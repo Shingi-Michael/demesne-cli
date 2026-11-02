@@ -407,6 +407,13 @@ export class DriveFixes {
 
   async act(id: string, action: DriveFixAction): Promise<DriveFix> {
     const fix = this.get(id);
+    // A merged thread is already off its worktree and branch: deleting it
+    // only takes it off the orchestrator's list.
+    if (fix?.thread && fix.status === "applied" && action === "discard") {
+      fix.status = "discarded";
+      this.save();
+      return fix;
+    }
     if (!fix || !ACTIVE.has(fix.status)) throw new Error("That fix is no longer open.");
     const before = fix.status;
     if (action === "discard") {

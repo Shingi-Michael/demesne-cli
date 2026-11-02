@@ -106,6 +106,9 @@ test("an orchestrator chat splits work into threads that run side by side, repor
     for (const fix of threads) expect((await call(`/v1/drive/fixes/${fix.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");
     expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 3;\n");
     expect(readFileSync(join(workspace, "src", "b.ts"), "utf8")).toBe("export const b = 2;\n");
+    // A merged thread can be deleted: it leaves the list, its merge stays.
+    expect((await call(`/v1/drive/fixes/${threads[0]!.id}/discard`, { method: "POST" })).body.fix.status).toBe("discarded");
+    expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 3;\n");
   } finally {
     server.stop(true);
     await app.close();

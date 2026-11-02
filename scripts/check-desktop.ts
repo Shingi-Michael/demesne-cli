@@ -115,6 +115,8 @@ const f = await fixture({
       const second = user.includes("Write the greeting");
       const toolResults = messages.filter(message => message.role === "tool").length;
       if (second && toolResults === 0) {
+        yield { type: "reasoning_delta", delta: "The greeting belongs in its own file, threads-b.md." };
+        yield { type: "text_delta", delta: "Waiting on the gate before writing the greeting." };
         yield { type: "tool_call_delta", index: 0, idDelta: "thread-b-wait", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: ["sh", "-c", `while [ ! -f '${threadGateFile}' ]; do sleep 0.1; done`] }) };
         yield { type: "finish", reason: "tool_calls" };
         return;
@@ -1737,7 +1739,18 @@ try {
   await page.keyboard.press("Escape");
   await until(() => page.locator("#overlay").isHidden(), "Escape closes the thread's picker");
   assert(await page.locator("#main > #overlay").count() === 1, "the picker goes back to the chat on the left");
+  // A thread shows its own thinking and words, its working line, and its
+  // own context, like any chat.
+  await until(() => page.locator("#thread-pane .tp-turns").innerText().then(text => text.includes("Waiting on the gate before writing the greeting.")), "the thread shows its own words");
+  await until(() => page.locator("#thread-pane .thinking").count().then(count => count >= 1), "the thread shows its own thinking");
+  await until(() => page.locator("#thread-pane .working-line").isVisible(), "the thread has a working line");
+  await until(() => page.locator("#tp-context").isVisible(), "the thread's composer shows its context");
+  assert.match(await page.locator("#tp-context").getAttribute("title") ?? "", /of this thread's context used/);
+  await page.locator("#tp-context").click();
+  await until(() => page.locator("#tp-context-card").isVisible(), "its ring opens the thread's context card");
   await capture("17-threads-working");
+  await page.locator("#tp-context").click();
+  await until(() => page.locator("#tp-context-card").isHidden(), "and closes it");
   releaseThread();
   const merge = page.locator("#threads-foot .th-merge button");
   await until(() => merge.isVisible(), "both back: the Merge bar", 30_000);
@@ -1748,6 +1761,12 @@ try {
   await merge.click();
   await until(() => page.locator("#threads-foot .th-msg").innerText().then(text => text.includes("Merged all 2")).catch(() => false), "Merge says what it did", 30_000);
   assert(existsSync(join(f.workspace, "threads-a.md")) && existsSync(join(f.workspace, "threads-b.md")), "both threads reached the checkout");
+  // A tab's × deletes a merged thread at once; the right half moves on.
+  await until(() => page.locator("#thread-pane .tp-tab").count().then(count => count === 2), "both merged threads keep their tabs");
+  await page.locator("#thread-pane .tp-tab").first().hover();
+  await page.locator("#thread-pane .tp-tab-x").first().click();
+  await until(() => page.locator("#thread-pane .tp-tab").count().then(count => count === 1), "× deletes the thread", 20_000);
+  await until(() => page.locator("#conversation .th-row").count().then(count => count === 1), "and it leaves the chat's list");
   await page.locator("#thread-pane .tp-x").click();
   await until(() => page.locator("#thread-pane").isHidden(), "× closes the right half");
   // Switching models resizes the context at once, before the new model's
@@ -1759,7 +1778,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "a thread's own thinking, words and context", "deleting a thread from its tab"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

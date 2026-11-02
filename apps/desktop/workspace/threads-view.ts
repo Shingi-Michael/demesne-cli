@@ -102,10 +102,13 @@ export function threadHeadHTML(view: ThreadsView, fix: DriveFix): string {
 
 /// The thread side's own picker (pass 128 A): a tab per thread, with its
 /// ring, so any thread is one click away. ⌘[ and ⌘] step through them.
-export function threadTabsHTML(view: ThreadsView): string {
+/// Each tab's × deletes its thread: a merged one goes at once; one with work
+/// still on its branch asks once more, the × turning into "Delete".
+export function threadTabsHTML(view: ThreadsView, armed: string | null = null): string {
   return `<div class="tp-tabs" role="tablist" aria-label="Threads">${view.list.map((fix) => {
-    const on = view.open === fix.id;
-    return `<button type="button" role="tab" class="tp-tab${on ? " on" : ""}" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(fix.title)}">${ring(fix)}<span>${esc(fix.title)}</span></button>`;
+    const on = view.open === fix.id, merged = fix.status === "applied", sure = merged || armed === fix.id;
+    const x = `<button type="button" class="tp-tab-x${armed === fix.id ? " armed" : ""}" data-action="${sure ? "thread-delete" : "thread-delete-arm"}" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Delete ${esc(fix.title)}" title="${merged ? "Delete this thread (its merge stays)" : "Delete this thread and its branch"}"${view.busy ? " disabled" : ""}>${armed === fix.id ? "Delete" : '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'}</button>`;
+    return `<div class="tp-tab${on ? " on" : ""}"><button type="button" role="tab" class="tp-tab-open" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(fix.title)}">${ring(fix)}<span>${esc(fix.title)}</span></button>${x}</div>`;
   }).join("")}</div>`;
 }
 

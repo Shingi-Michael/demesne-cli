@@ -91,25 +91,30 @@ export function threadsFootHTML(view: ThreadsView): string {
   return `${message}<div class="th-status">${parts.join(" · ")}</div>`;
 }
 
-/// The right half's head: the thread's name, where it works and how it is,
-/// then Merge once it is ready, and ×. Nothing else.
-export function threadHeadHTML(view: ThreadsView, fix: DriveFix): string {
-  const state = threadState(fix);
-  const how = { work: "working", you: "waits for you", ready: "ready", merged: "merged", failed: "stopped" }[state];
-  const merge = state === "ready" ? button("thread-merge", view.busy === fix.id ? "Merging…" : "Merge", { id: fix.id }, "tp-merge", Boolean(view.busy)) : "";
-  return `<div class="tp-title"><b>${esc(fix.title)}</b><span>${esc(fix.branch)} · <span class="${state === "you" ? "amber" : state === "failed" ? "danger" : ""}">${how}</span></span></div><span class="sp"></span>${merge}${button("thread-close", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>', {}, "tp-x").replace("<button ", '<button aria-label="Close the thread" title="Close" ')}`;
+/// How a thread stands, in words, for its tab's hover.
+function threadHow(fix: DriveFix): string {
+  return { work: "working", you: "waits for you", ready: "ready", merged: "merged", failed: "stopped" }[threadState(fix)];
 }
+
+/// Merge, in the thread's composer once it is ready (pass 130 A: the thread
+/// side has no head bar).
+export function threadMergeHTML(view: ThreadsView, fix: DriveFix): string {
+  return threadState(fix) === "ready" ? button("thread-merge", view.busy === fix.id ? "Merging…" : "Merge", { id: fix.id }, "tp-merge", Boolean(view.busy)) : "";
+}
+
+const PANEL_CLOSE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/><path d="m8 10 2 2-2 2"/></svg>';
 
 /// The thread side's own picker (pass 128 A): a tab per thread, with its
 /// ring, so any thread is one click away. ⌘[ and ⌘] step through them.
+/// The panel icon at the row's end puts the thread side away (pass 130 A).
 /// Each tab's × deletes its thread: a merged one goes at once; one with work
 /// still on its branch asks once more, the × turning into "Delete".
 export function threadTabsHTML(view: ThreadsView, armed: string | null = null): string {
   return `<div class="tp-tabs" role="tablist" aria-label="Threads">${view.list.map((fix) => {
     const on = view.open === fix.id, merged = fix.status === "applied", sure = merged || armed === fix.id;
     const x = `<button type="button" class="tp-tab-x${armed === fix.id ? " armed" : ""}" data-action="${sure ? "thread-delete" : "thread-delete-arm"}" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Delete ${esc(fix.title)}" title="${merged ? "Delete this thread (its merge stays)" : "Delete this thread and its branch"}"${view.busy ? " disabled" : ""}>${armed === fix.id ? "Delete" : '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'}</button>`;
-    return `<div class="tp-tab${on ? " on" : ""}"><button type="button" role="tab" class="tp-tab-open" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(fix.title)}">${ring(fix)}<span>${esc(fix.title)}</span></button>${x}</div>`;
-  }).join("")}</div>`;
+    return `<div class="tp-tab${on ? " on" : ""}"><button type="button" role="tab" class="tp-tab-open" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(`${fix.title}\n${fix.branch} · ${threadHow(fix)}`)}">${ring(fix)}<span>${esc(fix.title)}</span></button>${x}</div>`;
+  }).join("")}<span class="sp"></span><button type="button" class="tp-hide" data-action="thread-close" aria-label="Close the thread side" title="Close the thread side (Esc)">${PANEL_CLOSE}</button></div>`;
 }
 
 /// What the orchestrator told the thread, at the top of its chat in place

@@ -1710,6 +1710,11 @@ try {
   await until(() => page.locator("#thread-pane .th-brief").isVisible(), "the thread opens on its brief, not its prompt");
   await threadRows.nth(1).click();
   await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
+  assert(await page.locator("#thread-pane .tp-tab").count() === 2, "the thread side has a tab per thread");
+  await page.locator("#thread-pane .tp-tab").first().click();
+  await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the notes"), "a tab switches the right half");
+  await page.keyboard.press("Control+]");
+  await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the greeting"), "Ctrl+] steps to the next thread");
   await until(() => page.locator("#threads-foot .th-status").innerText().then(text => text.includes("working")).catch(() => false), "the line above the composer says one is working");
   // The right half is a chat like the left: the same composer, with the
   // thread's own model chip, and no buttons beyond Merge and ×.

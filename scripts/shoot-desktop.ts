@@ -67,7 +67,8 @@ const git = (...values: string[]) => execFileSync("git", ["-C", f.workspace, ...
 git("init", "-q"); git("add", ".");
 git("-c", "user.name=Shots", "-c", "user.email=shots@example.com", "commit", "-qm", "Baseline");
 
-const browser = await electron.launch({ args: [join(desktop, "build/app"), `--user-data-dir=${join(f.root, "electron")}`, `--workspace=${f.workspace}`, `--server=${f.server.url}`], env: { ...f.env, XDG_CONFIG_HOME: join(f.home, ".config") } });
+// The published images are taken at 2x so they stay sharp on the README.
+const browser = await electron.launch({ args: [join(desktop, "build/app"), ...(readme ? ["--force-device-scale-factor=2"] : []), `--user-data-dir=${join(f.root, "electron")}`, `--workspace=${f.workspace}`, `--server=${f.server.url}`], env: { ...f.env, XDG_CONFIG_HOME: join(f.home, ".config") } });
 try {
 const page = await browser.firstWindow();
 await browser.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]!.setSize(size.width, size.height), readme ? { width: 1280, height: 800 } : { width: 1440, height: 900 });
@@ -84,7 +85,13 @@ const toggle = async (selector: string, name: string) => {
   await page.locator(selector).first().click(); await page.waitForTimeout(400);
 };
 const named = (scratch: string, published: string) => readme ? `demesne-${published}` : scratch;
-await shot(named("01-start", "start"));
+await shot(named("01-start", "home"));
+if (readme) {
+  // Drive's ideas for the project, unfolded from Home's sentence.
+  await page.locator('[data-action="ideas-show"]:visible').first().click(); await page.waitForTimeout(2500);
+  await shot("demesne-drive");
+  await page.locator('[data-action="ideas-show"]:visible').first().click(); await page.waitForTimeout(400);
+}
 if (!readme) {
   // Drive's ideas unfold in place from its line (there is no Drive panel);
   // run the top one in its worktree and Home says a branch waits.
@@ -116,10 +123,7 @@ for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(500);
 }
 await page.waitForTimeout(1500);
-if (readme) {
-  // The finished turn, with Drive's next ideas unfolded above the composer.
-  await toggle('[data-action="ideas-show"]:visible', "demesne-drive");
-} else {
+if (!readme) {
   await shot("02-turn");
   await page.locator("#sidebar-sessions .sidebar-item").first().hover(); await page.waitForTimeout(300);
   await shot("02-sidebar-delete");
@@ -143,7 +147,13 @@ if (readme) {
 // top bar's ⋯ is the conversation's menu.
 await page.locator('.turn-receipt button[data-action="toggle-steps"]').first().click(); await page.waitForTimeout(500);
 await page.locator('.steps button[data-action="step"]').first().click(); await page.waitForTimeout(800);
-await shot(named("03-inline-diff", "review"));
+await shot(named("03-inline-diff", "ask"));
+if (readme) {
+  // Settings, read as a sentence.
+  await page.locator(".sidebar-settings").first().click(); await page.waitForTimeout(900);
+  await shot("demesne-settings");
+  await page.locator(".st-back").first().click(); await page.waitForTimeout(600);
+}
 if (!readme) {
   await page.locator(".header-more").click(); await page.waitForTimeout(600);
   await shot("03-menu");

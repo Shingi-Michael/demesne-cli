@@ -4,6 +4,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- The GitHub README starts over: the d. wordmark with the release name, one sentence, the home screen as it is now, install, then Ask, Drive and Yours in three columns, and the docs one row away. Its screenshots come from the current app at 2x (`bun scripts/shoot-desktop.ts --readme`: home, Drive's ideas, a finished turn, Settings) instead of the October window; the old banner and badges are gone. Home's blossom now ends above the greeting again when Drive's ideas unfold.
+
 - Recorded file edits open on demand from compact chat rows, with Before / Diff / After views, wrapped code, line numbers and replay. Diffs stay collapsed by default.
 
 ### Changed

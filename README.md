@@ -1,75 +1,13 @@
-<p align="center">
-  <img src="docs/assets/hero-b.svg" alt="demesne: Your repo has a to-do list. Drive already read it." width="100%">
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wordmark-dark.svg">
+  <img src="docs/assets/wordmark-light.svg" alt="d. Demesne, Cherry Blossom" width="420">
+</picture>
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5AA9E6?style=flat-square&amp;labelColor=0B1218" alt="MIT license"></a>
-  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-1.4.0-5AA9E6?style=flat-square&amp;labelColor=0B1218" alt="Bun 1.4.0"></a>
-</p>
+### A coding agent that lives on your Mac, starts by reading your project, and keeps working after you close the window.
 
-<p align="center">
-  <a href="#try-it">Try it</a> &nbsp;·&nbsp;
-  <a href="#how-drive-works">How Drive works</a> &nbsp;·&nbsp;
-  <a href="#see-it">See it</a> &nbsp;·&nbsp;
-  <a href="#install">Install</a> &nbsp;·&nbsp;
-  <a href="docs/README.md">Docs</a>
-</p>
+Ask for a change and watch it read, edit and check. Let Drive find the next thing worth doing. Make a page or a document in Foundry. Everything runs on your machine, on a model you choose.
 
-demesne is a coding agent that starts by reading your project. Its **Drive** looks at failing checks, red CI, open pull requests, issues you labelled `drive` and work you left unfinished, then suggests what to do next. Press **Run** and Drive gives the coding agent a bounded task, checks the result and shows you the diff, the commands it ran and whether the checks passed. It remembers what you decided, so it won't suggest the same thing twice.
-
-## Try it
-
-```sh
-git clone https://github.com/Shingi-Michael/demesne-cli.git demesne && cd demesne
-bun install --frozen-lockfile
-bun run desktop
-```
-
-Choose a project, connect a model and open **Drive**. You need [Bun 1.4](https://bun.sh), plus [Node.js](docs/desktop.md#prerequisites) to build the window from source, or [download the app](#install) instead. The model can run on your machine, come from your Codex plan, or be an OpenRouter account.
-
-## How Drive works
-
-<img src="docs/assets/drive-loop.svg" alt="Drive: reads signals from the repo, ranks what’s worth doing, runs a bounded mission, hands back the evidence, and remembers decisions, outcomes and vetoes" width="100%">
-
-Each suggestion says why it's there and roughly how long it will take. Drive keeps score: it records which of its suggestions you actually kept and how long they really took, and ranks the next ones with that. **Run** does it in its own git worktree and branch, so your checkout stays untouched until you choose **Apply**, **Open PR** or **Discard**. **Run top 3 away** (a link in the Next heading) works through the list one after another, and each finished branch waits on one line of a single card for your review. **Plan first** asks for a plan you approve before anything changes. **Not now** hides it for a day, and **Never** tells Drive to stop suggesting it. You can also start a mission yourself with `/drive --bounded "…"`. It works in its own worktree too, and ends with the same Apply, Open PR or Discard choice, plus a receipt that shows which tasks the recorded checks actually verify. The [Drive guide](docs/agent-drive.md) has the details.
-
-## See it
-
-<a href="docs/assets/demesne-drive.png"><img src="docs/assets/demesne-drive.png" alt="A finished coding turn folded into one receipt line, with Drive’s next three ideas unfolded above the composer" width="100%"></a>
-
-<table>
-<tr>
-<td width="50%" valign="top"><img src="docs/assets/demesne-start.png" alt="Start screen with three Drive proposals"><br><sub><b>Start from a suggestion.</b> The start screen lists what Drive would do next, and the evidence for each item.</sub></td>
-<td width="50%" valign="top"><img src="docs/assets/demesne-review.png" alt="A turn’s steps with the edit’s diff unfolded in place"><br><sub><b>Check the work.</b> Each edit, command and check stays with the turn that made it; a step unfolds its diff or output right there.</sub></td>
-</tr>
-</table>
-
-<p align="center"><sub>Screenshots of the real app running a scripted demo. <a href="docs/assets/README.md">How they’re made</a>.</sub></p>
-
-## Also inside
-
-**Make it yours.** Type [`/themefy`](docs/themes.md) and answer the model's questions in the composer. It creates a readable palette and applies it instantly. Generated themes stay in `/theme`; `/themefy undo` restores your previous colors.
-
-<table>
-<tr>
-<td width="50%" valign="top"><b>Models</b><br>Use a local server, your Codex plan, ChatGPT credits or OpenRouter. Codex talks to Codex's own backend with its own sign-in, so turns count against your plan like the Codex app's do, GPT-6.1 Sol included; no Codex app or CLI is needed. You can sign in and out under <b>Settings › Providers</b> without restarting. The model picker keeps score from your own work (turns finished, tool errors, speed, checks passing), so you can see whether a local model is good enough for a project. <a href="docs/authentication.md">Providers and model access</a></td>
-<td width="50%" valign="top"><b>Sessions</b><br>A local daemon runs every turn, so closing the window doesn't stop the work. A running Drive mission keeps going in the background too. Open it again and carry on. <code>/compact</code> shortens a long session.</td>
-</tr>
-<tr>
-<td valign="top"><b>Sub-agents</b><br>Read-only helpers that look into things in parallel, each with its own context, on a model you pick. <a href="docs/subagents.md">Sub-agents</a></td>
-<td valign="top"><b>Session tools</b><br>The agent can set up shortcuts and multi-step lookups for one session. The real tools stay as they are. <a href="docs/session-tools.md">Session tools</a></td>
-</tr>
-<tr>
-<td valign="top"><b>Breakage alerts</b><br>If a check starts failing or CI turns red, a card offers to fix it on a separate branch in a git worktree. You can apply the fix, open a PR with it or throw it away. <a href="docs/agent-drive.md#breakage-alerts-fix-it-in-a-worktree">Breakage alerts</a></td>
-<td valign="top"><b>Session cleanup</b><br><code>/cleanup</code> finds sessions that are empty, abandoned or unused for a month, says why for each one, and deletes the ones you pick.</td>
-</tr>
-<tr>
-<td valign="top"><b>Next prompt</b><br>After each turn the composer suggests what to ask next. Press <b>Tab</b> to use it.</td>
-<td valign="top"><b>Heartbeat</b><br>With <a href="https://github.com/tkamucheka/heartbeat">Heartbeat</a> on the machine, every chat has an address other agents can message, on this machine or a paired one. Mail arrives as a turn, even while the chat is idle. <a href="docs/heartbeat.md">Heartbeat</a></td>
-</tr>
-</table>
-
-**A note on safety.** Commands run as your user, not in a sandbox. When you're the one asking, demesne checks with you before it writes a file or runs a command. Drive's coding turns don't ask, so a mission can run on its own (missions and proposals you Run work in a separate git worktree, never your checkout, unless you add `--here`), but pushing, opening pull requests, releases and package publishing still need your OK. Only use Drive on projects where that's fine. [Security details](SECURITY.md)
+<a href="docs/assets/demesne-home.png"><img src="docs/assets/demesne-home.png" alt="Demesne’s home: a cherry blossom bough over “What are we building?”, with the composer and Drive’s suggestion for the project" width="100%"></a>
 
 ## Install
 
@@ -77,48 +15,26 @@ Each suggestion says why it's there and roughly how long it will take. Drive kee
 curl -fsSL https://raw.githubusercontent.com/shingi-michael/demesne-cli/main/install.sh | sh
 ```
 
-This installs Demesne for you alone, without sudo: on Linux (x86_64) into `~/.local/share/demesne` with a launcher and `demesne` in `~/.local/bin`, on an Apple silicon Mac into `~/Applications`. Run it again to update (it automatically detects upgrades and restarts a running daemon), or add `sh -s -- --uninstall` to remove the app. When a release has no prebuilt Linux bundle, it builds from source, which needs git, Bun 1.4 and Node.js 22. Your sessions and settings in `~/.demesne` are left alone.
+macOS (Apple silicon) and Linux. Or download the app from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest). Your model can run on this machine, come from your Codex plan, or be an OpenRouter account; sign in under **Settings › Providers**. Running it again updates; `sh -s -- --uninstall` removes it. The [desktop guide](docs/desktop.md) covers building from source and the installer’s options.
 
-The public commands are `demesne` (the app) and `demesned` (its daemon). The installer accepts older release filenames and migrates its old `demesne-desktop` launcher to `demesne`; sessions and settings stay in the same place. The private bundled `demesne-host` helper is not a separate user command.
+<table>
+<tr>
+<td width="33%" valign="top"><a href="docs/assets/demesne-ask.png"><img src="docs/assets/demesne-ask.png" alt="A finished turn: the edit’s diff open in place, the check passed, one receipt line"></a><br><b>Ask</b><br><sub>It asks before it writes a file or runs a command. Steps fold into one line while it works; every edit opens its diff in place, and you can rewind to any step. <a href="docs/commands.md">Commands</a></sub></td>
+<td width="33%" valign="top"><a href="docs/assets/demesne-drive.png"><img src="docs/assets/demesne-drive.png" alt="Drive’s three ideas for the project, each with Run and Plan"></a><br><b>Drive</b><br><sub>Reads failing checks, open PRs and unfinished work, suggests what to do next, and runs it in its own branch while you are away. You apply, open a PR or discard. <a href="docs/agent-drive.md">Drive</a></sub></td>
+<td width="33%" valign="top"><a href="docs/assets/demesne-settings.png"><img src="docs/assets/demesne-settings.png" alt="Settings, read as one sentence: the model, what it asks about, when Drive starts"></a><br><b>Yours</b><br><sub>Local models, your Codex plan or OpenRouter. Permissions you can read in one sentence. Themes the model makes for you. Chats that other agents can message. <a href="docs/configuration.md">Configuration</a></sub></td>
+</tr>
+</table>
 
-Release downloads require a matching `.sha256`; a missing checksum or a network error stops installation before replacing the app. Only for a trusted legacy release without checksums, explicitly pass `--insecure-skip-checksum`. Use `sh -s -- --help` after the pipe to see all options. On upgrades, daemon restart success requires a live process and a successful `/healthz` check; failures print recent daemon logs and exit nonzero. Linux installer regression tests run with `python3 scripts/test-install.py` (no Bun or network required).
+<p><sub>Screenshots are of the real app running a scripted demo, retaken for each release. <a href="docs/assets/README.md">How they’re made</a>.</sub></p>
 
-Demesne is a desktop app for macOS and Linux (unsigned preview builds). To install by hand, download it from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest): `demesne-darwin-arm64.zip` for Apple silicon Macs, `demesne-linux-amd64.deb` for Ubuntu. You don't need Bun or Node.js to run it.
-
-```sh
-# macOS: unzip, move to Applications, and clear the unsigned-download flag
-unzip demesne-darwin-arm64.zip && mv Demesne.app /Applications/
-xattr -dr com.apple.quarantine /Applications/Demesne.app
-
-# Ubuntu 22.04/24.04
-sudo apt install ./demesne-linux-amd64.deb
-```
-
-To run it from source instead, use `bun run desktop`, or `bun run build:desktop` to build the app (needs [Node.js and a few platform packages](docs/desktop.md#prerequisites)). The [desktop guide](docs/desktop.md) has more.
-
-<details>
-<summary><b>Keyboard shortcuts</b></summary>
-
-| Do this | Use this |
-| --- | --- |
-| Send / new line | Enter / Shift+Enter |
-| Take the suggested prompt | Tab on an empty composer |
-| Settings | Tab (no suggestion) or ⌘, |
-| Search chats | ⌘K |
-| Drive | Alt+J |
-| This conversation’s menu | ⋯ in the top bar |
-| Back to live output | Ctrl+G |
-| Stop | Double Esc |
-| Zoom | ⌘= / ⌘- / ⌘0 |
-| Quit the window (work continues) | Ctrl+Q |
-
-[All commands](docs/commands.md)
-</details>
+**A note on safety.** Commands run as your user, not in a sandbox. When you’re the one asking, Demesne checks with you before it writes a file or runs a command. Drive’s runs don’t ask, but they work in a separate git worktree, never your checkout, and pushing, opening pull requests, releases and publishing still need your OK. [Security details](SECURITY.md)
 
 ---
 
 <p align="center">
   <a href="docs/README.md">Docs</a> ·
+  <a href="docs/agent-drive.md">Drive</a> ·
+  <a href="docs/authentication.md">Providers and models</a> ·
   <a href="docs/configuration.md">Configuration</a> ·
   <a href="docs/architecture.md">Architecture</a> ·
   <a href="docs/troubleshooting.md">Troubleshooting</a> ·

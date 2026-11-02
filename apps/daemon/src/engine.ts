@@ -82,6 +82,8 @@ interface AgentEngineOptions extends AgentConfig {
   /// Whether a chat is the always-on assistant's: it gets the assistant's
   /// own tools and instructions instead of the coding agent's.
   assistantChat?: (sessionId: string) => boolean;
+  /// Tools a chat never sees (a thread: Heartbeat and starting threads).
+  hiddenTools?: (sessionId: string) => ReadonlySet<string> | null;
   /// The clock for the assistant's message stamps (tests set it).
   now?: () => Date;
 }
@@ -251,6 +253,8 @@ export class AgentEngine {
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
         FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+    const hidden = this.options.hiddenTools?.(session.id);
+    if (hidden?.size) for (let index = definitions.length - 1; index >= 0; index--) if (hidden.has(definitions[index]!.name)) definitions.splice(index, 1);
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
     // Turns swapped for notes can be brought back whole, one at a time.

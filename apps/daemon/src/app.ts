@@ -75,7 +75,9 @@ import { personalFilesTool } from "./personal-files.ts";
 import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
 import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
-import { startThreadsTool } from "./threads.ts";
+import { START_THREADS_TOOL, startThreadsTool } from "./threads.ts";
+/// What a thread never sees: Heartbeat, and starting threads of its own.
+const THREAD_HIDDEN_TOOLS: ReadonlySet<string> = new Set(["heartbeat", START_THREADS_TOOL]);
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
@@ -363,7 +365,13 @@ export function createDaemonApp(options: {
     }),
     log: (message) => console.warn(message),
   }) : null;
-  if (heartbeat) tools.register(heartbeatTool(heartbeat));
+  if (heartbeat) {
+    const tool = heartbeatTool(heartbeat);
+    tools.register({ ...tool, execute: (input, context) => {
+      if (context.sessionId && driveFixes.isThread(context.sessionId)) throw new Error("Threads aren't on Heartbeat; report to the orchestrator instead.");
+      return tool.execute(input, context);
+    } });
+  }
   const keepEdits = new KeepEdits(join(dirname(options.databasePath), "keep"));
   const engine = new AgentEngine(
     store,
@@ -388,6 +396,7 @@ export function createDaemonApp(options: {
       keepEdits,
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
+      hiddenTools: (sessionId: string) => driveFixes.isThread(sessionId) ? THREAD_HIDDEN_TOOLS : null,
       lateAnswers: (sessionId: string, turnId: string, texts: string[]) => void answerTurn(sessionId, turnId, texts.join("\n"), undefined),
       ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
@@ -532,7 +541,8 @@ export function createDaemonApp(options: {
     try {
       // The chat's Heartbeat address, claimed before its first model request
       // so the model is told it; a slow daemon never holds the turn.
-      const workspace = heartbeat && turn.kind !== "compaction" ? store.getSession(turn.sessionId)?.workspace?.root : undefined;
+      // Threads stay off Heartbeat: they answer only to their orchestrator and you.
+      const workspace = heartbeat && turn.kind !== "compaction" && !driveFixes.isThread(turn.sessionId) ? store.getSession(turn.sessionId)?.workspace?.root : undefined;
       if (workspace) await Promise.race([heartbeat!.attach(turn.sessionId, workspace), new Promise((resolve) => setTimeout(resolve, 2_000))]);
       if (turn.kind === "compaction") await compactor.run(turn.id, inference, signal);
       else await engine.run(turn.id, inference, signal);

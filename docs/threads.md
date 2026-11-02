@@ -6,6 +6,8 @@ A chat in a project can split a job into **threads**: up to three chats that wor
 
 Threads only exist inside a project. A plain chat on Home, the assistant's chat, and a thread itself can't start threads.
 
+A thread answers only to its orchestrator and to you: it isn't on Heartbeat (no address, no mail, no `heartbeat` tool).
+
 ## How a run goes
 
 1. Ask for work made of independent jobs, or ask for threads. The model calls `start_threads` with a title, a brief and the files each thread may change. Two threads may not claim the same file or folder.

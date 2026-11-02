@@ -276,6 +276,12 @@ const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", 
 const tools = (run: WorkspaceRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 let state: Snapshot | null = null;
+/// Whose model the picker sets: the chat's, or the open thread's (its chip
+/// in the right half opens the same picker there).
+let modelFor: "chat" | "thread" = "chat";
+const pickerModelId = () => modelFor === "thread" ? state!.threads.chat?.model || state!.model.id : state!.model.id;
+/// A model picked in the picker, for whichever it is setting.
+const pickModel = (args: Record<string, unknown>) => modelFor === "thread" ? api("thread-model", args) : api("model", args);
 let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
@@ -4066,7 +4072,8 @@ function renderDriveTurn() {
   node.innerHTML = `${ask}<div class="response${live ? " running" : ""}"><ol class="drive-trail">${rows}</ol>${toldNotes(drive)}<div class="drive-turn-foot"><span class="drive-turn-meta">${meta}</span><span class="drive-turn-actions">${actions}</span></div>${open ? driveSteps(drive) : ""}</div>`;
   if (bottom) stage.scrollTop = stage.scrollHeight;
 }
-async function openOverlay(name: OverlayName, query = "") {
+async function openOverlay(name: OverlayName, query = "", forThread = false) {
+  modelFor = name === "models" && forThread ? "thread" : "chat";
   overlay = name;
   overlayQuery = query;
   overlayIndex = 0;
@@ -4112,7 +4119,7 @@ function tokensShort(value: number) {
 /// the picker falls back to the sheet.
 function placeOverlay() {
   const box = el("overlay"),
-    chip = document.getElementById("composer-model"),
+    chip = document.getElementById(modelFor === "thread" ? "tp-model" : "composer-model"),
     more = document.querySelector<HTMLElement>(".header-more"),
     anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null,
     below = overlay === "session" && more && more.offsetParent ? more.getBoundingClientRect() : null;
@@ -4120,7 +4127,7 @@ function placeOverlay() {
   box.classList.toggle("dropped", !!below);
   box.classList.toggle("sheet", !!overlay && !anchor && !below);
   box.style.left = box.style.right = box.style.top = box.style.bottom = box.style.maxHeight = "";
-  const main = el("main").getBoundingClientRect();
+  const main = box.parentElement!.getBoundingClientRect();
   if (below) {
     // The ⋯ menu hangs from its button, at the right edge of the conversation.
     box.style.right = `${Math.max(12, main.right - below.right)}px`;
@@ -4152,7 +4159,7 @@ function renderModelPopover(hidden: number) {
   const counts = new Map<string, number>();
   for (const model of models) counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
   const item = (row: (typeof overlayRows)[number], index: number) => {
-    const current = row.action === "model" && row.data.id === state!.model.id;
+    const current = row.action === "model" && row.data.id === pickerModelId();
     const right = current ? '<span class="mp-tick" aria-label="current">✓</span>'
       : row.kind === "short" ? `<span class="mp-key">${index + 1}</span>`
       : row.kind === "more" ? `<span class="mp-key">${h(row.value)} ${modelsMore ? "‹" : "›"}</span>`
@@ -4186,7 +4193,7 @@ function renderModelPopover(hidden: number) {
 }
 function modelThinkingHTML() {
   const highlighted = overlayRows[overlayIndex],
-    model = models.find((item) => item.id === (highlighted?.action === "model" ? highlighted.data.id : state!.model.id)),
+    model = models.find((item) => item.id === (highlighted?.action === "model" ? highlighted.data.id : pickerModelId())),
     levels = model?.reasoningLevels ?? [],
     level = model ? modelLevel(model) : undefined,
     at = level ? levels.indexOf(level) : -1;
@@ -4369,6 +4376,10 @@ function renderOverlay() {
   if (!state) return;
   // Keep the dragged element and its geometry stable through host updates.
   if (thinkingDrag && overlay === "models") return;
+  // The picker opens in whichever half its chip is in.
+  if (overlay !== "models") modelFor = "chat";
+  const home = modelFor === "thread" && document.getElementById("tp-model")?.offsetParent ? el("thread-pane") : el("main");
+  if (el("overlay").parentElement !== home) home.append(el("overlay"));
   el("overlay").hidden = !overlay;
   el("overlay").dataset.screen = overlay ?? "";
   el("overlay").setAttribute("role", "dialog");
@@ -4380,7 +4391,7 @@ function renderOverlay() {
     hasFocus = focused === document.activeElement,
     selection = focused?.selectionStart;
   const signature = overlay === "models"
-    ? JSON.stringify([overlay, overlayQuery, state.model.id, models, modelsMore, modelsLoading])
+    ? JSON.stringify([overlay, overlayQuery, pickerModelId(), modelFor, models, modelsMore, modelsLoading])
     : JSON.stringify([
     overlay,
     overlayQuery,
@@ -4428,7 +4439,7 @@ function renderOverlay() {
     // The models you use most (the one in use always among them) make the
     // short list; the rest unfold under "More models", by provider. A search
     // looks through every provider at once, in place of the list.
-    const inUse = models.find((model) => model.id === state!.model.id);
+    const inUse = models.find((model) => model.id === pickerModelId());
     const sizes = new Map<string, number>();
     for (const model of models) sizes.set(model.provider, (sizes.get(model.provider) ?? 0) + 1);
     // Ties go to the provider in use, unless it is a large catalog: picking
@@ -4459,7 +4470,7 @@ function renderOverlay() {
     }
     if (modelIndexPending && !overlayQuery) {
       // Opens on the model you are using, so ←→ changes its thinking.
-      const at = overlayRows.findIndex((row) => row.data.id === state!.model.id);
+      const at = overlayRows.findIndex((row) => row.data.id === pickerModelId());
       if (at >= 0) overlayIndex = at;
       if (models.length) modelIndexPending = false;
     }
@@ -5360,6 +5371,7 @@ async function dispatch(
   if (action === "where-move") return toggleWhere(whereOpen === "move" ? null : "move");
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "drive-auto", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
+  if (action === "thread-models") return openOverlay("models", "", true);
   if (action.startsWith("thread-") || action.startsWith("threads-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
@@ -5677,6 +5689,12 @@ async function dispatch(
     notice("Copied");
     return;
   }
+  if (action === "model" && modelFor === "thread") {
+    overlay = null;
+    const pick = pickModel(args);
+    renderOverlay();
+    return pick;
+  }
   if (
     action === "mode" ||
     action === "model" ||
@@ -5802,6 +5820,12 @@ let renderedPalette: Snapshot["palette"] | null = null,
 /// picked running live on the right with a composer of its own. The list in
 /// the chat is the only switcher; nothing moves the right half but you.
 let foldedForThreads = false, threadPaneSignature = "", threadPaneFor = "";
+/// The thread's model chip: its own model, or the one it inherited.
+function threadModelWords() {
+  const chat = state!.threads.chat, id = chat?.model || state!.model.id, reasoning = chat?.model ? chat.reasoning : chat?.reasoning ?? state!.reasoning;
+  const name = id ? modelWords({ id, displayName: models.find((model) => model.id === id)?.displayName ?? (id === state!.model.id ? state!.model.displayName : undefined) }) : "";
+  return `${h(name) || "Choose a model"}${reasoning ? `<span class="composer-effort">${h(reasoning[0]!.toUpperCase() + reasoning.slice(1))}</span>` : ""}`;
+}
 function renderThreads() {
   if (!state) return;
   const view = state.threads;
@@ -5830,13 +5854,15 @@ function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
   if (!fix || !state) { if (threadPaneFor) { host.innerHTML = ""; threadPaneSignature = threadPaneFor = ""; } return; }
   if (threadPaneFor !== fix.id) {
     threadPaneFor = fix.id; threadPaneSignature = "";
-    host.innerHTML = `<div class="tp-head"></div><div class="tp-conv"></div><div class="tp-foot"><div class="tp-asks"></div><form class="tp-composer" data-thread-form><textarea rows="1" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="tp-send" aria-label="Send to this thread"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></form></div>`;
+    host.innerHTML = `<div class="tp-head"></div><div class="tp-conv"></div><div class="tp-foot"><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button></div></form></div>`;
   }
   const chat = state.threads.chat;
   const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.length, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
   if (signature === threadPaneSignature) return;
   threadPaneSignature = signature;
   host.querySelector<HTMLElement>(".tp-head")!.innerHTML = threadHeadHTML(state.threads, fix);
+  const chip = host.querySelector<HTMLElement>("#tp-model")!, chipHTML = threadModelWords();
+  if (chip.innerHTML !== chipHTML) chip.innerHTML = chipHTML;
   const conv = host.querySelector<HTMLElement>(".tp-conv")!;
   const atEnd = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 40;
   let html = "";
@@ -5865,6 +5891,7 @@ function sendToThread(form: HTMLFormElement) {
   const input = form.querySelector("textarea")!, text = input.value.trim();
   if (!text) return;
   input.value = "";
+  form.classList.remove("has-draft");
   void api("thread-send", { text }).catch((error) => { input.value = text; notice(error instanceof Error ? error.message : String(error)); });
 }
 document.addEventListener("submit", (event) => {
@@ -5872,6 +5899,10 @@ document.addEventListener("submit", (event) => {
   if (!form) return;
   event.preventDefault();
   sendToThread(form);
+});
+document.addEventListener("input", (event) => {
+  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea");
+  input?.form?.classList.toggle("has-draft", Boolean(input.value.trim()));
 });
 document.addEventListener("keydown", (event) => {
   const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea");
@@ -6107,7 +6138,7 @@ const settleGroove = (event: PointerEvent) => {
   const { index } = grooveAt(groove, event.clientX, drag.levels.length), reasoning = drag.levels[index]!;
   modelLevels.set(drag.model, reasoning);
   updateModelHighlight();
-  if (drag.model === state?.model.id) void act(() => api("model", { id: drag.model, reasoning }));
+  if (state && drag.model === pickerModelId()) void act(() => pickModel({ id: drag.model, reasoning }));
 };
 document.addEventListener("pointerup", settleGroove);
 document.addEventListener("pointercancel", settleGroove);
@@ -6507,7 +6538,7 @@ document.addEventListener("keydown", (event) => {
         const reasoning = levels[Math.max(0, Math.min(levels.length - 1, at + (key === "arrowright" ? 1 : -1)))]!;
         modelLevels.set(model.id, reasoning);
         updateModelHighlight();
-        if (model.id === state.model.id) void act(() => api("model", { id: model.id, reasoning }));
+        if (model.id === pickerModelId()) void act(() => pickModel({ id: model.id, reasoning }));
         return;
       }
     }

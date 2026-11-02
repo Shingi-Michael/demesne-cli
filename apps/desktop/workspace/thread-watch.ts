@@ -134,6 +134,8 @@ export class ThreadWatch {
         approvals: [...chat.approvals.values()],
         questions: [...chat.questions.values()],
         activeTurnId: chat.active?.id ?? null,
+        model: chat.session.preferredModel ?? null,
+        reasoning: chat.session.preferredReasoning ?? null,
       } : null,
     };
   }
@@ -159,6 +161,28 @@ export class ThreadWatch {
     await this.options.client().resolvePermission(id, decision);
     chat.approvals.delete(id);
     this.options.publish();
+  }
+
+  /// The open thread's model and effort, for its next turn; the chat on the
+  /// left keeps its own.
+  async setModel(model: string, reasoning: string | null) {
+    const chat = this.chat;
+    if (!chat || !model) throw new Error("Pick a thread first.");
+    const { session } = await this.options.client().updateSession(chat.session.id, { preferredModel: model, preferredReasoning: reasoning });
+    chat.session.preferredModel = session.preferredModel;
+    chat.session.preferredReasoning = session.preferredReasoning;
+    this.options.publish();
+  }
+
+  /// Merges one ready thread onto your branch.
+  async mergeOne(id: string) {
+    const fix = this.fix(id);
+    if (fix?.status !== "ready") throw new Error("That thread isn't ready to merge.");
+    await this.act(id, async () => {
+      await this.options.client().driveFixAction(fix.id, "apply");
+      this.state.message = { text: `Merged ${fix.title} onto your branch.`, tone: "ok" };
+      this.options.merged();
+    });
   }
 
   async stopThread(id: string) {
@@ -200,6 +224,8 @@ export class ThreadWatch {
     if (method === "thread-send") return this.send(String(args.text ?? ""));
     if (method === "thread-approve") return this.approve(String(args.id ?? ""), args.decision === "deny" ? "deny" : "allow_once");
     if (method === "thread-stop") return this.stopThread(String(args.id ?? ""));
+    if (method === "thread-merge") return this.mergeOne(String(args.id ?? ""));
+    if (method === "thread-model") return this.setModel(String(args.id ?? ""), typeof args.reasoning === "string" ? args.reasoning : null);
     if (method === "threads-merge") return this.mergeAll();
     if (method === "threads-message-close") { this.state.message = null; return this.options.publish(); }
     throw new Error(`Unknown action ${method}`);

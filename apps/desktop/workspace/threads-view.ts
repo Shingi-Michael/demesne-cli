@@ -91,12 +91,13 @@ export function threadsFootHTML(view: ThreadsView): string {
   return `${message}<div class="th-status">${parts.join(" · ")}</div>`;
 }
 
-/// The right half's head: the thread's name, where it works, and how it is.
+/// The right half's head: the thread's name, where it works and how it is,
+/// then Merge once it is ready, and ×. Nothing else.
 export function threadHeadHTML(view: ThreadsView, fix: DriveFix): string {
   const state = threadState(fix), index = view.list.indexOf(fix);
-  const pill = state === "you" ? `<span class="th-pill you">Needs you</span>` : state === "work" ? `<span class="th-pill">Working</span>` : state === "ready" ? `<span class="th-pill ok">Ready</span>` : state === "merged" ? `<span class="th-pill ok">Merged</span>` : `<span class="th-pill bad">Stopped</span>`;
-  const stop = state === "work" || state === "you" || state === "failed" ? button("thread-stop", state === "failed" ? "Discard" : "Stop", { id: fix.id }, "th-stop", Boolean(view.busy)) : "";
-  return `<div class="tp-title"><b>${esc(fix.title)}</b><span>Thread ${index + 1} of ${view.list.length} · ${esc(fix.branch)}</span></div><span class="sp"></span>${pill}${stop}${button("thread-close", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>', {}, "tp-x").replace("<button ", '<button aria-label="Close the thread" title="Close" ')}`;
+  const how = { work: "working", you: "waits for you", ready: "ready", merged: "merged", failed: "stopped" }[state];
+  const merge = state === "ready" ? button("thread-merge", view.busy === fix.id ? "Merging…" : "Merge", { id: fix.id }, "tp-merge", Boolean(view.busy)) : "";
+  return `<div class="tp-title"><b>${esc(fix.title)}</b><span>${esc(fix.branch)} · <span class="${state === "you" ? "amber" : state === "failed" ? "danger" : ""}">${how}</span>${view.list.length > 1 ? ` · ${index + 1} of ${view.list.length}` : ""}</span></div><span class="sp"></span>${merge}${button("thread-close", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>', {}, "tp-x").replace("<button ", '<button aria-label="Close the thread" title="Close" ')}`;
 }
 
 /// What the orchestrator told the thread, at the top of its chat in place

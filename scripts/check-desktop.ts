@@ -45,6 +45,11 @@ const stretchPrompt = "Desktop smoke: a stretch of steps";
 let releaseStretch!: () => void, stretchRound = 0;
 const stretchGate = new Promise<void>(resolve => { releaseStretch = resolve; });
 let overlapRound = 0;
+// Threads (pass 126): the chat splits a job into two threads, one held
+// until the window has shown it working beside the chat.
+const threadsPrompt = "Desktop smoke: split this into threads";
+let releaseThread!: () => void, threadsRound = 0;
+const threadGate = new Promise<void>(resolve => { releaseThread = resolve; });
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
 const heartbeatSocket = join(mkdtempSync(join(tmpdir(), "hb-")), "control.sock");
@@ -95,6 +100,32 @@ const f = await fixture({
     if (typeof user === "string" && user.startsWith("Drive report: ")) {
       yield { type: "text_delta", delta: "Noted: Drive stopped before changing anything." };
       yield { type: "finish", reason: "stop" };
+      return;
+    }
+    if (typeof user === "string" && user.startsWith("Thread report: ")) {
+      yield { type: "text_delta", delta: user.includes("still working: 0") ? "Both threads are back and stayed inside their files. Merge notes first, then the greeting." : "One thread is back." };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    if (typeof user === "string" && user.startsWith("You're one of the threads")) {
+      const second = user.includes("Write the greeting");
+      if (messages.at(-1)?.role === "tool") { yield { type: "text_delta", delta: second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
+      if (second) await threadGate;
+      yield { type: "tool_call_delta", index: 0, idDelta: `thread-${second ? "b" : "a"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify(second ? { path: "threads-b.md", content: "# Hello\n" } : { path: "threads-a.md", content: "# Notes\n" }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (user === threadsPrompt) {
+      if (threadsRound++ === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "split", nameDelta: "start_threads", argumentsDelta: JSON.stringify({ threads: [
+          { title: "Write the notes", brief: "Add threads-a.md with a Notes heading.", files: ["threads-a.md"] },
+          { title: "Write the greeting", brief: "Add threads-b.md with a Hello heading.", files: ["threads-b.md"] },
+        ] }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "Two threads are on it, each in its own branch." };
+        yield { type: "finish", reason: "stop" };
+      }
       return;
     }
     if (user === missionPushPrompt) {
@@ -1667,6 +1698,32 @@ try {
   await textIncludes("Version checked.");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the fifth runs without asking");
   assert.equal(await page.locator("#approval .approval-row").count(), 0, "it no longer asks");
+  // Threads (pass 126): the chat splits the job, the thread runs live in
+  // the right half, the list is the switcher, and only Merge reaches main.
+  await type(threadsPrompt);
+  await textIncludes("Two threads are on it");
+  const threadRows = page.locator("#conversation .th-row");
+  await until(() => threadRows.count().then(count => count === 2), "the chat lists its two threads", 20_000);
+  await until(() => page.locator("#thread-pane").isVisible(), "the first thread opens in the right half");
+  assert(await page.locator("#app").evaluate(element => element.classList.contains("threads-on")), "the window splits");
+  await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the notes"), "the right half shows the first thread");
+  await until(() => page.locator("#thread-pane .th-brief").isVisible(), "the thread opens on its brief, not its prompt");
+  await threadRows.nth(1).click();
+  await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
+  await until(() => page.locator("#threads-foot .th-status").innerText().then(text => text.includes("working")).catch(() => false), "the line above the composer says one is working");
+  await capture("17-threads-working");
+  releaseThread();
+  const merge = page.locator("#threads-foot .th-merge button");
+  await until(() => merge.isVisible(), "both back: the Merge bar", 30_000);
+  assert.equal(await merge.innerText(), "Merge both");
+  await textIncludes("Both threads are back");
+  assert(!existsSync(join(f.workspace, "threads-a.md")), "nothing reaches the checkout before Merge");
+  await capture("17-threads-ready");
+  await merge.click();
+  await until(() => page.locator("#threads-foot .th-msg").innerText().then(text => text.includes("Merged all 2")).catch(() => false), "Merge says what it did", 30_000);
+  assert(existsSync(join(f.workspace, "threads-a.md")) && existsSync(join(f.workspace, "threads-b.md")), "both threads reached the checkout");
+  await page.locator("#thread-pane .tp-x").click();
+  await until(() => page.locator("#thread-pane").isHidden(), "× closes the right half");
   // Switching models resizes the context at once, before the new model's
   // first request.
   const sizeBefore = await page.locator("#composer-context").getAttribute("title");

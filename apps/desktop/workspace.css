@@ -1885,3 +1885,90 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .file-edit .fe-footer { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--hair); background: var(--tone2); }
 .file-edit .fe-status { flex: 1 1 170px; min-width: 0; color: var(--t3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .file-edit .fe-replay { border-color: var(--hair); color: var(--t2); margin-left: auto; }
+
+/* Threads (pass 126): the orchestrator chat and the thread you picked, in
+   even halves. The cards column and Foundry's pane yield to the thread. */
+#thread-pane { display: none; }
+.desktop .live-app.threads-on:not(.paging) #thread-pane:not([hidden]) { display: flex; flex-direction: column; flex: none; width: 50%; min-width: 0; border-left: 1px solid var(--hair); background: var(--surface); }
+.desktop .live-app.threads-on:not(.paging) :is(#cards, #pane) { display: none !important; }
+.tp-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 8px 10px 8px 18px; border-bottom: 1px solid var(--hair); }
+.tp-title { display: flex; flex-direction: column; min-width: 0; }
+.tp-title b { overflow: hidden; color: var(--t1); font-weight: 600; font-size: 13.5px; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.tp-title span { overflow: hidden; color: var(--t3); font-size: 11.5px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.tp-head .sp { flex: 1; }
+.tp-head .th-stop { padding: 2px 9px; border-radius: 7px; color: var(--t3); font-size: 12px; }
+.tp-head .th-stop:hover { background: var(--tone2); color: var(--t1); }
+.tp-x { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--t3); }
+.tp-x:hover { background: var(--tone2); color: var(--t1); }
+.tp-x .ico { width: 15px; height: 15px; }
+.tp-conv { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 14px; }
+.tp-conv::-webkit-scrollbar { display: none; }
+.tp-conv .turn { display: flex; flex-direction: column; gap: 10px; }
+/* The thread's chat is for reading and steering: its turns' own Undo,
+   Rewind and Ask again belong to that chat, not this half. */
+#thread-pane :is(.receipt-actions, .ask-actions, .step-rewind, .live-line) { display: none !important; }
+#thread-pane .receipt-files { pointer-events: none; }
+#thread-pane .receipt-files .ico { display: none; }
+.tp-empty { color: var(--t3); font-size: 12.5px; margin: auto; }
+.tp-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; }
+.tp-ask { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--r); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 24%, transparent); color: var(--t1); font-size: 13px; }
+.tp-ask .from { color: var(--warn); font-size: 12px; }
+.tp-acts { display: flex; gap: 8px; }
+.tp-acts button { padding: 4px 12px; border-radius: 8px; background: var(--tone2); color: var(--t1); font-size: 12.5px; }
+.tp-acts button.primary { background: var(--warn); color: #1d1404; font-weight: 500; }
+.tp-composer { display: flex; align-items: flex-end; gap: 8px; margin: 0; padding: 10px 10px 10px 14px; border-radius: 12px; background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair2); }
+.tp-composer textarea { flex: 1; min-height: 22px; max-height: 120px; color: var(--t1); font: 13.5px/22px var(--sans, Inter, system-ui, sans-serif); field-sizing: content; }
+.tp-composer textarea::placeholder { color: var(--t4); }
+.tp-send { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 8px; background: var(--tone2); color: var(--t2); }
+.tp-send:hover { color: var(--t1); }
+.tp-send .ico { width: 15px; height: 15px; }
+.th-brief { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--tone); color: var(--t2); font-size: 12.5px; line-height: 19px; }
+.th-brief .k { color: var(--t4); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.th-claims { color: var(--t3); font-size: 12px; }
+.th-claims code { font-size: 11.5px; }
+
+/* The list in the orchestrator's chat: a ring per thread, one plain line. */
+.thread-list:empty { display: none; }
+.thread-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 2px; }
+.th-label { color: var(--t4); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.th-list { display: flex; flex-direction: column; gap: 2px; }
+.th-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; width: 100%; padding: 8px 10px; border-radius: 10px; text-align: left; transition: background 150ms ease-out; }
+.th-row:hover { background: var(--tone); }
+.th-row.on { background: var(--tone2); }
+.th-name { overflow: hidden; color: var(--t1); font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
+.th-meta { display: flex; align-items: center; color: var(--t3); font-size: 12px; white-space: nowrap; }
+.th-line { grid-column: 2 / 4; overflow: hidden; color: var(--t3); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.th-line .add, .tr-line .add { color: var(--ok); } .th-line .del { color: var(--bad); }
+.th-line .amber, .th-status .amber { color: var(--warn); }
+.th-line .danger { color: var(--bad); }
+.th-ok { color: var(--ok); } .th-ok .ico { width: 14px; height: 14px; }
+.th-pill { display: inline-flex; align-items: center; padding: 1px 9px; border-radius: 999px; background: var(--tone2); color: var(--t2); font-size: 11.5px; white-space: nowrap; }
+.th-pill.you { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.th-pill.ok { color: var(--ok); } .th-pill.bad { color: var(--bad); }
+.th-ring { width: 18px; height: 18px; fill: none; stroke-width: 2.2; }
+.th-ring .bg { stroke: var(--hair2); }
+.th-ring .fg { stroke: var(--acc); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset 400ms ease-out; }
+.th-ring.you .fg { stroke: var(--warn); } .th-ring.ready .fg { stroke: var(--ok); } .th-ring.failed .fg { stroke: var(--bad); }
+.th-ring.ok { stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (prefers-reduced-motion: no-preference) { .th-ring.work .fg { animation: th-turn 2.4s linear infinite; } }
+@keyframes th-turn { to { transform: rotate(270deg); } }
+
+/* Above the orchestrator's composer: one line, or the bar with Merge. */
+#threads-foot:not([hidden]) { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.th-status { padding: 0 6px; color: var(--t3); font-size: 12px; }
+.th-merge { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: 12px; background: color-mix(in srgb, var(--acc) 12%, transparent); color: var(--t3); font-size: 12.5px; }
+.th-merge b { color: var(--t1); font-weight: 500; }
+.th-merge button { margin-left: auto; padding: 4px 14px; border-radius: 8px; background: var(--acc); color: #0b1220; font-weight: 500; font-size: 12.5px; white-space: nowrap; }
+.th-merge button:disabled { opacity: .6; }
+.th-msg { display: flex; align-items: center; gap: 8px; padding: 0 6px; color: var(--t3); font-size: 12px; }
+.th-msg.error { color: var(--bad); }
+.th-msg .th-x { margin-left: auto; color: var(--t4); }
+
+/* A thread reporting back: one quiet line in the orchestrator's chat. */
+.desktop .request.thread-report { background: none; box-shadow: none; padding: 0; max-width: none; align-self: stretch; display: flex; align-items: center; }
+.tr-line { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--t3); font-size: 12px; }
+.tr-line b { color: var(--t2); font-weight: 500; }
+.tr-line:hover b { color: var(--t1); }
+.tr-mark { color: var(--ok); display: inline-flex; } .tr-mark .ico { width: 14px; height: 14px; }
+.thread-report.failed .tr-mark { color: var(--bad); }
+.thread-report .request-meta { margin-left: auto; }

@@ -1872,6 +1872,11 @@ export class DemesneStore {
     const event=this.insertEvent("command.changed",command.sessionId,command.turnId,{id:command.id,status:command.status},new Date().toISOString());
     this.eventSink?.(event);
   }
+  /// The chat's queued or running turns.
+  activeTurnIds(sessionId: string): string[] {
+    return (this.database.query("SELECT id FROM turns WHERE session_id = ? AND status IN ('queued', 'running')").all(sessionId) as { id: string }[]).map((row) => row.id);
+  }
+
   commandsForSession(sessionId: string): CommandRecord[] {
     this.requireSession(sessionId);
     return (this.database.query("SELECT data_json FROM command_runs WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200").all(sessionId) as {data_json:string}[]).map(row=>JSON.parse(row.data_json));

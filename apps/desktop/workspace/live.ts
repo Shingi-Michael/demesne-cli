@@ -9,6 +9,8 @@ import { markdown, MarkdownView } from "./markdown.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
+import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
+import { threadBriefHTML, threadHeadHTML, threadListHTML, threadReportHTML, threadsFootHTML } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
@@ -1971,6 +1973,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) {
       // Folded steps keep their trees: a commit or merge stays drawn.
       if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
+      if (entry.type === "tool" && entry.name === "start_threads" && entry.state === "done") { flush(); body += THREADS_SLOT; }
       if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
@@ -1997,6 +2000,7 @@ function runHTML(run: WorkspaceRun, index: number) {
         continue;
       }
       for (const part of stretches(group)) {
+        if (part.kind === "one" && part.tool.name === "start_threads" && part.tool.state === "done") { flush(); body += THREADS_SLOT; continue; }
         if (part.kind === "one") { steps += toolRow(run, part.tool); continue; }
         const words = stretchWords(part.tools, (tool) => totals(run, tool as ToolEntry)), first = part.tools[0]!, stretchKey = `${run.id}:${first.id}`;
         const meta = words.changed ? counts(words) : `<span class="success">✓</span> ${duration(words.durationMs)}`;
@@ -2081,7 +2085,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
-  const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${requestText(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? threadReport(run) ?? threadAsked(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${requestText(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   const day = assistantDay(run, index);
   return `${day ? `<div class="day-line"><span>${h(day)}</span></div>` : ""}${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}</div>${queued}`;
@@ -2157,6 +2161,21 @@ const ICON_MAIL = '<svg class="ico mail-mark" viewBox="0 0 24 24" aria-hidden="t
 /// its bubble takes the accent surface and opens with who sent it and what
 /// kind of message it is, so a scroll never mistakes it for your words. It
 /// has no edit or retry: the words are the sender's.
+/// Threads (pass 126). Where a chat started threads, its list sits in the
+/// conversation (filled in by renderThreads, so it stays live without
+/// repainting the turn); a thread reporting back is one quiet line.
+const THREADS_SLOT = '<div class="thread-list" data-threads></div>';
+function threadReport(run: WorkspaceRun): string | null {
+  const report = parseThreadReport(run.content);
+  return report ? threadReportHTML(report, clock(run.createdAt).slice(0, 5)) : null;
+}
+/// A thread's own chat opens on its brief, not on the long prompt it was given.
+function threadAsked(run: WorkspaceRun): string | null {
+  if (!run.content.startsWith("You're one of the threads an orchestrator chat split")) return null;
+  const branch = /on branch (\S+),/.exec(run.content)?.[1];
+  const fix = state?.threads.list.find((item) => item.branch === branch) ?? null;
+  return threadBriefHTML(fix, run.content);
+}
 function mailRequest(run: WorkspaceRun): string | null {
   const mail = parseMailTurn(run.content);
   if (!mail) return null;
@@ -2476,6 +2495,7 @@ function renderConversation() {
     pane.refresh(shown.flatMap((item) => item.artifacts.artifacts));
   }
   if (changed) placeQuestions();
+  if (changed) fillThreadLists();
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
     else stage.scrollTop = top;
@@ -5313,6 +5333,7 @@ async function dispatch(
   if (action === "where-move") return toggleWhere(whereOpen === "move" ? null : "move");
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "drive-auto", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
+  if (action.startsWith("thread-") || action.startsWith("threads-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
@@ -5750,6 +5771,87 @@ systemAppearance.addEventListener("change",()=>{if(window.demesne.mode!=="deskto
 document.addEventListener("demesne:system-appearance",()=>{if(state?.theme==="system"){applyPalette(state);renderFoot();}});
 let renderedPalette: Snapshot["palette"] | null = null,
   bannerSignature = "";
+/// Threads (pass 126): the orchestrator chat on the left, the thread you
+/// picked running live on the right with a composer of its own. The list in
+/// the chat is the only switcher; nothing moves the right half but you.
+let foldedForThreads = false, threadPaneSignature = "", threadPaneFor = "";
+function renderThreads() {
+  if (!state) return;
+  const view = state.threads;
+  const fix = view.open && !view.closed ? view.list.find((item) => item.id === view.open) ?? null : null;
+  const split = Boolean(fix) && !pageOpen && inSession(state);
+  el("app").classList.toggle("threads-on", split);
+  fillThreadLists();
+  const foot = el("threads-foot"), footHTML = inSession(state) ? threadsFootHTML(view) : "";
+  if (foot.dataset.html !== footHTML) { foot.innerHTML = footHTML; foot.dataset.html = footHTML; foot.hidden = !footHTML; }
+  // Both halves get room: the sidebar folds to its rail while the split is
+  // up, and comes back after if it was the split that folded it.
+  const shell = document.getElementById("desktop-shell"), toggle = document.getElementById("desktop-toggle-sidebar");
+  if (split && !foldedForThreads && shell && toggle && !shell.classList.contains("sidebar-collapsed")) { foldedForThreads = true; toggle.click(); }
+  else if (!split && foldedForThreads) { foldedForThreads = false; if (shell?.classList.contains("sidebar-collapsed")) toggle?.click(); }
+  renderThreadPane(split ? fix : null);
+}
+function fillThreadLists() {
+  if (!state) return;
+  const list = threadListHTML(state.threads);
+  for (const slot of document.querySelectorAll<HTMLElement>("#conversation [data-threads]"))
+    if (slot.dataset.html !== list) { slot.innerHTML = list; slot.dataset.html = list; }
+}
+function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
+  const host = el("thread-pane");
+  host.hidden = !fix;
+  if (!fix || !state) { if (threadPaneFor) { host.innerHTML = ""; threadPaneSignature = threadPaneFor = ""; } return; }
+  if (threadPaneFor !== fix.id) {
+    threadPaneFor = fix.id; threadPaneSignature = "";
+    host.innerHTML = `<div class="tp-head"></div><div class="tp-conv"></div><div class="tp-foot"><div class="tp-asks"></div><form class="tp-composer" data-thread-form><textarea rows="1" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="tp-send" aria-label="Send to this thread"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></form></div>`;
+  }
+  const chat = state.threads.chat;
+  const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.length, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
+  if (signature === threadPaneSignature) return;
+  threadPaneSignature = signature;
+  host.querySelector<HTMLElement>(".tp-head")!.innerHTML = threadHeadHTML(state.threads, fix);
+  const conv = host.querySelector<HTMLElement>(".tp-conv")!;
+  const atEnd = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 40;
+  let html = "";
+  if (chat) {
+    // The thread's turns draw with the same code as any chat's.
+    const saved = state;
+    state = { ...saved, runs: chat.runs, approvals: chat.approvals, questions: chat.questions, activeTurnId: chat.activeTurnId, rewinds: [], versions: [], steers: [], queue: "", answered: {} };
+    try { html = chat.runs.map((run, index) => `<article class="turn">${runHTML(run, index)}</article>`).join(""); }
+    finally { state = saved; }
+  } else html = `<p class="tp-empty">Opening the thread…</p>`;
+  conv.innerHTML = html;
+  for (const slot of conv.querySelectorAll<HTMLElement>("[data-answer][data-entry]")) {
+    const entry = chat?.runs.find((run) => run.id === slot.dataset.answer)?.entries.find((item) => item.id === Number(slot.dataset.entry));
+    if (entry?.type === "assistant") slot.innerHTML = markdown(splitNextPrompt(entry.raw).text);
+  }
+  if (atEnd) conv.scrollTop = conv.scrollHeight;
+  // What the thread waits on: an approval answers here; a question opens its chat.
+  const asks = [
+    ...(chat?.approvals ?? []).map((approval) => `<div class="tp-ask"><span class="from">Before it goes on</span><span>${h(approval.summary || approval.name)}</span><span class="tp-acts">${btn("thread-approve", "Allow once", { id: approval.id }, "primary")}${btn("thread-approve", "Deny", { id: approval.id, decision: "deny" })}</span></div>`),
+    ...(chat?.questions ?? []).filter((question) => question.open !== false).slice(0, 1).map((question) => `<div class="tp-ask"><span class="from">It asks you</span><span>${h(question.questions[0]?.question ?? "A question")}</span><span class="tp-acts">${btn("select-session", "Answer in its chat", { id: chat!.id }, "primary")}</span></div>`),
+  ].join("");
+  const askHost = host.querySelector<HTMLElement>(".tp-asks")!;
+  if (askHost.innerHTML !== asks) askHost.innerHTML = asks;
+}
+function sendToThread(form: HTMLFormElement) {
+  const input = form.querySelector("textarea")!, text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  void api("thread-send", { text }).catch((error) => { input.value = text; notice(error instanceof Error ? error.message : String(error)); });
+}
+document.addEventListener("submit", (event) => {
+  const form = (event.target as Element).closest<HTMLFormElement>("[data-thread-form]");
+  if (!form) return;
+  event.preventDefault();
+  sendToThread(form);
+});
+document.addEventListener("keydown", (event) => {
+  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea");
+  if (!input || event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  sendToThread(input.form!);
+});
 function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
   if (state?.session?.id !== next.session?.id) {
@@ -5823,6 +5925,7 @@ function renderState(next: Snapshot) {
   renderSakura(start);
   renderStatus();
   renderConversation();
+  renderThreads();
   renderDriveTurn();
   renderComposer();
   renderPlainLine();

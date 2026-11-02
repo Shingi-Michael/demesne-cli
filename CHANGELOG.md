@@ -4,6 +4,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- Threads: a chat in a project can split a job into up to three threads (`start_threads`), each a chat of its own in its own git worktree and branch, claiming the files it may change so no two overlap. The window splits in even halves: the orchestrator chat on the left with its thread list (a ring per thread, amber when it needs you), the thread you pick running live on the right with its own composer. Threads report back to the orchestrator as they finish; nothing reaches your checkout until you press Merge. See [Threads](docs/threads.md).
+
 - The GitHub README starts over: the d. wordmark with the release name, one sentence, the home screen as it is now, install, then Ask, Drive and Yours in three columns, and the docs one row away. Its screenshots come from the current app at 2x (`bun scripts/shoot-desktop.ts --readme`: home, Drive's ideas, a finished turn, Settings) instead of the October window; the old banner and badges are gone. Home's blossom now ends above the greeting again when Drive's ideas unfold.
 
 - Recorded file edits open on demand from compact chat rows, with Before / Diff / After views, wrapped code, line numbers and replay. Diffs stay collapsed by default.

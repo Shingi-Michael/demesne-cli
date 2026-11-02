@@ -129,7 +129,13 @@ export interface DriveFix {
   /// A mission's receipt (Markdown built from its task ledger and recorded
   /// checks) and its one-line headline; the receipt opens the PR body.
   receipt?: string; headline?: string;
+  /// Set for a thread an orchestrator chat started (its chat is `from`): the
+  /// job it was given and the files it claims, so two threads never overlap.
+  thread?: DriveThread;
+  /// While running: the thread's chat waits on the person (an approval or a question).
+  waiting?: boolean;
 }
+export interface DriveThread { brief: string; files: string[] }
 /// What a proposal run carries; the estimate and confidence let its outcome
 /// calibrate later rankings.
 export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why"> & Partial<Pick<DriveProposal, "minutes" | "confidence">>;

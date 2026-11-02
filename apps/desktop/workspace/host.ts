@@ -52,6 +52,7 @@ import {
 import { WorkspaceDrive } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
 import { BreakageWatch } from "./breakage.ts";
+import { ThreadWatch } from "./thread-watch.ts";
 import { missionReceipt } from "@demesne/drive/drive-receipt.ts";
 import { expandCustomCommand, loadCustomCommands, mergeSlashCommands, type CustomCommand } from "./custom-commands.ts";
 import { loadWorkflows, workflowCommand } from "@demesne/drive/workflows.ts";
@@ -219,6 +220,12 @@ export class WorkspaceHost {
     applied: () => { void this.refreshFiles().catch(() => {}); void this.refreshProcesses(); },
     closed: (fix) => void this.leaveMission(fix),
     copy: (text) => this.copy(text),
+  });
+  /// The threads the chat you're in started, and the one in the right half.
+  readonly threads = new ThreadWatch({
+    client: () => this.client,
+    publish: () => this.publish(),
+    merged: () => { void this.refreshFiles().catch(() => {}); void this.refreshProcesses(); },
   });
   /// The session you were in when a mission opened its worktree session.
   private missionReturn: string | null = null;
@@ -421,6 +428,7 @@ export class WorkspaceHost {
       providers: this.providers,
       cleanup: this.cleanup,
       breakage: this.breakage.state,
+      threads: this.threads.view(),
       driveNext: {
         ...this.nextQueue,
         proposals: this.nextQueue.proposals.filter((item) => {
@@ -803,6 +811,7 @@ export class WorkspaceHost {
       this.processesError = null;
       void this.refreshProcesses();
       this.selectedSession = id;
+      void this.threads.select(id);
       this.queue = "";
       this.steers = [];
       void this.refreshAsks();
@@ -837,6 +846,8 @@ export class WorkspaceHost {
         if (!this.current!.apply(event)) continue;
         if (event.type === "turn.steered") this.steers = this.steers.filter((steer) => steer.id !== event.payload.steerId);
         if(event.type === "tool.call_completed" && event.payload.name === "apply_theme")void this.refreshThemes().catch(error=>this.fail(error));
+        // Threads this chat just started, or one reporting back, show at once.
+        if ((event.type === "tool.call_completed" && event.payload.name === "start_threads") || event.type === "turn.created") void this.threads.refresh();
         this.onEvent?.(event);
         this.drive?.agent.workerEvent(event);
         if (
@@ -1513,6 +1524,7 @@ export class WorkspaceHost {
       return this.publish();
     }
     if (method.startsWith("breakage-")) return this.breakage.handle(method, args);
+    if (method.startsWith("thread-") || method.startsWith("threads-")) return this.threads.handle(method, args);
     if (method === "providers-refresh") return this.refreshProviders();
     if (method === "provider-signin") return this.signInProvider(string(args.key, "provider", 200));
     if (method === "provider-signout") return this.signOutProvider(string(args.key, "provider", 200));
@@ -2209,6 +2221,7 @@ export class WorkspaceHost {
     this.providerAccounts?.cancel();
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);
     this.breakage.stop();
+    this.threads.stop();
     this.drive?.dispose();
     this.stopFollowingDrive();
     this.setup?.dispose();

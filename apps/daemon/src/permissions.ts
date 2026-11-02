@@ -116,6 +116,12 @@ export class PermissionBroker {
     return true;
   }
 
+  /// Whether a chat waits on the person for an approval.
+  waitingIn(sessionId: string): boolean {
+    for (const pending of this.pending.values()) if (pending.sessionId === sessionId) return true;
+    return false;
+  }
+
   cancelTurn(turnId: string, reason: unknown): void {
     for (const [permissionId, pending] of this.pending) {
       if (pending.turnId !== turnId) continue;

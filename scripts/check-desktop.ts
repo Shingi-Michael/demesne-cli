@@ -1218,6 +1218,8 @@ try {
   await page.locator("#composer-context").click();
   await until(() => page.locator("#context-card").innerText().then(text => text.includes("Instructions") && text.includes("Your messages and replies") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
   if (percentage < 50) assert.equal(await page.locator("#context-card .context-compact").count(), 0, "Compact now waits until the context is half full");
+  // Compaction's own notes are Demesne's to manage: the card says only what is in the chat.
+  assert(!/\bKeep\b|Biggest in it|Turns ·/.test(await page.locator("#context-card").innerText()), "no Keep, Turns or Biggest in the context card");
   await capture("04-context");
   await page.keyboard.press("Escape");
   await page.locator("#context-card").waitFor({ state: "hidden" });

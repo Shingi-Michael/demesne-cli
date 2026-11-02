@@ -37,7 +37,7 @@ import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { ContextParts, FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
@@ -1090,35 +1090,12 @@ function renderContextCard() {
   const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
   const html = halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
   if (html === card.dataset.html) return;
-  // A line being typed into Keep survives the card redrawing around it.
-  const typing = card.querySelector<HTMLInputElement>(".context-keep-add");
-  const draft = typing?.value ?? "", focused = typing === document.activeElement;
   card.innerHTML = html;
   card.dataset.html = html;
-  const input = card.querySelector<HTMLInputElement>(".context-keep-add");
-  if (input && draft) input.value = draft;
-  if (input && focused) input.focus();
-  card.onkeydown = (event) => {
-    const target = event.target as HTMLInputElement;
-    if (event.key !== "Enter" || !target.classList.contains("context-keep-add") || !target.value.trim()) return;
-    event.preventDefault();
-    void editKeep({ add: target.value.trim() }).then(() => { target.value = ""; });
-  };
-}
-/// The Keep list as you just edited it, until the next request reads it back.
-let keepNow: { session: string; basis: string; keep: string[] } | null = null;
-async function editKeep(change: { add?: string; remove?: string }) {
-  const session = state?.session?.id, basis = JSON.stringify(state?.provider?.contextPlan?.parts?.keep ?? null);
-  const keep = await api<string[]>("keep", change);
-  if (session && keep) keepNow = { session, basis, keep };
-  renderContextCard();
-}
-function keepShown(parts: ContextParts | undefined) {
-  if (!parts?.keep) return undefined;
-  return keepNow && keepNow.session === state?.session?.id && keepNow.basis === JSON.stringify(parts.keep) ? keepNow.keep : parts.keep;
 }
 /// What is in the chat, in words first: how many more turns like the last
-/// few fit, then the parts and the biggest single things.
+/// few fit, then the parts. Compaction's own notes (Keep, the turn lane) and
+/// the biggest single things stay out of it: they are Demesne's to manage.
 function contextHalf(c: ReturnType<typeof context>) {
   const plan = state?.provider?.contextPlan, parts = plan?.parts;
   const capacity = c.capacity ?? 0, used = c.used ?? 0;
@@ -1137,20 +1114,10 @@ function contextHalf(c: ReturnType<typeof context>) {
   if (kept) pieces.push({ name: "Kept free for the answer", tokens: kept, tone: "c" });
   const share = (tokens: number) => (capacity ? (tokens / capacity) * 100 : 0);
   const shown = pieces.filter((piece) => piece.tokens > 0);
-  const biggest = parts?.largest.length
-    ? `<div class="context-sub">Biggest in it</div><div class="context-big">${parts.largest.map((item) => `<span title="${h(item.label)}">${h(item.label)}</span><em>${tokensShort(item.tokens)}</em>`).join("")}</div>`
-    : "";
-  // Compaction from notes (pass 114): the Keep list, then which turns are notes and which are whole.
-  const lines = keepShown(parts);
-  const keep = lines
-    ? `<div class="context-sub">Keep${lines.length ? ` · ${lines.length}` : ""}</div><div class="context-keep">${lines.slice(-6).map((line) => `<span>${h(line)}${btn("keep-remove", "×", { line }, "context-keep-remove").replace("<button ", `<button title="Take off Keep" aria-label="Take off Keep: ${h(line)}" `)}</span>`).join("")}${lines.length > 6 ? `<em>and ${lines.length - 6} earlier</em>` : ""}<input class="context-keep-add" type="text" maxlength="300" placeholder="Add something to keep" aria-label="Add something to keep"></div>` : "";
-  const noted = parts?.notedTurns ?? 0, whole = parts?.wholeTurns ?? 0;
-  const lane = noted
-    ? `<div class="context-sub">Turns · ${noted} ${noted === 1 ? "note" : "notes"}, ${whole} whole</div><div class="context-lane">${`<i class="note"></i>`.repeat(Math.min(noted, 40))}${"<i></i>".repeat(Math.min(whole, 20))}</div>` : "";
   return `<div class="context-head"><span>Context</span><span>${c.percentage}% · ${c.estimated ? "~" : ""}${tokensShort(used)} of ${capacity ? tokensShort(capacity) : "—"}</span></div>` +
     (contextWords(c) ? `<p class="context-say">${contextWords(c)}</p>` : "") +
     `<div class="context-bar">${shown.map((piece) => `<i class="tone-${piece.tone}" style="width:${share(piece.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
-    `<div class="context-legend">${shown.map((piece) => `<u class="tone-${piece.tone}"></u><span>${piece.name}</span><em>${tokensShort(piece.tokens)}</em>`).join("")}</div>` + keep + lane + biggest;
+    `<div class="context-legend">${shown.map((piece) => `<u class="tone-${piece.tone}"></u><span>${piece.name}</span><em>${tokensShort(piece.tokens)}</em>`).join("")}</div>`;
 }
 /// One sentence: room left in turns, and what Demesne does when it fills.
 function contextWords(c: ReturnType<typeof context>) {
@@ -5277,7 +5244,6 @@ async function dispatch(
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
   if (action === "detach") return api("detach", { id: args.id });
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
-  if (action === "keep-remove") { await editKeep({ remove: String(args.line ?? "") }); return; }
   if (action === "context-card") {
     contextCardOpen = !contextCardOpen;
     renderContextCard();

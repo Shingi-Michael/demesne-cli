@@ -2671,6 +2671,9 @@ function renderHero() {
     ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
     : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${bar}${fold}${pick}</div><div id="hero-composer"></div>`;
   el("hero-composer").append(composer);
+  // Home grew or lost lines (ideas unfolded, a branch to review): the
+  // blossom ends above the greeting again, so no text sits on the boughs.
+  if (sakura && !document.getElementById("sakura")?.hidden) sakura.refit();
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
 /// (Active or Archived), Scheduled, Customize or Settings. "" when closed.

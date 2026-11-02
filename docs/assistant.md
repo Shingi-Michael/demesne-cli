@@ -280,7 +280,7 @@ On the PC, from this repository:
 bun run pair:iphone
 ```
 
-It finds the PC's Tailscale name, checks that the daemon answers there, and prints a QR code in the terminal. Point the iPhone's camera at it and tap the banner: the Demesne app opens and saves the address, and the token in the iPhone's Keychain. If it can't find the name, pass the address `tailscale serve status` shows: `bun run pair:iphone -- --url https://<pc>.<tailnet>.ts.net:8443`.
+It finds the PC's Tailscale name, checks that the daemon answers there, and prints a QR code in the terminal. Point the iPhone's camera at it and tap the banner: the Demesne app opens and saves the address, and the token in the iPhone's Keychain. If it can't find the name, pass the address `tailscale serve status` shows: `bun run pair:iphone -- --url https://<pc>.<tailnet>.ts.net:8443`. To use the iOS simulator, which has no camera, add `-- --link`. It also prints the link, which you copy and paste into the app with its Paste button.
 
 The code holds the token, which can do anything the Demesne window can. It's printed only in the terminal and never saved to a file: scan it, then clear the screen (`cls`). The script refuses a plain `http://` address or one outside Tailscale (`.ts.net`), so the token only travels encrypted inside your tailnet.
 

@@ -4,6 +4,7 @@
 ///
 ///   bun run pair:iphone                      # address from `tailscale status`, port 8443
 ///   bun run pair:iphone -- --url https://pc.tail1234.ts.net:8443
+///   bun run pair:iphone -- --link          # also print the link, to paste into the simulator
 ///
 /// The token can do anything the Demesne window can, so the code is shown
 /// only in this terminal, never saved to a file.
@@ -71,5 +72,9 @@ if (import.meta.main) {
   }
   console.log(`\nScan this with your iPhone's camera to connect the Demesne app to ${server}:\n`);
   console.log(await QRCode.toString(pairingLink(server, token), { type: "terminal", small: true, errorCorrectionLevel: "M" }));
+  if (process.argv.includes("--link")) {
+    // For the iOS simulator, which has no camera: paste this into the app.
+    console.log(`Or paste this link into the app:\n\n${pairingLink(server, token)}\n`);
+  }
   console.log("This code holds the key to your PC. Scan it, then clear the screen (`cls` on Windows, `clear` elsewhere).");
 }

@@ -1465,26 +1465,32 @@ html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notc
 @keyframes rim-run { to { --rim-a: 360deg; } }
 @keyframes live-breathe { 50% { opacity: 0.35; } }
 
-/* The tabs (pass 101): your open chats as pills, each with its sidebar dot.
-   The tab you're on is a soft pill and keeps room for its title; the rest
-   shrink evenly, down to their dots. The strip scrolls sideways when full. */
-#workspace-tabs { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 2px; height: 100%; overflow-x: auto; scrollbar-width: none; }
+/* Joined tabs: the active chat meets its panel, rather than floating above
+   it. Every tab reserves the same width and close target; crowded bars scroll
+   instead of shrinking titles into dots. Keep the new-chat button outside. */
+#workspace-tabs { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-end; gap: 3px; height: 100%; overflow-x: auto; scrollbar-width: none; }
 #workspace-tabs::-webkit-scrollbar { display: none; }
-.bar-tab { position: relative; flex: 0 1 200px; min-width: 34px; display: flex; align-items: center; height: 30px; border-radius: var(--r-sm, 8px); color: var(--t3); overflow: hidden; transition: background 140ms var(--ease, ease), color 140ms var(--ease, ease); }
-.bar-tab:hover { background: var(--tone2); color: var(--t1); }
-.bar-tab.on { flex: 0 0 auto; min-width: 110px; max-width: 240px; background: var(--tone2); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); }
+.bar-tab { box-sizing: border-box; position: relative; flex: 0 0 180px; min-width: 0; display: flex; align-items: center; height: 40px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--t3); overflow: hidden; }
+.bar-tab:not(.on):hover { background: var(--tone); color: var(--t1); }
+.bar-tab.on { border-color: var(--panel-edge, var(--hair)); background: var(--panel, var(--ink)); color: var(--t1); }
+html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
+/* The tab paints over the panel's top hairline. No lower radius or underline
+   cuts the selected tab off from the conversation. */
+.bar-tab > button[role="tab"]:focus-visible, .bar-tab-close:focus-visible, .bar-tab-new:focus-visible { outline: 2px solid var(--acc); outline-offset: -3px; }
+@media (max-width: 720px) { .bar-tab { flex-basis: 152px; } }
+@media (prefers-reduced-motion: no-preference) { .bar-tab { transition: color 160ms var(--ease, ease); } }
 .bar-tab.dragging { opacity: 0.45; }
-.bar-tab > button[role="tab"], .bar-tab-label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 4px 0 9px; border: 0; background: none; font: 12.5px Inter, system-ui, sans-serif; color: inherit; text-align: left; cursor: pointer; }
+.bar-tab > button[role="tab"], .bar-tab-label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 5px 0 13px; border: 0; background: none; font: 12.5px Inter, system-ui, sans-serif; color: inherit; text-align: left; cursor: pointer; }
 .bar-tab-label { cursor: default; padding-right: 8px; }
 .bar-tab.here .bar-tab-label { padding-left: 12px; }
 .bar-tab .sidebar-session-mark { margin: 0; }
-.bar-tab .sidebar-session-mark:not(.warn, .acc, .working, .bad) { visibility: visible; width: 6px; height: 6px; margin: 0 2px; box-shadow: inset 0 0 0 1px var(--t4); }
+.bar-tab .sidebar-session-mark:not(.warn, .acc, .working, .bad) { display: none; }
 .bar-tab.on .bar-tab-name { font-weight: 600; }
 .bar-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-tab-rename { flex: 1; min-width: 0; margin: 0 4px 0 23px; padding: 2px 0; border: 0; outline: 0; background: none; box-shadow: 0 1px 0 var(--t3); font: 600 12.5px Inter, system-ui, sans-serif; color: var(--t1); }
-.bar-tab-close { flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-right: 6px; padding: 0; border: 0; border-radius: 5px; background: none; font-size: 14px; line-height: 1; color: var(--t3); opacity: 0; cursor: pointer; }
-.bar-tab:hover .bar-tab-close, .bar-tab.on .bar-tab-close, .bar-tab-close:focus-visible { opacity: 1; }
-.bar-tab:not(.on):not(:hover) .bar-tab-close { display: none; }
+.bar-tab-close { flex: none; display: grid; place-items: center; width: 26px; height: 28px; margin-right: 4px; padding: 0; border: 0; border-radius: 5px; background: none; font-size: 16px; line-height: 1; color: var(--t3); opacity: 0; cursor: pointer; }
+.bar-tab:hover .bar-tab-close, .bar-tab.on .bar-tab-close, .bar-tab:focus-within .bar-tab-close { opacity: 1; }
+@media (hover: none) { .bar-tab-close { opacity: 1; } }
 .bar-tab-close:hover { background: var(--surface2); color: var(--t1); }
 .bar-tab-new { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm, 8px); background: none; font-size: 17px; line-height: 1; color: var(--t3); cursor: pointer; }
 .bar-tab-new:hover { background: var(--tone2); color: var(--t1); }
@@ -1496,6 +1502,8 @@ html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notc
 #desktop-toolbar .bar-tab-pin.ready i { background: var(--ok); }
 @media (prefers-reduced-motion: no-preference) { #desktop-toolbar .bar-tab-pin.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
 /* A chat elsewhere needs you: one amber line that takes you there. */
+#workspace-call { min-width: 0; max-width: min(260px, 28%); }
+#workspace-call .bar-call { max-width: 100%; }
 #workspace-call:empty { display: none; }
 .bar-call { flex: none; display: inline-flex; align-items: center; gap: 7px; max-width: 260px; height: 26px; padding: 0 10px 0 9px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--warn) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 40%, transparent); font: 12px Inter, system-ui, sans-serif; color: var(--warn); white-space: nowrap; cursor: pointer; }
 .bar-call span { overflow: hidden; text-overflow: ellipsis; }
@@ -1768,8 +1776,6 @@ b.pane-title { padding: 0 6px; }
 body.desktop textarea, body.desktop input { caret-color: var(--blossom); }
 body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, transparent); }
 .sidebar-session.selected .sidebar-session-mark:not(.warn, .acc, .working, .bad) { visibility: visible; width: 6px; height: 6px; margin: 0 5px; background: var(--blossom); }
-.bar-tab.on .sidebar-session-mark:not(.warn, .acc, .working, .bad) { box-shadow: none; background: var(--blossom); }
-.bar-tab.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 1.5px; border-radius: 1px; background: var(--blossom); pointer-events: none; }
 .sidebar-release { margin-top: auto; padding: 0 10px 8px; font-size: 11px; color: var(--blossom); white-space: nowrap; }
 .sidebar-release + .sidebar-foot { margin-top: 0; }
 #desktop-shell.sidebar-collapsed .sidebar-release { display: none; }

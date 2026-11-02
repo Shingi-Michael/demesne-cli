@@ -961,7 +961,19 @@ export class WorkspaceHost {
         // can't switch, the chat opens on the model already running instead
         // of the whole window going offline.
         try { await this.client.setModel(id, effective); }
-        catch (error) { if (!restoring) throw error; return; }
+        catch (error) {
+          if (!restoring) throw error;
+          // The picker already shows the chat's saved model; put it back on
+          // the model that will actually answer, so nothing sends under a
+          // name the daemon isn't running.
+          const running = this.activatedModel;
+          if (running && !this.disposed && selected === this.current) {
+            this.model = models.find(model => model.id === running.id) ?? { id: running.id, provider: "" };
+            this.reasoning = running.reasoning;
+            this.publish();
+          }
+          return;
+        }
         this.activatedModel = { id, reasoning: effective };
       }
       if (!model.contextWindow) {

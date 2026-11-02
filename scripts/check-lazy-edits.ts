@@ -6,7 +6,7 @@ const source=readFileSync(new URL('../apps/desktop/workspace/live.ts',import.met
 const loader=source.slice(source.indexOf('const fileEditViews ='),source.indexOf('const repoSlot ='));
 const build=await Bun.build({entrypoints:['apps/desktop/workspace/file-edit.ts'],target:'browser',format:'esm'});
 assert(build.success);
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH});
 try {
   const page=await browser.newPage({reducedMotion:'reduce'});
   await page.setContent('<main></main>');

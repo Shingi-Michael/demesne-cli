@@ -41,16 +41,16 @@ test("cold catalog cannot block navigation; send waits and only the latest chat 
   } finally { gate.resolve(); host.dispose(); await f.close(); }
 });
 
-test("a failed background activation blocks sending instead of using the previous model", async () => {
+test("a chat whose model can't be restored opens on the running model and says so in the picker", async () => {
   const f = await fixture();
+  const running = (await f.client.health()).model;
   const id = (await f.client.createSession({ workspacePath: f.workspace })).session.id;
   await f.client.updateSession(id, { preferredModel: "missing-model", preferredReasoning: "high" });
   const host = new WorkspaceHost({ client: f.client, settings: f.settings, workspace: f.workspace, sessionId: id, headless: true, changed() {} });
   try {
     await host.connect(false);
-    await eventually(() => host.error);
-    await expect(host.submit("Do not send with the wrong model")).rejects.toThrow();
-    expect((await f.client.getSessionState(id)).session.turns).toHaveLength(0);
+    await eventually(() => host.model.id === running);
+    expect(host.snapshot()).toMatchObject({ connection: "online", error: null, model: { id: running } });
   } finally { host.dispose(); await f.close(); }
 });
 

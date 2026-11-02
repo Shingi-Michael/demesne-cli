@@ -6,7 +6,14 @@ import { toolError, type AgentTool } from "./tools.ts";
 /// the same topic, shows it. The topic is fixed in `[assistant] ntfy`, so the
 /// model can reach you and nobody else.
 
-export interface PhoneMessage { title?: string; text: string; urgent?: boolean }
+/// `link` opens when the notification is tapped: a `demesne://` link opens
+/// that chat in the Demesne iPhone app.
+export interface PhoneMessage { title?: string; text: string; urgent?: boolean; link?: string }
+
+/// The iPhone app's link to a chat, or to the assistant's chat.
+export function chatLink(sessionId?: string): string {
+  return sessionId ? `demesne://chat/${encodeURIComponent(sessionId)}` : "demesne://assistant";
+}
 
 export interface Phone {
   send(message: PhoneMessage, signal?: AbortSignal): Promise<void>;
@@ -14,11 +21,12 @@ export interface Phone {
 
 export function ntfy(url: string, token?: string, fetcher: typeof fetch = fetch): Phone {
   return {
-    async send({ title, text, urgent }, signal) {
+    async send({ title, text, urgent, link }, signal) {
       const headers: Record<string, string> = { "content-type": "text/plain; charset=utf-8", markdown: "yes" };
       // HTTP headers are Latin-1 only; RFC 2047 encoding keeps any title intact.
       if (title) headers.title = `=?UTF-8?B?${Buffer.from(title.slice(0, 120)).toString("base64")}?=`;
       if (urgent) headers.priority = "high";
+      if (link) headers.click = link;
       if (token) headers.authorization = `Bearer ${token}`;
       let response: Response;
       try {
@@ -61,7 +69,7 @@ export function notifyPhoneTool(phone: Phone, perHour = 10, now: () => number = 
       if (!isRecord(input) || typeof input.text !== "string" || !input.text.trim()) throw toolError("MISSING_TEXT", "a notification needs text", "say what to show");
       while (sent.length && now() - sent[0]! > 3_600_000) sent.shift();
       if (sent.length >= perHour) throw toolError("TOO_MANY", `${perHour} notifications already sent this hour`, "put the rest in your answer instead");
-      await phone.send({ title: typeof input.title === "string" ? input.title : undefined, text: input.text, urgent: input.urgent === true }, context.signal);
+      await phone.send({ title: typeof input.title === "string" ? input.title : undefined, text: input.text, urgent: input.urgent === true, link: chatLink(context.sessionId) }, context.signal);
       sent.push(now());
       return "Sent to the user's phone.";
     },
@@ -69,9 +77,11 @@ export function notifyPhoneTool(phone: Phone, perHour = 10, now: () => number = 
 }
 
 /// What a routine's run sends to your phone: its answer, or why there isn't one.
-export function routineMessage(title: string, status: string, responseText: string): PhoneMessage | null {
-  if (status === "completed") return { title, text: responseText.trim() || "Finished, with nothing to say." };
+/// A tap opens the chat it ran in.
+export function routineMessage(title: string, status: string, responseText: string, sessionId?: string): PhoneMessage | null {
+  const link = chatLink(sessionId);
+  if (status === "completed") return { title, text: responseText.trim() || "Finished, with nothing to say.", link };
   // Cancelled or interrupted means you stopped it or the daemon shut down.
-  if (status === "failed") return { title, text: "This routine didn't finish. Open its chat in Demesne to see why." };
+  if (status === "failed") return { title, text: "This routine didn't finish. Open its chat in Demesne to see why.", link };
   return null;
 }

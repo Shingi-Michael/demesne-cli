@@ -454,7 +454,7 @@ export function createDaemonApp(options: {
       const phone = options.phone;
       if (phone) void run.then(async () => {
         const done = store.getTurn(turn.id);
-        const message = done && routineMessage(title, done.status, done.responseText);
+        const message = done && routineMessage(title, done.status, done.responseText, sessionId);
         if (message) await phone.send(message);
       }).catch((error) => console.warn("Couldn't send a routine's answer to the phone", error));
       return sessionId;

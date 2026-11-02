@@ -30,7 +30,7 @@ Everything the assistant reads from a file, an email or a web page is data, neve
 
 ### Why a service
 
-Until now you started llama-server in a terminal and Demesne's daemon from the window. That's fine for coding, but an assistant has to be awake when you aren't looking: a routine set for 8:00 only fires if the daemon is running at 8:00. On Windows, **Task Scheduler** is the built-in way to start programs on their own. [`install.ps1`](../scripts/assistant/install.ps1) adds two tasks, under a **Demesne** folder in Task Scheduler, that start hidden when you log in:
+Until now you started llama-server in a terminal and Demesne's daemon from the window. That's fine for coding, but an assistant has to be awake when you aren't looking: a routine set for 8:00 only fires if the daemon is running at 8:00. On Windows, **Task Scheduler** is the built-in way to start programs on their own. [`install.ps1`](../scripts/assistant/install.ps1) adds two tasks, under a **Demesne** folder in Task Scheduler, that start when you log in with no window at all (each runs inside a headless console host, so Windows Terminal never shows it as a tab; a task that did show as a tab died with every other tab when that Terminal window was closed):
 
 - **llama-server** runs the model on port 8081.
 - **demesned** runs Demesne's daemon.

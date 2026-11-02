@@ -10,6 +10,10 @@ You can talk to a thread directly in the right half, or ask the orchestrator to 
 
 A thread answers only to its orchestrator and to you: it isn't on Heartbeat (no address, no mail, no `heartbeat` tool).
 
+## Orchestrate mode
+
+The composer's mode word has a fifth mode in project chats: **Orchestrate**. In it the chat is the project's orchestrator: it reads, plans, starts threads (`start_threads`) and passes them your rules and corrections (`message_thread`), and it never edits files or runs commands itself. The threads do all the work. The setting is kept per chat (`orchestrate` on the session).
+
 ## How a run goes
 
 1. Ask for work made of independent jobs, or ask for threads. The model calls `start_threads` with a title, a brief and the files each thread may change. Two threads may not claim the same file or folder.

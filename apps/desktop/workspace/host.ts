@@ -361,6 +361,7 @@ export class WorkspaceHost {
             createdAt: this.current.session.createdAt,
             autoApprove: this.current.session.autoApprove === true,
             acceptEdits: this.current.session.acceptEdits === true,
+            orchestrate: this.current.session.orchestrate === true,
           }
         : null,
       assistant: this.assistant ? (() => {
@@ -1758,18 +1759,20 @@ export class WorkspaceHost {
     // The composer's mode word: Ask, Accept edits, Plan or Auto, for this chat.
     if (method === "permission-mode") {
       const mode = args.mode;
-      if (mode !== "ask" && mode !== "edits" && mode !== "plan" && mode !== "auto") throw new Error("Invalid mode");
+      if (mode !== "ask" && mode !== "edits" && mode !== "plan" && mode !== "auto" && mode !== "orchestrate") throw new Error("Invalid mode");
       if (!this.current) throw new Error("Choose a session first.");
       const selected = this.current, id = selected.session.id;
-      const patch: { autoApprove?: boolean; acceptEdits?: boolean } = {};
+      const patch: { autoApprove?: boolean; acceptEdits?: boolean; orchestrate?: boolean } = {};
+      if ((selected.session.orchestrate === true) !== (mode === "orchestrate")) patch.orchestrate = mode === "orchestrate";
       if ((selected.session.autoApprove === true) !== (mode === "auto")) patch.autoApprove = mode === "auto";
       if ((selected.session.acceptEdits === true) !== (mode === "edits")) patch.acceptEdits = mode === "edits";
-      if (patch.autoApprove !== undefined || patch.acceptEdits !== undefined) {
+      if (patch.autoApprove !== undefined || patch.acceptEdits !== undefined || patch.orchestrate !== undefined) {
         const result = await this.client.updateSession(id, patch);
         if ((result.session.autoApprove === true) !== (mode === "auto") || (result.session.acceptEdits === true) !== (mode === "edits"))
           throw new Error("The daemon did not apply this mode. Restart Demesne to update the daemon.");
         selected.session.autoApprove = result.session.autoApprove === true;
         selected.session.acceptEdits = result.session.acceptEdits === true;
+        selected.session.orchestrate = result.session.orchestrate === true;
       }
       this.plans.set(id, mode === "plan");
       if (this.current === selected) this.planOnly = mode === "plan";

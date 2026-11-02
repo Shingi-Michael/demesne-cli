@@ -1317,6 +1317,7 @@ export function createDaemonApp(options: {
           eventId = updated.event?.eventId ?? eventId;
           if (body.acceptEdits) permissions.approvePendingSession(path[2]!);
         }
+        if (body.orchestrate !== undefined) session = store.setSessionOrchestrate(path[2]!, body.orchestrate);
         const response: UpdateSessionResponse = { session, eventId };
         return json(response);
       }

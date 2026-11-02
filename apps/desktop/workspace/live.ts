@@ -3200,16 +3200,17 @@ async function attachFiles(files: File[]) {
     if (image?.id) { attachmentPreviews.set(image.id, url); composerSignature = ""; renderComposer(); renderConversation(); }
   }
 }
-type Mode = "ask" | "edits" | "plan" | "auto";
-const MODES: Record<Mode, string> = { ask: "Ask", edits: "Accept edits", plan: "Plan", auto: "Auto" };
+type Mode = "ask" | "edits" | "plan" | "auto" | "orchestrate";
+const MODES: Record<Mode, string> = { ask: "Ask", edits: "Accept edits", plan: "Plan", auto: "Auto", orchestrate: "Orchestrate" };
 const MODE_HELP: Record<Mode, string> = {
   ask: "Every edit and command asks first",
   edits: "File edits run without asking; commands and deletes still ask",
   plan: "Reads and proposes a plan; changes nothing",
   auto: "Edits and commands run without asking",
+  orchestrate: "Plans and runs threads; the threads do the work, this chat never edits",
 };
 function currentMode(): Mode {
-  const saved: Mode = state?.planOnly ? "plan" : state?.session?.autoApprove ? "auto" : state?.session?.acceptEdits ? "edits" : "ask";
+  const saved: Mode = state?.session?.orchestrate ? "orchestrate" : state?.planOnly ? "plan" : state?.session?.autoApprove ? "auto" : state?.session?.acceptEdits ? "edits" : "ask";
   // A step still on its way to the host wins, so quick presses keep stepping.
   if (pendingMode && pendingMode.mode !== saved && Date.now() < pendingMode.until) return pendingMode.mode;
   pendingMode = null;
@@ -3219,7 +3220,8 @@ let pendingMode: { mode: Mode; until: number } | null = null;
 let modeHintTimer: ReturnType<typeof setTimeout> | undefined;
 /** Steps to the next mode and opens the word into all four for a moment. */
 async function cycleMode(step = 1) {
-  const order = Object.keys(MODES) as Mode[];
+  // Orchestrate is for a chat in a project: threads only live there.
+  const order = (Object.keys(MODES) as Mode[]).filter((item) => item !== "orchestrate" || (state?.session && !isPlain()));
   const next = order[(order.indexOf(currentMode()) + step + order.length) % order.length]!;
   // The word opens into all four modes where it sits, the new one lit, and
   // folds back to one word a moment later.
@@ -3353,6 +3355,7 @@ function renderComposer() {
   chip.className = `cb mode-${mode}${chip.classList.contains("open") ? " open" : ""}`;
   if (!chip.querySelector(".mode-opt")) chip.innerHTML = `<span class="mode-list">${(Object.keys(MODES) as Mode[]).map((item) => `<span class="mode-opt mode-${item}" data-mode="${item}">${MODES[item]}</span>`).join("")}</span><kbd>⇧⇥</kbd>`;
   for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) option.classList.toggle("on", option.dataset.mode === mode);
+  chip.querySelector<HTMLElement>(".mode-opt.mode-orchestrate")!.style.display = state.session && !isPlain() ? "" : "none";
   chip.setAttribute("aria-label", `Mode: ${MODES[mode]}`);
   chip.title = `${MODE_HELP[mode]}. Click or ⇧⇥ for the next mode.`;
   // On Home one word says where the chat will live, and unfolds the choices.

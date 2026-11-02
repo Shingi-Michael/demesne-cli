@@ -48,7 +48,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
-- The assistant's Windows tasks no longer die when a Windows Terminal window is closed. With Windows Terminal as the default terminal, a task started as `powershell.exe -WindowStyle Hidden` was handed to Terminal as a tab, and closing that window sent Ctrl+C to the daemon and the model server at once (three times in a week). `install.ps1` now starts each task inside a headless console host (`conhost.exe --headless`), which has no window and never joins Terminal.
+- The assistant's Windows tasks no longer die when a Windows Terminal window is closed. With Windows Terminal as the default terminal, a task started as `powershell.exe -WindowStyle Hidden` was handed to Terminal as a tab, and closing that window sent Ctrl+C to the daemon and the model server at once (three times in a week). `install.ps1` now starts each task inside a headless console host (`conhost.exe --headless`), which has no window and never joins Terminal. Because stopping a task then ends only that console host, `keep-running.ps1` watches it and exits with it, so Stop-ScheduledTask still stops the daemon or the model server.
 - On the Mac, Demesne comes to the front when it opens, once. Opened from a terminal or script it could stay behind the app that launched it, with its window present but hidden.
 - A chat whose project folder was removed (a deleted worktree) no longer makes the daemon throw ENOENT when the window lists its files; the daemon answers "The project folder is gone".
 - The daemon log no longer grows without end: past 5 MB it moves to `daemon.log.1` (replacing the one before) when a daemon starts. One Mac's had reached 28 MB.

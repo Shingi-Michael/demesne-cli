@@ -39,6 +39,12 @@ describe("assistant services", () => {
     expect(loop).toContain("0x2000");
     expect(loop).toContain("AssignProcessToJobObject");
     expect(loop).toContain("Stop-LeftOver $Program $arguments");
+    // Task Scheduler ends the headless console host, not PowerShell: the loop
+    // watches its parent and exits with it, so the job closes and the
+    // program goes too.
+    expect(loop).toContain("parent.Exited +=");
+    expect(loop).toContain("System.Environment.Exit(0)");
+    expect(loop).toContain("Stop-WithParent");
     const installer = readFileSync(join(assistant, "install.ps1"), "utf8");
     // A headless console host: Windows Terminal never adopts the task as a
     // tab, so closing a Terminal window can't send it Ctrl+C.

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConfigError, loadConfig } from "@demesne/config";
-import { notifyPhoneTool, ntfy, routineMessage, type Phone } from "../src/notify-phone.ts";
+import { chatLink, notifyPhoneTool, ntfy, routineMessage, type Phone } from "../src/notify-phone.ts";
 
 const servers: ReturnType<typeof Bun.serve>[] = [];
 const temporaryDirectories: string[] = [];
@@ -21,11 +21,13 @@ describe("ntfy", () => {
       return Response.json({ id: "1" });
     } });
     servers.push(server);
-    await ntfy(`http://127.0.0.1:${server.port}/mike-assistant-7f3k2p9q`, "tk_1").send({ title: "Dentist — Thursday", text: "3pm, bring the form", urgent: true });
+    await ntfy(`http://127.0.0.1:${server.port}/mike-assistant-7f3k2p9q`, "tk_1").send({ title: "Dentist — Thursday", text: "3pm, bring the form", urgent: true, link: chatLink() });
     expect(received[0]!.path).toBe("/mike-assistant-7f3k2p9q");
     expect(received[0]!.body).toBe("3pm, bring the form");
     expect(received[0]!.headers.get("priority")).toBe("high");
     expect(received[0]!.headers.get("authorization")).toBe("Bearer tk_1");
+    // A tap opens the assistant's chat in the iPhone app.
+    expect(received[0]!.headers.get("click")).toBe("demesne://assistant");
     const title = received[0]!.headers.get("title")!.match(/^=\?UTF-8\?B\?(.*)\?=$/)![1]!;
     expect(Buffer.from(title, "base64").toString()).toBe("Dentist — Thursday");
   });
@@ -45,8 +47,8 @@ describe("notify_phone", () => {
   });
 
   test("sends, then stops after the hourly limit", async () => {
-    const sent: string[] = [];
-    const phone: Phone = { async send(message) { sent.push(message.text); } };
+    const sent: string[] = [], links: (string | undefined)[] = [];
+    const phone: Phone = { async send(message) { sent.push(message.text); links.push(message.link); } };
     let clock = 0;
     const tool = notifyPhoneTool(phone, 2, () => clock);
     await tool.execute({ text: "one" }, context);
@@ -56,12 +58,15 @@ describe("notify_phone", () => {
     await tool.execute({ text: "four" }, context);
     await expect(tool.execute({ text: " " }, context)).rejects.toThrow("MISSING_TEXT");
     expect(sent).toEqual(["one", "two", "four"]);
+    await tool.execute({ text: "five" }, { ...context, sessionId: "abc" });
+    expect(links.at(0)).toBe("demesne://assistant");
+    expect(links.at(-1)).toBe("demesne://chat/abc");
   });
 });
 
 describe("a routine's message", () => {
   test("is its answer, or a note that it didn't finish; nothing when you stopped it", () => {
-    expect(routineMessage("Morning brief", "completed", "Dentist at 3pm.\n")).toEqual({ title: "Morning brief", text: "Dentist at 3pm." });
+    expect(routineMessage("Morning brief", "completed", "Dentist at 3pm.\n", "s 1")).toEqual({ title: "Morning brief", text: "Dentist at 3pm.", link: "demesne://chat/s%201" });
     expect(routineMessage("Morning brief", "failed", "")?.text).toContain("didn't finish");
     expect(routineMessage("Morning brief", "cancelled", "")).toBeNull();
     expect(routineMessage("Morning brief", "interrupted", "")).toBeNull();

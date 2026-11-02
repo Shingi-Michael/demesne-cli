@@ -8,6 +8,8 @@
 /// once its turn is over (forgetFoundrySources): the artifact is stored,
 /// and foundry_read brings it back when the agent needs it.
 import type { DemesneStore } from "@demesne/storage";
+import { LOOKS_PER_TURN, lookReport, type FoundryLook } from "./foundry-look.ts";
+import type { StructuredToolResult } from "./artifacts.ts";
 import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, type FoundryKind, type ModelMessage } from "@demesne/protocol";
 import type { AgentTool } from "./tools.ts";
 
@@ -112,8 +114,8 @@ function conflict(error: unknown): never {
   throw error;
 }
 
-export function foundrySaveTool(store: DemesneStore): AgentTool {
-  return {
+export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks = new Map<string, number>()): AgentTool {
+  const tool: AgentTool = {
     definition: {
       name: "foundry_save",
       description: "Show the person something they can see, click or compare: a screen or layout, a flow, an interactive prototype, a small game or tool, a chart or diagram, a logo or palette, a page or one-pager. It opens live beside the chat. "
@@ -153,6 +155,8 @@ export function foundrySaveTool(store: DemesneStore): AgentTool {
         message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.` });
     },
   };
+  if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
+  return tool;
 }
 
 /// One exact edit: `find` must occur exactly once (or `all` replaces every
@@ -170,8 +174,8 @@ export function applyFoundryEdits(source: string, edits: FoundryEdit[]) {
   return out;
 }
 
-export function foundryEditTool(store: DemesneStore): AgentTool {
-  return {
+export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks = new Map<string, number>()): AgentTool {
+  const tool: AgentTool = {
     definition: {
       name: "foundry_edit",
       description: "Change part of a Foundry artifact without resending it: exact find-and-replace edits on the version you read, saved as a new version. "
@@ -227,6 +231,8 @@ export function foundryEditTool(store: DemesneStore): AgentTool {
         message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.` });
     },
   };
+  if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
+  return tool;
 }
 
 export function foundryReadTool(store: DemesneStore): AgentTool {
@@ -252,4 +258,22 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
         versions: found.versions.map(({ version, note, createdAt }) => ({ version, note, createdAt })) });
     },
   };
+}
+
+/// After an HTML page is saved: render it, and hand the model the faults
+/// found and a picture at each width. Twice per artifact per turn at most.
+async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<string, number>, text: string, context: { turnId?: string; signal: AbortSignal }): Promise<string | StructuredToolResult> {
+  let saved: Record<string, unknown>;
+  try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return text; }
+  if (saved.kind !== "html" || typeof saved.id !== "string") return text;
+  const key = `${context.turnId ?? ""}:${saved.id}`, seen = looks.get(key) ?? 0;
+  if (seen >= LOOKS_PER_TURN) return text;
+  const artifact = store.getFoundryArtifact(saved.id);
+  if (!artifact) return text;
+  const result = await look({ kind: artifact.kind, source: artifact.source, title: artifact.title }, context.signal).catch(() => null);
+  if (!result) return text;
+  looks.set(key, seen + 1);
+  if (looks.size > 200) looks.delete(looks.keys().next().value!);
+  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN);
+  return { text: JSON.stringify({ ...saved, look: report.look }), images: report.images };
 }

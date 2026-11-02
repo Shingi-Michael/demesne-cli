@@ -5,11 +5,15 @@ import { homedir, release } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
+import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true } }]);
 app.setName("Demesne");
+/// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
+const lookJob = lookJobPath(process.argv);
+if (lookJob) runFoundryLook(lookJob);
 // Match the installed Windows shortcut identity so native toasts can appear.
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
@@ -35,7 +39,7 @@ async function quit() {
   exited = true;
   app.quit();
 }
-app.on("before-quit", event => { if (!exited) { event.preventDefault(); void quit(); } });
+if (!lookJob) app.on("before-quit", event => { if (!exited) { event.preventDefault(); void quit(); } });
 app.on("activate", () => { window?.show(); window?.focus(); });
 /// macOS's cooperative activation can leave a just-launched app behind the
 /// app that launched it (a terminal, a script): the window opens but stays in
@@ -49,7 +53,7 @@ function launchToFront() {
   app.focus({ steal: true });
 }
 
-void app.whenReady().then(async () => {
+if (!lookJob) void app.whenReady().then(async () => {
   const base = app.getAppPath();
   const resources = app.isPackaged ? process.resourcesPath : join(base, "..");
   const runtime = join(resources, "backend");

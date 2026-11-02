@@ -5,6 +5,7 @@ import { workspaceReview } from "./workspace-review.ts";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
+import { electronLook, lookCommand, type FoundryLook } from "./foundry-look.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -179,6 +180,8 @@ export function createDaemonApp(options: {
   /// external GitHub queries from the caller's account and CI environment.
   driveSignals?: typeof collectDriveSignals;
   providerVision?: boolean;
+  /// Renders a saved Foundry page for the model to look at (tests); by default the desktop app does it when present.
+  foundryLook?: FoundryLook;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
   agent?: AgentConfig;
@@ -299,9 +302,12 @@ export function createDaemonApp(options: {
     if (process.platform === "darwin") tools.register(captureWindowTool());
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
-  tools.register(foundrySaveTool(store));
+  // Pages are looked at after each save when the desktop app is there to render them.
+  const lookWith = options.foundryLook === undefined ? lookCommand() : null;
+  const look = options.foundryLook ?? (lookWith ? electronLook(lookWith) : undefined), looks = new Map<string, number>();
+  tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
-  tools.register(foundryEditTool(store));
+  tools.register(foundryEditTool(store, look, looks));
   // The assistant's shared folders: a tool to read them, and a search index
   // over them, brought up to date at start and every ten minutes.
   let personalIndex: PersonalIndex | undefined;

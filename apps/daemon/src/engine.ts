@@ -3,6 +3,7 @@ import { isRecord, type NearbyAgent, type PermissionMode, type StoredModelMessag
 import { DEFAULT_AGENT_LIMITS, type AgentConfig } from "@demesne/config";
 import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
+import { FOUNDRY_LOOK_PREFIX } from "./foundry-look.ts";
 import { ProviderError, type ProviderMessage, type ProviderToolCall, type ProviderToolDefinition } from "@demesne/providers";
 import { DemesneStore, NotFoundError, type SnapshotFile } from "@demesne/storage";
 import { createHash } from "node:crypto";
@@ -343,7 +344,8 @@ export class AgentEngine {
           let usageEventCount = 0;
           const visualMessages = this.options.providerVision || inference.vision
             ? await hydrateImageInputs(this.store, session.id, messages, providerController.signal,
-              { tools: this.options.providerVision === true, attachments: true }) : messages;
+              // A model that sees but wasn't set up for tool pictures still gets Foundry's look at its own page.
+              { tools: this.options.providerVision === true || ((filename: string) => filename.startsWith(FOUNDRY_LOOK_PREFIX)), attachments: true }) : messages;
           const stream = inference.stream(visualMessages, requestDefinitions, providerController.signal, { cacheKey: session.id });
           for await (const event of withProviderDeadlines(
             stream,

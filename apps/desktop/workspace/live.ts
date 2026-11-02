@@ -32,6 +32,7 @@ import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
+import { deferredChanges } from "./display-runs.ts";
 import { FoundryPane, buildRequest } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
@@ -1546,6 +1547,8 @@ function reopenTab() {
   return goChat(id);
 }
 function totals(run: WorkspaceRun, tool: ToolEntry) {
+  const deferred = deferredChanges(tool);
+  if (deferred) return deferred;
   const key = `${run.id}:${tool.id}:${tool.state}:${tool.draftArguments?.length ?? 0}:${tool.changes?.length ?? 0}`;
   let total = diffCache.get(key);
   if (!total) {
@@ -1740,15 +1743,36 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
 const hasFileEdit = (tool: ToolEntry) => tool.phase === "change" && tool.state === "done" && Boolean(tool.changes?.length);
 const fileEditSlot = (tool: ToolEntry) => `<div data-file-edit="${h(tool.toolCallId)}"></div>`;
 const fileEditViews = new Map<string, FileEditView>();
+const fileEditRequests = new Map<string, Promise<NonNullable<ToolEntry["changes"]>>>();
+const fileEditKey = (run: WorkspaceRun, tool: ToolEntry) => `${state?.session?.id}:${run.id}:${tool.toolCallId}:${deferredChanges(tool)?.revision ?? 0}`;
 function placeFileEdits(container: ParentNode, run: WorkspaceRun) {
   for (const slot of container.querySelectorAll<HTMLElement>("[data-file-edit]")) {
     const tool = run.entries.find((entry): entry is ToolEntry => entry.type === "tool" && entry.toolCallId === slot.dataset.fileEdit);
     if (!tool?.changes?.length) continue;
-    const key = `${run.id}:${tool.toolCallId}`;
-    let view = fileEditViews.get(key);
-    if (!view) { view = new FileEditView(tool.changes, tool.state === "done"); fileEditViews.set(key, view); }
-    slot.replaceWith(view.element);
-    view.render(stepsSeenRunning.has(tool.toolCallId) || (tool.startedAt >= windowOpenedAt && Date.now() - tool.startedAt < 30_000));
+    const key = fileEditKey(run, tool), sessionId = state?.session?.id;
+    const place = (changes: NonNullable<ToolEntry["changes"]>) => {
+      if (state?.session?.id !== sessionId || !slot.isConnected) return;
+      let view = fileEditViews.get(key);
+      if (!view) { view = new FileEditView(changes, tool.state === "done"); fileEditViews.set(key, view); }
+      slot.replaceWith(view.element);
+      view.render(stepsSeenRunning.has(tool.toolCallId) || (tool.startedAt >= windowOpenedAt && Date.now() - tool.startedAt < 30_000));
+    };
+    const view = fileEditViews.get(key);
+    if (view) { place(tool.changes); continue; }
+    if (!deferredChanges(tool)) { place(tool.changes); continue; }
+    slot.textContent = "Loading recorded edit…";
+    let request = fileEditRequests.get(key);
+    if (!request) {
+      request = api<NonNullable<ToolEntry["changes"]>>("file-edit-details", { sessionId, turnId: run.id, toolCallId: tool.toolCallId });
+      fileEditRequests.set(key, request);
+    }
+    void request.then(place, error => {
+      if (state?.session?.id !== sessionId || !slot.isConnected) return;
+      slot.textContent = error instanceof Error ? error.message : "Could not load the recorded edit.";
+      const retry = document.createElement("button"); retry.textContent = "Try again";
+      retry.onclick = () => { fileEditRequests.delete(key); if (slot.parentElement) placeFileEdits(slot.parentElement, run); };
+      slot.append(retry);
+    });
   }
 }
 const repoSlot = (tool: ToolEntry) => `<div class="repo-flow-slot" data-repo-flow="${h(tool.toolCallId)}"></div>`;
@@ -2481,7 +2505,8 @@ function renderConversation() {
       runNodes.delete(id);
       changed = true;
     }
-  const editKeys = new Set(state.runs.flatMap(run => run.entries.flatMap(entry => entry.type === "tool" && entry.changes?.length ? [`${run.id}:${entry.toolCallId}`] : [])));
+  const editKeys = new Set(state.runs.flatMap(run => run.entries.flatMap(entry => entry.type === "tool" && entry.changes?.length ? [fileEditKey(run, entry)] : [])));
+  for (const key of fileEditRequests.keys()) if (!editKeys.has(key)) fileEditRequests.delete(key);
   for (const [key, view] of fileEditViews) {
     if (!editKeys.has(key)) { view.dispose(); fileEditViews.delete(key); }
     else if (!view.element.isConnected) view.suspend();

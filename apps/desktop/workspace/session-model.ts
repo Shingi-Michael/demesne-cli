@@ -18,6 +18,7 @@ import {
 } from "@demesne/workbench/history.ts";
 import { derivePersistedRule } from "@demesne/workbench/allow-rules.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
+import { DisplayRuns } from "./display-runs.ts";
 import type {
   WorkbenchEntry,
   ToolEntry,
@@ -85,6 +86,8 @@ export class WorkspaceSession {
   answered = new Map<string, { questions: UserQuestion[]; answers: UserAnswer[] }>();
   private journals = new Map<string, ReplayEvent[]>();
   private cache = new Map<string, WorkspaceRun>();
+  private display = new DisplayRuns();
+  displayRuns(): WorkspaceRun[] { return this.display.project(this.runs()); }
   constructor(
     state: SessionStateResponse,
     events: readonly ReplayEvent[] = [],

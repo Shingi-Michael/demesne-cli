@@ -408,3 +408,35 @@ test("launch lands on Home as Just a chat; the where word and Move to a project 
     expect(back.snapshot!.draft).toBe("Carry this");
   } finally { await first.close(); if (home) await home.close(); await f.close(); }
 });
+
+test("opening a specific chat in another project never replays its remembered chat first", async () => {
+  const f = await fixture(), other = join(f.root, "navigation-other");
+  mkdirSync(other);
+  const a = (await f.client.createSession({ workspacePath: f.workspace })).session.id;
+  const b = (await f.client.createSession({ workspacePath: f.workspace })).session.id;
+  await f.client.createSession({ workspacePath: other, trustWorkspace: true });
+  for (const id of [a, b]) {
+    await f.client.submitTurn(id, { content: "Keep this chat in history" });
+    await eventually(async () => (await f.client.getSessionState(id)).session.turns.at(-1)?.status === "completed");
+  }
+  const reads: string[] = [], replays: string[] = [];
+  const proxy = Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0, fetch(request) {
+    const url = new URL(request.url), match = /^\/v1\/sessions\/([^/]+)$/.exec(url.pathname);
+    if (request.method === "GET" && match) reads.push(match[1]!);
+    const replay = /^\/v1\/sessions\/([^/]+)\/replay$/.exec(url.pathname);
+    if (request.method === "GET" && replay) replays.push(replay[1]!);
+    return fetch(new Request(new URL(url.pathname + url.search, f.server.url), request));
+  } });
+  const sidecar = new Sidecar(f, ["--server", proxy.url.href, "--workspace", f.workspace]);
+  try {
+    await sidecar.value("desktop-bootstrap");
+    await sidecar.value("select-session", { id: a });
+    await sidecar.value("desktop-open-project", { path: other });
+    reads.length = 0; replays.length = 0;
+    const result = bootstrap(await sidecar.value("desktop-open-project", { path: f.workspace, sessionId: b }));
+    expect(result.snapshot!.session!.id).toBe(b);
+    expect(reads).not.toContain(a);
+    expect(reads.filter(id => id === b).length).toBeGreaterThan(0);
+    expect(replays).toEqual([b]);
+  } finally { await sidecar.close(); await proxy.stop(true); await f.close(); }
+});

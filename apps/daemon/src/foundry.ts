@@ -29,13 +29,21 @@ const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet"
   + "When a page shows options to choose between, mark each option's element with data-option=\"B · Joined\" (its letter and name): the person gets a Pick button on it that sends their choice to the chat. "
   + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
-/// The design brief every artifact follows, so Foundry's work reads as one
-/// competent hand: the kit carries the look, the page brings content,
-/// layout and its own character.
-export const DESIGN_BRIEF = "Design brief: a title of two to four words. Lean on the kit: write real content and layout, little CSS of your own, and use its variables for anything you add "
-  + "(never fixed greys or shadows on flat things). Give the page its own character by setting --accent, and --ink/--paper for a tinted page, on :root, plus at most one display face from Google Fonts for headings if it fits. "
-  + "Works at phone width with no horizontal scroll. Real content, never lorem ipsum; interactive mockups have working controls. No gradient heroes, emoji bullets, purple on white, glassmorphism or other stock AI looks. "
-  + "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce. Demesne's own UI: the kit as it is, no menus or side panels.";
+/// The design brief every artifact follows. The kit is the floor, not the
+/// ceiling: a brief that only said "lean on the kit" and listed don'ts made
+/// every page the same plain template (own CSS fell to a third, no fonts,
+/// no motion), so this one says what good looks like.
+export const DESIGN_BRIEF = "Design brief: make it look designed, never like a template; the kit is the floor, not the ceiling. "
+  + "First pick a direction in a few words (who it is for, the mood) and let it decide the rest. Title of two to four words. "
+  + "One focal point and a clear hierarchy: a real type scale (a display size of 36 to 64px for the lead, tight leading and tracking, body 14 to 16px), an 8px spacing rhythm, dense areas against quiet ones. "
+  + "One strong move per page: an oversized number or headline, a bold colour field, an asymmetric layout, an SVG illustration or a striking chart. "
+  + "Write as much CSS of your own as the design needs, on the kit's variables: set --accent (and --ink/--paper for a tinted page) on :root, and a display face from Google Fonts when it fits. "
+  + "Depth and detail where they earn it: layered surfaces, soft shadows only on things that float, real data, hover/selected/empty states, small SVG icons. "
+  + "Asked for options or ideas: two or three genuinely different directions side by side, each named, and say which you would pick. "
+  + "A mockup of an existing app (Demesne included: no menus or side panels) matches that app's look but is composed as a presentation: the idea shown large, the key detail called out, before and after or options next to each other. "
+  + "Works at phone width with no horizontal scroll. Real content, never lorem ipsum; interactive mockups have working controls. "
+  + "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce. "
+  + "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.";
 
 const GUIDE = FILE_RULES + " " + DESIGN_BRIEF;
 

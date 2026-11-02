@@ -208,6 +208,8 @@ test("the tools carry the design brief, the kit and the library rules", () => {
     expect(text).toContain("prefers-reduced-motion: reduce");
     expect(JSON.stringify(foundryEditTool(store).definition)).toContain("base_version");
     expect(DESIGN_BRIEF).toContain("phone width");
+    expect(DESIGN_BRIEF).toContain("the kit is the floor");
+    expect(DESIGN_BRIEF).not.toContain("little CSS");
     expect(JSON.stringify(foundryReadTool(store).definition)).toContain("base_version");
   } finally { store.close(); }
 });

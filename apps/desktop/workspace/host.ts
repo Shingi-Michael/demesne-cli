@@ -388,7 +388,7 @@ export class WorkspaceHost {
         ...(session.backAt ? { backAt: session.backAt } : {}),
         ...(session.prUrl ? { prUrl: session.prUrl } : {}),
       })),
-      runs: this.current?.runs() ?? [],
+      runs: this.current?.displayRuns() ?? [],
       cursor: this.current?.cursor ?? 0,
       model: this.model,
       reasoning: this.reasoning,
@@ -474,7 +474,7 @@ export class WorkspaceHost {
     const library=await this.client.themes();
     if (revision===this.themeRevision) this.setThemes(library);
   }
-  async connect() {
+  async connect(waitForModel = true) {
     this.connection = "connecting";
     this.error = null;
     this.publish();
@@ -494,6 +494,7 @@ export class WorkspaceHost {
       const contextWindow = health.contextCapacity ?? [this.settings.loaded.config.provider, ...Object.values(this.settings.loaded.config.additionalProviders ?? {})]
         .find(p => p.model === health.model)?.contextWindow;
       this.reasoning = health.reasoning;
+      this.activatedModel = { id: health.model, reasoning: health.reasoning };
       this.model = {
         id: health.model,
         provider: health.provider,
@@ -514,11 +515,11 @@ export class WorkspaceHost {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
-      if (this.selectedSession) await this.select(this.selectedSession);
-      else if (this.options.home === "plain") await this.newSession(undefined, { plain: true, reuse: true });
+      if (this.selectedSession) await this.select(this.selectedSession, waitForModel);
+      else if (this.options.home === "plain") await this.newSession(undefined, { plain: true, reuse: true, waitForModel });
       else {
         try {
-          await this.newSession(undefined, { reuse: this.options.home === "project" });
+          await this.newSession(undefined, { reuse: this.options.home === "project", waitForModel });
         } catch (error) {
           if (isWorkspaceUntrusted(error)) return;
           throw error;
@@ -645,14 +646,14 @@ export class WorkspaceHost {
   }
   /// A plain chat has no project: no files, commands or Drive. With
   /// `reuse`, an empty chat already there is opened rather than piling up.
-  async newSession(title?: string, options: { plain?: boolean; reuse?: boolean } = {}) {
+  async newSession(title?: string, options: { plain?: boolean; reuse?: boolean; waitForModel?: boolean } = {}) {
     if (this.options.projectless) options = { ...options, plain: true };
     if (options.reuse && !title) {
       // The assistant's chat is never a new chat, even while it's empty.
       const empty = this.sessions.filter((session) => session.id !== this.assistant?.sessionId && (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       if (empty) {
-        await this.select(empty.id);
+        await this.select(empty.id, options.waitForModel);
         return empty.id;
       }
     }
@@ -673,7 +674,7 @@ export class WorkspaceHost {
       throw error;
     }
     this.untrustedWorkspace = null;
-    await this.select(result.session.id);
+    await this.select(result.session.id, options.waitForModel);
     return result.session.id;
   }
   /// Opens a worktree and session for a /drive mission. Drive works it in
@@ -777,18 +778,18 @@ export class WorkspaceHost {
     catch { /* stay; the session list still has yours */ }
   }
 
-  async select(id: string) {
+  async select(id: string, waitForModel = true) {
     if (this.busy)
       throw new Error("Wait for the current session action to finish.");
     if (this.current) this.drafts.set(this.current.session.id, this.draft);
     const generation = this.generation + 1;
+    let navigationReleased = false;
     this.busy = true;
     this.publish();
     try {
-      // Finish any choice made in the previous chat before reading preferences.
-      await this.modelChange;
+      // Navigation loads history, not provider catalogs. Inference restoration
+      // runs separately; submitting still waits for it before creating a turn.
       const state = await this.client.getSessionState(id);
-      await this.changeModel(state.session.preferredModel || this.model.id, state.session.preferredReasoning ?? undefined, undefined, true);
       // A chat that came back is done coming back once you open it.
       if (backState(state.session.backAt, Date.now(), this.mergedPullRequests.has(id)) === "back") void this.client.updateSession(id, { backAt: null }).then(() => this.refreshSessions()).catch(() => {});
       const events = await replaySession(
@@ -802,6 +803,12 @@ export class WorkspaceHost {
       this.generation = generation;
       this.stream?.abort();
       this.current = new WorkspaceSession(state, events);
+      const selected = this.current;
+      const modelId = state.session.preferredModel || this.model.id;
+      if (this.model.id !== modelId) this.model = { id: modelId, provider: "" };
+      this.reasoning = resolveReasoningLevel(this.model, state.session.preferredReasoning);
+      const restoredModel = this.changeModel(modelId, state.session.preferredReasoning ?? undefined, selected, true);
+      void restoredModel.catch(error => { if (this.current === selected) this.fail(error); });
       this.planOnly = this.plans.get(id) ?? false;
       this.attachments = [];
       this.reviewRevision++;
@@ -819,6 +826,7 @@ export class WorkspaceHost {
       this.draftVersion++;
       this.restored = false;
       this.files = [];
+      navigationReleased = true;
       this.busy = false;
       this.error = null;
       this.publish();
@@ -826,8 +834,9 @@ export class WorkspaceHost {
       void this.watch(id, generation, controller);
       void this.refreshFiles().catch(() => {});
       void this.refreshSessions();
+      if (waitForModel) await restoredModel;
     } finally {
-      this.busy = false;
+      if (!navigationReleased) this.busy = false;
       this.publish();
     }
   }
@@ -920,35 +929,71 @@ export class WorkspaceHost {
   // Model activation is daemon-wide. Serialize choices so slow responses cannot
   // overwrite a newer selection or save it onto a different chat.
   private modelChange: Promise<void> = Promise.resolve();
+  private inferenceReady: Promise<void> = Promise.resolve();
+  private activatedModel: { id: string; reasoning?: string } | null = null;
+  private explicitModelChoice: { revision: number; id: string } | null = null;
   private changeModel(id: string, reasoning?: string, selected?: WorkspaceSession, restoring = false) {
+    const choiceRevision = this.explicitModelChoice?.revision ?? 0;
+    const stale = () => this.disposed || (restoring && selected !== this.current);
     const change = this.modelChange.then(async () => {
-      if (!id) return;
+      if (!id || stale()) return;
+      if (restoring && selected) {
+        // An explicit choice queued in the old chat may only just have saved.
+        // Read it here, after that choice, not from navigation's earlier snapshot.
+        const saved = (await this.client.getSessionState(selected.session.id)).session;
+        // Inherit a picker choice that finished after navigation began, but
+        // otherwise keep the visible model, not an older daemon activation.
+        const inherited = this.explicitModelChoice && this.explicitModelChoice.revision > choiceRevision
+          ? this.explicitModelChoice.id : id;
+        id = saved.preferredModel || inherited;
+        reasoning = saved.preferredReasoning ?? undefined;
+        selected.session.preferredModel = saved.preferredModel;
+        selected.session.preferredReasoning = saved.preferredReasoning;
+      }
       const models = await this.models().catch(() => []);
-      const model = models.find(model => model.id === id) ?? (this.model.id === id ? this.model : { id, provider: "" });
+      if (stale()) return;
+      let model = models.find(model => model.id === id) ?? (this.model.id === id ? this.model : { id, provider: "" });
       const effective = resolveReasoningLevel(model, reasoning);
-      if (!restoring || this.model.id !== id || this.reasoning !== effective) {
+      // The visible picker can already describe the new chat while activation
+      // is pending. It is not evidence of the daemon's currently selected model.
+      if (!restoring || this.activatedModel?.id !== id || this.activatedModel.reasoning !== effective) {
         // Opening a chat only tries to bring back its model: if the daemon
         // can't switch, the chat opens on the model already running instead
         // of the whole window going offline.
         try { await this.client.setModel(id, effective); }
-        catch (error) { if (!restoring) throw error; return; }
-      }
-      this.reasoning = effective;
-      if (this.model.id !== id || model !== this.model) {
-        this.model = model;
-        if (!this.model.contextWindow) {
-          const health = await this.client.health().catch(() => null);
-          if (health?.contextCapacity && health.model.split("/").at(-1) === id.split("/").at(-1))
-            this.model = { ...this.model, contextWindow: health.contextCapacity };
+        catch (error) {
+          if (!restoring) throw error;
+          // The picker already shows the chat's saved model; put it back on
+          // the model that will actually answer, so nothing sends under a
+          // name the daemon isn't running.
+          const running = this.activatedModel;
+          if (running && !this.disposed && selected === this.current) {
+            this.model = models.find(model => model.id === running.id) ?? { id: running.id, provider: "" };
+            this.reasoning = running.reasoning;
+            this.publish();
+          }
+          return;
         }
+        this.activatedModel = { id, reasoning: effective };
       }
-      if (selected) {
+      if (!model.contextWindow) {
+        const health = await this.client.health().catch(() => null);
+        if (health?.contextCapacity && health.model.split("/").at(-1) === id.split("/").at(-1))
+          model = { ...model, contextWindow: health.contextCapacity };
+      }
+      if (selected && !restoring) {
         const result = await this.client.updateSession(selected.session.id, { preferredModel: id, preferredReasoning: effective ?? null });
         selected.session.preferredModel = result.session.preferredModel;
         selected.session.preferredReasoning = result.session.preferredReasoning;
       }
-      this.publish();
+      if (!restoring) this.explicitModelChoice = { revision: (this.explicitModelChoice?.revision ?? 0) + 1, id };
+      if (!this.disposed && (!selected || selected === this.current)) {
+        this.model = model;
+        this.reasoning = effective;
+        this.publish();
+      }
     });
+    this.inferenceReady = change;
     this.modelChange = change.catch(() => {});
     return change;
   }
@@ -1180,7 +1225,7 @@ export class WorkspaceHost {
     this.error = null;
     this.publish();
     try {
-      await this.modelChange;
+      await this.inferenceReady;
       if (this.current !== session) throw new Error("The session changed. Try the action again.");
       // Pin a chat's initial choice too, so another window cannot change the
       // model/effort of its next turn by moving the daemon-wide picker.
@@ -1563,7 +1608,7 @@ export class WorkspaceHost {
       if (carried !== undefined && this.current) { this.draft = ""; this.drafts.delete(this.current.session.id); }
       const id = await this.newSession(
         typeof args.title === "string" ? args.title : undefined,
-        { plain: args.plain === true, reuse: args.reuse === true },
+        { plain: args.plain === true, reuse: args.reuse === true, waitForModel: false },
       );
       if (carried !== undefined) this.carryDraft(carried);
       return id;
@@ -1583,7 +1628,7 @@ export class WorkspaceHost {
       return { here, sessionId: current.session.id };
     }
     if (method === "select-session") {
-      await this.select(string(args.id, "session id", 200));
+      await this.select(string(args.id, "session id", 200), false);
       return this.snapshot();
     }
     // The Assistant row: its one chat, made the first time it's opened.
@@ -1591,7 +1636,7 @@ export class WorkspaceHost {
       const opened = await this.client.openAssistant();
       this.assistant = opened;
       this.sessions = await this.client.listSessions();
-      await this.select(opened.sessionId);
+      await this.select(opened.sessionId, false);
       return this.snapshot();
     }
     if (method === "draft") {
@@ -1791,6 +1836,14 @@ export class WorkspaceHost {
     if (method === "files") {
       await this.refreshFiles();
       return this.files;
+    }
+    if (method === "file-edit-details") {
+      const turnId = string(args.turnId, "turn id", 200);
+      const toolCallId = string(args.toolCallId, "tool call id", 200);
+      const run = this.current?.runs().find(run => run.id === turnId);
+      const tool = run?.entries.find(entry => entry.type === "tool" && entry.toolCallId === toolCallId);
+      if (tool?.type !== "tool" || !tool.changes?.length) throw new Error("This recorded edit is no longer available.");
+      return tool.changes;
     }
     if (method === "changes") {
       const scope = (args.scope ?? "turn") as ReviewScope;

@@ -129,7 +129,7 @@ export class DesktopHost {
       if (typeof sessionId !== "string") return;
       if (!host.sessions.some(session => session.id === sessionId && session.workspace?.root === workspace))
         throw new Error("This conversation is not available in the selected project");
-      await host.select(sessionId);
+      if (host.current?.session.id !== sessionId) await host.select(sessionId, false);
     };
     if (this.host?.workspace === workspace) {
       if (open.fresh) { await this.host.handle("new-session", { draft, reuse: true }); return this.bootstrap(); }
@@ -150,7 +150,7 @@ export class DesktopHost {
     try {
       const settings = loadCliSettings({ workspaceRoot: workspace, serverOverride: this.options.server });
       const savedSession = this.prefs.lastSessions[sessionKey(settings.server, workspace)];
-      const selectedSession = open.home || open.fresh ? undefined : this.options.sessionId ?? savedSession;
+      const selectedSession = typeof sessionId === "string" ? sessionId : open.home || open.fresh ? undefined : this.options.sessionId ?? savedSession;
       // A mission carried on in the background since the window closed comes
       // back to the window before it loads the journal.
       const reclaimed = await reclaimDrive(
@@ -173,12 +173,12 @@ export class DesktopHost {
       this.options = { ...this.options, startup: undefined, setup: false };
       // Keep the previous host until the replacement is ready. An offline
       // daemon still yields a valid project with the existing Start daemon UI.
-      await candidate.connect();
-      if (selectedSession && savedSession && !this.options.sessionId && (!candidate.current || !candidate.sessions.some(session => session.id === savedSession) || candidate.current.session.workspace?.root !== workspace)) {
+      await candidate.connect(false);
+      if (sessionId === undefined && selectedSession && savedSession && !this.options.sessionId && (!candidate.current || !candidate.sessions.some(session => session.id === savedSession) || candidate.current.session.workspace?.root !== workspace)) {
         // Deleted/archived sessions or a fresh daemon must not strand the
         // desktop in a false offline state. A real offline daemon stays offline.
         try {
-          await candidate.newSession();
+          await candidate.newSession(undefined, { waitForModel: false });
           candidate.connection = "online";
           candidate.error = null;
         } catch {}

@@ -625,6 +625,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #composer .composer-bar #composer-mode.mode-edits { color: var(--ok); }
 .desktop #composer .composer-bar #composer-mode.mode-plan { color: var(--acc); }
 .desktop #composer .composer-bar #composer-mode.mode-auto { color: var(--warn); }
+.desktop #composer .composer-bar #composer-mode.mode-orchestrate { color: var(--electric, var(--acc)); }
 /* ⇧⇥ opens the word into all four modes in place, the current one lit. */
 .desktop #composer-mode .mode-list { display: inline-flex; align-items: center; }
 .desktop #composer-mode .mode-opt { display: inline-block; max-width: 0; padding: 0; overflow: hidden; white-space: nowrap; opacity: 0; border-radius: var(--r-sm); color: var(--t4); }

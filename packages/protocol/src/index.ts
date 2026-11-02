@@ -461,6 +461,9 @@ export interface Session {
   autoApprove?: boolean;
   /// File edits run without asking; commands and deletes still ask.
   acceptEdits?: boolean;
+  /// Orchestrate mode: this chat plans and runs threads and never changes
+  /// files or runs commands itself.
+  orchestrate?: boolean;
 }
 
 /// A chat that starts on its own: one sentence, when and then what.
@@ -504,6 +507,7 @@ export interface UpdateSessionRequest {
   trustWorkspace?: boolean;
   autoApprove?: boolean;
   acceptEdits?: boolean;
+  orchestrate?: boolean;
   title?: string;
   preferredModel?: string | null;
   preferredReasoning?: string | null;
@@ -799,6 +803,10 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
     if (typeof value.acceptEdits !== "boolean") throw new ProtocolValidationError("acceptEdits must be a boolean");
     update.acceptEdits = value.acceptEdits;
   }
+  if (value.orchestrate !== undefined) {
+    if (typeof value.orchestrate !== "boolean") throw new ProtocolValidationError("orchestrate must be a boolean");
+    update.orchestrate = value.orchestrate;
+  }
   if (value.workspacePath !== undefined) {
     if (typeof value.workspacePath !== "string" || !value.workspacePath || value.workspacePath.length > 4096 || value.workspacePath.includes("\0"))
       throw new ProtocolValidationError("workspacePath must be a path");
@@ -822,7 +830,7 @@ export function parseUpdateSessionRequest(value: unknown): UpdateSessionRequest 
       throw new ProtocolValidationError("prUrl must be a GitHub pull request link or null");
     update.prUrl = value.prUrl;
   }
-  if (update.title === undefined && update.preferredModel === undefined && update.preferredReasoning === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined && update.prUrl === undefined) {
+  if (update.title === undefined && update.preferredModel === undefined && update.preferredReasoning === undefined && update.autoApprove === undefined && update.acceptEdits === undefined && update.orchestrate === undefined && update.workspacePath === undefined && update.pinned === undefined && update.backAt === undefined && update.prUrl === undefined) {
     throw new ProtocolValidationError("title, preferredModel, preferredReasoning, autoApprove, acceptEdits, pinned, backAt, prUrl or workspacePath is required");
   }
   return update;

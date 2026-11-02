@@ -48,8 +48,12 @@ let overlapRound = 0;
 // Threads (pass 126): the chat splits a job into two threads, one held
 // until the window has shown it working beside the chat.
 const threadsPrompt = "Desktop smoke: split this into threads";
-let releaseThread!: () => void, threadsRound = 0;
-const threadGate = new Promise<void>(resolve => { releaseThread = resolve; });
+// The greeting thread waits in a command (not in a model call, which would
+// hold the one inference slot the orchestrator needs to answer) until the
+// check releases it.
+let threadsRound = 0;
+const threadGateFile = join(tmpdir(), `demesne-thread-gate-${process.pid}`);
+const releaseThread = () => writeFileSync(threadGateFile, "go");
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
 const heartbeatSocket = join(mkdtempSync(join(tmpdir(), "hb-")), "control.sock");
@@ -109,8 +113,13 @@ const f = await fixture({
     }
     if (typeof user === "string" && user.startsWith("You're one of the threads")) {
       const second = user.includes("Write the greeting");
-      if (messages.at(-1)?.role === "tool") { yield { type: "text_delta", delta: second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
-      if (second) await threadGate;
+      const toolResults = messages.filter(message => message.role === "tool").length;
+      if (second && toolResults === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "thread-b-wait", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: ["sh", "-c", `while [ ! -f '${threadGateFile}' ]; do sleep 0.1; done`] }) };
+        yield { type: "finish", reason: "tool_calls" };
+        return;
+      }
+      if (toolResults >= (second ? 2 : 1)) { yield { type: "text_delta", delta: second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
       yield { type: "tool_call_delta", index: 0, idDelta: `thread-${second ? "b" : "a"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify(second ? { path: "threads-b.md", content: "# Hello\n" } : { path: "threads-a.md", content: "# Notes\n" }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
@@ -1163,19 +1172,19 @@ try {
   await capture("02-agent-step");
   await agentStep.click();
   await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
-  // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Ask.
+  // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Orchestrate → Ask.
   await page.locator("textarea").focus();
   for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],
-    ["Auto", { acceptEdits: false, autoApprove: true }], ["Ask", { acceptEdits: false, autoApprove: false }]] as const) {
+    ["Auto", { acceptEdits: false, autoApprove: true }], ["Orchestrate", { acceptEdits: false, autoApprove: false, orchestrate: true }], ["Ask", { acceptEdits: false, autoApprove: false }]] as const) {
     await page.keyboard.press("Shift+Tab");
     await until(() => page.locator("#composer-mode .mode-opt.on").innerText().then(text => text === word), `mode word ${word}`);
     await until(async () => {
       const session = (await f.client.getSessionState(sessionId)).session;
-      return session.acceptEdits === policy.acceptEdits && session.autoApprove === policy.autoApprove;
+      return session.acceptEdits === policy.acceptEdits && session.autoApprove === policy.autoApprove && (session.orchestrate === true) === ("orchestrate" in policy);
     }, `daemon policy for ${word}`);
     if (word === "Plan") {
-      assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the four modes");
-      assert.equal(await page.locator("#composer-mode .mode-opt").count(), 4, "all four modes are in the bar");
+      assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the five modes");
+      assert.equal(await page.locator("#composer-mode .mode-opt:visible").count(), 5, "all five modes are in the bar of a project chat");
       await capture("03-mode-plan");
     }
   }

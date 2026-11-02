@@ -26,7 +26,7 @@ test("an orchestrator chat splits work into threads that run side by side, repor
   writeFileSync(join(workspace, "src", "b.ts"), "export const b = 1;\n");
   git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
 
-  const reports: string[] = [], threadTools: string[][] = [], told: string[] = [];
+  const reports: string[] = [], threadTools: string[][] = [], told: string[] = [], orchestrated: string[][] = [];
   const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
     async *stream(messages, tools) {
       const last = messages.at(-1)!;
@@ -37,6 +37,10 @@ test("an orchestrator chat splits work into threads that run side by side, repor
         const file = said.includes("Bump a") ? "src/a.ts" : "src/b.ts";
         yield { type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: file, content: `export const ${file.includes("a.ts") ? "a" : "b"} = 2;\n` }) };
         yield { type: "finish" as const, reason: "tool_calls" }; return;
+      }
+      if (last.role === "user" && said === "what can you do here") {
+        orchestrated.push((tools ?? []).map((tool) => tool.name));
+        yield { type: "text_delta" as const, delta: "Plan and run threads." }; yield { type: "finish" as const, reason: "stop" }; return;
       }
       if (last.role === "user" && said === "tell bump a to use 3") {
         yield { type: "tool_call_delta" as const, index: 0, idDelta: "m", nameDelta: "message_thread", argumentsDelta: JSON.stringify({ thread: "bump a", text: "Use 3, not 2." }) };
@@ -89,6 +93,14 @@ test("an orchestrator chat splits work into threads that run side by side, repor
     for (let i = 0; i < 400 && !(existsSync(thread) && readFileSync(thread, "utf8") === "export const a = 3;\n"); i++) await Bun.sleep(25);
     expect(told).toEqual(["Use 3, not 2."]);
     for (let i = 0; i < 400 && (await call(`/v1/sessions/${threads[0]!.sessionId}`)).body.session.turns.some((turn: { status: string }) => turn.status === "running" || turn.status === "queued"); i++) await Bun.sleep(25);
+    // Orchestrate mode: the chat reads and runs threads, never edits or runs commands.
+    expect((await call(`/v1/sessions/${session.id}`, { method: "PATCH", body: JSON.stringify({ orchestrate: true }) })).body.session.orchestrate).toBe(true);
+    await call(`/v1/sessions/${session.id}/turns`, { method: "POST", body: JSON.stringify({ content: "what can you do here", permissionMode: "ask" }) });
+    for (let i = 0; i < 400 && !orchestrated.length; i++) await Bun.sleep(25);
+    expect(orchestrated[0]).toContain("start_threads");
+    expect(orchestrated[0]).toContain("message_thread");
+    expect(orchestrated[0]).toContain("read_file");
+    for (const name of ["write_file", "edit_file", "run_command"]) expect(orchestrated[0]).not.toContain(name);
     // Nothing reached the checkout until the person merges.
     expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 1;\n");
     for (const fix of threads) expect((await call(`/v1/drive/fixes/${fix.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");

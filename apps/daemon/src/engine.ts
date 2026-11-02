@@ -253,6 +253,9 @@ export class AgentEngine {
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
         FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+    // Orchestrate mode: the chat reads, plans and runs threads; the threads change the files.
+    const orchestrating = !themefy && !assistant && Boolean(session.workspace) && this.store.isSessionOrchestrate(session.id);
+    if (orchestrating) for (let index = definitions.length - 1; index >= 0; index--) if (!ORCHESTRATE_TOOL_NAMES.has(definitions[index]!.name)) definitions.splice(index, 1);
     const hidden = this.options.hiddenTools?.(session.id);
     if (hidden?.size) for (let index = definitions.length - 1; index >= 0; index--) if (hidden.has(definitions[index]!.name)) definitions.splice(index, 1);
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
@@ -292,7 +295,7 @@ export class AgentEngine {
       const historyMessages = forgetOldReadsInHistory(history.map((entry) => forgetFoundrySources(entry.messages))).flat();
       const systemPrompt = themefy ? THEMEFY_PROMPT : assistant ? assistantSystemPrompt({ home: session.workspace?.root, definitions, planOnly: turn.planOnly })
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
-        planOnly: turn.planOnly, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
+        planOnly: turn.planOnly, orchestrate: orchestrating, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         attended: turn.permissionMode === "ask" && !turn.fromDrive && !turn.fromRoutine, providerVision: this.options.providerVision, configured: this.configuredSystemPrompt, sessionContext: this.options.sessionContext?.(session.id) ?? undefined });
       const unplannedMessages: ProviderMessage[] = [
         { role: "system", content: systemPrompt + (noting ? NOTE_INSTRUCTION : "") + (finalizing
@@ -1137,7 +1140,7 @@ export const FOUNDRY_GUIDANCE = `Foundry (foundry_save) is how you show the pers
 export const FOUNDRY_UNATTENDED_GUIDANCE = `Foundry (foundry_save) makes pages the person can look at, but nobody is watching this turn (Drive, a routine or mail): make one only when the task asks for a page, a mockup or a design. ${FOUNDRY_HOW}`;
 
 export function agentSystemPrompt(options: { workspaceRoot?: string; definitions: ProviderToolDefinition[]; content?: string;
-  planOnly?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean; configured?: string; sessionContext?: string;
+  planOnly?: boolean; orchestrate?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean; configured?: string; sessionContext?: string;
   /// Someone is at the window: a chat turn, not Drive, a routine or mail.
   attended?: boolean }): string {
   const base = options.configured?.trim() || defaultSystemPrompt(options.workspaceRoot, options.autoApprove === true && !options.planOnly);
@@ -1146,6 +1149,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
     : options.definitions.some((tool) => tool.name === "view_image")
       ? "\nImage tools can save images to the session, but this provider has visual inputs disabled. Do not claim to have inspected image pixels; use browser text/DOM results for inspection." : "");
   const guidance = [ANSWER_FORMAT_GUIDANCE, turnToolGuidance(options.content ?? ""), planModeGuidance(options.planOnly === true),
+    options.orchestrate ? ORCHESTRATE_GUIDANCE : null,
     options.definitions.some((tool) => tool.name === "foundry_save")
       ? options.attended === false ? FOUNDRY_UNATTENDED_GUIDANCE : FOUNDRY_GUIDANCE
       : null,
@@ -1197,6 +1201,13 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   // may not be initialised yet while this set is built.
   "subagent",
 ]);
+
+/// Orchestrate mode: reading, planning and the threads. No edits, no commands.
+export const ORCHESTRATE_TOOL_NAMES = new Set([
+  "list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history",
+  "session_tools", "ask_user", "subagent", "start_threads", "message_thread",
+]);
+const ORCHESTRATE_GUIDANCE = "Orchestrate mode: you are this project's orchestrator. You never change files or run commands yourself; threads do all the work. Read and plan, then hand the work out with start_threads (each thread a clear brief and the files it may change), pass the person's rules, corrections and answers to a thread with message_thread, and read the reports as they come back. When the person asks for a change, start or message a thread rather than explaining how they could do it. Only the person merges threads.";
 
 export function planModeDefinitions(
   definitions: ProviderToolDefinition[],

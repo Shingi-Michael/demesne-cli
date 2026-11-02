@@ -207,14 +207,20 @@ export function createDaemonApp(options: {
   const calibrationLog = new CalibrationLog(join(dirname(options.databasePath), "drive-calibration.jsonl"));
   // Breakage fixes: a coding turn in its own worktree, applied only on request.
   const driveFixes = new DriveFixes(join(dirname(options.databasePath), "drive-fixes.json"), options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees"), {
-    startSession: (title, workspace) => {
+    startSession: (title, workspace, like) => {
       const root = canonicalWorkspace(workspace);
       // A worktree of a trusted project is the same project's files.
       workspaceTrust.trust(root);
-      return store.createSession(title, root).session.id;
+      const { session } = store.createSession(title, root);
+      const model = like ? store.getSession(like) : null;
+      if (model?.preferredModel || model?.preferredReasoning)
+        store.setSessionInference(session.id, { preferredModel: model.preferredModel ?? null, preferredReasoning: model.preferredReasoning ?? null });
+      return session.id;
     },
     startTurn: (sessionId, prompt) => {
-      const inference = snapshotTurnInference(processor, true);
+      // A chat with a model of its own (a thread, on its orchestrator's) runs on it.
+      const session = store.getSession(sessionId);
+      const inference = session?.preferredModel || session?.preferredReasoning ? inferenceIn(sessionId, true) : snapshotTurnInference(processor, true);
       const { turn } = store.createTurn(sessionId, prompt, "allow", true, false);
       return { turnId: turn.id, done: queueTurn(turn, inference) };
     },

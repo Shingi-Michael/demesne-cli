@@ -1711,6 +1711,16 @@ try {
   await threadRows.nth(1).click();
   await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
   await until(() => page.locator("#threads-foot .th-status").innerText().then(text => text.includes("working")).catch(() => false), "the line above the composer says one is working");
+  // The right half is a chat like the left: the same composer, with the
+  // thread's own model chip, and no buttons beyond Merge and ×.
+  assert(await page.locator("#thread-pane #tp-composer .composer-box textarea").isVisible(), "the thread's composer is the chat's composer");
+  assert(await page.locator("#thread-pane .tp-head button").count() === 1, "the thread's head has only ×");
+  await until(() => page.locator("#tp-model").innerText().then(text => text.trim().length > 0), "the thread's composer names its model");
+  await page.locator("#tp-model").click();
+  await until(() => page.locator("#thread-pane #overlay").isVisible(), "the thread's model chip opens the picker in the right half");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#overlay").isHidden(), "Escape closes the thread's picker");
+  assert(await page.locator("#main > #overlay").count() === 1, "the picker goes back to the chat on the left");
   await capture("17-threads-working");
   releaseThread();
   const merge = page.locator("#threads-foot .th-merge button");

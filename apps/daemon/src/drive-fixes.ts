@@ -12,7 +12,9 @@ import { formatDriveReport, formatThreadReport, splitNextPrompt, type CommandRec
 
 export interface FixHost {
   /// A session rooted at the worktree.
-  startSession(title: string, workspace: string): string;
+  /// `like`: a chat whose model and effort the new one starts on (a thread
+  /// runs on its orchestrator's).
+  startSession(title: string, workspace: string, like?: string): string;
   /// A coding turn with every tool allowed (publishing still asks).
   startTurn(sessionId: string, prompt: string): { turnId: string; done: Promise<void> };
   turn(turnId: string): Turn | null;
@@ -223,7 +225,7 @@ export class DriveFixes {
       if (!added.ok) throw new Error(`Couldn't create the worktree: ${firstLine(added.err)}`);
       fix.linked = await this.linkDependencies(top.out, path);
       const sub = relative(top.out, workspace);
-      const sessionId = this.host.startSession(title, sub ? join(path, sub) : path);
+      const sessionId = this.host.startSession(title, sub ? join(path, sub) : path, from);
       const { turnId, done } = this.host.startTurn(sessionId, threadPrompt({ ...fix, thread }));
       Object.assign(fix, { sessionId, turnId, status: "running" });
       this.save();

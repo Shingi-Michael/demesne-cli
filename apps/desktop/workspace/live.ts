@@ -1522,7 +1522,9 @@ function renderTabs() {
   const drive = peek && !shown.includes(peek.sessionId) ? `<button type="button" class="bar-tab-pin header-drive ${peek.kind}" data-action="select-session" data-args="${h(JSON.stringify({ id: peek.sessionId }))}" title="${h(`${peek.words} · open Drive's chat`)}" aria-label="${h(`${peek.words} · open Drive's chat`)}">${ICON_DRIVE}<i aria-hidden="true"></i></button>` : "";
   const page = here ? `<div class="bar-tab on here"><span class="bar-tab-label" role="tab" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
-  strip.innerHTML = `${drive}${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}${btn("new-session", "+", {}, "bar-tab-new").replace("<button ", `<button title="New chat (${h(shortcut("Ctrl+T"))})" aria-label="Open a new chat" aria-keyshortcuts="Control+T Meta+T" `)}`;
+  strip.innerHTML = `${drive}${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}`;
+  const newTab = document.getElementById("workspace-new-tab");
+  if (newTab) newTab.title = `New chat (${shortcut("Ctrl+T")})`;
   const callSlot = document.getElementById("workspace-call");
   if (callSlot) callSlot.innerHTML = callButton;
   strip.querySelector(".bar-tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });

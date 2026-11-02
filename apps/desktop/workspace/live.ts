@@ -5387,6 +5387,15 @@ async function dispatch(
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "drive-auto", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
   if (action === "thread-models") return openOverlay("models", "", true);
+  if (action === "thread-context") { threadContextOpen = !threadContextOpen; threadPaneSignature = ""; return renderThreads(); }
+  if (action === "thread-delete-arm") {
+    threadDeleteArmed = String(args.id ?? "");
+    if (threadDeleteTimer) clearTimeout(threadDeleteTimer);
+    threadDeleteTimer = setTimeout(() => { threadDeleteArmed = null; threadPaneSignature = ""; renderThreads(); }, 4000);
+    threadPaneSignature = "";
+    return renderThreads();
+  }
+  if (action === "thread-delete") { threadDeleteArmed = null; if (threadDeleteTimer) clearTimeout(threadDeleteTimer); }
   if (action.startsWith("thread-") || action.startsWith("threads-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
@@ -5835,6 +5844,23 @@ let renderedPalette: Snapshot["palette"] | null = null,
 /// picked running live on the right with a composer of its own. The list in
 /// the chat is the only switcher; nothing moves the right half but you.
 let foldedForThreads = false, threadPaneSignature = "", threadPaneFor = "";
+/// The tab whose × was pressed once: pressing it again deletes the thread.
+let threadDeleteArmed: string | null = null, threadDeleteTimer: ReturnType<typeof setTimeout> | null = null;
+/// The thread's context card, opened from the ring in its composer.
+let threadContextOpen = false;
+/// The open thread's working line, kept out of the pane's repaints.
+let threadWorking: WorkingLine | null = null;
+/// Runs `draw` as if the open thread's chat were the chat you're in, so
+/// its turns, working line and context use the same code as any chat's.
+function asThread<T>(draw: () => T): T | null {
+  const chat = state?.threads.chat;
+  if (!state || !chat) return null;
+  const saved = state;
+  const id = chat.model || saved.model.id;
+  const model = id === saved.model.id ? saved.model : { ...saved.model, id, contextWindow: models.find((item) => item.id === id)?.contextWindow ?? saved.model.contextWindow };
+  state = { ...saved, runs: chat.runs, approvals: chat.approvals, questions: chat.questions, activeTurnId: chat.activeTurnId, provider: chat.provider, model, rewinds: [], versions: [], steers: [], queue: "", answered: {} } as Snapshot;
+  try { return draw(); } finally { state = saved; }
+}
 /// The thread's model chip: its own model, or the one it inherited.
 function threadModelWords() {
   const chat = state!.threads.chat, id = chat?.model || state!.model.id, reasoning = chat?.model ? chat.reasoning : chat?.reasoning ?? state!.reasoning;
@@ -5869,28 +5895,29 @@ function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
   if (!fix || !state) { if (threadPaneFor) { host.innerHTML = ""; threadPaneSignature = threadPaneFor = ""; } return; }
   if (threadPaneFor !== fix.id) {
     threadPaneFor = fix.id; threadPaneSignature = "";
-    host.innerHTML = `<div class="tp-tabs-host"></div><div class="tp-head"></div><div class="tp-conv"></div><div class="tp-foot"><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button></div></form></div>`;
+    threadWorking ??= new WorkingLine(spinner);
+    threadContextOpen = false;
+    host.innerHTML = `<div class="tp-tabs-host"></div><div class="tp-head"></div><div class="tp-conv"><div class="tp-turns"></div></div><div class="tp-foot"><div id="tp-context-card" hidden></div><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button><button type="button" id="tp-context" class="cb" data-action="thread-context" aria-expanded="false" hidden></button></div></form></div>`;
+    host.querySelector(".tp-conv")!.append(threadWorking.element);
   }
   const chat = state.threads.chat;
-  const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.length, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
+  const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.map((item) => [item.id, item.status]), threadDeleteArmed, threadContextOpen, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
   if (signature === threadPaneSignature) return;
   threadPaneSignature = signature;
-  host.querySelector<HTMLElement>(".tp-tabs-host")!.innerHTML = threadTabsHTML(state.threads);
+  host.querySelector<HTMLElement>(".tp-tabs-host")!.innerHTML = threadTabsHTML(state.threads, threadDeleteArmed);
   host.querySelector<HTMLElement>(".tp-head")!.innerHTML = threadHeadHTML(state.threads, fix);
   const chip = host.querySelector<HTMLElement>("#tp-model")!, chipHTML = threadModelWords();
   if (chip.innerHTML !== chipHTML) chip.innerHTML = chipHTML;
-  const conv = host.querySelector<HTMLElement>(".tp-conv")!;
+  const conv = host.querySelector<HTMLElement>(".tp-conv")!, turns = host.querySelector<HTMLElement>(".tp-turns")!;
   const atEnd = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 40;
-  let html = "";
-  if (chat) {
-    // The thread's turns draw with the same code as any chat's.
-    const saved = state;
-    state = { ...saved, runs: chat.runs, approvals: chat.approvals, questions: chat.questions, activeTurnId: chat.activeTurnId, rewinds: [], versions: [], steers: [], queue: "", answered: {} };
-    try { html = chat.runs.map((run, index) => `<article class="turn">${runHTML(run, index)}</article>`).join(""); }
-    finally { state = saved; }
-  } else html = `<p class="tp-empty">Opening the thread…</p>`;
-  conv.innerHTML = html;
-  for (const slot of conv.querySelectorAll<HTMLElement>("[data-answer][data-entry]")) {
+  // The thread's turns draw with the same code as any chat's, its thinking
+  // and words included, and its working line says what it is doing now.
+  turns.innerHTML = asThread(() => chat!.runs.map((run, index) => `<article class="turn">${runHTML(run, index)}</article>`).join("")) ?? `<p class="tp-empty">Opening the thread…</p>`;
+  const last = chat?.runs.at(-1);
+  if (last) asThread(() => workingLine(threadWorking!, last));
+  else threadWorking!.update(null);
+  renderThreadContext(host);
+  for (const slot of turns.querySelectorAll<HTMLElement>("[data-answer][data-entry]")) {
     const entry = chat?.runs.find((run) => run.id === slot.dataset.answer)?.entries.find((item) => item.id === Number(slot.dataset.entry));
     if (entry?.type === "assistant") slot.innerHTML = markdown(splitNextPrompt(entry.raw).text);
   }
@@ -5902,6 +5929,23 @@ function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
   ].join("");
   const askHost = host.querySelector<HTMLElement>(".tp-asks")!;
   if (askHost.innerHTML !== asks) askHost.innerHTML = asks;
+}
+/// The thread's context, like the chat's: a ring with the share used in
+/// its composer, and the same card of what fills it.
+function renderThreadContext(host: HTMLElement) {
+  const ring = host.querySelector<HTMLElement>("#tp-context")!, card = host.querySelector<HTMLElement>("#tp-context-card")!;
+  const c = asThread(() => context());
+  if (!c || c.percentage == null) { ring.hidden = true; card.hidden = true; return; }
+  ring.hidden = false;
+  const html = `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span><span class="tp-context-pct">${c.percentage}%</span>`;
+  if (ring.innerHTML !== html) ring.innerHTML = html;
+  ring.title = `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of this thread's context used`;
+  ring.setAttribute("aria-expanded", String(threadContextOpen));
+  ring.classList.toggle("on", threadContextOpen);
+  card.hidden = !threadContextOpen;
+  if (!threadContextOpen) return;
+  const inner = asThread(() => contextHalf(c)) ?? "";
+  if (card.dataset.html !== inner) { card.innerHTML = inner; card.dataset.html = inner; }
 }
 function sendToThread(form: HTMLFormElement) {
   const input = form.querySelector("textarea")!, text = input.value.trim();

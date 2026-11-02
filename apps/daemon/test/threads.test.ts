@@ -26,13 +26,14 @@ test("an orchestrator chat splits work into threads that run side by side, repor
   writeFileSync(join(workspace, "src", "b.ts"), "export const b = 1;\n");
   git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
 
-  const reports: string[] = [];
+  const reports: string[] = [], threadTools: string[][] = [];
   const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
-    async *stream(messages) {
+    async *stream(messages, tools) {
       const last = messages.at(-1)!;
       const said = String(last.content);
       if (last.role === "user" && said.startsWith("Thread report: ")) { reports.push(said); yield { type: "text_delta" as const, delta: "Noted." }; yield { type: "finish" as const, reason: "stop" }; return; }
       if (last.role === "user" && said.includes("You're one of the threads")) {
+        threadTools.push((tools ?? []).map((tool) => tool.name));
         const file = said.includes("Bump a") ? "src/a.ts" : "src/b.ts";
         yield { type: "tool_call_delta" as const, index: 0, idDelta: "w", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: file, content: `export const ${file.includes("a.ts") ? "a" : "b"} = 2;\n` }) };
         yield { type: "finish" as const, reason: "tool_calls" }; return;
@@ -63,6 +64,9 @@ test("an orchestrator chat splits work into threads that run side by side, repor
     }
     expect(threads.map((fix) => [fix.title, fix.status, fix.thread?.files])).toEqual([["Bump a", "ready", ["src/a.ts"]], ["Bump b", "ready", ["src/b.ts"]]]);
     expect(threads[0]!.branch).toMatch(/^thread\/bump-a-/);
+    // A thread doesn't start threads of its own (nor see Heartbeat).
+    expect(threadTools.length).toBe(2);
+    for (const names of threadTools) { expect(names).toContain("write_file"); expect(names).not.toContain("start_threads"); }
     // Drive's own list doesn't show them.
     expect((await call(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`)).body.fixes).toEqual([]);
     // Each reported back to the orchestrator; the last one says none are left.

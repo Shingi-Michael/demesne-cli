@@ -24,6 +24,9 @@ import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
+import { newSince, todayPage, type TodayUi } from "./today-page.ts";
+import { agentFace } from "./agent-face.ts";
+import type { SocialPost, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
@@ -672,7 +675,7 @@ function renderSidebar() {
   const housedIds = new Set(housed.flatMap((agent) => agent.sessionId ? [agent.sessionId] : []));
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen())]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -738,11 +741,13 @@ function renderSidebar() {
   // A group's rows, the first six unless searching or expanded.
   // The agents: a letter tile, the name, and how it is (a dot
   // while it works or has a new reply). Clicking opens its chat.
-  const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${housed.map((agent) => {
+  const todayCount = newSince(socialsView, todaySeen());
+  const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span><small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
+  const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${todayRow}${housed.map((agent) => {
     const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
-    return btn("agent-open", `<span class="agent-mark" data-provider="${h(agent.id)}" aria-hidden="true">${h(agent.id === "codex" ? "X" : agent.name[0] ?? "?")}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
-      { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id ? " on" : ""}`)
+    return btn("agent-open", `<span class="agent-mark agent-face" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id)}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
+      { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
       .replace("<button ", `<button title="${h(agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
   }).join("")}</div>`;
   const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
@@ -1640,7 +1645,7 @@ function renderTabs() {
   if (chatOpen && current!.id !== tabClosed && tabs.open(current!.id, tabOn)) tabsSignature = "";
   if (chatOpen) tabOn = current!.id;
   const peek = drivePeek(), call = waitingElsewhere();
-  const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
+  const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen === "today" ? "Today" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
   const shown = tabs.ids.filter((id) => byId.has(id));
   const tones = shown.map((id) => chatTone(byId.get(id)!));
   const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, peek, call?.id, call?.title, rimNow?.words]);
@@ -2849,8 +2854,35 @@ function renderHero() {
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
 /// (Active or Archived), Scheduled, Customize or Settings. "" when closed.
-type PageKind = ChatsTab | "scheduled" | "foundry" | "customize" | "settings";
+type PageKind = ChatsTab | "scheduled" | "foundry" | "customize" | "settings" | "today";
 let pageOpen: "" | PageKind = "";
+/// Today (agent socials): the feed, what is open in it, and when you last looked.
+let socialsView: SocialsView | null = null;
+const todayUi: TodayUi = { replying: "", sending: [], error: "" };
+const TODAY_SEEN = "demesne-today-seen";
+const todaySeen = () => { try { return localStorage.getItem(TODAY_SEEN); } catch { return null; } };
+async function loadSocials() {
+  try { socialsView = await api<SocialsView>("socials"); todayUi.error = ""; }
+  catch (error) { socialsView = socialsView ?? { posts: [], agents: [] }; if (pageOpen === "today") todayUi.error = errorWords(error); }
+  if (pageOpen === "today") { try { localStorage.setItem(TODAY_SEEN, new Date().toISOString()); } catch {} renderPage(); }
+  if (state) renderState({ ...state });
+}
+// The feed fills while you work: a look once a minute keeps the count fresh.
+setInterval(() => { if (state?.housed?.length) void loadSocials(); }, 60_000);
+function swapPost(post: SocialPost) {
+  if (socialsView) socialsView = { ...socialsView, posts: socialsView.posts.map((item) => item.id === post.id ? post : item) };
+}
+async function commentOn(id: string, text: string) {
+  todayUi.replying = "";
+  todayUi.sending = [...todayUi.sending, id];
+  // Yours shows at once; the agent's answer follows.
+  const post = socialsView?.posts.find((item) => item.id === id);
+  if (post) swapPost({ ...post, comments: [...post.comments, { id: "pending", by: "you", at: new Date().toISOString(), text }] });
+  renderPage();
+  try { swapPost(await api<SocialPost>("socials-comment", { id, text })); todayUi.error = ""; }
+  catch (error) { todayUi.error = errorWords(error); void loadSocials(); }
+  finally { todayUi.sending = todayUi.sending.filter((item) => item !== id); renderPage(); }
+}
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
 let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
 const foundryUi: FoundryUi = { tab: "all", view: "preview", width: "desktop", edit: null, draft: "", error: "", busy: false };
@@ -3084,6 +3116,7 @@ function openPage(kind: "" | PageKind) {
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
   if (kind === "foundry") { if (was !== "foundry") Object.assign(foundryUi, { edit: null, error: "" }); foundrySaves = foundrySaveCount(); void loadFoundry(); }
   if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
+  if (kind === "today") { if (was !== "today") Object.assign(todayUi, { replying: "", error: "" }); void loadSocials(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
@@ -3178,6 +3211,8 @@ function renderPage() {
     html = customizePage(customizeData, customizeUi, state.connectors, /Mac/i.test(navigator.platform));
   } else if (pageOpen === "settings") {
     html = settingsPage(settingsView());
+  } else if (pageOpen === "today") {
+    html = todayPage(socialsView, todayUi);
   } else if (pageOpen === "active" || pageOpen === "archived") {
     const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
     html = chatsPageHtml(pageOpen, active, archivedChats);
@@ -3282,6 +3317,12 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const value = form.querySelector("input")?.value.trim() ?? "";
     if (value) void settingsCall("settings-config", { key: form.dataset.key, value });
+    return;
+  }
+  if (form.classList.contains("td-field")) {
+    event.preventDefault();
+    const text = form.querySelector("input")?.value.trim() ?? "";
+    if (text) void commentOn(form.dataset.id ?? "", text);
     return;
   }
   if (form.id === "foundry-make") {
@@ -5321,6 +5362,33 @@ async function dispatch(
     return;
   }
   if (action === "chats-page") return openPage(args.tab === "archived" ? "archived" : "active");
+  // Today: the agents' feed.
+  if (action === "today-page") return openPage(pageOpen === "today" ? "" : "today");
+  if (action === "today-like") {
+    const post = socialsView?.posts.find((item) => item.id === args.id);
+    if (post) { swapPost({ ...post, liked: args.liked === true }); renderPage(); }
+    try { swapPost(await api<SocialPost>("socials-like", { id: String(args.id), liked: args.liked === true })); } catch (error) { todayUi.error = errorWords(error); }
+    return renderPage();
+  }
+  if (action === "today-reply") {
+    todayUi.replying = todayUi.replying === args.id ? "" : String(args.id);
+    renderPage();
+    document.querySelector<HTMLInputElement>("#page .td-field input")?.focus({ preventScroll: true });
+    return;
+  }
+  // A post's tag opens the chat it came from, in its own project.
+  if (action === "today-open") {
+    openPage("");
+    const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
+    const path = typeof args.path === "string" ? args.path : null;
+    return dispatch(!path || path === here ? "select-session" : "project-session", !path || path === here ? { id: String(args.id) } : { id: String(args.id), path });
+  }
+  // A comment that asked for work: the agent's chat, with your words ready to send.
+  if (action === "today-ask") {
+    openPage("");
+    await api("agent-open", { id: String(args.agent) });
+    return setDraft(String(args.text ?? ""));
+  }
   if (action === "page-open") {
     const page = String(args.page ?? "");
     return openPage(!page || pageOpen === page ? "" : (["foundry", "customize", "settings", "active", "archived"].includes(page) ? page : "scheduled") as PageKind);

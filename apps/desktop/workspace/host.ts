@@ -2113,6 +2113,10 @@ export class WorkspaceHost {
     }
     // Scheduled: routines, each one sentence; a new one belongs to this
     // window's project, or to no project in a plain chat.
+    // Today: the agents' feed (agent socials).
+    if (method === "socials") return await this.client.socials();
+    if (method === "socials-like") return (await this.client.likePost(string(args.id, "post", 200), args.liked !== false)).post;
+    if (method === "socials-comment") return (await this.client.commentOnPost(string(args.id, "post", 200), string(args.text, "comment", 1000))).post;
     if (method === "routines") return (await this.client.routines()).routines;
     if (method === "routine-add") {
       // One written in the assistant's chat runs in that chat.

@@ -2082,3 +2082,44 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 #row-menu .row-menu-line { margin: 4px 2px; border: 0; border-top: 1px solid var(--line2); }
 #row-menu .row-menu-note { margin: 2px 9px 4px; color: var(--t3); font-size: 11.5px; line-height: 16px; }
 .sidebar-item.row-menu-on, .sidebar-project-header.row-menu-on { box-shadow: inset 0 0 0 1px var(--line2); border-radius: var(--r-sm); }
+/* Agent socials: each agent's drawn face, and Today, the agents' feed
+   (pass 137 A). One narrow column like a phone feed. */
+.agent-mark.agent-face { overflow: hidden; border-radius: 50%; background: none; }
+.agent-face-svg { display: block; width: 100%; height: 100%; }
+.agent-mark.today-mark { border-radius: 50%; background: var(--blossom, #f2b6c8); color: #141416; font-size: 10px; }
+.sidebar-today small { color: var(--blossom, #f2b6c8); }
+.desktop #page[data-kind="today"] { max-width: 520px; }
+.td-top { display: block; }
+.td-top h2 { margin: 0 0 4px; color: var(--t1); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.td-top p { margin: 0 0 18px; color: var(--t3); font-size: 13px; }
+.td-day { margin: 22px 0 6px; color: var(--t4); font-size: 11px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
+.td-feed { display: flex; flex-direction: column; }
+.td-post { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 16px; box-shadow: inset 0 -1px 0 var(--hair); }
+.td-head { display: flex; align-items: center; gap: 10px; }
+.td-head b { display: block; color: var(--t1); font-weight: 500; font-size: 13.5px; }
+.td-head small { display: block; color: var(--t3); font-size: 11.5px; }
+.td-face { display: inline-grid; place-items: center; flex: none; overflow: hidden; border-radius: 50%; }
+.td-face.td-f-post { width: 32px; height: 32px; }
+.td-face.td-f-comment { width: 20px; height: 20px; margin-top: 1px; }
+.td-face.td-you { background: var(--tone2); color: var(--t2); font-size: 9.5px; font-weight: 600; }
+.td-face.td-f-comment.td-you { font-size: 7px; }
+.td-text { margin: 0; color: var(--t1); font-size: 14px; line-height: 21px; }
+.td-text.td-moment { color: var(--t2); }
+.td-text.td-moment b { color: var(--t1); font-weight: 500; }
+.td-from { align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 22px; padding: 0 8px; border-radius: var(--r-sm, 6px); background: var(--tone); color: var(--t3); font-size: 11.5px; }
+.td-from:hover { background: var(--tone2); color: var(--t1); }
+.td-acts { display: flex; gap: 14px; }
+.td-act { height: 22px; padding: 0; color: var(--t3); font-size: 12px; }
+.td-act:hover { color: var(--t1); }
+.td-act.on { color: var(--blossom, #f2b6c8); }
+.td-comment { display: flex; align-items: flex-start; gap: 8px; padding-left: 4px; color: var(--t2); font-size: 13px; line-height: 19px; }
+.td-comment b { color: var(--t1); font-weight: 500; margin-right: 3px; }
+.td-wait > div { color: var(--t3); animation: td-wait 1.2s ease-in-out infinite; }
+@keyframes td-wait { 50% { opacity: .35; } }
+.td-ask { margin-left: 4px; height: 20px; padding: 0 8px; border-radius: var(--r-sm, 6px); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t2); font-size: 11.5px; }
+.td-ask:hover { background: var(--tone2); color: var(--t1); }
+.td-field input { width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 9px; background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); font: inherit; font-size: 13px; outline: none; }
+.td-field input:focus { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent); }
+.td-empty { color: var(--t3); font-size: 13px; }
+.td-empty .td-faces { display: flex; gap: 6px; margin: 6px 0 10px; }
+.td-error { color: var(--bad, #ec8b80); font-size: 12.5px; }

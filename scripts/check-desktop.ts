@@ -607,7 +607,13 @@ try {
   assert(!await page.locator("#sidebar-sessions").isVisible(), "The rail hides the list");
   await until(() => page.locator("#rail-chats .rail-chat").count().then(count => count >= 1), "the strip shows the open chats");
   assert.equal(await page.locator("#rail-chats .rail-chat.on").count(), 1, "the chat you're in is marked on the strip");
-  await page.locator("#rail-search").hover();
+  // On the Mac the check's window may sit behind the real app, where a
+  // synthetic hover doesn't always take: bring it forward and move onto
+  // the icon in two steps so :hover sticks.
+  await page.bringToFront();
+  const searchBox = (await page.locator("#rail-search").boundingBox())!;
+  await page.mouse.move(searchBox.x + 4, searchBox.y + 4);
+  await page.mouse.move(searchBox.x + searchBox.width / 2, searchBox.y + searchBox.height / 2, { steps: 3 });
   // The label fades in after a short delay; wait for it rather than a fixed time.
   await until(() => page.locator("#rail-search").evaluate(button => getComputedStyle(button, "::after").opacity === "1"), "hovering an icon shows its label");
   assert.equal(await page.locator("#rail-search").getAttribute("data-tip"), "Search chats");

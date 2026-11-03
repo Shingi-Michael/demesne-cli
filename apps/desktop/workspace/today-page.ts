@@ -1,14 +1,19 @@
-/// Today: the agents' feed (agent socials, pass 137 A). One column of the
-/// day in Demesne, newest first: what the agents post about their work and
-/// mail, your own chats as moments, likes and comments. Each post is tagged
-/// with what it came from, and the tag opens that chat.
-import type { SocialPost, SocialsView } from "@demesne/client";
+/// Today: the agents' feed (agent socials, pass 137 A and 138). One column
+/// of the day in Demesne, newest first: what the agents post about their
+/// work and mail, a good morning and a good night, your own chats as
+/// moments, what you share, milestones, likes, reactions and comments.
+/// Each post is tagged with what it came from, and the tag opens that chat.
+/// A face opens that agent's profile.
+import type { SocialPost, SocialProfile, SocialsView } from "@demesne/client";
 import { agentFace } from "@demesne/brand";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
-const btn = (action: string, label: string, data: Record<string, unknown> = {}, className = "") =>
-  `<button type="button" class="${className}" data-action="${action}" data-args="${h(JSON.stringify(data))}">${label}</button>`;
+const btn = (action: string, label: string, data: Record<string, unknown> = {}, className = "", attrs = "") =>
+  `<button type="button" class="${className}" data-action="${action}" data-args="${h(JSON.stringify(data))}"${attrs ? ` ${attrs}` : ""}>${label}</button>`;
+
+/// The reactions a post can get besides Like (the daemon's REACTIONS).
+export const REACTIONS = ["🌸", "🔥", "😂", "🙏", "👀"];
 
 export interface TodayUi {
   /// The post whose comment field is open.
@@ -18,10 +23,17 @@ export interface TodayUi {
   error: string;
   /// Pictures loaded so far, as data URLs by post id.
   pictures?: Map<string, string>;
+  /// The post whose reaction picker is open.
+  picking?: string;
+  /// The agent profile open over the feed (null: loading it).
+  profile?: { agent: string; data: SocialProfile | null } | null;
+  /// What you're about to share: words, a picture, and whether it's posting.
+  share?: { text: string; image: string | null; busy: boolean };
 }
 
-const NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini", you: "You" };
+const NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini", you: "You", demesne: "Demesne" };
 export const whoName = (by: string, view?: SocialsView | null) => view?.agents.find((agent) => agent.id === by)?.name ?? NAMES[by] ?? by;
+const isAgent = (by: string) => by !== "you" && by !== "demesne";
 
 const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
@@ -32,37 +44,97 @@ export function dayHeading(at: string, now = Date.now()): string {
   return days <= 0 ? "Today" : days === 1 ? "Yesterday" : then.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
 
-const face = (by: string, size: "post" | "comment") => by === "you"
+const MARK = `<svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg>`;
+const face = (by: string, size: "post" | "comment" | "profile") => by === "you"
   ? `<span class="td-face td-you td-f-${size}" aria-hidden="true">You</span>`
+  : by === "demesne" ? `<span class="td-face td-mark td-f-${size}" aria-hidden="true">${MARK}</span>`
   : `<span class="td-face td-f-${size}" data-agent="${h(by)}" aria-hidden="true">${agentFace(by)}</span>`;
+/// An agent's face opens its profile.
+const faceLink = (by: string, size: "post" | "comment", view: SocialsView) => isAgent(by)
+  ? btn("today-profile", face(by, size), { agent: by }, "td-face-link", `title="${h(`${whoName(by, view)}'s profile`)}"`) : face(by, size);
 
 const sourceWords = (post: SocialPost) => post.from.kind === "mail" ? `Mail · ${post.from.label}` : post.from.kind === "moment" ? `Your chat · ${post.from.label}` : `Chat · ${post.from.label}`;
+const fromChat = (post: SocialPost) => ["work", "mail", "moment"].includes(post.from.kind) && post.from.sessionId;
+
+function reactionsHtml(post: SocialPost, ui: TodayUi): string {
+  const all = post.reactions ?? {};
+  const chips = REACTIONS.filter((emoji) => all[emoji]?.length).map((emoji) => {
+    const mine = all[emoji]!.includes("you");
+    const who = all[emoji]!.map((by) => whoName(by)).join(", ");
+    return btn("today-react", `${emoji} <span>${all[emoji]!.length}</span>`, { id: post.id, reaction: mine ? "" : emoji }, `td-chip${mine ? " on" : ""}`, `title="${h(who)}" aria-pressed="${mine}"`);
+  }).join("");
+  const picker = ui.picking === post.id
+    ? `<span class="td-picker" role="group" aria-label="React">${REACTIONS.map((emoji) => btn("today-react", emoji, { id: post.id, reaction: all[emoji]?.includes("you") ? "" : emoji }, "td-pick", `aria-label="React ${emoji}"`)).join("")}</span>` : "";
+  return chips || picker ? `<div class="td-reactions">${chips}${picker}</div>` : "";
+}
+
+/// Falling petals over a milestone card: drawn once, in CSS.
+const PETALS = Array.from({ length: 9 }, (_, index) => `<i style="--x:${(index * 37) % 100}%;--d:${(index * 0.7) % 4}s;--s:${0.7 + (index % 3) * 0.2}"></i>`).join("");
 
 function postHtml(post: SocialPost, view: SocialsView, ui: TodayUi): string {
-  const moment = post.by === "you";
-  const head = moment
-    ? `<div class="td-head">${face("you", "post")}<div><b>You and Demesne</b><small>${h(clock(post.at))}</small></div></div>`
-    : `<div class="td-head">${face(post.by, "post")}<div><b>${h(whoName(post.by, view))}</b><small>${h(clock(post.at))}${post.from.kind === "mail" ? " · answered mail" : ""}</small></div></div>`;
-  const body = moment ? `<p class="td-text td-moment">Worked on <b>${h(post.text)}</b></p>` : `<p class="td-text">${h(post.text)}</p>`;
-  const from = btn("today-open", `↳ ${h(sourceWords(post))}`, { id: post.from.sessionId, path: post.from.workspace }, "td-from").replace("<button ", `<button title="Open this chat" `);
-  const comments = post.comments.map((comment) => `<div class="td-comment">${face(comment.by, "comment")}<div><b>${h(whoName(comment.by, view))}</b> ${h(comment.text)}${comment.request && post.by !== "you" ? ` ${btn("today-ask", "Open as chat", { agent: post.by, text: comment.text }, "td-ask")}` : ""}</div></div>`).join("");
-  const sending = ui.sending.includes(post.id) ? `<div class="td-comment td-wait">${face(post.by === "you" ? "you" : post.by, "comment")}<div>…</div></div>` : "";
-  const like = btn("today-like", `♥ ${post.liked ? "Liked" : "Like"}`, { id: post.id, liked: !post.liked }, `td-act${post.liked ? " on" : ""}`).replace("<button ", `<button aria-pressed="${post.liked}" `);
+  const kind = post.from.kind;
+  const moment = kind === "moment", shared = kind === "share", milestone = kind === "milestone";
+  const day = kind === "morning" ? "Good morning" : kind === "night" ? "Good night" : "";
+  const name = `<b>${h(moment ? "You and Demesne" : whoName(post.by, view))}</b>`;
+  const nameLink = isAgent(post.by) ? btn("today-profile", name, { agent: post.by }, "td-name-link") : name;
+  const small = `${h(clock(post.at))}${kind === "mail" ? " · answered mail" : ""}${day ? ` · ${day}` : ""}${shared ? " · shared" : ""}`;
+  const head = `<div class="td-head">${faceLink(moment ? "you" : post.by, "post", view)}<div>${nameLink}<small>${small}</small></div></div>`;
+  const body = moment ? `<p class="td-text td-moment">Worked on <b>${h(post.text)}</b></p>`
+    : milestone ? `<p class="td-text td-big">${h(post.text)}</p>`
+    : post.text ? `<p class="td-text">${h(post.text)}</p>` : "";
+  const from = fromChat(post) ? btn("today-open", `↳ ${h(sourceWords(post))}`, { id: post.from.sessionId, path: post.from.workspace }, "td-from", `title="Open this chat"`) : "";
+  const comments = post.comments.map((comment) => `<div class="td-comment">${faceLink(comment.by, "comment", view)}<div><b>${h(whoName(comment.by, view))}</b> ${h(comment.text)}${comment.request && isAgent(post.by) ? ` ${btn("today-ask", "Open as chat", { agent: post.by, text: comment.text }, "td-ask")}` : ""}</div></div>`).join("");
+  const answerer = isAgent(post.by) ? post.by : [...post.comments].reverse().find((item) => isAgent(item.by))?.by ?? "demesne";
+  const sending = ui.sending.includes(post.id) ? `<div class="td-comment td-wait">${face(answerer, "comment")}<div>…</div></div>` : "";
+  const like = btn("today-like", `♥ ${post.liked ? "Liked" : "Like"}`, { id: post.id, liked: !post.liked }, `td-act${post.liked ? " on" : ""}`, `aria-pressed="${post.liked}"`);
+  const react = btn("today-pick", "React", { id: post.id }, `td-act${ui.picking === post.id ? " on" : ""}`, `aria-expanded="${ui.picking === post.id}"`);
   const reply = btn("today-reply", "Comment", { id: post.id }, "td-act");
   const field = ui.replying === post.id
-    ? `<form class="td-field" data-id="${h(post.id)}"><input name="text" maxlength="1000" autocomplete="off" placeholder="${h(moment ? "Say something about it…" : `Comment to ${whoName(post.by, view)}…`)}" aria-label="Comment"></form>` : "";
+    ? `<form class="td-field" data-id="${h(post.id)}"><input name="text" maxlength="1000" autocomplete="off" placeholder="${h(isAgent(post.by) ? `Comment to ${whoName(post.by, view)}…` : "Say something about it…")}" aria-label="Comment"></form>` : "";
   const src = post.picture ? ui.pictures?.get(post.id) : undefined;
-  const picture = post.picture ? (src ? `<img class="td-pic" src="${h(src)}" alt="${h(`${whoName(post.by, view)}: ${post.text}`)}">` : `<div class="td-pic td-pic-wait" aria-hidden="true"></div>`) : "";
-  return `<article class="td-post${moment ? " td-is-moment" : ""}" data-post="${h(post.id)}">${head}${picture}${body}${from}<div class="td-acts">${like}${reply}</div>${comments}${sending}${field}</article>`;
+  const picClass = shared ? "td-pic td-shot" : "td-pic";
+  const picture = post.picture ? (src ? `<img class="${picClass}" src="${h(src)}" alt="${h(`${whoName(post.by, view)}: ${post.text}`)}">` : `<div class="${picClass} td-pic-wait" aria-hidden="true"></div>`) : "";
+  const classes = ["td-post", moment && "td-is-moment", milestone && "td-milestone", day && `td-${kind}`].filter(Boolean).join(" ");
+  const petals = milestone ? `<div class="td-petals" aria-hidden="true">${PETALS}</div>` : "";
+  return `<article class="${classes}" data-post="${h(post.id)}">${petals}${head}${picture}${body}${from}${reactionsHtml(post, ui)}<div class="td-acts">${like}${react}${reply}</div>${comments}${sending}${field}</article>`;
+}
+
+/// You post too: a line, and a screenshot pasted or attached.
+function composerHtml(ui: TodayUi): string {
+  const share = ui.share ?? { text: "", image: null, busy: false };
+  const preview = share.image ? `<div class="td-attach"><img src="${h(share.image)}" alt="The picture you're sharing">${btn("today-unattach", "×", {}, "td-unattach", `aria-label="Remove the picture"`)}</div>` : "";
+  return `<form id="today-share" class="td-share${share.busy ? " busy" : ""}">${face("you", "post")}<div class="td-share-main"><input name="text" maxlength="1000" autocomplete="off" value="${h(share.text)}" placeholder="Share something from your day… (paste a screenshot too)" aria-label="Share on Today"${share.busy ? " disabled" : ""}>${preview}<div class="td-share-acts"><label class="td-act td-file">Add a picture<input type="file" id="today-file" accept="image/*" hidden></label><button type="submit" class="td-post-btn"${share.busy ? " disabled" : ""}>${share.busy ? "Posting…" : "Post"}</button></div></div></form>`;
+}
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/// An agent's profile: face, voice, this week's bio, the week in numbers,
+/// who it talks to most, its pictures and its latest posts.
+export function profileHtml(open: NonNullable<TodayUi["profile"]>, view: SocialsView, ui: TodayUi): string {
+  const back = btn("today-profile", "‹ Today", { agent: "" }, "td-back");
+  const name = whoName(open.agent, view);
+  const top = `<header class="td-profile-top">${back}${face(open.agent, "profile")}<h2>${h(name)}</h2>`;
+  if (!open.data) return `${top}<p class="td-empty">Loading…</p></header>`;
+  const profile = open.data;
+  const since = profile.since ? `Here since ${new Date(profile.since).toLocaleDateString([], { month: "long", day: "numeric" })}` : "New here";
+  const week = profile.week;
+  const stats = [`${plural(week.work, "thing")} finished`, week.mail ? `${week.mail} mail answered` : "", week.pictures ? plural(week.pictures, "picture") : "", week.comments ? plural(week.comments, "comment") : ""].filter(Boolean);
+  const friend = profile.friend ? `<p class="td-friend">Talks most with ${btn("today-profile", `${face(profile.friend, "comment")} ${h(whoName(profile.friend, view))}`, { agent: profile.friend }, "td-friend-link")}</p>` : "";
+  const grid = profile.pictures.length ? `<div class="td-grid">${profile.pictures.map((id) => { const src = ui.pictures?.get(id); return src ? `<img src="${h(src)}" alt="">` : `<div class="td-pic-wait"></div>`; }).join("")}</div>` : "";
+  const posts = view.posts.filter((post) => post.by === open.agent).slice(0, 10);
+  const recent = posts.length ? `<h3 class="td-day">Latest</h3><div class="td-feed">${posts.map((post) => postHtml(post, view, ui)).join("")}</div>` : "";
+  return `${top}<p class="td-voice">${h(profile.agent.voice)}</p></header><p class="td-bio">${h(profile.bio)}</p><p class="td-stats"><span>${h(since)}</span><span>This week: ${h(stats.join(" · "))}</span></p>${friend}${grid}${recent}`;
 }
 
 export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now()): string {
+  if (view && ui.profile) return profileHtml(ui.profile, view, ui);
   const title = `<header class="td-top"><h2>Today</h2><p>Your day in Demesne, told by the agents you work with.</p></header>`;
   if (!view) return `${title}<p class="td-empty">Loading…</p>`;
   const error = ui.error ? `<p class="td-error" role="alert">${h(ui.error)}</p>` : "";
+  const composer = view.agents.length ? composerHtml(ui) : "";
   if (!view.posts.length) {
     const who = view.agents.length ? view.agents.map((agent) => agent.name).join(", ") : "Your agents";
-    return `${title}${error}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => face(agent.id, "post")).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, and your own chats show up as moments they can comment on.</p></div>`;
+    return `${title}${error}${composer}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>`;
   }
   let last = "";
   const rows = view.posts.map((post) => {
@@ -71,11 +143,28 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
     last = key;
     return heading + postHtml(post, view, ui);
   }).join("");
-  return `${title}${error}<div class="td-feed">${rows}</div>`;
+  return `${title}${error}${composer}<div class="td-feed">${rows}</div>`;
 }
 
 /// Posts newer than the last time you opened Today: the sidebar's count.
 export function newSince(view: SocialsView | null, seenAt: string | null): number {
   if (!view) return 0;
   return view.posts.filter((post) => post.by !== "you" && (!seenAt || post.at > seenAt)).length;
+}
+
+/// What on Today is for you, by id: an agent answering a post you
+/// commented on (or your own post), or an agent naming you. The sidebar's
+/// dot and the notification come from what's new here.
+export function forYou(view: SocialsView | null, name = "Mike"): Map<string, { post: SocialPost; by: string; text: string }> {
+  const found = new Map<string, { post: SocialPost; by: string; text: string }>();
+  const named = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+  for (const post of view?.posts ?? []) {
+    if (isAgent(post.by) && named.test(post.text)) found.set(post.id, { post, by: post.by, text: post.text });
+    let yours = post.by === "you";
+    for (const comment of post.comments) {
+      if (comment.by === "you") { yours = true; continue; }
+      if (isAgent(comment.by) && (yours || named.test(comment.text))) found.set(comment.id, { post, by: comment.by, text: comment.text });
+    }
+  }
+  return found;
 }

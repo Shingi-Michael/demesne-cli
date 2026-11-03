@@ -434,6 +434,20 @@ export function createDaemonApp(options: {
     agents: () => agentCli.agents().map((agent) => agent.id),
     // Pictures of their day (social-pictures.ts), from the [images] model.
     picture: options.images ? pictureMaker(options.images, { facePng: (svg) => svgToPng(svg, 512), shrink: (data) => feedPicture(data, 768) }) : null,
+    // A screenshot you share keeps enough width to read.
+    shrink: (data) => feedPicture(data, 1280),
+    // Your chats for the good morning and good night posts: named ones you
+    // were at, not the assistant, threads or Drive's worktrees.
+    dayFacts: () => {
+      const now = Date.now(), midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+      const chats = store.listSessions(200).filter((session) => session.title && session.title !== "New chat" && session.id !== assistantChat.existing()
+        && !driveFixes.isThread(session.id) && !(session.workspace && inDriveWorktree(session.workspace.root)));
+      const where = (session: { title: string; workspace: { root: string } | null }) => session.workspace ? `${session.title} (${session.workspace.root.split(/[\\/]/).at(-1)})` : session.title;
+      return {
+        recent: chats.filter((session) => now - Date.parse(session.updatedAt) < 36 * 3_600_000).slice(0, 12).map(where),
+        today: chats.filter((session) => Date.parse(session.updatedAt) >= midnight.getTime()).slice(0, 12).map(where),
+      };
+    },
     write: async (messages) => {
       const inference = snapshotTurnInference(processor, false);
       const leaseId = `socials:${randomUUID()}`;
@@ -519,6 +533,9 @@ export function createDaemonApp(options: {
     },
   });
   const routinesTimer = setInterval(() => { try { routines.tick(); } catch { /* the next minute tries again */ } }, 60_000);
+  // The feed's good morning and good night posts, checked once a minute.
+  const socialsTimer = socials ? setInterval(() => { void socials.tick().catch(() => {}); }, 60_000) : undefined;
+  socialsTimer?.unref?.();
   routinesTimer.unref?.();
   // Every chat in a project is told what Drive has and is doing; Drive's
   // own sessions in its worktrees are not.
@@ -1204,13 +1221,33 @@ export function createDaemonApp(options: {
         if (!path || !existsSync(path)) return apiError("picture_not_found", "This post has no picture", 404);
         return json({ mimeType: "image/webp", data: readFileSync(path).toString("base64") });
       }
-      const socialMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/(like|comments)$/);
+      const profileMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)$/);
+      if (profileMatch && request.method === "GET") {
+        const agent = decodeURIComponent(profileMatch[1]!);
+        if (!socials || !agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
+        return json({ profile: await socials.profile(agent as Parameters<typeof socials.profile>[0]) });
+      }
+      // You post too: words and maybe a screenshot.
+      if (url.pathname === "/v1/socials/posts" && request.method === "POST") {
+        if (!socials) return apiError("socials_off", "Agent socials are off", 404);
+        const body = await readJson(request) as { text?: unknown; image?: unknown };
+        try {
+          const image = typeof body.image === "string" && body.image ? new Uint8Array(Buffer.from(body.image.replace(/^data:[^,]*,/, ""), "base64")) : null;
+          if (image && image.byteLength > 12 * 1024 * 1024) return apiError("image_too_large", "That picture is too big to share", 413);
+          return json({ post: await socials.share(typeof body.text === "string" ? body.text : "", image) });
+        } catch (error) {
+          return apiError("invalid_post", error instanceof Error ? error.message : String(error), 400);
+        }
+      }
+      const socialMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/(like|comments|react)$/);
       if (socialMatch && request.method === "POST") {
         if (!socials) return apiError("socials_off", "Agent socials are off", 404);
-        const body = await readJson(request) as { liked?: unknown; text?: unknown };
+        const body = await readJson(request) as { liked?: unknown; text?: unknown; reaction?: unknown };
         try {
           const id = decodeURIComponent(socialMatch[1]!);
-          const post = socialMatch[2] === "like" ? socials.like(id, body.liked !== false) : await socials.comment(id, typeof body.text === "string" ? body.text : "");
+          const post = socialMatch[2] === "like" ? socials.like(id, body.liked !== false)
+            : socialMatch[2] === "react" ? socials.react(id, typeof body.reaction === "string" && body.reaction ? body.reaction : null)
+            : await socials.comment(id, typeof body.text === "string" ? body.text : "");
           return json({ post });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -1908,6 +1945,7 @@ export function createDaemonApp(options: {
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       clearInterval(driveAutoTimer);
       clearInterval(routinesTimer);
+      clearInterval(socialsTimer);
       clearInterval(personalIndexTimer);
       personalIndexing.abort();
       for (const close of [...activeStreamClosers]) close();

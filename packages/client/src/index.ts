@@ -4,7 +4,8 @@ import type { ThemeLibrary } from "@demesne/brand";
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean }
-export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean }
+export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
+export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[] }
 export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }> }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
@@ -340,6 +341,10 @@ export class DemesneClient {
   async socials(): Promise<SocialsView> { return this.request("/v1/socials"); }
   async likePost(id: string, liked: boolean): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/like`, { method: "POST", body: JSON.stringify({ liked }) }); }
   async socialPicture(id: string): Promise<{ mimeType: string; data: string }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/picture`); }
+  async reactToPost(id: string, reaction: string | null): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/react`, { method: "POST", body: JSON.stringify({ reaction }) }); }
+  async socialProfile(agent: string): Promise<{ profile: SocialProfile }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}`); }
+  /// Share a line on Today, with a picture (base64) if you like.
+  async sharePost(text: string, image?: string | null): Promise<{ post: SocialPost }> { return this.request("/v1/socials/posts", { method: "POST", body: JSON.stringify({ text, image: image ?? null }) }); }
   async commentOnPost(id: string, text: string): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ text }) }); }
   /// The agent's chat in the project, made the first time.
   async openAgent(agent: string, workspacePath: string): Promise<{ session: { id: string }; address: string | null }> {

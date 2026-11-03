@@ -3,7 +3,7 @@ import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
-import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
+import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import { electronLook, lookCommand, type FoundryLook } from "./foundry-look.ts";
 import {
@@ -47,6 +47,7 @@ import {
 } from "@demesne/protocol";
 import { DemesneStore, InvalidStateError, NotFoundError, QuestionStateError } from "@demesne/storage";
 import { SocialFeed, writeOnce } from "./socials.ts";
+import { pictureMaker } from "./social-pictures.ts";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
@@ -431,6 +432,8 @@ export function createDaemonApp(options: {
   // together, written by the default model with thinking off.
   const socials = options.socials ? new SocialFeed(join(dirname(options.databasePath), "socials.json"), {
     agents: () => agentCli.agents().map((agent) => agent.id),
+    // Pictures of their day (social-pictures.ts), from the [images] model.
+    picture: options.images ? pictureMaker(options.images, { facePng: (svg) => svgToPng(svg, 512), shrink: (data) => feedPicture(data, 768) }) : null,
     write: async (messages) => {
       const inference = snapshotTurnInference(processor, false);
       const leaseId = `socials:${randomUUID()}`;
@@ -1194,6 +1197,18 @@ export function createDaemonApp(options: {
       // Agent socials: the day's posts, likes and comments (socials.ts).
       if (url.pathname === "/v1/socials" && request.method === "GET") {
         return json(socials ? socials.view() : { posts: [], agents: [] });
+      }
+      if (url.pathname === "/v1/socials/cap" && request.method === "POST") {
+        if (!socials) return apiError("socials_off", "Agent socials are off", 404);
+        const body = await readJson(request) as { dollars?: unknown };
+        try { return json({ spend: socials.setCap(typeof body.dollars === "number" ? body.dollars : Number.NaN) }); }
+        catch (error) { return apiError("invalid_cap", error instanceof Error ? error.message : String(error), 400); }
+      }
+      const pictureMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/picture$/);
+      if (pictureMatch && request.method === "GET") {
+        const path = socials?.picturePath(decodeURIComponent(pictureMatch[1]!));
+        if (!path || !existsSync(path)) return apiError("picture_not_found", "This post has no picture", 404);
+        return json({ mimeType: "image/webp", data: readFileSync(path).toString("base64") });
       }
       const socialMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/(like|comments)$/);
       if (socialMatch && request.method === "POST") {

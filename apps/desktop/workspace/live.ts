@@ -25,7 +25,7 @@ import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointe
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { newSince, todayPage, type TodayUi } from "./today-page.ts";
-import { agentFace } from "./agent-face.ts";
+import { agentFace } from "@demesne/brand";
 import type { SocialPost, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
@@ -2858,17 +2858,28 @@ type PageKind = ChatsTab | "scheduled" | "foundry" | "customize" | "settings" | 
 let pageOpen: "" | PageKind = "";
 /// Today (agent socials): the feed, what is open in it, and when you last looked.
 let socialsView: SocialsView | null = null;
-const todayUi: TodayUi = { replying: "", sending: [], error: "" };
+const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new Map(), editingCap: false };
+const picturesLoading = new Set<string>();
+/// The posts' pictures, fetched once each while Today is open.
+function loadPictures() {
+  for (const post of socialsView?.posts ?? []) {
+    if (!post.picture || todayUi.pictures!.has(post.id) || picturesLoading.has(post.id)) continue;
+    picturesLoading.add(post.id);
+    void api<string>("socials-picture", { id: post.id }).then((src) => { todayUi.pictures!.set(post.id, src); renderPage(); }, () => {}).finally(() => picturesLoading.delete(post.id));
+  }
+}
 const TODAY_SEEN = "demesne-today-seen";
 const todaySeen = () => { try { return localStorage.getItem(TODAY_SEEN); } catch { return null; } };
 async function loadSocials() {
   try { socialsView = await api<SocialsView>("socials"); todayUi.error = ""; }
   catch (error) { socialsView = socialsView ?? { posts: [], agents: [] }; if (pageOpen === "today") todayUi.error = errorWords(error); }
-  if (pageOpen === "today") { try { localStorage.setItem(TODAY_SEEN, new Date().toISOString()); } catch {} renderPage(); }
+  if (pageOpen === "today") { try { localStorage.setItem(TODAY_SEEN, new Date().toISOString()); } catch {} loadPictures(); renderPage(); }
   if (state) renderState({ ...state });
 }
-// The feed fills while you work: a look once a minute keeps the count fresh.
-setInterval(() => { if (state?.housed?.length) void loadSocials(); }, 60_000);
+// The feed fills while you work: a look once a minute keeps the count
+// fresh, and every 10 seconds while Today is open so pictures arrive.
+let socialTicks = 0;
+setInterval(() => { if (state?.housed?.length && (pageOpen === "today" || ++socialTicks % 6 === 0)) void loadSocials(); }, 10_000);
 function swapPost(post: SocialPost) {
   if (socialsView) socialsView = { ...socialsView, posts: socialsView.posts.map((item) => item.id === post.id ? post : item) };
 }
@@ -3317,6 +3328,13 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const value = form.querySelector("input")?.value.trim() ?? "";
     if (value) void settingsCall("settings-config", { key: form.dataset.key, value });
+    return;
+  }
+  if (form.classList.contains("td-cap")) {
+    event.preventDefault();
+    const dollars = Number(form.querySelector("input")?.value);
+    todayUi.editingCap = false;
+    void api<SocialsView["spend"]>("socials-cap", { dollars }).then((spend) => { if (socialsView && spend) socialsView = { ...socialsView, spend }; todayUi.error = ""; }, (error) => { todayUi.error = errorWords(error); }).finally(() => renderPage());
     return;
   }
   if (form.classList.contains("td-field")) {
@@ -5369,6 +5387,12 @@ async function dispatch(
     if (post) { swapPost({ ...post, liked: args.liked === true }); renderPage(); }
     try { swapPost(await api<SocialPost>("socials-like", { id: String(args.id), liked: args.liked === true })); } catch (error) { todayUi.error = errorWords(error); }
     return renderPage();
+  }
+  if (action === "today-cap") {
+    todayUi.editingCap = true;
+    renderPage();
+    document.querySelector<HTMLInputElement>("#page .td-cap input")?.select();
+    return;
   }
   if (action === "today-reply") {
     todayUi.replying = todayUi.replying === args.id ? "" : String(args.id);

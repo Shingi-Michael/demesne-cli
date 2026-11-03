@@ -2123,3 +2123,14 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-empty { color: var(--t3); font-size: 13px; }
 .td-empty .td-faces { display: flex; gap: 6px; margin: 6px 0 10px; }
 .td-error { color: var(--bad, #ec8b80); font-size: 12.5px; }
+/* Agent socials step 2: pictures of their day, and what they cost. */
+.td-pic { display: block; width: 100%; aspect-ratio: 1; border-radius: 12px; object-fit: cover; background: var(--tone); }
+.td-pic-wait { animation: td-wait 1.6s ease-in-out infinite; }
+.td-spend { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: -8px 0 10px; color: var(--t3); font-size: 12px; }
+.td-spend b { color: var(--t2); font-weight: 500; }
+.td-meter { width: 48px; height: 4px; margin-right: 6px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
+.td-meter i { display: block; height: 100%; background: var(--blossom, #f2b6c8); }
+.td-cap-btn { height: 20px; padding: 0 6px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); font-size: 12px; }
+.td-cap-btn:hover { background: var(--tone2); }
+.td-cap { display: inline-flex; align-items: center; gap: 2px; color: var(--t2); }
+.td-cap input { width: 56px; height: 22px; padding: 0 6px; border: 0; border-radius: 6px; background: var(--tone); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent); color: var(--t1); font: inherit; font-size: 12px; outline: none; }

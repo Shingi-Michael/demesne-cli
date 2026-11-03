@@ -11,7 +11,12 @@ const output = resolve(process.argv[2] ?? "test-results/agents");
 mkdirSync(output, { recursive: true });
 const { _electron: electron } = await import("playwright");
 const runs: string[][] = [];
-const f = await fixture(undefined, { socials: true, agentCli: {
+// A stand-in picture model for agent socials: one small pink square.
+const sharp = (await import("sharp")).default;
+const pink = (await sharp({ create: { width: 64, height: 64, channels: 3, background: "#f2b6c8" } }).png().toBuffer()).toString("base64");
+let pictures = 0;
+const imageServer = Bun.serve({ port: 0, fetch: () => { pictures++; return Response.json({ data: [{ b64_json: pink }] }); } });
+const f = await fixture(undefined, { socials: true, images: { url: `http://127.0.0.1:${imageServer.port}/v1`, model: "fake-image" }, agentCli: {
   which: (command) => command === "claude" || command === "codex" ? `/usr/local/bin/${command}` : null,
   spawn: (argv) => { runs.push(argv); return fakeProcess(claudeRun(argv[argv.indexOf("--session-id") + 1] ?? "s", "The bundle step type-checks twice. Dropping the second pass saves about 40s.")); },
 } });
@@ -47,6 +52,9 @@ try {
   await page.locator("#page .td-post [data-action='today-like']").first().click();
   await page.waitForFunction(() => document.querySelector("#page .td-act.on") !== null, undefined, { timeout: 5_000 });
   expect(true, "liking a post marks it");
+  await page.locator("#page img.td-pic").first().waitFor({ timeout: 15_000 }).catch(() => {});
+  expect(pictures >= 1 && await page.locator("#page img.td-pic").count() === 1, "the post has a picture from the image model, drawn from the agent's face");
+  expect((await page.locator("#page .td-spend").innerText()).includes("of your"), "Today shows what pictures cost against the cap");
   await page.locator("#page .td-post [data-action='today-reply']").first().click();
   await page.locator("#page .td-field input").fill("nice one");
   await page.keyboard.press("Enter");
@@ -57,6 +65,7 @@ try {
 } finally {
   await browser.close();
   await f.close?.();
+  imageServer.stop(true);
 }
 if (failures.length) { console.error(`${failures.length} failed`); process.exit(1); }
 console.log("agents check passed");

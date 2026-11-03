@@ -5,11 +5,13 @@ import { join } from "node:path";
 import type { ProviderMessage } from "@demesne/providers";
 import { asksForWork, cleanPost, SocialFeed, writeOnce } from "../src/socials.ts";
 import type { AgentId } from "../src/agent-cli.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { picturePrompt, pictureMaker, type PictureMaker } from "../src/social-pictures.ts";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const step of cleanup.splice(0)) step(); });
 
-function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number } = {}) {
+function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number; picture?: PictureMaker | null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "demesne-socials-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const calls: ProviderMessage[][] = [];
@@ -18,6 +20,7 @@ function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?
     agents: () => options.agents ?? ["claude", "codex", "gemini"],
     now: options.now,
     monthlyCalls: options.monthlyCalls,
+    picture: options.picture,
     write: async (messages) => { calls.push(messages); return replies.length ? replies.shift()! : "ok"; },
   });
   return { social: make(), calls, reopen: make };
@@ -124,5 +127,75 @@ describe("writeOnce", () => {
   test("joins the streamed words", async () => {
     async function* stream() { yield { type: "text_delta", delta: "Hello " }; yield { type: "text_delta", delta: "there" }; }
     expect(await writeOnce(() => stream(), [])).toBe("Hello there");
+  });
+});
+
+describe("pictures", () => {
+  test("an agent's post gets a picture of the moment, at most two a day, counted against the cap", async () => {
+    let now = new Date("2026-11-03T09:00:00");
+    const made: string[] = [];
+    const { social } = feed([], { now: () => now, picture: async (agent, post) => { made.push(`${agent}:${post}`); return new Uint8Array([1, 2, 3]); } });
+    const first = (await social.noteAgentTurn("claude", work("s1"), "a", "b"))!;
+    expect(first.picture).toBe(true);
+    expect(existsSync(social.picturePath(first.id)!)).toBe(true);
+    expect([...readFileSync(social.picturePath(first.id)!)]).toEqual([1, 2, 3]);
+    now = new Date("2026-11-03T10:00:00");
+    await social.noteAgentTurn("claude", work("s1"), "c", "d");
+    now = new Date("2026-11-03T11:00:00");
+    const third = (await social.noteAgentTurn("claude", work("s1"), "e", "f"))!;
+    expect(third.picture).toBeUndefined();
+    expect(made).toHaveLength(2);
+    expect(social.spend()).toMatchObject({ on: true, pictures: 2, dollars: 0.08, cap: 10 });
+    // Moments of yours never cost a picture.
+    expect((await social.noteMoment("s9", "Tab names", "/p/demesne-cli"))!.picture).toBeUndefined();
+  });
+
+  test("the cap you set stops pictures before it is passed, and a failed picture isn't counted", async () => {
+    let now = new Date("2026-11-03T09:00:00");
+    let fail = true;
+    const { social } = feed([], { now: () => now, picture: async () => fail ? null : new Uint8Array([9]) });
+    expect(social.setCap(0.05).cap).toBe(0.05);
+    expect((await social.noteAgentTurn("claude", work("s1"), "a", "b"))!.picture).toBeUndefined();
+    expect(social.spend().pictures).toBe(0);
+    fail = false;
+    expect((await social.noteAgentTurn("codex", work("s2"), "a", "b"))!.picture).toBe(true);
+    expect((await social.noteAgentTurn("gemini", work("s3"), "a", "b"))!.picture).toBeUndefined();
+    expect(() => social.setCap(-1)).toThrow();
+    // A new month starts the count again.
+    now = new Date("2026-12-01T09:00:00");
+    expect(social.spend().pictures).toBe(0);
+  });
+
+  test("without an image model the feed says pictures are off", () => {
+    expect(feed([]).social.view().spend.on).toBe(false);
+  });
+
+  test("the picture model gets the agent's face as the reference and a safe, drawn prompt", async () => {
+    const seen: Array<{ url: string; body: unknown }> = [];
+    const make = pictureMaker({ url: "https://images.example/v1/", model: "img-1", apiKey: "k" }, {
+      facePng: async () => new Uint8Array([7]),
+      shrink: async (data) => new Uint8Array([...data, 0]),
+      request: (async (url: string, init: RequestInit) => {
+        seen.push({ url: String(url), body: init.body });
+        return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from([4, 5]).toString("base64") }] }), { status: 200 });
+      }) as unknown as typeof fetch,
+    })!;
+    expect([...(await make("claude", "Fixed the flaky test"))!]).toEqual([4, 5, 0]);
+    expect(seen[0]!.url).toBe("https://images.example/v1/images/edits");
+    expect((seen[0]!.body as FormData).get("prompt")).toContain("Fixed the flaky test");
+    expect(picturePrompt("codex", "x")).toContain("mint-green");
+    expect(picturePrompt("codex", "x")).toContain("no real people");
+  });
+
+  test("a provider without edits gets a plain generation; one that refuses both makes nothing", async () => {
+    const urls: string[] = [];
+    const ok = pictureMaker({ url: "https://i.example", model: "m" }, { facePng: async () => new Uint8Array([1]), shrink: async (data) => data,
+      request: (async (url: string) => { urls.push(String(url)); return String(url).endsWith("/edits") ? new Response("no", { status: 404 }) : new Response(JSON.stringify({ data: [{ b64_json: "AQ==" }] })); }) as unknown as typeof fetch })!;
+    expect([...(await ok("gemini", "x"))!]).toEqual([1]);
+    expect(urls).toEqual(["https://i.example/images/edits", "https://i.example/images/generations"]);
+    const no = pictureMaker({ url: "https://i.example", model: "m" }, { facePng: async () => new Uint8Array([1]), shrink: async (data) => data,
+      request: (async () => new Response("no", { status: 500 })) as unknown as typeof fetch })!;
+    expect(await no("gemini", "x")).toBeNull();
+    expect(pictureMaker({}, { facePng: async () => new Uint8Array(), shrink: async (data) => data })).toBeNull();
   });
 });

@@ -1700,15 +1700,20 @@ try {
   await until(() => threadRows.count().then(count => count === 2), "the chat lists its two threads", 20_000);
   await until(() => page.locator("#thread-pane").isVisible(), "the first thread opens in the right half");
   assert(await page.locator("#app").evaluate(element => element.classList.contains("threads-on")), "the window splits");
-  await until(() => page.locator("#thread-pane .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "the right half shows the first thread");
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "the right half shows the first thread");
   await until(() => page.locator("#thread-pane .th-brief").isVisible(), "the thread opens on its brief, not its prompt");
   await threadRows.nth(1).click();
-  await until(() => page.locator("#thread-pane .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
-  assert(await page.locator("#thread-pane .tp-tab").count() === 2, "the thread side has a tab per thread");
-  await page.locator("#thread-pane .tp-tab").first().click();
-  await until(() => page.locator("#thread-pane .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "a tab switches the right half");
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
+  assert(await page.locator("#thread-tabs .tp-tab").count() === 2, "the top bar has a tab per thread");
+  // The thread tabs live in the top bar over the thread side (pass 131 A):
+  // they start at the split line, and the thread side has no tab row.
+  assert.equal(await page.locator("#thread-pane .tp-tabs").count(), 0, "the thread side keeps no tab row of its own");
+  const [tabsLeft, paneLeft] = await Promise.all([page.locator("#thread-tabs").boundingBox(), page.locator("#thread-pane").boundingBox()]);
+  assert(Math.abs(tabsLeft!.x - paneLeft!.x) <= 2, `the thread tabs start at the split line: ${tabsLeft!.x} vs ${paneLeft!.x}`);
+  await page.locator("#thread-tabs .tp-tab").first().click();
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "a tab switches the right half");
   await page.keyboard.press("Control+]");
-  await until(() => page.locator("#thread-pane .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "Ctrl+] steps to the next thread");
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "Ctrl+] steps to the next thread");
   await until(() => page.locator("#threads-foot .th-status").innerText().then(text => text.includes("working")).catch(() => false), "the line above the composer says one is working");
   // The right half is a chat like the left: the same composer, with the
   // thread's own model chip, and no head bar.
@@ -1716,8 +1721,8 @@ try {
   // No head bar over the thread (pass 130 A): the tab names it, the panel
   // icon at the end of the tabs puts it away.
   assert.equal(await page.locator("#thread-pane .tp-head").count(), 0, "the thread side has no head bar");
-  assert(await page.locator("#thread-pane .tp-hide").isVisible(), "the tabs end with the close icon");
-  assert.match(await page.locator("#thread-pane .tp-tab.on .tp-tab-open").getAttribute("title") ?? "", /thread\/write-the-greeting.*· working/s, "resting on the tab says its branch and state");
+  assert(await page.locator("#thread-tabs .tp-hide").isVisible(), "the tabs end with the close icon");
+  assert.match(await page.locator("#thread-tabs .tp-tab.on .tp-tab-open").getAttribute("title") ?? "", /thread\/write-the-greeting.*· working/s, "resting on the tab says its branch and state");
   await until(() => page.locator("#tp-model").innerText().then(text => text.trim().length > 0), "the thread's composer names its model");
   await page.locator("#tp-model").click();
   await until(() => page.locator("#thread-pane #overlay").isVisible(), "the thread's model chip opens the picker in the right half");
@@ -1747,18 +1752,26 @@ try {
   await merge.click();
   await until(() => page.locator("#threads-foot .th-msg").innerText().then(text => text.includes("Merged all 2")).catch(() => false), "Merge says what it did", 30_000);
   assert(existsSync(join(f.workspace, "threads-a.md")) && existsSync(join(f.workspace, "threads-b.md")), "both threads reached the checkout");
-  // A tab's × deletes a merged thread at once; the right half moves on.
-  await until(() => page.locator("#thread-pane .tp-tab").count().then(count => count === 2), "both merged threads keep their tabs");
-  await page.locator("#thread-pane .tp-tab").first().hover();
-  await page.locator("#thread-pane .tp-tab-x").first().click();
-  await until(() => page.locator("#thread-pane .tp-tab").count().then(count => count === 1), "× deletes the thread", 20_000);
-  await until(() => page.locator("#conversation .th-row").count().then(count => count === 1), "and it leaves the chat's list");
-  await page.locator("#thread-pane .tp-tab-open").first().click();
+  // A tab's × only closes the tab; the next tab takes over, and opening the
+  // thread from the chat's list brings its tab back.
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 2), "both merged threads keep their tabs");
+  await page.locator("#thread-tabs .tp-tab").first().hover();
+  await page.locator("#thread-tabs .tp-tab-x").first().click();
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 1), "× closes the tab");
+  assert.equal(await page.locator("#conversation .th-row").count(), 2, "closing a tab deletes nothing");
+  await page.locator("#conversation .th-row").first().click();
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 2), "opening the thread brings its tab back");
+  // Delete lives on the thread's row in the chat: a merged thread goes at once.
+  await page.locator("#conversation .th-item").first().hover();
+  await page.locator("#conversation .th-del").first().click();
+  await until(() => page.locator("#conversation .th-row").count().then(count => count === 1), "the row's × deletes the thread", 20_000);
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 1), "and its tab goes with it");
+  await page.locator("#thread-tabs .tp-tab-open").first().click();
   await page.keyboard.press("Escape");
   await until(() => page.locator("#thread-pane").isHidden(), "Esc in the thread side puts it away");
   await page.locator("#conversation .th-row").first().click();
   await until(() => page.locator("#thread-pane").isVisible(), "picking the thread opens it again");
-  await page.locator("#thread-pane .tp-hide").click();
+  await page.locator("#thread-tabs .tp-hide").click();
   await until(() => page.locator("#thread-pane").isHidden(), "the panel icon closes the thread side");
   // Switching models resizes the context at once, before the new model's
   // first request.
@@ -1769,7 +1782,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "a thread's own thinking, words and context", "deleting a thread from its tab", "closing the thread side from its tabs"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "a thread's own thinking, words and context", "deleting a thread from its tab", "closing the thread side from its tabs", "thread tabs on the top bar"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

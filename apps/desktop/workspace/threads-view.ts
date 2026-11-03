@@ -18,6 +18,7 @@ export interface ThreadsView {
 const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const button = (action: string, label: string, data: Record<string, unknown>, className = "", disabled = false) =>
   `<button type="button"${disabled ? " disabled" : ""} class="${className}" data-action="${action}" data-args="${esc(JSON.stringify(data))}">${label}</button>`;
+const X = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 const CHECK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
 
 export type ThreadState = "work" | "you" | "ready" | "failed" | "merged";
@@ -65,11 +66,15 @@ function meta(fix: DriveFix): string {
   return "";
 }
 
-export function threadListHTML(view: ThreadsView): string {
+/// The chat's thread list. Each row opens its thread; the × on a row
+/// deletes it (pass 131 A): a merged thread goes at once, one with work on
+/// its branch asks once more, the × turning into "Delete".
+export function threadListHTML(view: ThreadsView, armed: string | null = null): string {
   if (!view.list.length) return "";
   return `<div class="th-label">Threads</div><div class="th-list">${view.list.map((fix) => {
-    const on = !view.closed && view.open === fix.id;
-    return `<button type="button" class="th-row${on ? " on" : ""}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-pressed="${on}" title="${esc(fix.thread?.files.length ? `Claims ${fix.thread.files.join(", ")}` : fix.title)}">${ring(fix)}<span class="th-name">${esc(fix.title)}</span><span class="th-meta">${meta(fix)}</span><span class="th-line">${threadLine(fix)}</span></button>`;
+    const on = !view.closed && view.open === fix.id, merged = fix.status === "applied", sure = merged || armed === fix.id;
+    const del = `<button type="button" class="th-del${armed === fix.id ? " armed" : ""}" data-action="${sure ? "thread-delete" : "thread-delete-arm"}" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Delete ${esc(fix.title)}" title="${merged ? "Delete this thread (its merge stays)" : "Delete this thread and its branch"}"${view.busy ? " disabled" : ""}>${armed === fix.id ? "Delete" : X}</button>`;
+    return `<div class="th-item"><button type="button" class="th-row${on ? " on" : ""}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-pressed="${on}" title="${esc(fix.thread?.files.length ? `Claims ${fix.thread.files.join(", ")}` : fix.title)}">${ring(fix)}<span class="th-name">${esc(fix.title)}</span><span class="th-meta">${meta(fix)}</span><span class="th-line">${threadLine(fix)}</span></button>${del}</div>`;
   }).join("")}</div>`;
 }
 
@@ -104,17 +109,15 @@ export function threadMergeHTML(view: ThreadsView, fix: DriveFix): string {
 
 const PANEL_CLOSE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/><path d="m8 10 2 2-2 2"/></svg>';
 
-/// The thread side's own picker (pass 128 A): a tab per thread, with its
-/// ring, so any thread is one click away. ⌘[ and ⌘] step through them.
-/// The panel icon at the row's end puts the thread side away (pass 130 A).
-/// Each tab's × deletes its thread: a merged one goes at once; one with work
-/// still on its branch asks once more, the × turning into "Delete".
-export function threadTabsHTML(view: ThreadsView, armed: string | null = null): string {
-  return `<div class="tp-tabs" role="tablist" aria-label="Threads">${view.list.map((fix) => {
-    const on = view.open === fix.id, merged = fix.status === "applied", sure = merged || armed === fix.id;
-    const x = `<button type="button" class="tp-tab-x${armed === fix.id ? " armed" : ""}" data-action="${sure ? "thread-delete" : "thread-delete-arm"}" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Delete ${esc(fix.title)}" title="${merged ? "Delete this thread (its merge stays)" : "Delete this thread and its branch"}"${view.busy ? " disabled" : ""}>${armed === fix.id ? "Delete" : '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'}</button>`;
-    return `<div class="tp-tab${on ? " on" : ""}"><button type="button" role="tab" class="tp-tab-open" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(`${fix.title}\n${fix.branch} · ${threadHow(fix)}`)}">${ring(fix)}<span>${esc(fix.title)}</span></button>${x}</div>`;
-  }).join("")}<span class="sp"></span><button type="button" class="tp-hide" data-action="thread-close" aria-label="Close the thread side" title="Close the thread side (Esc)">${PANEL_CLOSE}</button></div>`;
+/// The thread tabs, in the window's top bar over the thread side (pass 131
+/// A), one per thread you haven't closed, with its ring. A tab's × only
+/// closes the tab; the panel icon at the end puts the thread side away.
+/// ⌘[ and ⌘] step through them.
+export function threadTabsHTML(view: ThreadsView, closed: ReadonlySet<string> = new Set()): string {
+  return `<div class="tp-tabs" role="tablist" aria-label="Threads">${view.list.filter((fix) => !closed.has(fix.id)).map((fix) => {
+    const on = view.open === fix.id;
+    return `<div class="tp-tab${on ? " on" : ""}"><button type="button" role="tab" class="tp-tab-open" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(`${fix.title}\n${fix.branch} · ${threadHow(fix)}`)}">${ring(fix)}<span>${esc(fix.title)}</span></button><button type="button" class="tp-tab-x" data-action="thread-tab-close" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Close the ${esc(fix.title)} tab" title="Close this tab">${X}</button></div>`;
+  }).join("")}</div><button type="button" class="tp-hide" data-action="thread-close" aria-label="Close the thread side" title="Close the thread side (Esc)">${PANEL_CLOSE}</button>`;
 }
 
 /// What the orchestrator told the thread, at the top of its chat in place

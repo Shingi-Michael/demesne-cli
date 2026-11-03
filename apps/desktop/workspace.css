@@ -1906,21 +1906,26 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 #thread-pane { display: none; }
 .desktop .live-app.threads-on:not(.paging) #thread-pane:not([hidden]) { position: relative; display: flex; flex-direction: column; flex: none; width: 50%; min-width: 0; border-left: 1px solid var(--hair); background: var(--surface); }
 .desktop .live-app.threads-on:not(.paging) :is(#cards, #pane) { display: none !important; }
-.tp-tabs { display: flex; gap: 4px; padding: 8px 10px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--hair); }
+/* The thread tabs sit in the top bar over the thread side (pass 131 A):
+   placeThreadTabs() sizes the strip so it starts at the split line, where
+   a hairline continues the divider below. */
+#thread-tabs { flex: none; display: flex; align-items: center; gap: 4px; height: 100%; min-width: 0; margin-left: auto; padding-left: 10px; border-left: 1px solid var(--hair); box-sizing: border-box; }
+#thread-tabs[hidden] { display: none; }
+#desktop-toolbar.thread-split header { margin-left: 0; }
+.tp-tabs { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tp-tabs::-webkit-scrollbar { display: none; }
 .tp-tab { position: relative; display: flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 240px; border-radius: 8px; color: var(--t3); font-size: 12.5px; white-space: nowrap; }
 .tp-tab-open { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 5px 4px 5px 10px; color: inherit; font-size: inherit; }
 .tp-tab-open span { overflow: hidden; text-overflow: ellipsis; }
 .tp-tab-x { display: grid; place-items: center; flex: none; width: 20px; height: 20px; margin-right: 4px; border-radius: 6px; color: var(--t4); opacity: 0; }
 .tp-tab-x .ico { width: 12px; height: 12px; }
-.tp-tab:hover .tp-tab-x, .tp-tab.on .tp-tab-x, .tp-tab-x:focus-visible, .tp-tab-x.armed { opacity: 1; }
+.tp-tab:hover .tp-tab-x, .tp-tab.on .tp-tab-x, .tp-tab-x:focus-visible { opacity: 1; }
 .tp-tab-x:hover { background: var(--surface3); color: var(--t1); }
-.tp-tab-x.armed { width: auto; padding: 0 7px; background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); font-size: 11.5px; font-weight: 600; }
+
 .tp-tab:hover { background: var(--tone); color: var(--t1); }
 .tp-tab.on { background: var(--tone2); color: var(--t1); }
 .tp-tab .th-ring { width: 14px; height: 14px; flex: none; }
 .tp-merge-host:empty { display: none; }
-.tp-tabs .sp { flex: 1; min-width: 8px; }
 .tp-hide { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 7px; color: var(--t3); }
 .tp-hide:hover { background: var(--tone2); color: var(--t1); }
 .tp-hide .ico { width: 16px; height: 16px; }
@@ -1959,6 +1964,13 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .th-list { display: flex; flex-direction: column; gap: 2px; }
 .th-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; width: 100%; padding: 8px 10px; border-radius: 10px; text-align: left; transition: background 150ms ease-out; }
 .th-row:hover { background: var(--tone); }
+/* A row's × deletes its thread (pass 131 A); it covers the row's corner mark on hover. */
+.th-item { position: relative; }
+.th-del { position: absolute; right: 8px; top: 8px; display: grid; place-items: center; height: 22px; min-width: 22px; border-radius: 6px; color: var(--t4); background: var(--surface); opacity: 0; }
+.th-del .ico { width: 12px; height: 12px; }
+.th-item:hover .th-del, .th-del:focus-visible, .th-del.armed { opacity: 1; }
+.th-del:hover { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--surface)); }
+.th-del.armed { padding: 0 8px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, var(--surface)); font-size: 11.5px; font-weight: 600; }
 .th-row.on { background: var(--tone2); }
 .th-name { overflow: hidden; color: var(--t1); font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
 .th-meta { display: flex; align-items: center; color: var(--t3); font-size: 12px; white-space: nowrap; }

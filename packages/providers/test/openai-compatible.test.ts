@@ -474,3 +474,19 @@ test("Google's models/ ids are listed by their plain chat name", async () => {
   });
   expect((await provider.listModels()).map((model) => model.id)).toEqual(["gemini-test-flash", "gemini-test-pro"]);
 });
+
+test("running usage on several chunks is reported once, as the last total", async () => {
+  const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+  const body = chunk({ choices: [{ delta: { content: "He" } }], usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 } })
+    + chunk({ choices: [{ delta: { content: "llo" }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 } })
+    + "data: [DONE]\n\n";
+  const provider = new OpenAICompatibleProvider({
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    apiKey: "fixture",
+    fetch: (async () => new Response(body, { headers: { "Content-Type": "text/event-stream" } })) as unknown as typeof fetch,
+  });
+  const events = [];
+  for await (const event of provider.stream({ model: "gemini-test-flash", messages: [{ role: "user", content: "hi" }] }, new AbortController().signal)) events.push(event);
+  const usage = events.filter((event) => event.type === "usage");
+  expect(usage).toEqual([{ type: "usage", usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13 } }]);
+});

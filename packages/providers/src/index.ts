@@ -215,6 +215,9 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
 
     let completed = false;
     let reportedFinishReason: string | undefined;
+    // Gemini attaches its running usage to several chunks: the last one is
+    // the total, so usage is reported once, when the stream completes.
+    let usage: TokenUsage | null = null;
     for await (const data of readEventData(response.body)) {
       if (data === "[DONE]") {
         completed = true;
@@ -246,10 +249,10 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
         if (reportedFinishReason === undefined) yield { type: "finish", reason: finishReason };
         reportedFinishReason = finishReason;
       }
-      const usage = readUsage(value.usage);
-      if (usage) yield { type: "usage", usage };
+      usage = readUsage(value.usage) ?? usage;
     }
     if (!completed) throw new ProviderError("Provider stream ended before the completion marker");
+    if (usage) yield { type: "usage", usage };
   }
 
   private headers(): Record<string, string> {

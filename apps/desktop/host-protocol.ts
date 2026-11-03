@@ -30,7 +30,8 @@ export type DesktopOutput =
   | { kind: "native"; id: number; method: "copy" | "open"; args: { text?: string; path?: string } }
   | { kind: "protocol-error"; error: string };
 
-export const MAX_INPUT_BYTES = 1024 * 1024;
+/// One line from the window: room for a picture request (policy.ts PICTURE_REQUEST_BYTES) and its framing.
+export const MAX_INPUT_BYTES = 33 * 1024 * 1024;
 export function parseDesktopInput(value: unknown): DesktopInput {
   if (!isRecord(value) || !Number.isSafeInteger(value.id) || Number(value.id) <= 0)
     throw new Error("Expected a positive request id");

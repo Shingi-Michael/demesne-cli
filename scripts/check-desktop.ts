@@ -1189,6 +1189,15 @@ try {
   await page.locator("#attach-row .att").hover();
   await page.locator("#attach-row .att-x").click();
   await until(() => page.locator("#attach-row .att").count().then(count => count === 0), "removing the image empties the row");
+  // A big screenshot (noise, ~18 MB as PNG) fits and attaches; the window's request limit used to refuse anything over ~190 KB.
+  const noise = new Uint8Array(3200 * 2000 * 3).map(() => Math.floor(Math.random() * 256));
+  const bigShot = join(f.workspace, "..", "big-shot.png");
+  writeFileSync(bigShot, await sharp(noise, { raw: { width: 3200, height: 2000, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer());
+  await page.locator("#attach-input").setInputFiles(bigShot);
+  await page.locator("#attach-row .att img").waitFor({ timeout: 20_000 });
+  await page.locator("#attach-row .att").hover();
+  await page.locator("#attach-row .att-x").click();
+  await until(() => page.locator("#attach-row .att").count().then(count => count === 0), "removing the big image empties the row");
   await page.locator("textarea").fill("");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(900, 680));
   await until(() => page.evaluate(() => window.innerWidth <= 900), "narrow desktop size");

@@ -175,3 +175,30 @@ test("backup cleanup failure reports committed save/removal so the host can stil
   expect(config.additionalProviders?.google?.apiKey).toBeUndefined();
   expect(readFileSync(`${f.configPath}.bak`, "utf8")).toContain(KEY); // warning is truthful
 });
+test("an unexpected failure names its step and cause without the key", async () => {
+  const f = fixture();
+  const fake = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith("/chat/completions"))
+      return new Response(`data: ${JSON.stringify({ error: { message: `Thought signature missing for ${KEY}` } })}\n\n`, { headers: { "Content-Type": "text/event-stream" } });
+    return f.fake(input, init);
+  }) as unknown as typeof fetch;
+  const connection = new GoogleAIConnection({ configPath: f.configPath, fetch: fake });
+  const error = await connection.save(KEY, "gemini-test-flash", true, "new:google").catch(error => String(error));
+  expect(error).toContain("testing a tool call");
+  expect(error).toContain("Thought signature missing");
+  expect(error).not.toContain(KEY);
+  expect(error).not.toContain("network");
+  expect(existsSync(f.configPath)).toBe(false);
+});
+
+test("a tool call that finishes with stop still passes", async () => {
+  const f = fixture();
+  const fake = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    if (body?.messages?.length === 1)
+      return stream({ tool_calls: [{ id: "call-test", function: { name: "connection_check", arguments: '{"value":"ready"}' } }] }, "stop");
+    return f.fake(input, init);
+  }) as unknown as typeof fetch;
+  const connection = new GoogleAIConnection({ configPath: f.configPath, fetch: fake });
+  expect((await connection.test(KEY, "gemini-test-flash")).message).toContain("passed");
+});

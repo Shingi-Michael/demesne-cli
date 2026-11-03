@@ -12,7 +12,9 @@ import { formatDriveReport, formatThreadReport, splitNextPrompt, type CommandRec
 
 export interface FixHost {
   /// A session rooted at the worktree.
-  startSession(title: string, workspace: string): string;
+  /// `like`: a chat whose model and effort the new one starts on (a thread
+  /// runs on its orchestrator's).
+  startSession(title: string, workspace: string, like?: string): string;
   /// A coding turn with every tool allowed (publishing still asks).
   startTurn(sessionId: string, prompt: string): { turnId: string; done: Promise<void> };
   turn(turnId: string): Turn | null;
@@ -151,6 +153,11 @@ export class DriveFixes {
   }
 
   /// The threads an orchestrator chat started, oldest first.
+  /// Whether a chat is a thread's own chat.
+  isThread(sessionId: string): boolean {
+    return this.fixes.some((fix) => fix.thread && fix.sessionId === sessionId);
+  }
+
   threads(from: string): DriveFix[] {
     const workspace = this.fixes.find((fix) => fix.thread && fix.from === from)?.workspace;
     return workspace ? this.list(workspace).filter((fix) => fix.thread && fix.from === from) : [];
@@ -223,7 +230,9 @@ export class DriveFixes {
       if (!added.ok) throw new Error(`Couldn't create the worktree: ${firstLine(added.err)}`);
       fix.linked = await this.linkDependencies(top.out, path);
       const sub = relative(top.out, workspace);
-      const sessionId = this.host.startSession(title, sub ? join(path, sub) : path);
+      const sessionId = this.host.startSession(title, sub ? join(path, sub) : path, from);
+      // Known as a thread before its first turn runs (it never sees Heartbeat).
+      fix.sessionId = sessionId;
       const { turnId, done } = this.host.startTurn(sessionId, threadPrompt({ ...fix, thread }));
       Object.assign(fix, { sessionId, turnId, status: "running" });
       this.save();
@@ -398,6 +407,13 @@ export class DriveFixes {
 
   async act(id: string, action: DriveFixAction): Promise<DriveFix> {
     const fix = this.get(id);
+    // A merged thread is already off its worktree and branch: deleting it
+    // only takes it off the orchestrator's list.
+    if (fix?.thread && fix.status === "applied" && action === "discard") {
+      fix.status = "discarded";
+      this.save();
+      return fix;
+    }
     if (!fix || !ACTIVE.has(fix.status)) throw new Error("That fix is no longer open.");
     const before = fix.status;
     if (action === "discard") {

@@ -25,7 +25,7 @@ function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string
 export async function fixture(
   processor?: TurnProcessor,
   // `root` and `workspaceName` give screenshots a readable project path.
-  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string } = {},
+  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string; agentCli?: import("../../../daemon/src/agent-cli.ts").AgentCliOptions } = {},
 ) {
   if (options.root) mkdirSync(options.root);
   const root = realpathSync(
@@ -50,6 +50,7 @@ export async function fixture(
       providerVision: options.vision,
       // Heartbeat stays off unless a test brings its own stand-in daemon.
       heartbeat: options.heartbeatSocket ? { socket: options.heartbeatSocket } : { enabled: false },
+      ...(options.agentCli ? { agentCli: options.agentCli } : { agentCli: { which: () => null } }),
       processor: processor ?? {
         providerId: "test",
         modelId: "qwen3.8-27b",

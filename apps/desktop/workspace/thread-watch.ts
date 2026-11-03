@@ -134,6 +134,9 @@ export class ThreadWatch {
         approvals: [...chat.approvals.values()],
         questions: [...chat.questions.values()],
         activeTurnId: chat.active?.id ?? null,
+        model: chat.session.preferredModel ?? null,
+        reasoning: chat.session.preferredReasoning ?? null,
+        provider: chat.provider ?? null,
       } : null,
     };
   }
@@ -153,12 +156,62 @@ export class ThreadWatch {
     this.options.publish();
   }
 
+  /// Stop: the open thread's running turn ends where it is, like Stop in a chat.
+  async cancel() {
+    const fix = this.state.open ? this.fix(this.state.open) : null, turn = this.chat?.active;
+    if (!fix?.sessionId || !turn) return;
+    await this.options.client().cancelTurn(turn.id);
+  }
+
   async approve(id: string, decision: "allow_once" | "deny") {
     const chat = this.chat;
     if (!chat?.approvals.has(id)) throw new Error("This permission is no longer pending.");
     await this.options.client().resolvePermission(id, decision);
     chat.approvals.delete(id);
     this.options.publish();
+  }
+
+  /// The open thread's model and effort, for its next turn; the chat on the
+  /// left keeps its own.
+  async setModel(model: string, reasoning: string | null) {
+    const chat = this.chat;
+    if (!chat || !model) throw new Error("Pick a thread first.");
+    const { session } = await this.options.client().updateSession(chat.session.id, { preferredModel: model, preferredReasoning: reasoning });
+    chat.session.preferredModel = session.preferredModel;
+    chat.session.preferredReasoning = session.preferredReasoning;
+    this.options.publish();
+  }
+
+  /// Merges one ready thread onto your branch.
+  async mergeOne(id: string) {
+    const fix = this.fix(id);
+    if (fix?.status !== "ready") throw new Error("That thread isn't ready to merge.");
+    await this.act(id, async () => {
+      await this.options.client().driveFixAction(fix.id, "apply");
+      this.state.message = { text: `Merged ${fix.title} onto your branch.`, tone: "ok" };
+      this.options.merged();
+    });
+  }
+
+  /// Deletes a thread: a working one stops, its worktree and branch go; a
+  /// merged one only leaves the list. The right half moves to the next one.
+  async deleteThread(id: string) {
+    const fix = this.fix(id);
+    if (!fix) return;
+    await this.act(id, async () => {
+      await this.options.client().driveFixAction(fix.id, "discard");
+      this.state.message = { text: fix.status === "applied" ? `Deleted ${fix.title}. Its merge stays on your branch.` : `Deleted ${fix.title}: its worktree and branch are gone.`, tone: "ok" };
+      if (this.state.open === id) {
+        const rest = this.state.list.filter((item) => item.id !== id);
+        const at = this.state.list.findIndex((item) => item.id === id);
+        const next = rest[Math.min(at, rest.length - 1)];
+        this.stopFollowing();
+        this.state.list = rest;
+        this.state.open = null;
+        if (next) await this.show(next.id);
+        else this.state.closed = true;
+      }
+    });
   }
 
   async stopThread(id: string) {
@@ -197,9 +250,13 @@ export class ThreadWatch {
   async handle(method: string, args: Record<string, unknown>) {
     if (method === "thread-open") return this.show(String(args.id ?? ""));
     if (method === "thread-close") return this.close();
+    if (method === "thread-cancel") return this.cancel();
     if (method === "thread-send") return this.send(String(args.text ?? ""));
     if (method === "thread-approve") return this.approve(String(args.id ?? ""), args.decision === "deny" ? "deny" : "allow_once");
     if (method === "thread-stop") return this.stopThread(String(args.id ?? ""));
+    if (method === "thread-delete") return this.deleteThread(String(args.id ?? ""));
+    if (method === "thread-merge") return this.mergeOne(String(args.id ?? ""));
+    if (method === "thread-model") return this.setModel(String(args.id ?? ""), typeof args.reasoning === "string" ? args.reasoning : null);
     if (method === "threads-merge") return this.mergeAll();
     if (method === "threads-message-close") { this.state.message = null; return this.options.publish(); }
     throw new Error(`Unknown action ${method}`);

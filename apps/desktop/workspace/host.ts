@@ -15,7 +15,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { homedir, userInfo } from "node:os";
-import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted, type HealthResponse } from "@demesne/client";
+import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted, type HealthResponse, type HousedAgent } from "@demesne/client";
 import { DEFAULT_AGENT_LIMITS, loadConfig, parseConfigFile, updateUserConfig } from "@demesne/config";
 import {
   themeByName,
@@ -365,6 +365,7 @@ export class WorkspaceHost {
             createdAt: this.current.session.createdAt,
             autoApprove: this.current.session.autoApprove === true,
             acceptEdits: this.current.session.acceptEdits === true,
+            orchestrate: this.current.session.orchestrate === true,
           }
         : null,
       assistant: this.assistant ? (() => {
@@ -444,6 +445,7 @@ export class WorkspaceHost {
       setup: this.setup?.snapshot() ?? null,
       processes: this.processes,
       agents: this.agents,
+      housed: this.housed,
       connectors: this.connectors,
       queuePosition: this.queuePosition,
       verificationFingerprint: this.verificationFingerprint,
@@ -1060,6 +1062,8 @@ export class WorkspaceHost {
   agents: NearbyAgent[] = [];
   /// MCP servers and whether Heartbeat is on, for the Connectors card.
   connectors: { servers: { name: string; state: "starting" | "ready" | "failed"; tools: number }[]; heartbeat: boolean } = { servers: [], heartbeat: false };
+  /// Agent tools Demesne runs itself, each with its chat in this project.
+  housed: HousedAgent[] = [];
   private agentsTimer: ReturnType<typeof setTimeout> | null = null;
   private agentsStarted = false;
   async refreshAgents() {
@@ -1073,6 +1077,14 @@ export class WorkspaceHost {
         this.publish();
       }
     } catch { /* an older daemon, or Heartbeat is off */ }
+    try {
+      const root = this.current?.session.workspace?.root ?? (this.options.projectless ? "" : this.workspace);
+      const housed = root ? (await this.client.housedAgents(root)).agents : [];
+      if (JSON.stringify(housed) !== JSON.stringify(this.housed)) {
+        this.housed = housed;
+        this.publish();
+      }
+    } catch { /* an older daemon */ }
     try {
       const connectors = await this.client.connectors();
       if (JSON.stringify(connectors) !== JSON.stringify(this.connectors)) {
@@ -1695,6 +1707,15 @@ export class WorkspaceHost {
       await this.select(opened.sessionId, false);
       return this.snapshot();
     }
+    // An agent in the sidebar's Agents list: its chat in this project.
+    if (method === "agent-open") {
+      const root = this.current?.session.workspace?.root ?? this.workspace;
+      const opened = await this.client.openAgent(string(args.id, "agent id", 40), root);
+      this.sessions = await this.client.listSessions();
+      await this.select(opened.session.id, false);
+      void this.refreshAgents();
+      return this.snapshot();
+    }
     if (method === "draft") {
       this.draft = string(args.text, "draft");
       this.restored = false;
@@ -1814,18 +1835,20 @@ export class WorkspaceHost {
     // The composer's mode word: Ask, Accept edits, Plan or Auto, for this chat.
     if (method === "permission-mode") {
       const mode = args.mode;
-      if (mode !== "ask" && mode !== "edits" && mode !== "plan" && mode !== "auto") throw new Error("Invalid mode");
+      if (mode !== "ask" && mode !== "edits" && mode !== "plan" && mode !== "auto" && mode !== "orchestrate") throw new Error("Invalid mode");
       if (!this.current) throw new Error("Choose a session first.");
       const selected = this.current, id = selected.session.id;
-      const patch: { autoApprove?: boolean; acceptEdits?: boolean } = {};
+      const patch: { autoApprove?: boolean; acceptEdits?: boolean; orchestrate?: boolean } = {};
+      if ((selected.session.orchestrate === true) !== (mode === "orchestrate")) patch.orchestrate = mode === "orchestrate";
       if ((selected.session.autoApprove === true) !== (mode === "auto")) patch.autoApprove = mode === "auto";
       if ((selected.session.acceptEdits === true) !== (mode === "edits")) patch.acceptEdits = mode === "edits";
-      if (patch.autoApprove !== undefined || patch.acceptEdits !== undefined) {
+      if (patch.autoApprove !== undefined || patch.acceptEdits !== undefined || patch.orchestrate !== undefined) {
         const result = await this.client.updateSession(id, patch);
         if ((result.session.autoApprove === true) !== (mode === "auto") || (result.session.acceptEdits === true) !== (mode === "edits"))
           throw new Error("The daemon did not apply this mode. Restart Demesne to update the daemon.");
         selected.session.autoApprove = result.session.autoApprove === true;
         selected.session.acceptEdits = result.session.acceptEdits === true;
+        selected.session.orchestrate = result.session.orchestrate === true;
       }
       this.plans.set(id, mode === "plan");
       if (this.current === selected) this.planOnly = mode === "plan";

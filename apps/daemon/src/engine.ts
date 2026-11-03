@@ -82,6 +82,8 @@ interface AgentEngineOptions extends AgentConfig {
   /// Whether a chat is the always-on assistant's: it gets the assistant's
   /// own tools and instructions instead of the coding agent's.
   assistantChat?: (sessionId: string) => boolean;
+  /// Tools a chat never sees (a thread: Heartbeat and starting threads).
+  hiddenTools?: (sessionId: string) => ReadonlySet<string> | null;
   /// The clock for the assistant's message stamps (tests set it).
   now?: () => Date;
 }
@@ -195,7 +197,7 @@ export class AgentEngine {
   /// After a chat's first turn, its model names it in a few words (chat-name.ts):
   /// only chats a person is in, only once, and never over a name given meanwhile.
   private async nameChat(turnId: string, sessionId: string, inference: TurnInference) {
-    if (!this.options.nameChats) return;
+    if (!this.options.nameChats || inference.external) return;
     const turn = this.store.getTurn(turnId), session = this.store.getSession(sessionId);
     if (!turn || !session || turn.status !== "completed" || turn.kind || turn.fromDrive || turn.fromRoutine || turn.permissionMode !== "ask") return;
     if (this.options.assistantChat?.(sessionId) || session.turns.filter((item) => !item.kind).length !== 1) return;
@@ -251,6 +253,11 @@ export class AgentEngine {
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
         FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+    // Orchestrate mode: the chat reads, plans and runs threads; the threads change the files.
+    const orchestrating = !themefy && !assistant && Boolean(session.workspace) && this.store.isSessionOrchestrate(session.id);
+    if (orchestrating) for (let index = definitions.length - 1; index >= 0; index--) if (!ORCHESTRATE_TOOL_NAMES.has(definitions[index]!.name)) definitions.splice(index, 1);
+    const hidden = this.options.hiddenTools?.(session.id);
+    if (hidden?.size) for (let index = definitions.length - 1; index >= 0; index--) if (hidden.has(definitions[index]!.name)) definitions.splice(index, 1);
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
     // Turns swapped for notes can be brought back whole, one at a time.
@@ -288,7 +295,7 @@ export class AgentEngine {
       const historyMessages = forgetOldReadsInHistory(history.map((entry) => forgetFoundrySources(entry.messages))).flat();
       const systemPrompt = themefy ? THEMEFY_PROMPT : assistant ? assistantSystemPrompt({ home: session.workspace?.root, definitions, planOnly: turn.planOnly })
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
-        planOnly: turn.planOnly, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
+        planOnly: turn.planOnly, orchestrate: orchestrating, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         attended: turn.permissionMode === "ask" && !turn.fromDrive && !turn.fromRoutine, providerVision: this.options.providerVision, configured: this.configuredSystemPrompt, sessionContext: this.options.sessionContext?.(session.id) ?? undefined });
       const unplannedMessages: ProviderMessage[] = [
         { role: "system", content: systemPrompt + (noting ? NOTE_INSTRUCTION : "") + (finalizing
@@ -447,7 +454,7 @@ export class AgentEngine {
           if (!signal.aborted && roundText.length === 0 && assembled.size === 0 && isProviderDropped(error)) {
             // The assistant's chat runs on its own model only: its reading
             // of your files never continues on another provider.
-            const next = this.options.assistantChat?.(turn.sessionId) ? null : this.options.fallbackInference?.(inference, triedProviders) ?? null;
+            const next = inference.external || this.options.assistantChat?.(turn.sessionId) ? null : this.options.fallbackInference?.(inference, triedProviders) ?? null;
             if (next && !triedProviders.includes(next.providerId)) {
               const reason = error instanceof Error ? error.message : String(error);
               if (!(await this.continueElsewhere(turnId, turn.permissionMode, providerCallId, inference, next, signal))) {
@@ -1116,7 +1123,7 @@ function isContextOverflow(error: unknown): boolean {
 
 /// How answers are displayed: Demesne renders Markdown in the desktop app's conversation column, so the
 /// model formats for that instead of for a web chat.
-export const ANSWER_FORMAT_GUIDANCE = "Answers are shown as Markdown in the Demesne desktop app, in a conversation column about 90 characters wide. Rendered: headings, bold, italic, `code`, fenced code blocks with a language, lists (nested, numbered, - [ ] tasks), block quotes, links, and tables. Lead with the outcome. Use short paragraphs and lists; headings only for longer answers. Use a table only to compare items across a few attributes: at most 5 short columns, no paragraphs in cells, otherwise use a list. Keep file paths and commands in `code`. No emoji or decorative rules.";
+export const ANSWER_FORMAT_GUIDANCE = "Answers are shown as Markdown in the Demesne desktop app, in a conversation column about 90 characters wide. Rendered: headings, bold, italic, `code`, fenced code blocks with a language, lists (nested, numbered, - [ ] tasks), block quotes, links, tables, and LaTeX math. Write every formula as math, never in a code block or with Unicode sub/superscripts: $x_i$ inline, and $$ … $$ on its own lines for a formula that stands alone. Lead with the outcome. Use short paragraphs and lists; headings only for longer answers. Use a table only to compare items across a few attributes: at most 5 short columns, no paragraphs in cells, otherwise use a list. Keep file paths and commands in `code`. No emoji or decorative rules.";
 
 /// Foundry in a chat, in one breath: the tool descriptions carry the rules,
 /// so this only says when to reach for it and how the preview works. It goes
@@ -1133,7 +1140,7 @@ export const FOUNDRY_GUIDANCE = `Foundry (foundry_save) is how you show the pers
 export const FOUNDRY_UNATTENDED_GUIDANCE = `Foundry (foundry_save) makes pages the person can look at, but nobody is watching this turn (Drive, a routine or mail): make one only when the task asks for a page, a mockup or a design. ${FOUNDRY_HOW}`;
 
 export function agentSystemPrompt(options: { workspaceRoot?: string; definitions: ProviderToolDefinition[]; content?: string;
-  planOnly?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean; configured?: string; sessionContext?: string;
+  planOnly?: boolean; orchestrate?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean; configured?: string; sessionContext?: string;
   /// Someone is at the window: a chat turn, not Drive, a routine or mail.
   attended?: boolean }): string {
   const base = options.configured?.trim() || defaultSystemPrompt(options.workspaceRoot, options.autoApprove === true && !options.planOnly);
@@ -1142,6 +1149,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
     : options.definitions.some((tool) => tool.name === "view_image")
       ? "\nImage tools can save images to the session, but this provider has visual inputs disabled. Do not claim to have inspected image pixels; use browser text/DOM results for inspection." : "");
   const guidance = [ANSWER_FORMAT_GUIDANCE, turnToolGuidance(options.content ?? ""), planModeGuidance(options.planOnly === true),
+    options.orchestrate ? ORCHESTRATE_GUIDANCE : null,
     options.definitions.some((tool) => tool.name === "foundry_save")
       ? options.attended === false ? FOUNDRY_UNATTENDED_GUIDANCE : FOUNDRY_GUIDANCE
       : null,
@@ -1193,6 +1201,13 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   // may not be initialised yet while this set is built.
   "subagent",
 ]);
+
+/// Orchestrate mode: reading, planning and the threads. No edits, no commands.
+export const ORCHESTRATE_TOOL_NAMES = new Set([
+  "list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history",
+  "session_tools", "ask_user", "subagent", "start_threads", "message_thread",
+]);
+const ORCHESTRATE_GUIDANCE = "Orchestrate mode: you are this project's orchestrator. You never change files or run commands yourself; threads do all the work. Read and plan, then hand the work out with start_threads (each thread a clear brief and the files it may change), pass the person's rules, corrections and answers to a thread with message_thread, and read the reports as they come back. When the person asks for a change, start or message a thread rather than explaining how they could do it. Only the person merges threads.";
 
 export function planModeDefinitions(
   definitions: ProviderToolDefinition[],

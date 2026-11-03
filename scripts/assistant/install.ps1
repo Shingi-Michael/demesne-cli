@@ -1,6 +1,6 @@
 # Installs the assistant's two always-on programs for your Windows user: the
 # model (llama-server) and Demesne's daemon. Each becomes a scheduled task
-# that starts hidden when you log in and restarts its program if it exits.
+# that starts with no window when you log in and restarts its program if it exits.
 # Run it from the repository in PowerShell:
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\assistant\install.ps1 -Model C:\models\Qwen3.8-27B-Q5_K_M.gguf
@@ -98,8 +98,13 @@ foreach ($task in $tasks) {
   $argsFile = Join-Path $state "$($task.Name).args"
   Set-Content -LiteralPath $argsFile -Value (@("# Arguments for $($task.Program)") + $task.Args)
   $log = Join-Path $state "$($task.Name).log"
-  $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
-    "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$keepRunning`" " +
+  # A headless console host. With Windows Terminal as the default terminal
+  # (Windows 11's "Let Windows decide"), a plain powershell.exe task is
+  # handed to Terminal as a tab even with -WindowStyle Hidden, and closing
+  # that Terminal window sends Ctrl+C to every task at once. conhost
+  # --headless keeps the task out of Terminal, with no window at all.
+  $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument (
+    "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$keepRunning`" " +
     "-Program `"$($task.Program)`" -ArgsFile `"$argsFile`" -Log `"$log`"")
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   # No time limit (the default stops a task after three days), and keep

@@ -2123,3 +2123,6 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-empty { color: var(--t3); font-size: 13px; }
 .td-empty .td-faces { display: flex; gap: 6px; margin: 6px 0 10px; }
 .td-error { color: var(--bad, #ec8b80); font-size: 12.5px; }
+/* Agent socials step 2: pictures of their day. */
+.td-pic { display: block; width: 100%; aspect-ratio: 1; border-radius: 12px; object-fit: cover; background: var(--tone); }
+.td-pic-wait { animation: td-wait 1.6s ease-in-out infinite; }

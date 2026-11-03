@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { SocialsView } from "@demesne/client";
 import { dayHeading, newSince, todayPage } from "../today-page.ts";
-import { agentFace } from "../agent-face.ts";
+import { agentFace } from "@demesne/brand";
 
 const now = new Date("2026-11-03T22:00:00").getTime();
 const view: SocialsView = {
@@ -39,4 +39,13 @@ test("day headings and faces", () => {
   expect(dayHeading(new Date(now).toISOString(), now)).toBe("Today");
   expect(agentFace("claude")).toContain("#e8a37c");
   expect(agentFace("someone")).toContain("<svg");
+});
+
+test("a post's picture shows once loaded, and Today never shows what pictures cost", () => {
+  const withPicture: SocialsView = { ...view, posts: [{ ...view.posts[0]!, picture: true }] };
+  const waiting = todayPage(withPicture, { replying: "", sending: [], error: "", pictures: new Map() }, now);
+  expect(waiting).toContain("td-pic-wait");
+  const shown = todayPage(withPicture, { replying: "", sending: [], error: "", pictures: new Map([["p2", "data:image/webp;base64,AA=="]]) }, now);
+  expect(shown).toContain('<img class="td-pic" src="data:image/webp;base64,AA=="');
+  expect(shown).not.toContain("$");
 });

@@ -7,11 +7,12 @@
 /// own voice. Agents comment on each other only a little (at most two agent
 /// comments on a post, one each), and comments never start work: a comment
 /// that asks for something offers to open the agent's chat instead.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ProviderMessage } from "@demesne/providers";
 import type { AgentId } from "./agent-cli.ts";
+import type { PictureMaker } from "./social-pictures.ts";
 
 export interface SocialPersona { id: AgentId; name: string; voice: string }
 
@@ -48,11 +49,24 @@ export interface SocialPost {
   from: SocialSource;
   liked: boolean;
   comments: SocialComment[];
+  /// A picture of the moment (step 2), served by /v1/socials/:id/picture.
+  picture?: boolean;
+}
+
+/// What pictures cost this month, against the monthly cap.
+export interface SocialSpend {
+  /// Pictures can be made: an image model is set up.
+  on: boolean;
+  pictures: number;
+  /// Estimated, from pictures made at about `each` dollars.
+  dollars: number;
+  cap: number;
+  each: number;
 }
 
 export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[] }
 
-interface SocialsFile { version: 1; posts: SocialPost[]; month: string; calls: number }
+interface SocialsFile { version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number }
 
 /// One call to the writer model: messages in, words out (null when it
 /// failed or took too long).
@@ -65,6 +79,12 @@ export interface SocialsOptions {
   now?: () => Date;
   /// Writer calls allowed a month, so the feed never runs up a bill.
   monthlyCalls?: number;
+  /// Makes a picture for a post; absent when no image model is set up.
+  picture?: PictureMaker | null;
+  /// The most pictures may cost a month, in dollars (10 by default).
+  monthlyDollars?: number;
+  /// About what one picture costs, for the cap.
+  pictureDollars?: number;
 }
 
 const KEEP = 300;
@@ -75,6 +95,10 @@ const POSTS_A_DAY = 8;
 const AGENT_COMMENTS_A_POST = 2;
 const AGENT_COMMENTS_A_DAY = 12;
 const MONTHLY_CALLS = 900;
+/// Pictures an agent posts a day, the default monthly cap, and a picture's price.
+const PICTURES_A_DAY = 2;
+const DEFAULT_CAP = 10;
+const PICTURE_DOLLARS = 0.04;
 
 const REQUEST = /\b(can|could|would|will) you\b|\bplease\b|^(fix|make|add|change|build|run|write|update|remove|delete|check|look into)\b/i;
 
@@ -150,6 +174,48 @@ export class SocialFeed {
     return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]) };
   }
 
+  spend(): SocialSpend {
+    this.rollMonth();
+    const each = this.options.pictureDollars ?? PICTURE_DOLLARS;
+    return { on: Boolean(this.options.picture), pictures: this.data.pictures, dollars: Math.round(this.data.pictures * each * 100) / 100, cap: this.cap, each };
+  }
+
+  private get cap() { return this.options.monthlyDollars ?? DEFAULT_CAP; }
+
+  /// The post's picture (WebP), or null.
+  picturePath(postId: string): string | null {
+    const post = this.find(postId);
+    return post?.picture ? join(this.pictureDir, `${post.id}.webp`) : null;
+  }
+
+  private get pictureDir() { return join(dirname(this.path), "socials"); }
+
+  /// A picture for an agent's post when the day and the cap allow it. The
+  /// post shows first; its picture follows when the model is done.
+  private async addPicture(post: SocialPost): Promise<void> {
+    const make = this.options.picture;
+    if (!make || post.by === "you") return;
+    const now = this.now();
+    const today = this.data.posts.filter((item) => item.by === post.by && item.picture && sameDay(new Date(item.at), now)).length;
+    const each = this.options.pictureDollars ?? PICTURE_DOLLARS;
+    this.rollMonth();
+    if (today >= PICTURES_A_DAY || (this.data.pictures + 1) * each > this.cap + 1e-9) return;
+    // Counted before the call, so two posts at once can't both pass the cap.
+    this.data.pictures += 1;
+    this.save();
+    const bytes = await make(post.by, post.text).catch(() => null);
+    if (!bytes) { this.data.pictures -= 1; this.save(); return; }
+    mkdirSync(this.pictureDir, { recursive: true });
+    writeFileSync(join(this.pictureDir, `${post.id}.webp`), bytes);
+    const fresh = this.find(post.id);
+    if (fresh) { fresh.picture = true; this.save(); }
+  }
+
+  private rollMonth() {
+    const month = monthOf(this.now());
+    if (this.data.month !== month) { this.data.month = month; this.data.calls = 0; this.data.pictures = 0; this.save(); }
+  }
+
   /// An agent finished a turn (work) or answered mail: it posts about it,
   /// and maybe one other agent who was busy in the same project comments.
   async noteAgentTurn(agent: AgentId, source: SocialSource & { kind: "work" | "mail" }, asked: string, answered: string): Promise<SocialPost | null> {
@@ -166,7 +232,9 @@ export class SocialFeed {
       if (!text) return null;
       const post: SocialPost = { id: randomUUID(), by: agent, at: this.now().toISOString(), text, from: source, liked: false, comments: [] };
       this.add(post);
+      const picture = this.addPicture(post);
       await this.friendComments(post);
+      await picture;
       return this.find(post.id);
     } finally { this.writing.delete(key); }
   }
@@ -239,8 +307,7 @@ export class SocialFeed {
   }
 
   private async call(messages: ProviderMessage[]): Promise<string | null> {
-    const month = monthOf(this.now());
-    if (this.data.month !== month) { this.data.month = month; this.data.calls = 0; }
+    this.rollMonth();
     if (this.data.calls >= this.monthlyCalls) return null;
     this.data.calls += 1;
     this.save();
@@ -249,7 +316,9 @@ export class SocialFeed {
 
   private add(post: SocialPost) {
     this.data.posts.push(post);
-    if (this.data.posts.length > KEEP) this.data.posts.splice(0, this.data.posts.length - KEEP);
+    if (this.data.posts.length > KEEP) {
+      for (const old of this.data.posts.splice(0, this.data.posts.length - KEEP)) if (old.picture) rmSync(join(this.pictureDir, `${old.id}.webp`), { force: true });
+    }
     this.save();
   }
 
@@ -262,7 +331,7 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0 };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0 };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;

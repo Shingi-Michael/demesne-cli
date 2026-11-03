@@ -3,7 +3,7 @@
 /// mail, your own chats as moments, likes and comments. Each post is tagged
 /// with what it came from, and the tag opens that chat.
 import type { SocialPost, SocialsView } from "@demesne/client";
-import { agentFace } from "./agent-face.ts";
+import { agentFace } from "@demesne/brand";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -16,6 +16,8 @@ export interface TodayUi {
   /// Posts waiting on an agent's answer to your comment.
   sending: string[];
   error: string;
+  /// Pictures loaded so far, as data URLs by post id.
+  pictures?: Map<string, string>;
 }
 
 const NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini", you: "You" };
@@ -49,7 +51,9 @@ function postHtml(post: SocialPost, view: SocialsView, ui: TodayUi): string {
   const reply = btn("today-reply", "Comment", { id: post.id }, "td-act");
   const field = ui.replying === post.id
     ? `<form class="td-field" data-id="${h(post.id)}"><input name="text" maxlength="1000" autocomplete="off" placeholder="${h(moment ? "Say something about it…" : `Comment to ${whoName(post.by, view)}…`)}" aria-label="Comment"></form>` : "";
-  return `<article class="td-post${moment ? " td-is-moment" : ""}" data-post="${h(post.id)}">${head}${body}${from}<div class="td-acts">${like}${reply}</div>${comments}${sending}${field}</article>`;
+  const src = post.picture ? ui.pictures?.get(post.id) : undefined;
+  const picture = post.picture ? (src ? `<img class="td-pic" src="${h(src)}" alt="${h(`${whoName(post.by, view)}: ${post.text}`)}">` : `<div class="td-pic td-pic-wait" aria-hidden="true"></div>`) : "";
+  return `<article class="td-post${moment ? " td-is-moment" : ""}" data-post="${h(post.id)}">${head}${picture}${body}${from}<div class="td-acts">${like}${reply}</div>${comments}${sending}${field}</article>`;
 }
 
 export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now()): string {

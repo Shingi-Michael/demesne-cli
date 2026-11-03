@@ -2116,6 +2116,7 @@ export class WorkspaceHost {
     // Today: the agents' feed (agent socials).
     if (method === "socials") return await this.client.socials();
     if (method === "socials-like") return (await this.client.likePost(string(args.id, "post", 200), args.liked !== false)).post;
+    if (method === "socials-picture") { const picture = await this.client.socialPicture(string(args.id, "post", 200)); return `data:${picture.mimeType};base64,${picture.data}`; }
     if (method === "socials-comment") return (await this.client.commentOnPost(string(args.id, "post", 200), string(args.text, "comment", 1000))).post;
     if (method === "routines") return (await this.client.routines()).routines;
     if (method === "routine-add") {

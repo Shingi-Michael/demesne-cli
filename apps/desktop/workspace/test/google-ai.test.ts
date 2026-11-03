@@ -71,12 +71,14 @@ test("only an explicit save stores a checked model and preserves other providers
   expect(readFileSync(`${f.configPath}.bak`, "utf8")).not.toContain(KEY);
 });
 
-test("an empty setup can become the primary; prefixed catalog IDs survive model filtering", async () => {
+test("an empty setup can become the primary; prefixed catalog IDs are chatted and saved by their plain name", async () => {
   const f = fixture({ prefixed: true });
+  expect((await f.connection.discover(KEY)).models.map(model => model.id)).toEqual(["gemini-test-flash"]);
   await f.connection.save(KEY, "models/gemini-test-flash", true, "new:google");
+  expect(f.requests.filter(r => r.body).every(r => r.body.model === "gemini-test-flash")).toBe(true);
   const config = loadConfig({ userConfigPath: f.configPath, includeProject: false, env: {} }).config;
-  expect(config.provider.model).toBe("models/gemini-test-flash");
-  expect(config.provider.allowedModels).toEqual(["models/gemini-test-flash"]);
+  expect(config.provider.model).toBe("gemini-test-flash");
+  expect(config.provider.allowedModels).toEqual(["gemini-test-flash"]);
 });
 
 test("a model that lists successfully but fails tool continuity cannot be saved", async () => {

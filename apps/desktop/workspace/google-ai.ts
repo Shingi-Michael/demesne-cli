@@ -35,7 +35,7 @@ function safeError(error: unknown, signal: AbortSignal, key = "", step = "connec
     if (error.status === 400) return new Error("Google rejected this key or model request. If Check key works, try another model: this build may not support its tool metadata.");
     if (error.status === 403) return new Error("Google denied access. Check the key's API restrictions, project permissions and regional availability.");
     if (error.status === 429) return new Error("Google quota or rate limit reached. Check AI Studio billing and limits, then retry.");
-    if (error.status === 404) return new Error("This Google model is no longer available. Check the key again to refresh models.");
+    if (error.status === 404) return new Error(`Google answered "not found" while ${step}. Check the key again to refresh models, or pick another model. Nothing was saved.`);
     if (error.status && error.status >= 500) return new Error("Google is temporarily unavailable. Try again shortly.");
     // Our own fixed wording about a malformed reply (never upstream text):
     // say what went wrong instead of blaming the network.
@@ -102,7 +102,9 @@ export class GoogleAIConnection {
     this.step = "matching models";
     const compatible = new Map((await this.adapter(key).listModels(signal)).filter(model => /^(?:models\/)?gemini-[a-z0-9._-]+$/.test(model.id)).map(model => [modelId(model.id), model.id]));
     signal.throwIfAborted();
-    const available = [...models.values()].filter(model => compatible.has(model.id)).map(model => ({ ...model, id: compatible.get(model.id)! })).sort((a, b) => a.id.localeCompare(b.id));
+    // Chat requests use the plain "gemini-…" name: Google's /chat/completions
+    // answers 404 for the "models/gemini-…" form its own /models list returns.
+    const available = [...models.values()].filter(model => compatible.has(model.id)).sort((a, b) => a.id.localeCompare(b.id));
     if (!available.length) fail("This key exposes no compatible Gemini chat models. Check the project and API access in AI Studio.");
     return { models: available };
   }
@@ -148,7 +150,7 @@ export class GoogleAIConnection {
   }
   private async checked(key: string, id: unknown, signal: AbortSignal) {
     const { models } = await this.catalog(key, signal);
-    const selected = models.find(model => model.id === id);
+    const selected = models.find(model => model.id === modelId(id));
     if (!selected) fail("Choose a model returned by Check key.");
     await this.probe(key, selected!, signal);
     signal.throwIfAborted();

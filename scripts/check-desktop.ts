@@ -1649,6 +1649,9 @@ try {
   const stretch = page.locator("#stage .steps .explored.stretch").last();
   await until(() => stretch.locator("summary .verb").innerText().then(text => text === "Read 3 files").catch(() => false), "three finished reads fold into one line", 20_000);
   assert.equal(await page.locator("#stage .steps > .tool-row", { hasText: "read_files" }).count(), 0, "no row names the read tool");
+  // The folded line is one line: icon, words and time in a row, not stacked
+  // and centred (a stray rule once made the summary a column).
+  assert.deepEqual(await stretch.locator("summary").evaluate(summary => { const style = getComputedStyle(summary); return [style.flexDirection, style.borderLeftWidth]; }), ["row", "0px"], "the folded line sits in one row");
   assert.equal(await stretch.locator(".tool-row").count(), 2, "the stretch keeps its two steps");
   assert(!(await stretch.locator(".tool-row").first().isVisible()), "the steps wait folded");
   await stretch.locator("summary").click();

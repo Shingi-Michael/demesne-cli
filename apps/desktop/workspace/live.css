@@ -315,7 +315,11 @@
   font-size: 13px;
   line-height: 20px;
 }
-.explored > summary,
+.explored > summary {
+  cursor: pointer;
+  color: var(--secondary);
+  list-style: none;
+}
 .explored > div {
   border-left: 1px solid #24343f;
   padding-left: 14px;

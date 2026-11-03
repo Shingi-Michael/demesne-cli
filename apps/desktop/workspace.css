@@ -1493,7 +1493,7 @@ html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notc
 html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 /* The tab paints over the panel's top hairline. No lower radius or underline
    cuts the selected tab off from the conversation. */
-.bar-tab > button[role="tab"]:focus-visible, .bar-tab-close:focus-visible, .bar-tab-new:focus-visible { outline: 2px solid var(--acc); outline-offset: -3px; }
+#workspace-tabs [role="tab"]:focus-visible, .bar-tab-close:focus-visible, .bar-tab-new:focus-visible { outline: 2px solid var(--acc); outline-offset: -3px; }
 @media (max-width: 720px) { .bar-tab { flex-basis: 152px; } }
 @media (prefers-reduced-motion: no-preference) { .bar-tab { transition: color 160ms var(--ease, ease); } }
 .bar-tab.dragging { opacity: 0.45; }
@@ -2049,3 +2049,15 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .sidebar-housed-row small { margin-left: auto; color: var(--t3); font-size: 11px; }
 .sidebar-housed-row .sidebar-session-mark { margin-left: auto; }
 .sidebar-housed-row .sidebar-session-mark + small { margin-left: 0; }
+
+/* API credentials stay in a stable form, outside Settings' HTML snapshots. */
+.st-google { display: grid; gap: 12px; max-width: 560px; padding: 8px 0; }
+.st-google > label { display: grid; gap: 8px; color: var(--t2); font-size: 12px; }
+.st-google input[type="password"], .st-google select { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--hair2); border-radius: var(--r-sm); background: var(--surface); color: var(--t1); font: inherit; }
+.st-google input:focus-visible, .st-google select:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.st-google .st-google-consent { display: flex; align-items: flex-start; gap: 8px; }
+.st-google-consent input { flex-shrink: 0; }
+.st-google .st-hint { margin: 0; }
+.st-google-actions { display: flex; flex-wrap: wrap; gap: 16px; }
+.st-google > button { justify-self: start; }
+.st-google button:disabled { opacity: .45; cursor: default; }

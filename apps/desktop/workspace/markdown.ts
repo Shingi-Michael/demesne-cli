@@ -98,7 +98,7 @@ function decorate(parsed: string): string {
   for (const element of wrapper.querySelectorAll<HTMLElement>("[data-math]")) {
     const display = element.dataset.display === "1";
     // A formula KaTeX cannot parse stays readable as its source.
-    katex.render(element.dataset.math ?? "", element, { displayMode: display, throwOnError: false, output: "html", strict: "ignore", trust: false });
+    katex.render(element.dataset.math ?? "", element, { displayMode: display, throwOnError: false, output: "htmlAndMathml", strict: "ignore", trust: false });
   }
   decorateTables(wrapper);
   for (const block of wrapper.querySelectorAll("pre")) {
@@ -174,7 +174,9 @@ function wrapFades(nodes: ChildNode[], fades: Fade[], now: number) {
   for (const text of texts) {
     const length = text.data.length, from = offset;
     offset += length;
-    if (!length) continue;
+    // Keep KaTeX's visual layout and semantic MathML intact. Its text still
+    // contributes to offsets, but must never receive HTML animation wrappers.
+    if (!length || text.parentElement?.closest(".math")) continue;
     // Cut this text node where fades begin, then wrap each piece that fades.
     let piece = text, pieceAt = from;
     for (let i = 0; i < fades.length; i++) {

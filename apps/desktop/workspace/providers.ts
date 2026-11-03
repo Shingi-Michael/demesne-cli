@@ -1,4 +1,5 @@
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
+import { GOOGLE_AI_LABEL, isGoogleAI, scrubGoogleBackup } from "./google-ai.ts";
 import { CodexAuth } from "@demesne/codex-auth";
 import { loadConfig, updateUserConfig, type ProviderConfig } from "@demesne/config";
 import { configureChatGPT, connectChatGPT } from "@demesne/setup/chatgpt-auth.ts";
@@ -15,7 +16,7 @@ export interface ProviderEntry {
   /// / "new:chatgpt" / "new:openrouter" for a provider not configured yet.
   key: string;
   label: string;
-  kind: "codex" | "chatgpt" | "openrouter" | "local" | "api-key";
+  kind: "codex" | "chatgpt" | "openrouter" | "google" | "local" | "api-key";
   status: "signed-in" | "signed-out" | "local" | "key";
   detail: string;
   /// The provider serving the selected model.
@@ -34,7 +35,7 @@ export class ProviderAccounts {
   /// The key being signed in, while its browser flow is open.
   signingIn: string | null = null;
   private abort: AbortController | null = null;
-  constructor(private readonly options: { configPath: string; dataDirectory: string; accountDataDirectory?: string; open: (url: string) => Promise<void>; fetch?: typeof fetch; codexAuth?: () => CodexAccountAuth }) {}
+  constructor(private readonly options: { configPath: string; dataDirectory: string; accountDataDirectory?: string; open: (url: string) => Promise<void>; fetch?: typeof fetch; codexAuth?: () => CodexAccountAuth; scrubGoogleBackup?: typeof scrubGoogleBackup }) {}
 
   private config() { return loadConfig({ userConfigPath: this.options.configPath, includeProject: false, env: {} }).config; }
   private auth() { return new ChatGPTAuth(this.options.accountDataDirectory ?? this.options.dataDirectory, { fetch: this.options.fetch }); }
@@ -57,7 +58,7 @@ export class ProviderAccounts {
           ? { key, label: CODEX_ACCOUNT_LABEL, kind: "codex", status: "signed-in", detail: `Signed in${codex.email ? ` as ${codex.email}` : ""}${codex.planType ? ` · ${codex.planType}` : ""} · uses your Codex plan`, active }
           : { key, label: CODEX_ACCOUNT_LABEL, kind: "codex", status: "signed-out", detail: "Signed out · uses your Codex plan", active };
       }
-      const label = settings.auth === "chatgpt" ? "ChatGPT" : settings.id ?? (isOpenRouter(settings) ? "OpenRouter" : "OpenAI-compatible");
+      const label = settings.auth === "chatgpt" ? "ChatGPT" : settings.id ?? (isGoogleAI(settings) ? GOOGLE_AI_LABEL : isOpenRouter(settings) ? "OpenRouter" : "OpenAI-compatible");
       const active = label === activeProvider;
       if (settings.auth === "chatgpt") {
         const account = accounts.find((item) => item.id === settings.authProfile);
@@ -65,6 +66,7 @@ export class ProviderAccounts {
           ? { key, label, kind: "chatgpt", status: "signed-in", detail: `Signed in as ${account.email ?? account.label}`, active }
           : { key, label, kind: "chatgpt", status: "signed-out", detail: "Signed out", active };
       }
+      if (isGoogleAI(settings)) return { key, label: settings.id ?? GOOGLE_AI_LABEL, kind: "google", status: settings.apiKey ? "signed-in" : "signed-out", detail: settings.apiKey ? `API key saved locally · ${settings.model}` : "No saved API key", active };
       if (isOpenRouter(settings)) return settings.apiKey
         ? { key, label, kind: "openrouter", status: "signed-in", detail: "Signed in", active }
         : { key, label, kind: "openrouter", status: "signed-out", detail: "Signed out", active };
@@ -77,10 +79,12 @@ export class ProviderAccounts {
       entries.push({ key: "new:chatgpt", label: "ChatGPT", kind: "chatgpt", status: "signed-out", detail: "Not set up · metered as credits", active: false });
     if (!entries.some((entry) => entry.kind === "openrouter"))
       entries.push({ key: "new:openrouter", label: "OpenRouter", kind: "openrouter", status: "signed-out", detail: "Not set up · hosted models", active: false });
+    if (!entries.some(entry => entry.kind === "google"))
+      entries.push({ key: "new:google", label: GOOGLE_AI_LABEL, kind: "google", status: "signed-out", detail: "Gemini models · test a key without saving it", active: false });
     return entries;
   }
 
-  async signOut(key: string): Promise<{ label: string; revoked?: boolean }> {
+  async signOut(key: string): Promise<{ label: string; revoked?: boolean; warning?: string }> {
     const settings = this.configured().find(([name]) => name === key)?.[1];
     if (!settings) throw new Error("That provider isn't configured.");
     if (settings.auth === "codex") { await this.codexAuth().logout(); return { label: "Codex" }; }
@@ -88,6 +92,16 @@ export class ProviderAccounts {
       if (!settings.authProfile) throw new Error("This ChatGPT provider has no account.");
       const { revoked } = await this.auth().logout(settings.authProfile);
       return { label: "ChatGPT", revoked };
+    }
+    if (isGoogleAI(settings)) {
+      let backup: string | null = null;
+      try {
+        backup = updateUserConfig(this.options.configPath, key === "provider" ? { provider: { api_key: null } } : { additional_providers: { [key]: { api_key: null } } }).backup;
+      } catch { throw new Error("Could not finish removing the Google key. Check file permissions and refresh Providers."); }
+      let warning: string | undefined;
+      try { (this.options.scrubGoogleBackup ?? scrubGoogleBackup)(backup); }
+      catch { warning = "The key was removed from active configuration, but may remain in its backup (.bak). Remove that backup's Google key or revoke it in AI Studio."; }
+      return { label: settings.id ?? GOOGLE_AI_LABEL, ...(warning ? { warning } : {}) };
     }
     if (isOpenRouter(settings)) {
       // null removes the key; the rest of the provider stays for signing back in.

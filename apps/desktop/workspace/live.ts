@@ -52,6 +52,8 @@ import type { WorkspaceRun, WorkspaceApproval, WorkspaceQuestion } from "./sessi
 import { chatChanges, chatServers, contextInUse } from "./cards.ts";
 import { whereCard } from "./where-card.ts";
 import { OpenTabs } from "./tabs.ts";
+import { GoogleAIForm } from "./google-ai-form.ts";
+import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -406,7 +408,7 @@ async function api<T = unknown>(
     entry.outcome = "ok";
     return result;
   } catch (error) {
-    entry.outcome = `error: ${error instanceof Error ? error.message : String(error)}`;
+    entry.outcome = method.startsWith("google-ai-") ? "error (credential request; details omitted)" : `error: ${error instanceof Error ? error.message : String(error)}`;
     throw error;
   }
 }
@@ -984,6 +986,9 @@ document.getElementById("desktop-sidebar")?.addEventListener("pointerleave", () 
 document.getElementById("desktop-sidebar")?.addEventListener("pointerdown", glanceDown);
 // The tabs glance the same way, except the one you're on.
 const tabStrip = document.getElementById("workspace-tabs");
+tabStrip?.addEventListener("keydown", event => {
+  if (handleTabStripKey(event, tabStrip)) event.stopPropagation();
+});
 tabStrip?.addEventListener("pointerover", (event) =>
   glanceOver((event.target as Element).closest<HTMLElement>(".bar-tab:not(.on)")?.querySelector<HTMLElement>("[data-updated]") ?? null));
 tabStrip?.addEventListener("pointerleave", () => { hideGlance(); glanceQuiet = ""; });
@@ -1371,7 +1376,7 @@ function renderStatus() {
   el("composer-context").hidden = !inSession() || !c2;
   renderContextCard();
   el("status").innerHTML =
-    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Tab")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
+    `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Ctrl+,")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
   // The top bar is your tabs and ⋯, which opens the chat's own view
   // (rename, compact, history). The open tab's dot carries the live state,
   // and the rim's words are its tooltip.
@@ -1551,19 +1556,23 @@ function renderTabs() {
     const item = byId.get(id)!, on = chatOpen && id === current!.id, title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
     const [action, args] = chatTarget(id);
     const tip = on && rimNow ? `${title} · ${rimNow.words}` : about ? `${title}, ${about}` : title;
-    return `<div class="bar-tab${on ? " on" : ""}" draggable="true" data-tab="${h(id)}"><button type="button" role="tab" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"><span class="sidebar-session-mark ${tone}" aria-hidden="true"></span><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span></button>${btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `)}</div>`;
+    return `<div class="bar-tab${on ? " on" : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"><span class="sidebar-session-mark ${tone}" aria-hidden="true"></span><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span></button>${btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `)}</div>`;
   };
   // Drive's work, while it makes a branch elsewhere: a pinned tab with its
   // icon and dot; green once it's ready. Opened, its chat becomes a tab.
-  const drive = peek && !shown.includes(peek.sessionId) ? `<button type="button" class="bar-tab-pin header-drive ${peek.kind}" data-action="select-session" data-args="${h(JSON.stringify({ id: peek.sessionId }))}" title="${h(`${peek.words} · open Drive's chat`)}" aria-label="${h(`${peek.words} · open Drive's chat`)}">${ICON_DRIVE}<i aria-hidden="true"></i></button>` : "";
-  const page = here ? `<div class="bar-tab on here"><span class="bar-tab-label" role="tab" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
+  const drive = peek && !shown.includes(peek.sessionId) ? `<button type="button" class="bar-tab-pin header-drive ${peek.kind}" data-tab-key="drive:${h(peek.sessionId)}" role="tab" id="workspace-tab-drive" aria-controls="workspace" aria-selected="false" tabindex="-1" data-action="select-session" data-args="${h(JSON.stringify({ id: peek.sessionId }))}" title="${h(`${peek.words} · open Drive's chat`)}" aria-label="${h(`${peek.words} · open Drive's chat`)}">${ICON_DRIVE}<i aria-hidden="true"></i></button>` : "";
+  const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
-  strip.innerHTML = `${drive}${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}`;
   const newTab = document.getElementById("workspace-new-tab");
+  updateTabStrip(strip, `${drive}${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}`, newTab);
+  const selected = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+  const panel = document.getElementById("workspace");
+  if (selected) panel?.setAttribute("aria-labelledby", selected.id);
+  else panel?.removeAttribute("aria-labelledby");
   if (newTab) newTab.title = `New chat (${shortcut("Ctrl+T")})`;
   const callSlot = document.getElementById("workspace-call");
   if (callSlot) callSlot.innerHTML = callButton;
-  strip.querySelector(".bar-tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  (strip.contains(document.activeElement) ? document.activeElement : selected)?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 /// Closes a tab; the one you were on hands over to its neighbour, or Home.
 function closeTab(id: string): Promise<unknown> | void {
@@ -1604,7 +1613,7 @@ function totals(run: WorkspaceRun, tool: ToolEntry) {
 }
 const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
-/// Drive's best idea, as the start screen's ghost text; Tab takes it.
+/// Drive's best idea, as the start screen's ghost text; Alt+Right takes it.
 function driveSuggestion(): string | null {
   return !inSession() && state && !isPlain() ? state.driveNext.proposals[0]?.title ?? null : null;
 }
@@ -2801,6 +2810,14 @@ async function editCustomizable(path: string) {
 /// Settings: the section shown, the search, the row whose words are unfolded,
 /// and what the host read from config.toml and the daemon.
 const settingsUi = { section: "overview" as SettingsSection, query: "", fold: "", error: "" };
+let googleAIForm: GoogleAIForm | null = null;
+function clearGoogleAIForm() {
+  if (!googleAIForm) return;
+  googleAIForm.clear(); googleAIForm.element.remove(); googleAIForm = null;
+  const root = document.getElementById("page");
+  if (root) delete root.dataset.html;
+}
+window.addEventListener("pagehide", clearGoogleAIForm);
 let settingsInfo: SettingsInfo | null = null, usageScores: ModelScore[] | null = null,
   /// The window's zoom, read from the desktop shell when Settings opens.
   zoomLevel: number | null = null;
@@ -2940,6 +2957,7 @@ function renderLastChat() {
 }
 function openPage(kind: "" | PageKind) {
   const was = pageOpen;
+  if (was === "settings" && kind !== "settings") clearGoogleAIForm();
   pageOpen = kind;
   sidebarSignature = heroSignature = "";
   if (kind === "active" || kind === "archived") void loadArchived();
@@ -3016,6 +3034,7 @@ async function loadRoutines(method = "routines", args: Record<string, unknown> =
   if (method === "routine-add") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
 }
 function renderPage() {
+  if (pageOpen !== "settings") clearGoogleAIForm();
   renderSettingsNav();
   const root = document.getElementById("page");
   if (!root || !state || !pageOpen) return;
@@ -3048,10 +3067,18 @@ function renderPage() {
   if (root.dataset.html === html) return;
   // Whatever field has the keyboard keeps it, with its caret, across the redraw.
   const active = document.activeElement;
-  const field = (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
+  const googleFocus = active instanceof HTMLElement && googleAIForm?.element.contains(active) ? active : null;
+  const field = !googleFocus && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
     ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
   root.innerHTML = html;
   root.dataset.html = html;
+  const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
+  if (googleSlot) {
+    const key = googleSlot.dataset.googleProvider!;
+    if (googleAIForm?.providerKey !== key) { clearGoogleAIForm(); googleAIForm = new GoogleAIForm(key, api); }
+    googleSlot.append(googleAIForm!.element);
+    if (googleFocus?.isConnected) googleFocus.focus({ preventScroll: true });
+  } else clearGoogleAIForm();
   if (field) {
     const again = [...root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("form input, form textarea")].find((node) => node.closest("form")?.className === field.form && ((node.closest("form") as HTMLElement).dataset.kind ?? "") === field.kind);
     if (again) { again.value = field.value; again.focus({ preventScroll: true }); again.setSelectionRange(field.at, field.at); again.scrollTop = field.scroll; }
@@ -3374,14 +3401,14 @@ function renderComposer() {
     answered = question && (question.answers?.length ?? 0) >= question.questions.length,
     queued = false;
   // The mode word says how this chat's edits and commands are gated; a
-  // click or ⇧⇥ steps to the next mode.
+  // click or Alt+M in the composer steps to the next mode.
   const mode = currentMode(), chip = el("composer-mode");
   chip.className = `cb mode-${mode}${chip.classList.contains("open") ? " open" : ""}`;
-  if (!chip.querySelector(".mode-opt")) chip.innerHTML = `<span class="mode-list">${(Object.keys(MODES) as Mode[]).map((item) => `<span class="mode-opt mode-${item}" data-mode="${item}">${MODES[item]}</span>`).join("")}</span><kbd>⇧⇥</kbd>`;
+  if (!chip.querySelector(".mode-opt")) chip.innerHTML = `<span class="mode-list">${(Object.keys(MODES) as Mode[]).map((item) => `<span class="mode-opt mode-${item}" data-mode="${item}">${MODES[item]}</span>`).join("")}</span><kbd>Alt+M</kbd>`;
   for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) option.classList.toggle("on", option.dataset.mode === mode);
   chip.querySelector<HTMLElement>(".mode-opt.mode-orchestrate")!.style.display = state.session && !isPlain() ? "" : "none";
   chip.setAttribute("aria-label", `Mode: ${MODES[mode]}`);
-  chip.title = `${MODE_HELP[mode]}. Click or ⇧⇥ for the next mode.`;
+  chip.title = `${MODE_HELP[mode]}. Click or Alt+M in the composer for the next mode.`;
   // On Home one word says where the chat will live, and unfolds the choices.
   const whereWord = el("composer-where"), home = !inSession() && !question;
   if (!home && whereOpen === "home") whereOpen = null;
@@ -3411,8 +3438,8 @@ function renderComposer() {
       ? "Reply… the question stays in the chat"
       : state.activeTurnId
       ? "Steer it while it works…"
-      : suggestion ? `${suggestion}   ⇥ Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
-    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   ⇥ Tab` : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
+      : suggestion ? `${suggestion}   Alt+→` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
+    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   Alt+→` : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -4104,7 +4131,7 @@ async function openOverlay(name: OverlayName, query = "", forThread = false) {
   overlayIndex = 0;
   overlaySignature = "";
   completionDismissed = true;
-  el("completion").hidden = true;
+  hideCompletion();
   if (name === "models") {
     modelLevels.clear();
     modelIndexPending = true;
@@ -4504,16 +4531,16 @@ function renderOverlay() {
     subtitle = state.providers.loading ? "checking…" : `using ${state.model.provider}`;
     noun = "providers";
     filter = false;
-    footerNote = state.providers.message ?? "Codex uses your Codex plan, ChatGPT is metered as credits, OpenRouter uses hosted models.";
+    footerNote = state.providers.message ?? "Codex uses your Codex plan, ChatGPT is metered as credits. Google AI Studio accepts a key in Settings; OpenRouter uses hosted models.";
     overlayRows = state.providers.items.map((item) => {
       const signing = state!.providers.signingIn === item.key;
       return {
         label: `${item.label}${item.active ? " ●" : ""}`,
         value: signing ? "Waiting for your browser…" : item.detail,
         group: item.kind === "local" ? "On this computer" : item.kind === "api-key" ? "API keys" : "Accounts",
-        action: signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "",
+        action: item.kind === "google" ? "google-ai-open" : signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "",
         data: { key: item.key },
-        hint: signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : item.status === "signed-out" ? "Sign in ↗" : "",
+        hint: item.kind === "google" ? "Manage key" : signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : item.status === "signed-out" ? "Sign in ↗" : "",
       };
     });
     overlayRows.push({ label: "Provider setup", value: state.model.provider, group: "Setup", action: "setup", data: {}, hint: "Open" });
@@ -4666,8 +4693,15 @@ function recentCommands(): string[] {
 function rememberCommand(name: string) {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify([name, ...recentCommands().filter((item) => item !== name)].slice(0, 8))); } catch { /* storage may be off */ }
 }
+const completionOptionId = (item: { kind: string; value: string }) =>
+  `completion-${item.kind}-${encodeURIComponent(item.value)}`;
+function hideCompletion() {
+  el("completion").hidden = true;
+  for (const name of ["aria-controls", "aria-activedescendant", "aria-autocomplete", "aria-haspopup"])
+    editor.removeAttribute(name);
+}
 function renderCompletion() {
-  if (pendingQuestion()) { el("completion").hidden=true;completionItems=[];return; }
+  if (pendingQuestion()) { hideCompletion();completionItems=[];return; }
   if (
     !state ||
     overlay ||
@@ -4675,7 +4709,7 @@ function renderCompletion() {
     state.activeTurnId ||
     completionDismissed
   ) {
-    el("completion").hidden = true;
+    hideCompletion();
     return;
   }
   const value = editor.value,
@@ -4734,8 +4768,8 @@ function renderCompletion() {
       completionMore = 0;
     }
   }
-  el("completion").hidden = !completionItems.length;
-  if (!completionItems.length) return;
+  if (!completionItems.length) { hideCompletion(); return; }
+  el("completion").hidden = false;
   completionIndex = Math.min(completionIndex, completionItems.length - 1);
   // One quiet panel (pass 83 A): an icon, the plain name with what you've
   // typed in bold, a faint argument, and the description. No footer.
@@ -4760,11 +4794,18 @@ function renderCompletion() {
           `${commandIcon(item.icon ?? "")}<span class="cm-name">${highlight(item.label)}</span>${argument}<span class="cm-desc">${h(item.description)}</span>`,
           { index },
           `cm-row${index === completionIndex ? " selected" : ""}`)
+          .replace("<button ", `<button role="option" tabindex="-1" id="${h(completionOptionId(item))}" aria-selected="${index === completionIndex}" `)
       );
     })
     .join("");
   const more = !mention && completionMore ? btn("completion-more", `<span>${completionMore} more</span><span>›</span>`, {}, "cm-more") : "";
-  el("completion").innerHTML = `<div class="cm-list">${rows}</div>${more}`;
+  el("completion").innerHTML = `<div class="cm-list" id="completion-list" role="listbox" aria-label="${mention ? "Files" : "Commands"}">${rows}</div>${more}`;
+  // A multiline textbox controlling a listbox: keep the caret in the editor
+  // while exposing the same active option that the arrow keys highlight.
+  editor.setAttribute("aria-autocomplete", "list");
+  editor.setAttribute("aria-haspopup", "listbox");
+  editor.setAttribute("aria-controls", "completion-list");
+  editor.setAttribute("aria-activedescendant", completionOptionId(completionItems[completionIndex]!));
   el("completion")
     .querySelector(".selected")
     ?.scrollIntoView({ block: "nearest" });
@@ -4772,7 +4813,7 @@ function renderCompletion() {
 function changedDraft() {
   const question=pendingQuestion();
   if (question) {
-    completionDismissed=true;el("completion").hidden=true;renderComposer();
+    completionDismissed=true;hideCompletion();renderComposer();
     clearTimeout(draftTimer);
     const text=editor.value,index=questionIndex(),revision=question.revision ?? 0,version=++questionDraftVersion;
     try { localStorage.setItem(replyCacheKey(question.id,index),JSON.stringify({text,version})); } catch {}
@@ -4820,7 +4861,7 @@ async function chooseCompletion(index = completionIndex) {
     if (command.argument !== "required") {
       editor.value = "";
       completionDismissed = true;
-      el("completion").hidden = true;
+      hideCompletion();
       await submitText(item.value);
     } else setDraft(`${item.value} `);
   }
@@ -4877,7 +4918,7 @@ async function submitText(value = editor.value, wait = false) {
   }
   clearTimeout(draftTimer);
   completionDismissed = true;
-  el("completion").hidden = true;
+  hideCompletion();
   if (value.startsWith("/")) {
     const [name, ...parts] = value.trim().split(/\s+/),
       argument = parts.join(" ");
@@ -5414,7 +5455,20 @@ async function dispatch(
   }
   if (action === "thread-open") closedThreadTabs.delete(String(args.id ?? ""));
   if (action.startsWith("thread-") || action.startsWith("threads-")) return act(() => api(action, args));
-  if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
+  if (action === "google-ai-open") {
+    overlay = null; renderOverlay();
+    if (pageOpen !== "settings") openPage("settings");
+    settingsSection("providers");
+    settingsUi.fold = `google:${String(args.key)}`;
+    renderPage();
+    googleAIForm?.focus();
+    return;
+  }
+  if (action === "google-ai-disconnect") {
+    clearGoogleAIForm();
+    return act(() => api("google-ai-disconnect", args));
+  }
+  if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) { clearGoogleAIForm(); return act(() => api(action, args)); }
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
   if (action === "drive-forget") return api("drive", { text: `forget ${args.id}` });
   // The opener toggles: a second click on the model chip closes its picker.
@@ -6575,13 +6629,13 @@ document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === "tab") {
     event.preventDefault();
     const id = tabs.step(state.session?.id, event.shiftKey ? -1 : 1);
-    if (id && id !== state.session?.id) run(() => goChat(id));
+    if (id && (id !== state.session?.id || pageOpen || !inSession() || inAssistant())) run(() => goChat(id));
     return;
   }
   if (ctrl && !event.altKey && !event.shiftKey && /^[1-9]$/.test(key)) {
     event.preventDefault();
     const id = key === "9" ? tabs.ids.at(-1) : tabs.ids[Number(key) - 1];
-    if (id && id !== state.session?.id) run(() => goChat(id));
+    if (id && (id !== state.session?.id || pageOpen || !inSession() || inAssistant())) run(() => goChat(id));
     return;
   }
   if (ctrl && !event.altKey && key === "t") {
@@ -6710,7 +6764,7 @@ document.addEventListener("keydown", (event) => {
     }
     return;
   }
-  if (event.target === editor && !el("completion").hidden) {
+  if (event.target === editor && !el("completion").hidden && !ctrl && !event.altKey && !event.shiftKey) {
     if (key === "arrowdown" || key === "arrowup") {
       run(() => {
         completionIndex =
@@ -6738,7 +6792,7 @@ document.addEventListener("keydown", (event) => {
     if (prompt) { event.preventDefault(); setDraft(prompt); }
     return;
   }
-  if (key === "tab" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && event.target === editor) {
+  if (event.code === "KeyM" && event.altKey && !ctrl && !event.shiftKey && event.target === editor) {
     run(() => cycleMode());
     return;
   }
@@ -6751,15 +6805,14 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (
-    key === "tab" &&
+    key === "arrowright" && event.altKey && !ctrl &&
     !event.shiftKey &&
     event.target === editor &&
-    !editor.value
+    !editor.value && !pendingQuestion() && !state.approvals.length
   ) {
-    // The model's suggested next prompt, or Drive's idea on the start
-    // screen, when one shows; else Settings.
+    // Accept a visible suggestion explicitly; Tab remains focus navigation.
     const suggestion = nextSuggestion() ?? driveSuggestion();
-    run(() => (suggestion ? setDraft(suggestion) : openPage("settings")));
+    if (suggestion) run(() => setDraft(suggestion));
     return;
   }
   if (key === "enter" && event.target instanceof HTMLInputElement) {
@@ -6793,9 +6846,8 @@ window.demesneInspect = () => ({
         tag: e.tagName,
         id: e.id,
         value:
-          e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement
-            ? e.value
-            : undefined,
+          e instanceof HTMLInputElement && e.type === "password" ? "[redacted]"
+            : e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement ? e.value : undefined,
         hit: (() => {
           const top = document.elementFromPoint(
             r.x + r.width / 2,

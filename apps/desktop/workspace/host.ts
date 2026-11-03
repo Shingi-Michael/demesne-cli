@@ -51,6 +51,7 @@ import {
 } from "./session-title.ts";
 import { WorkspaceDrive } from "./drive-controller.ts";
 import { ProviderAccounts, type ProviderEntry } from "./providers.ts";
+import { GoogleAIConnection } from "./google-ai.ts";
 import { BreakageWatch } from "./breakage.ts";
 import { ThreadWatch } from "./thread-watch.ts";
 import { missionReceipt } from "@demesne/drive/drive-receipt.ts";
@@ -75,6 +76,7 @@ export interface WorkspaceHostOptions {
   settings?: CliSettings;
   client?: DemesneClient;
   providerAccounts?: Pick<ProviderAccounts, "signingIn" | "list" | "signIn" | "signOut" | "cancel">;
+  googleAI?: Pick<GoogleAIConnection, "discover" | "test" | "save" | "cancel">;
   /// Runs Drive in this host (the desktop window and headless missions).
   drive?: boolean;
   /// Opens on Home: an empty chat, with no project ("plain") or in this
@@ -199,6 +201,8 @@ export class WorkspaceHost {
   /// signed in while its browser flow is open.
   providers: { items: ProviderEntry[]; signingIn: string | null; message: string | null; loading: boolean } = { items: [], signingIn: null, message: null, loading: false };
   private providerAccounts: NonNullable<WorkspaceHostOptions["providerAccounts"]> | null = null;
+  private googleConnection: NonNullable<WorkspaceHostOptions["googleAI"]> | null = null;
+  private googleOperation: string | null = null;
   private providerSignInGeneration = 0;
   /// Settings › Clean up sessions: what's worth deleting, what you ticked,
   /// and whether Delete was pressed once (it asks twice).
@@ -1372,10 +1376,19 @@ export class WorkspaceHost {
       : result.switched ? `${done} Switched to ${result.model} (${result.provider}); signing back in returns you to ${result.previous.model}.` : done);
   }
   private async signOutProvider(key: string) {
-    const { label, revoked } = await this.accounts().signOut(key);
-    await this.applyProviderChange(`Signed out of ${label}.${revoked === false ? " Remove Demesne in ChatGPT settings to confirm remote revocation." : ""}`);
+    ++this.providerSignInGeneration;
+    this.googleConnection?.cancel();
+    this.providerAccounts?.cancel();
+    const { label, revoked, warning } = await this.accounts().signOut(key);
+    const message = `Signed out of ${label}.${revoked === false ? " Remove Demesne in ChatGPT settings to confirm remote revocation." : ""}${warning ? ` ${warning}` : ""}`;
+    try { await this.applyProviderChange(message); }
+    catch (error) {
+      if (!warning) throw error;
+      await this.refreshProviders(`${message} The daemon could not reload providers and may still hold the old credential.`);
+    }
   }
   private async signInProvider(key: string) {
+    this.googleConnection?.cancel();
     const generation = ++this.providerSignInGeneration;
     this.providers = { ...this.providers, signingIn: key, loading: false, message: "Finish signing in in your browser." };
     this.publish();
@@ -1388,6 +1401,36 @@ export class WorkspaceHost {
       if (generation !== this.providerSignInGeneration || this.disposed) return;
       this.providers = { ...this.providers, signingIn: null, message: error instanceof Error ? error.message : String(error) };
       this.publish();
+    }
+  }
+  private googleAI() {
+    return this.googleConnection ??= this.options.googleAI ?? new GoogleAIConnection({ configPath: this.settings.configPath });
+  }
+  private async googleAIRequest(method: string, args: Record<string, unknown>) {
+    const operation = string(args.operationId, "Google operation", 100);
+    this.googleConnection?.cancel();
+    this.googleOperation = operation;
+    try {
+      if (method === "google-ai-save") return await this.saveGoogleAI(args);
+      if (method === "google-ai-test") return await this.googleAI().test(args.apiKey, args.model);
+      return await this.googleAI().discover(args.apiKey);
+    } finally { if (this.googleOperation === operation) this.googleOperation = null; }
+  }
+  private async saveGoogleAI(args: Record<string, unknown>) {
+    if (args.remember !== true) throw new Error("Saving requires your explicit permission to store this key locally.");
+    const generation = ++this.providerSignInGeneration;
+    this.providerAccounts?.cancel();
+    const saved = await this.googleAI().save(args.apiKey, args.model, args.remember, args.key);
+    if (this.disposed || generation !== this.providerSignInGeneration) return { message: "Google settings saved. Refresh Providers to check the connection." };
+    try {
+      await this.applyProviderChange(`Connected ${saved.label}. Choose ${saved.model} in the model picker.${saved.warning ? ` ${saved.warning}` : ""}`, generation);
+      return { message: `Connected. Choose ${saved.model} in the model picker.${saved.warning ? ` ${saved.warning}` : ""}` };
+    } catch {
+      // A successful disk write is not a failed credential test. Never forward
+      // reload errors that could include configuration secrets.
+      const message = "Google key saved locally, but the daemon could not reload it. Check the daemon, then reconnect; no restart was requested." + (saved.warning ? ` ${saved.warning}` : "");
+      if (!this.disposed && generation === this.providerSignInGeneration) await this.refreshProviders(message);
+      return { message };
     }
   }
   private nextHiddenPath() {
@@ -1483,6 +1526,7 @@ export class WorkspaceHost {
       "setup-action",
       "foundry-list",
       "foundry-get",
+      "google-ai-cancel",
     ]);
     // A draft saved for a session that is no longer current (a workflow or
     // mission that just switched sessions, a keystroke racing a switch) has
@@ -1582,6 +1626,18 @@ export class WorkspaceHost {
     }
     if (method.startsWith("breakage-")) return this.breakage.handle(method, args);
     if (method.startsWith("thread-") || method.startsWith("threads-")) return this.threads.handle(method, args);
+    if (["google-ai-check", "google-ai-test", "google-ai-save"].includes(method)) return this.googleAIRequest(method, args);
+    if (method === "google-ai-cancel") {
+      if (typeof args.operationId === "string" && args.operationId === this.googleOperation) { this.googleConnection?.cancel(); this.googleOperation = null; }
+      return;
+    }
+    if (method === "google-ai-disconnect") {
+      const key = string(args.key, "provider", 200);
+      if (!(await this.accounts().list(this.model.provider)).some(item => item.key === key && item.kind === "google")) throw new Error("Choose a Google AI Studio connection.");
+      try { await this.signOutProvider(key); }
+      catch { throw new Error("Could not finish disconnecting Google. Refresh Providers to check whether the saved key was removed; the daemon may need to reconnect."); }
+      return;
+    }
     if (method === "providers-refresh") return this.refreshProviders();
     if (method === "provider-signin") return this.signInProvider(string(args.key, "provider", 200));
     if (method === "provider-signout") return this.signOutProvider(string(args.key, "provider", 200));
@@ -2295,6 +2351,7 @@ export class WorkspaceHost {
     if (this.themeRefreshTimer) clearInterval(this.themeRefreshTimer);
     this.providerSignInGeneration++;
     this.providerAccounts?.cancel();
+    this.googleConnection?.cancel();
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);
     this.breakage.stop();
     this.threads.stop();

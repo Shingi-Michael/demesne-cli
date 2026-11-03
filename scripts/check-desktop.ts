@@ -1162,11 +1162,11 @@ try {
   await capture("02-agent-step");
   await agentStep.click();
   await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
-  // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Orchestrate → Ask.
+  // The mode word under the composer: Alt+M steps Ask → Accept edits → Plan → Auto → Orchestrate → Ask.
   await page.locator("textarea").focus();
   for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],
     ["Auto", { acceptEdits: false, autoApprove: true }], ["Orchestrate", { acceptEdits: false, autoApprove: false, orchestrate: true }], ["Ask", { acceptEdits: false, autoApprove: false }]] as const) {
-    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Alt+KeyM");
     await until(() => page.locator("#composer-mode .mode-opt.on").innerText().then(text => text === word), `mode word ${word}`);
     await until(async () => {
       const session = (await f.client.getSessionState(sessionId)).session;
@@ -1178,7 +1178,7 @@ try {
       await capture("03-mode-plan");
     }
   }
-  assert(await page.evaluate(() => document.activeElement?.tagName === "TEXTAREA"), "⇧⇥ keeps focus in the composer");
+  assert(await page.evaluate(() => document.activeElement?.tagName === "TEXTAREA"), "Alt+M keeps focus in the composer");
   // + attaches images: a thumbnail sits in the box above the text, × drops it.
   const shot = join(f.workspace, "..", "shot.png");
   writeFileSync(shot, await sharp({ create: { width: 320, height: 200, channels: 3, background: "#3d5a80" } }).png().toBuffer());

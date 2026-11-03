@@ -173,7 +173,7 @@ export interface SettingsView {
   permissions: { mode: "ask" | "edits" | "plan" | "auto" | null; asks: { thisWeek: number; lastWeek: number } | null };
   drive: { project: string; auto: { on: boolean; quietMinutes: number; perDay: number; usedToday: number } | null };
   model: { words: string; provider: string; reasoning: string; chatgpt: string | null };
-  providers: { items: { key: string; label: string; detail: string; status: string; active?: boolean }[]; signingIn: string | null; message: string | null };
+  providers: { items: { key: string; label: string; detail: string; status: string; active?: boolean; kind?: string }[]; signingIn: string | null; message: string | null };
   connectors: { servers: { name: string; state: "starting" | "ready" | "failed"; tools: number }[]; heartbeat: boolean };
   agents: NearbyAgent[];
   chats: { here: number; all: number };
@@ -230,7 +230,8 @@ function shortcuts(mac: boolean): Group[] {
   const row = (title: string, keys: string, line = ""): SettingsRow => ({ title, line, control: `<span class="st-keys">${kbd(keys)}</span>`, keywords: "shortcut key" });
   return [
     { name: "Anywhere", rows: [row("New chat", `${cmd}N`), row("Search chats", `${cmd}K`), row("Open a folder", `${cmd}O`), row("Settings", `${cmd},`), row("Next and previous chat", "Ctrl+Tab Ctrl+⇧Tab"), row("Drive", `${alt}J`, "Its line, or its ideas"), row("Text size", `${cmd}+ ${cmd}− ${cmd}0`), row("Undo a delete", `${cmd}Z`)] },
-    { name: "In the composer", rows: [row("Send", "↵"), row("Steer the turn that is running", "↵", "Delivered after its next step"), row("Queue for after it", `${alt}↵`), row("Change mode", "⇧⇥", "Ask, Accept edits, Plan, Auto"), row("Commands", "/"), row("Files", "@"), row("Take Drive's idea", "Tab", "On Home, when its idea shows in the box"), row("Where a new chat lives", `${alt}P`, "On Home")] },
+    { name: "On a tab", rows: [row("Move focus between tabs", "← → Home End", "Enter or Space opens the focused chat; Tab leaves the tab strip")] },
+    { name: "In the composer", rows: [row("Send", "↵"), row("Steer the turn that is running", "↵", "Delivered after its next step"), row("Queue for after it", `${alt}↵`), row("Change mode", `${alt}M`, "Ask, Accept edits, Plan, Auto"), row("Commands", "/"), row("Files", "@"), row("Accept a suggestion", `${alt}→`, "When the empty composer shows a suggested prompt or Drive idea"), row("Complete a command or file", "Tab", "While its suggestions are open; Shift+Tab moves focus backward"), row("Where a new chat lives", `${alt}P`, "On Home")] },
     { name: "Answering", rows: [row("Pick a choice", "1 9", "On a question or an approval"), row("Close a page or a sheet", "Esc")] },
   ];
 }
@@ -245,7 +246,7 @@ function pages(view: SettingsView): Page[] {
       { title: "Open on", line: "Where the window lands when you open Demesne", control: segments([["Home", view.general.openOn === "home", "settings-local", { key: "openOn", value: "home" }], ["Last chat", view.general.openOn === "last", "settings-local", { key: "openOn", value: "last" }]], "Open on"), keywords: "launch start home last chat" },
     ] },
     { name: "While it works", rows: [
-      ...(view.desktop ? [{ title: "Keep this Mac awake while something runs", line: "A chat's turn or a Drive run; the display may still sleep", control: toggle(view.general.awake, "settings-local", { key: "awake", value: !view.general.awake }, "Keep this Mac awake"), keywords: "sleep awake power battery" }] : []),
+      ...(view.desktop ? [{ title: "Keep this computer awake while something runs", line: "A chat's turn or a Drive run; the display may still sleep", control: toggle(view.general.awake, "settings-local", { key: "awake", value: !view.general.awake }, "Keep this computer awake"), keywords: "sleep awake power battery" }] : []),
       { title: "Closing the window", line: "The daemon keeps running, so Drive, routines and mail carry on", keywords: "quit close background daemon" },
     ] },
   ] });
@@ -290,7 +291,7 @@ function pages(view: SettingsView): Page[] {
     { name: "Trusted folders", hidden: true, rows: (info?.trusted ?? []).map((root) => ({ title: `\`${homeWords(root, view.home)}\``, line: "A trusted folder", keywords: "trust folder project untrust" })) },
   ] });
   const auto = view.drive.auto;
-  out.push({ id: "drive", title: "Drive", sub: "Drive picks work on its own, each run on its own branch. It never pushes and never needs you.", groups: [
+  out.push({ id: "drive", title: "Drive", sub: "Drive picks work on its own, each run on its own branch. It never pushes, leaves results for your review, and pauses when it needs your input.", groups: [
     { name: view.drive.project ? `In ${view.drive.project}` : "In a project", rows: [view.drive.project && auto
       ? { title: "Start on its own", line: `After ${auto.quietMinutes} quiet minutes it runs the top idea, at most ${auto.perDay} a day${auto.usedToday ? ` (${auto.usedToday} today)` : ""}`, control: toggle(auto.on, "drive-auto", { on: !auto.on }, "Start on its own"), keywords: "drive auto quiet start own" }
       : { title: "Start on its own", line: "Open a project to set Drive for it", keywords: "drive auto quiet" }] },
@@ -318,10 +319,14 @@ function pages(view: SettingsView): Page[] {
   out.push({ id: "providers", title: "Providers", sub: "Where models come from: accounts, API keys and model servers on this computer.", groups: [
     { name: "Accounts", rows: [
       ...view.providers.items.map((item) => {
+        if (item.kind === "google") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
+          control: link("google-ai-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("google-ai-disconnect", "Remove saved key", { key: item.key }, " quiet") : ""),
+          fold: view.fold === `google:${item.key}` ? `<div data-google-provider="${h(item.key)}"></div>` : "", keywords: "google gemini ai studio api key test connect" };
         const signing = view.providers.signingIn === item.key;
         const action = signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "";
         return { title: item.label, line: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`, control: action ? link(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }) : "", keywords: "sign in account api key local provider" };
       }),
+      { title: "Google API keys", line: "Create or revoke a key in Google AI Studio. Removing a saved key here does not revoke it at Google.", control: link("open-link", "AI Studio ↗", { url: "https://aistudio.google.com/apikey" }), keywords: "google gemini key billing quota" },
       { title: "Provider setup", line: view.providers.message ?? "Add a local model server, an API key, or an account", control: link("setup", "Open"), keywords: "add provider configure setup" },
     ] },
   ] });
@@ -471,7 +476,7 @@ const TRUSTED_SHOWN = 4;
 function permissionsTop(view: SettingsView): string {
   const mode = view.permissions.mode, info = view.info, rules = info?.allow ?? [], asks = view.permissions.asks;
   const current = MODES.find(([id]) => id === mode);
-  const modes = mode ? `<div class="st-head"><span>This chat</span><span>${asks && (asks.thisWeek || asks.lastWeek) ? `asked you ${asks.thisWeek} ${asks.thisWeek === 1 ? "time" : "times"} this week · ` : ""}⇧⇥ changes it</span></div><div class="pm-modes">${MODES.map(([id, label, line, free]) => `<button type="button" class="pm-mode${mode === id ? " on" : ""}" aria-pressed="${mode === id}" title="${h(line)}" data-action="permission-mode" data-args="${h(JSON.stringify({ mode: id }))}"><b>${h(label)}</b><span class="pm-can">${(["read", "edit", "run"] as const).map((can) => `<em${(free as readonly string[]).includes(can) ? ' class="free"' : ""}>${can}</em>`).join("")}</span></button>`).join("")}</div>${current ? `<p class="st-hint">${h(current[2])}. Green is what it does without asking.</p>` : ""}` : "";
+  const modes = mode ? `<div class="st-head"><span>This chat</span><span>${asks && (asks.thisWeek || asks.lastWeek) ? `asked you ${asks.thisWeek} ${asks.thisWeek === 1 ? "time" : "times"} this week · ` : ""}Alt+M in the composer changes it</span></div><div class="pm-modes">${MODES.map(([id, label, line, free]) => `<button type="button" class="pm-mode${mode === id ? " on" : ""}" aria-pressed="${mode === id}" title="${h(line)}" data-action="permission-mode" data-args="${h(JSON.stringify({ mode: id }))}"><b>${h(label)}</b><span class="pm-can">${(["read", "edit", "run"] as const).map((can) => `<em${(free as readonly string[]).includes(can) ? ' class="free"' : ""}>${can}</em>`).join("")}</span></button>`).join("")}</div>${current ? `<p class="st-hint">${h(current[2])}. Green is what it does without asking.</p>` : ""}` : "";
   // Rules sit in groups by what they run (grep · 34), one short line each; a
   // group unfolds its rules as one-line rows, each with ×.
   const groups = ruleGroups(rules), openGroup = view.fold.startsWith("rules:") ? view.fold.slice(6) : null;

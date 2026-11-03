@@ -201,3 +201,40 @@ test("System palette errors and paths are safely escaped in Settings",()=>{
   expect(html).not.toContain("<script>");
   expect(html).toContain("&quot;&lt;palette&gt;");
 });
+test("composer shortcuts reserve Tab traversal and describe explicit mode and suggestion actions", () => {
+  for (const mac of [true, false]) {
+    const html = settingsPage(view({ section: "keys", mac }));
+    expect(html).toContain(mac ? "⌥M" : "Alt+M");
+    expect(html).toContain(mac ? "⌥→" : "Alt+→");
+    expect(html).toContain("Shift+Tab moves focus backward");
+    expect(html).not.toContain("⇧⇥");
+    expect(html).not.toContain("Take Drive&#39;s idea");
+  }
+  expect(settingsPage(view({ section: "permissions" }))).toContain("Alt+M in the composer changes it");
+});
+test("General labels the awake switch without assuming a Mac; Drive acknowledges intervention", () => {
+  for (const mac of [true, false]) {
+    const html = settingsPage(view({ section: "general", mac }));
+    expect(html).toContain("Keep this computer awake while something runs");
+    expect(html).toContain('aria-label="Keep this computer awake"');
+    expect(html).not.toContain("Keep this Mac awake");
+  }
+  expect(settingsPage(view({ desktop: false }))).not.toContain("Keep this computer awake");
+  const drive = settingsPage(view({ section: "drive" }));
+  expect(drive).toContain("pauses when it needs your input");
+  expect(drive).toContain("leaves results for your review");
+  expect(drive).not.toContain("never needs you");
+  expect(settingsPage(view({ section: "keys" }))).toContain("Enter or Space opens the focused chat");
+});
+test("Google API key setup stays separate from browser sign-in and never interpolates a key", () => {
+  const html = settingsPage(view({ section: "providers", fold: "google:new:google", providers: { items: [{ key: "new:google", label: "Google AI Studio", kind: "google", status: "signed-out", detail: "No saved key" }], signingIn: null, message: null } }));
+  expect(html).toContain('data-action="google-ai-open"');
+  expect(html).toContain('data-google-provider="new:google"');
+  expect(html).not.toContain('data-action="provider-signin"');
+  expect(html).not.toContain('type="password"'); // mounted stable DOM, never cached in page HTML
+  expect(html).toContain("aistudio.google.com/apikey");
+  expect(html).toContain("does not revoke");
+  const connected = settingsPage(view({ section: "providers", providers: { items: [{ key: "google", label: "Google AI Studio", kind: "google", status: "signed-in", detail: "API key saved locally" }], signingIn: null, message: null } }));
+  expect(connected).toContain('data-action="google-ai-disconnect"');
+  expect(connected).toContain("Remove saved key");
+});

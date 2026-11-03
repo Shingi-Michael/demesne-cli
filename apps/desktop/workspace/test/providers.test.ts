@@ -27,6 +27,7 @@ test("lists providers with their sign-in state and signs out of OpenRouter by re
     ["openrouter", "openrouter", "signed-in", false],
     ["new:codex", "codex", "signed-out", false],
     ["new:chatgpt", "chatgpt", "signed-out", false],
+    ["new:google", "google", "signed-out", false],
   ]);
   expect(await accounts.signOut("openrouter")).toEqual({ label: "OpenRouter" });
   const config = readFileSync(configPath, "utf8");

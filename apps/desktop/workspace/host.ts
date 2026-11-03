@@ -1552,6 +1552,10 @@ export class WorkspaceHost {
       "foundry-list",
       "foundry-get",
       "google-ai-cancel",
+      // The sidebar's right-click menu acts on any chat or project.
+      "delete-chat",
+      "reveal-project",
+      "remove-project-chats",
     ]);
     // A draft saved for a session that is no longer current (a workflow or
     // mission that just switched sessions, a keystroke racing a switch) has
@@ -2338,7 +2342,9 @@ export class WorkspaceHost {
         return;
       }
       if (path === this.workspace) throw new Error("Open another project to remove this one");
-      const ids = this.sessions.filter((session) => session.workspace?.root === path).map((session) => session.id);
+      // Archived chats go too, so nothing of the project is left behind.
+      const archived = await this.client.listArchivedSessions().catch(() => []);
+      const ids = [...new Set([...this.sessions, ...archived].filter((session) => session.workspace?.root === path).map((session) => session.id))];
       for (let at = 0; at < ids.length; at += 500) {
         const { skipped } = await this.client.deleteSessions(ids.slice(at, at + 500));
         if (skipped.length) throw new Error(`Kept ${skipped.length} ${skipped.length === 1 ? "chat" : "chats"}: ${skipped[0]!.reason}`);

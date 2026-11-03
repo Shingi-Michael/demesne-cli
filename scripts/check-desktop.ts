@@ -1812,6 +1812,13 @@ try {
   await until(() => page.locator("#row-menu").innerText().then(text => text.includes("Show in Finder") && text.includes("Open another project to remove this one")).catch(() => false), "the open project's menu, which can't remove itself");
   await page.keyboard.press("Escape");
   await until(() => page.locator("#row-menu").count().then(count => count === 0), "Esc closes the menu");
+  // Another project goes with Remove from Demesne: its chats and its line.
+  const otherProject = page.locator("#sidebar-projects .sidebar-project:not(.active) .sidebar-project-header").first();
+  const projectsBefore = await page.locator("#sidebar-projects .sidebar-project").count();
+  await otherProject.click({ button: "right" });
+  await page.locator("#row-menu .danger").click();
+  await page.locator("#row-menu .sure").click();
+  await until(() => page.locator("#sidebar-projects .sidebar-project").count().then(count => count === projectsBefore - 1), "Remove from Demesne takes the project off the sidebar", 20_000);
   // Switching models resizes the context at once, before the new model's
   // first request.
   const sizeBefore = await page.locator("#composer-context").getAttribute("title");

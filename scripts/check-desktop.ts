@@ -1737,6 +1737,13 @@ try {
   await page.keyboard.press("Escape");
   await until(() => page.locator("#overlay").isHidden(), "Escape closes the thread's picker");
   assert(await page.locator("#main > #overlay").count() === 1, "the picker goes back to the chat on the left");
+  // Picking a model in the thread's picker switches that thread, even while it works.
+  const chatModelBefore = await page.locator("#composer-model").innerText();
+  await page.locator("#tp-model").click();
+  await until(() => page.locator("#thread-pane #overlay").isVisible(), "the thread's picker opens again");
+  await page.locator(`#thread-pane #overlay .mp-row`).filter({ hasText: /small/i }).first().click();
+  await until(() => page.locator("#tp-model").innerText().then(text => /small/i.test(text)), "picking a model switches the thread's model", 10_000);
+  assert.equal(await page.locator("#composer-model").innerText(), chatModelBefore, "the chat on the left keeps its own model");
   // A thread shows its own words (never its thinking), its working line, and its
   // own context, like any chat.
   await until(() => page.locator("#thread-pane .tp-turns").innerText().then(text => text.includes("Waiting on the gate before writing the greeting.")), "the thread shows its own words");

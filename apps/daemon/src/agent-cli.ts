@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import type { ProviderMessage, ProviderStreamEvent } from "@demesne/providers";
 import type { TurnInference } from "./processor.ts";
 
@@ -181,8 +182,18 @@ async function tail(stream: ReadableStream<Uint8Array>): Promise<string> {
   try { return (await new Response(stream).text()).trim().slice(-600); } catch { return ""; }
 }
 
+/// Where agent tools get installed. An app started from the Dock or Finder
+/// gets launchd's short PATH, without these, so they are added (and the
+/// tool, often a Node script, finds its `node` the same way).
+export function agentPath(path = process.env.PATH ?? "", home = homedir()): string {
+  const extra = [join(home, ".local/bin"), join(home, ".bun/bin"), join(home, ".npm-global/bin"), join(home, ".volta/bin"),
+    "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+  const parts = path.split(":").filter(Boolean);
+  return [...parts, ...extra.filter((dir) => !parts.includes(dir))].join(":");
+}
+
 function defaultSpawn(argv: string[], cwd: string): AgentProcess {
-  const child = Bun.spawn(argv, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+  const child = Bun.spawn(argv, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: agentPath(), NO_COLOR: "1" } });
   return { stdout: child.stdout, stderr: child.stderr, exited: child.exited, kill: () => child.kill() };
 }
 
@@ -192,7 +203,7 @@ export class AgentCli {
   private readonly sessionsPath: string;
 
   constructor(dataDirectory: string, options: AgentCliOptions = {}) {
-    this.which = options.which ?? ((command) => Bun.which(command));
+    this.which = options.which ?? ((command) => Bun.which(command, { PATH: agentPath() }));
     this.spawn = options.spawn ?? defaultSpawn;
     this.sessionsPath = join(dataDirectory, "agent-sessions.json");
   }

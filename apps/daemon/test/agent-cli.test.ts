@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentCli, agentArgs, agentIdOf, agentPrompt, parseAgentLine } from "../src/agent-cli.ts";
+import { AgentCli, agentArgs, agentPath, agentIdOf, agentPrompt, parseAgentLine } from "../src/agent-cli.ts";
 import { claudeRun, fakeProcess } from "./agent-cli-fakes.ts";
 
 async function collect(stream: AsyncIterable<{ type: string; delta?: string }>) {
@@ -15,6 +15,14 @@ async function collect(stream: AsyncIterable<{ type: string; delta?: string }>) 
 }
 
 describe("agent tools", () => {
+  test("finds tools where they get installed, even from launchd's short PATH", () => {
+    const path = agentPath("/usr/bin:/bin", "/Users/m").split(":");
+    expect(path.slice(0, 2)).toEqual(["/usr/bin", "/bin"]);
+    expect(path).toContain("/Users/m/.local/bin");
+    expect(path).toContain("/opt/homebrew/bin");
+    expect(path.filter((dir) => dir === "/usr/bin")).toHaveLength(1);
+  });
+
   test("a chat is an agent's by its model", () => {
     expect(agentIdOf("agent:claude")).toBe("claude");
     expect(agentIdOf("agent:nope")).toBeNull();

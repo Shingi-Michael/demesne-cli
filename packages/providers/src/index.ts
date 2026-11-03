@@ -38,7 +38,7 @@ export type ProviderStreamEvent =
   | { type: "response_state"; state: import("@demesne/protocol").ResponsesState }
   | { type: "reasoning_delta"; delta: string }
   | { type: "text_delta"; delta: string }
-  | { type: "tool_call_delta"; index: number; idDelta: string; nameDelta: string; argumentsDelta: string }
+  | { type: "tool_call_delta"; index: number; idDelta: string; nameDelta: string; argumentsDelta: string; extra?: unknown }
   | { type: "finish"; reason: string }
   | { type: "usage"; usage: TokenUsage };
 
@@ -368,6 +368,7 @@ function serializeMessage(message: ProviderMessage): Record<string, unknown> {
         id: call.id,
         type: "function",
         function: { name: call.name, arguments: call.arguments },
+        ...(call.extra !== undefined ? { extra_content: call.extra } : {}),
       })),
     };
   }
@@ -548,12 +549,16 @@ function readToolCallDeltas(value: Record<string, unknown>): Array<{
   idDelta: string;
   nameDelta: string;
   argumentsDelta: string;
+  extra?: unknown;
 }> {
   if (!Array.isArray(value.choices)) return [];
   const output = [];
   for (const choice of value.choices) {
     if (!isRecord(choice) || !isRecord(choice.delta) || !Array.isArray(choice.delta.tool_calls)) continue;
-    for (const call of choice.delta.tool_calls) {
+    for (const [position, call] of choice.delta.tool_calls.entries()) {
+      // Google's OpenAI-compatible endpoint sends whole calls without an
+      // index: each one's place in the list is its index.
+      if (isRecord(call) && call.index === undefined) call.index = position;
       if (!isRecord(call) || !Number.isSafeInteger(call.index) || (call.index as number) < 0) {
         throw new ProviderError("Provider returned an invalid tool call index");
       }
@@ -564,7 +569,7 @@ function readToolCallDeltas(value: Record<string, unknown>): Array<{
       if (typeof idDelta !== "string" || typeof nameDelta !== "string" || typeof argumentsDelta !== "string") {
         throw new ProviderError("Provider returned invalid tool call fragments");
       }
-      output.push({ index: call.index as number, idDelta, nameDelta, argumentsDelta });
+      output.push({ index: call.index as number, idDelta, nameDelta, argumentsDelta, ...(call.extra_content !== undefined ? { extra: call.extra_content } : {}) });
     }
   }
   return output;

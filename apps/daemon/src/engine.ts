@@ -37,6 +37,7 @@ interface AssembledToolCall {
   id: string;
   name: string;
   arguments: string;
+  extra?: unknown;
   draftId?: string;
   draftSent?: number;
   draftAt?: number;
@@ -397,6 +398,7 @@ export class AgentEngine {
               call.id += event.idDelta;
               call.name += event.nameDelta;
               call.arguments += event.argumentsDelta;
+              if (event.extra !== undefined) call.extra = event.extra;
               if (call.id.length > 512 || call.name.length > 256) throw new Error("Tool identity exceeded the limit");
               if (call.arguments.length > 128 * 1024) throw new Error("Tool arguments exceeded the limit");
               assembled.set(event.index, call);
@@ -508,7 +510,7 @@ export class AgentEngine {
         role: "assistant",
         content: roundText || null,
         ...(responses ? { responses } : {}),
-        toolCalls: providerCalls.map(({ id, name, arguments: args }) => ({ id, name, arguments: args })) satisfies ProviderToolCall[],
+        toolCalls: providerCalls.map(({ id, name, arguments: args, extra }) => ({ id, name, arguments: args, ...(extra !== undefined ? { extra } : {}) })) satisfies ProviderToolCall[],
       } as const;
       currentMessages.push(assistantMessage);
       this.store.appendModelMessage(turnId, assistantMessage);

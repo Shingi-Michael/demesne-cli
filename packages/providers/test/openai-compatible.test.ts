@@ -391,6 +391,27 @@ describe("OpenAICompatibleProvider", () => {
     expect(redirectMode).toBe("manual");
   });
 
+  test("Gemini's whole calls without an index, and their thought signature going back", async () => {
+    const bodies: Record<string, any>[] = [];
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      fetch: (async (_input: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response([
+          `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", tool_calls: [{ id: "c1", type: "function", function: { name: "check", arguments: JSON.stringify({ value: "ready" }) }, extra_content: { google: { thought_signature: "sig" } } }] }, finish_reason: "tool_calls" }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join(""));
+      }) as unknown as typeof fetch,
+    });
+    const events = [];
+    for await (const event of provider.stream({ model: "gemini-3-pro", messages: [
+      { role: "assistant", content: null, toolCalls: [{ id: "p", name: "check", arguments: "{}", extra: { google: { thought_signature: "old" } } }] },
+      { role: "tool", toolCallId: "p", content: "ok" },
+    ] }, new AbortController().signal)) events.push(event);
+    expect(events[0]).toEqual({ type: "tool_call_delta", index: 0, idDelta: "c1", nameDelta: "check", argumentsDelta: JSON.stringify({ value: "ready" }), extra: { google: { thought_signature: "sig" } } });
+    expect(bodies[0]!.messages[0].tool_calls[0].extra_content).toEqual({ google: { thought_signature: "old" } });
+  });
+
   test("serializes tools and assembles streamed tool call fragments", async () => {
     let body: Record<string, unknown> | undefined;
     const provider = new OpenAICompatibleProvider({

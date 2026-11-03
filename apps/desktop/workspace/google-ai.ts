@@ -27,6 +27,10 @@ function safeError(error: unknown, signal: AbortSignal): Error {
     if (error.status === 429) return new Error("Google quota or rate limit reached. Check AI Studio billing and limits, then retry.");
     if (error.status === 404) return new Error("This Google model is no longer available. Check the key again to refresh models.");
     if (error.status && error.status >= 500) return new Error("Google is temporarily unavailable. Try again shortly.");
+    // Our own fixed wording about a malformed reply (never upstream text):
+    // say what went wrong instead of blaming the network.
+    if (!error.status && /^Provider (stream|returned|response)/.test(error.message))
+      return new Error(`Google's reply didn't match what Demesne expects (${error.message.replace(/^Provider /, "")}). Try another model; nothing was saved.`);
   }
   return new Error("Google connection failed. Check your network and try again. Nothing was saved.");
 }
@@ -107,6 +111,7 @@ export class GoogleAIConnection {
         if (event.type === "tool_call_delta") {
           const call = calls.get(event.index) ?? { id: "", name: "", arguments: "" };
           call.id += event.idDelta; call.name += event.nameDelta; call.arguments += event.argumentsDelta;
+          if (event.extra !== undefined) call.extra = event.extra;
           calls.set(event.index, call);
         }
       }

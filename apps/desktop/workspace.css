@@ -1419,7 +1419,12 @@ body.desktop :is(pre, .diff, .rv-diff, .step-fold, .pv-view) { scrollbar-width: 
 .desktop #cards .card { border-radius: 12px; }
 /* The Mac: no title bar. The traffic lights sit on the glass at the top of
    the sidebar, and the shell's top edge moves the window. */
-html.mac-chrome #desktop-sidebar { padding-top: 48px; -webkit-app-region: drag; }
+html.mac-chrome #desktop-sidebar { padding: 48px 8px 10px; -webkit-app-region: drag; }
+html.mac-chrome .sidebar-foot { margin-inline: -8px; padding-left: 18px; }
+/* The window's own buttons sit in a patch that is never a drag area: inside
+   one, macOS is slow to show their marks and a click can start a drag. */
+#mac-lights-hole { display: none; }
+html.mac-chrome #mac-lights-hole { display: block; position: fixed; top: calc(10px + var(--notch-top, 0px)); left: 10px; width: 68px; height: 28px; z-index: 49; pointer-events: none; -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-sidebar > * { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-toolbar { -webkit-app-region: drag; }
 html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .bar-tab, header > *) { -webkit-app-region: no-drag; }
@@ -1429,11 +1434,11 @@ html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { 
 html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-sidebar { padding-top: 52px; }
 html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-toolbar { padding-left: 24px; }
 /* The Mac's simple full screen has no title bar, so the page draws the
-   three buttons where the window's own sit (trafficLightPosition 18, 17). */
+   three buttons where the window's own sit (trafficLightPosition 18, 18). */
 /* The window can't move there, so the drag regions go: they'd swallow the
    buttons' clicks, whatever is painted on top and even with no-drag here. */
 html.fullscreen :is(#desktop-sidebar, #desktop-toolbar) { -webkit-app-region: no-drag; }
-#mac-lights { position: fixed; top: calc(17px + var(--notch-top, 0px)); left: 18px; z-index: 50; display: flex; gap: 8px; }
+#mac-lights { position: fixed; top: calc(18px + var(--notch-top, 0px)); left: 18px; z-index: 50; display: flex; gap: 8px; }
 /* Simple full screen covers the camera notch's strip too, so the shell starts
    below it (main.ts measures it); the strip stays glass, like the menu bar. */
 html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notch-top, 0px); }

@@ -17,7 +17,17 @@ const positive = (value: unknown): value is number => typeof value === "number" 
 
 /** The only text allowed across the privileged boundary is ours, never a
  * transport exception or an upstream error body (which can echo credentials). */
-function safeError(error: unknown, signal: AbortSignal): Error {
+/** A short, key-free description of an unexpected failure, so a broken step
+ * says which step and what broke instead of always blaming the network. */
+function detail(error: unknown, key: string): string {
+  const name = error instanceof Error ? error.name : typeof error;
+  const raw = error instanceof Error ? error.message : String(error);
+  const text = raw.split(key).join("…").replace(/AIza[0-9A-Za-z_-]{20,}/g, "…").replace(/https?:\/\/\S+/g, "…")
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+  return text ? `${name}: ${text}` : name;
+}
+
+function safeError(error: unknown, signal: AbortSignal, key = "", step = "connecting"): Error {
   if (signal.aborted) return new Error("Google connection cancelled or timed out. Try again.");
   if (error instanceof GoogleAIError) return new Error(error.message);
   if (error instanceof ProviderError) {
@@ -32,13 +42,16 @@ function safeError(error: unknown, signal: AbortSignal): Error {
     if (!error.status && /^Provider (stream|returned|response)/.test(error.message))
       return new Error(`Google's reply didn't match what Demesne expects (${error.message.replace(/^Provider /, "")}). Try another model; nothing was saved.`);
   }
-  return new Error("Google connection failed. Check your network and try again. Nothing was saved.");
+  if (error instanceof TypeError && /fetch|network|connect/i.test(error.message))
+    return new Error(`Google connection failed while ${step}. Check your network and try again. Nothing was saved.`);
+  return new Error(`Google setup failed while ${step} (${detail(error, key)}). Nothing was saved.`);
 }
 
 /** Neither discovery nor tests persist keys, requests, responses or chat turns.
  * Save is a separate, explicitly consented operation. No key is a class field. */
 export class GoogleAIConnection {
   private pending: AbortController | null = null;
+  private step = "connecting";
   constructor(private readonly options: { configPath: string; fetch?: typeof fetch; timeoutMs?: number; scrubBackup?: typeof scrubGoogleBackup }) {}
   cancel() { this.pending?.abort(); this.pending = null; }
 
@@ -47,15 +60,17 @@ export class GoogleAIConnection {
     if (typeof raw !== "string" || !raw.trim() || raw.length > 4096 || /\s/.test(raw.trim()))
       throw new Error("Enter a Google AI Studio API key without spaces.");
     const controller = this.pending = new AbortController();
+    this.step = "connecting";
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.options.timeoutMs ?? 90_000)]);
     try { return await work(raw.trim(), signal); }
-    catch (error) { throw safeError(error, signal); }
+    catch (error) { throw safeError(error, signal, raw.trim(), this.step); }
     finally { if (this.pending === controller) this.pending = null; }
   }
   private adapter(key: string) {
     return new OpenAICompatibleProvider({ baseUrl: GOOGLE_AI_URL, providerId: GOOGLE_AI_LABEL, apiKey: key, fetch: this.options.fetch });
   }
   private async catalog(key: string, signal: AbortSignal): Promise<GoogleAICatalog> {
+    this.step = "listing models";
     const models = new Map<string, GoogleAIModel>();
     let token = "";
     const seen = new Set<string>();
@@ -84,6 +99,7 @@ export class GoogleAIConnection {
     }
     // The native catalog supplies limits; only offer IDs also exposed by the
     // OpenAI-compatible endpoint used by the daemon. No hard-coded model names.
+    this.step = "matching models";
     const compatible = new Map((await this.adapter(key).listModels(signal)).filter(model => /^(?:models\/)?gemini-[a-z0-9._-]+$/.test(model.id)).map(model => [modelId(model.id), model.id]));
     signal.throwIfAborted();
     const available = [...models.values()].filter(model => compatible.has(model.id)).map(model => ({ ...model, id: compatible.get(model.id)! })).sort((a, b) => a.id.localeCompare(b.id));
@@ -117,12 +133,15 @@ export class GoogleAIConnection {
       }
       return { text, calls: [...calls.values()], finish };
     }
+    this.step = "testing a tool call";
     const first = await complete(), call = first.calls[0];
-    if (first.calls.length !== 1 || !call?.id || call.name !== "connection_check" || first.finish !== "tool_calls")
+    // Some Gemini models finish a tool-call turn with "stop": the call itself is what counts.
+    if (first.calls.length !== 1 || !call?.id || call.name !== "connection_check" || !["tool_calls", "stop"].includes(first.finish))
       fail("This model did not complete the tool-call check. Try another model; nothing was saved.");
     try { if (JSON.parse(call!.arguments).value !== "ready") throw new Error(); }
     catch { fail("This model returned an invalid test tool call. Nothing was saved."); }
     messages.push({ role: "assistant", content: first.text || null, toolCalls: first.calls }, { role: "tool", toolCallId: call!.id, content: '{"result":"ready"}' });
+    this.step = "testing a tool result";
     const second = await complete();
     if (!second.text.trim() || second.calls.length || second.finish !== "stop")
       fail("This model did not complete the tool-result check. Try another model; nothing was saved.");
@@ -142,6 +161,7 @@ export class GoogleAIConnection {
     if (remember !== true) return Promise.reject(new Error("Saving requires your explicit permission to store this key locally."));
     return this.run(key, async (key, signal) => {
       const selected = await this.checked(key, id, signal);
+      this.step = "saving settings";
       const config = loadConfig({ userConfigPath: this.options.configPath, includeProject: false, env: {} }).config;
       const existing = target === "provider" ? config.provider : typeof target === "string" ? config.additionalProviders?.[target] : undefined;
       if (target !== "new:google" && (!existing || !isGoogleAI(existing))) fail("That Google provider changed. Reopen its settings and try again.");

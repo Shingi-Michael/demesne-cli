@@ -11,10 +11,10 @@ import type {
   NearbyAgent,
 } from "@demesne/protocol";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
-import { homedir, userInfo } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted, type HealthResponse, type HousedAgent } from "@demesne/client";
 import { DEFAULT_AGENT_LIMITS, loadConfig, parseConfigFile, updateUserConfig } from "@demesne/config";
 import {
@@ -1844,6 +1844,21 @@ export class WorkspaceHost {
     }
     // An image pasted, dropped or picked in the composer: uploaded now, sent
     // with the next message.
+    // An iPhone photo (HEIC) the window can't draw: the Mac's own sips
+    // turns it into a JPEG, at most 4096px, as a data URL.
+    if (method === "image-convert") {
+      if (typeof args.data !== "string" || !args.data) throw new Error("Invalid image");
+      if (process.platform !== "darwin") throw new Error("HEIC photos can only be converted on a Mac. Export it as JPEG first.");
+      const dir = mkdtempSync(join(tmpdir(), "demesne-heic-"));
+      try {
+        const source = join(dir, "in.heic"), out = join(dir, "out.jpg");
+        writeFileSync(source, Buffer.from(args.data.replace(/^data:[^,]*,/, ""), "base64"));
+        execFileSync("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "88", "-Z", "4096", source, "--out", out], { stdio: "ignore", timeout: 30_000 });
+        return `data:image/jpeg;base64,${readFileSync(out).toString("base64")}`;
+      } catch (error) {
+        throw new Error(error instanceof Error && /HEIC|Mac/.test(error.message) ? error.message : "This photo couldn't be converted");
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
     if (method === "attach") {
       if (!this.current) throw new Error("Choose a session first.");
       if (typeof args.data !== "string" || typeof args.mimeType !== "string" || typeof args.name !== "string") throw new Error("Invalid image");

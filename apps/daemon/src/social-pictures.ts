@@ -42,6 +42,9 @@ const RESPONSE_LIMIT = 30 * 1024 * 1024;
 export function pictureMaker(config: ImageGenerationConfig, deps: PictureDeps): PictureMaker | null {
   if (!config.url || !config.model) return null;
   const base = config.url.replace(/\/+$/, ""), model = config.model, request = deps.request ?? fetch;
+  // gpt-image models pick their own quality (up to about $0.17 a picture)
+  // unless told; medium keeps a picture near the $0.04 the cap counts.
+  const quality = /^gpt-image/i.test(model) ? "medium" : null;
   const headers = (): Record<string, string> => config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {};
   async function read(response: Response): Promise<Uint8Array | null> {
     if (!response.ok) { await response.body?.cancel(); return null; }
@@ -60,14 +63,14 @@ export function pictureMaker(config: ImageGenerationConfig, deps: PictureDeps): 
     try {
       const face = await deps.facePng(agentFace(agent));
       const form = new FormData();
-      form.set("model", model); form.set("prompt", prompt); form.set("n", "1"); form.set("size", "1024x1024");
+      form.set("model", model); form.set("prompt", prompt); form.set("n", "1"); form.set("size", "1024x1024"); if (quality) form.set("quality", quality);
       form.set("image", new Blob([new Uint8Array(face)], { type: "image/png" }), `${agent}.png`);
       image = await read(await request(`${base}/images/edits`, { method: "POST", headers: headers(), body: form, signal, redirect: "error" }));
     } catch { image = null; }
     if (!image) {
       try {
         image = await read(await request(`${base}/images/generations`, { method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
-          body: JSON.stringify({ model, prompt, n: 1, size: "1024x1024" }), signal, redirect: "error" }));
+          body: JSON.stringify({ model, prompt, n: 1, size: "1024x1024", ...(quality ? { quality } : {}) }), signal, redirect: "error" }));
       } catch { return null; }
     }
     if (!image) return null;

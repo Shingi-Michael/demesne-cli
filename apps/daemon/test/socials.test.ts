@@ -183,6 +183,13 @@ describe("pictures", () => {
     expect([...(await make("claude", "Fixed the flaky test"))!]).toEqual([4, 5, 0]);
     expect(seen[0]!.url).toBe("https://images.example/v1/images/edits");
     expect((seen[0]!.body as FormData).get("prompt")).toContain("Fixed the flaky test");
+    // Only gpt-image models are asked for medium quality, which the cap's price assumes.
+    expect((seen[0]!.body as FormData).get("quality")).toBeNull();
+    const asked: unknown[] = [];
+    const gpt = pictureMaker({ url: "https://i.example", model: "gpt-image-1" }, { facePng: async () => new Uint8Array([1]), shrink: async (data) => data,
+      request: (async (_url: string, init: RequestInit) => { asked.push((init.body as FormData).get("quality")); return new Response(JSON.stringify({ data: [{ b64_json: "AQ==" }] })); }) as unknown as typeof fetch })!;
+    await gpt("claude", "x");
+    expect(asked).toEqual(["medium"]);
     expect(picturePrompt("codex", "x")).toContain("mint-green");
     expect(picturePrompt("codex", "x")).toContain("no real people");
   });

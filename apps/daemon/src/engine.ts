@@ -197,7 +197,7 @@ export class AgentEngine {
   /// After a chat's first turn, its model names it in a few words (chat-name.ts):
   /// only chats a person is in, only once, and never over a name given meanwhile.
   private async nameChat(turnId: string, sessionId: string, inference: TurnInference) {
-    if (!this.options.nameChats) return;
+    if (!this.options.nameChats || inference.external) return;
     const turn = this.store.getTurn(turnId), session = this.store.getSession(sessionId);
     if (!turn || !session || turn.status !== "completed" || turn.kind || turn.fromDrive || turn.fromRoutine || turn.permissionMode !== "ask") return;
     if (this.options.assistantChat?.(sessionId) || session.turns.filter((item) => !item.kind).length !== 1) return;
@@ -454,7 +454,7 @@ export class AgentEngine {
           if (!signal.aborted && roundText.length === 0 && assembled.size === 0 && isProviderDropped(error)) {
             // The assistant's chat runs on its own model only: its reading
             // of your files never continues on another provider.
-            const next = this.options.assistantChat?.(turn.sessionId) ? null : this.options.fallbackInference?.(inference, triedProviders) ?? null;
+            const next = inference.external || this.options.assistantChat?.(turn.sessionId) ? null : this.options.fallbackInference?.(inference, triedProviders) ?? null;
             if (next && !triedProviders.includes(next.providerId)) {
               const reason = error instanceof Error ? error.message : String(error);
               if (!(await this.continueElsewhere(turnId, turn.permissionMode, providerCallId, inference, next, signal))) {

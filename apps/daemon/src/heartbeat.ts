@@ -176,7 +176,12 @@ export { isMailTurn } from "@demesne/protocol";
 export interface HeartbeatBridgeOptions {
   client: HeartbeatClient;
   /// Starts a turn in the chat; throws InvalidStateError while one is running.
-  startTurn: (sessionId: string, content: string) => void;
+  startTurn: (sessionId: string, content: string) => { turnId: string; done: Promise<void> } | void;
+  /// A chat whose answers go back to the senders by themselves: an agent
+  /// tool's chat (agent-cli.ts), which has no heartbeat tool of its own.
+  answersMail?: (sessionId: string) => boolean;
+  /// The finished turn's answer, or null when it didn't finish.
+  answerOf?: (turnId: string) => string | null;
   /// Resolves when the chat's running turn, if any, has ended.
   waitForIdle: (sessionId: string) => Promise<void>;
   log?: (message: string) => void;
@@ -279,7 +284,11 @@ export class HeartbeatBridge {
         const pairRequests = attachment.pairRequests.splice(0);
         if (!held.length && !pairRequests.length) return;
         try {
-          this.options.startTurn(sessionId, formatMail(attachment.address, held, pairRequests));
+          const started = this.options.startTurn(sessionId, formatMail(attachment.address, held, pairRequests));
+          const asked = held;
+          if (started && asked.length && this.options.answersMail?.(sessionId)) {
+            void started.done.catch(() => {}).then(() => this.answer(sessionId, asked, this.options.answerOf?.(started.turnId) ?? null));
+          }
           return;
         } catch (error) {
           // A turn began between the idle check and ours: deliver after it.
@@ -292,6 +301,26 @@ export class HeartbeatBridge {
       }
     } finally {
       attachment.delivering = false;
+    }
+  }
+
+  /// Sends a chat's answer back to whoever wrote: done for a request,
+  /// inform otherwise, fail when the turn didn't finish.
+  async answer(sessionId: string, asked: Envelope[], text: string | null): Promise<void> {
+    const address = this.address(sessionId);
+    if (!address) return;
+    const latest = new Map<string, Envelope>();
+    for (const message of asked) if (message.from !== address) latest.set(message.from, message);
+    for (const message of latest.values()) {
+      const performative: Performative = text === null ? "fail" : message.performative === "request" ? "done" : "inform";
+      const words = (text ?? "This agent did not finish; its chat in Demesne says why.").slice(0, 1900);
+      try {
+        const { line } = compactLine({ to: message.from, performative, reply_to: message.id, text: words });
+        const reply = await this.client.request({ command: "say", line, as: address, owner: false, read: false });
+        if (reply.status !== "ok") this.options.log?.(`Heartbeat: could not answer ${message.from}: ${String(reply.error ?? "refused")}`);
+      } catch (error) {
+        this.options.log?.(`Heartbeat: could not answer ${message.from}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 

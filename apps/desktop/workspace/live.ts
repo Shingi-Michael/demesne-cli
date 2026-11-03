@@ -125,6 +125,11 @@ const k = (key: string) => `<kbd>${h(shortcut(key))}</kbd>`;
 /// "qwen/qwen3.8-27b-instruct" reads "Qwen3.8 27B Instruct".
 const modelWords = (model: { id: string; displayName?: string | null }) => model.displayName?.trim() || model.id.split("/").at(-1)!.split(/[-_]/).filter(Boolean)
   .map((word) => /^\d+(\.\d+)?[bkm]$/i.test(word) ? word.toUpperCase() : /^(gpt|glm|llm|vl|it)$/i.test(word) ? word.toUpperCase() : word.replace(/^./, (c) => c.toUpperCase())).join(" ");
+/// The agent tool whose chat this is (agent-cli.ts), or null for a model's chat.
+const housedHere = (snapshot: Snapshot | null = state) => snapshot?.session ? snapshot.housed?.find((agent) => agent.sessionId === snapshot.session!.id) ?? null : null;
+const AGENT_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
+/// "agent:claude" reads "Claude Code"; a model's id is left as it is.
+const agentWords = (model: string) => model.startsWith("agent:") ? AGENT_NAMES[model.slice(6)] ?? model.slice(6) : null;
 /// A session view, not the start screen: it has turns, or Drive is working
 /// it (Drive plans before its first turn).
 const projectLabel = (path: string) => path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path;
@@ -655,9 +660,12 @@ function renderSidebar() {
   openProjectFor = projectWorkspace;
   const isOpen = (key: string) => Boolean(query) || groupIsOpen(key);
   const agents = state.agents ?? [];
+  // Agent tools Demesne runs itself: their chats show under Agents, not as chats.
+  const housed = state.housed ?? [];
+  const housedIds = new Set(housed.flatMap((agent) => agent.sessionId ? [agent.sessionId] : []));
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000)]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000)]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -675,7 +683,7 @@ function renderSidebar() {
   // your chat and lands as a branch to review. One you open shows while open.
   // An empty chat is the composer itself, and the New chat row above already
   // names it; it joins the list once it has a turn.
-  const listed = sessions.filter((item) => (!branches.has(item.id) || item.id === current?.id) && (backOf(item) !== "away" || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
+  const listed = sessions.filter((item) => !housedIds.has(item.id) && (!branches.has(item.id) || item.id === current?.id) && (backOf(item) !== "away" || item.id === current?.id) && (titleOf(item) !== "New chat" || tones.get(item.id) === "working" || (item.id === current?.id && Boolean(waiting))));
   const matches = (item: typeof sessions[number]) => !query || titleOf(item).toLowerCase().includes(query) || Boolean(item.workspace?.toLowerCase().includes(query));
   const sorted = (items: typeof sessions) => sidebarView.sort === "name" ? [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))) : items;
   const whereWords = (item: typeof sessions[number]) => { const project = projectFor(item); return project ? projectLabel(project) : "Just a chat"; };
@@ -721,6 +729,15 @@ function renderSidebar() {
     return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
+  // The project's agents: a letter tile, the name, and how it is (a dot
+  // while it works or has a new reply). Clicking opens its chat.
+  const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${housed.map((agent) => {
+    const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
+    const word = tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
+    return btn("agent-open", `<span class="agent-mark" data-provider="${h(agent.id)}" aria-hidden="true">${h(agent.id === "codex" ? "X" : agent.name[0] ?? "?")}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
+      { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id ? " on" : ""}`)
+      .replace("<button ", `<button title="${h(agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
+  }).join("")}</div>`;
   const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
     const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)));
@@ -780,6 +797,7 @@ function renderSidebar() {
       const key = `p:${path}`, expanded = isOpen(key), active = path === projectWorkspace;
       const rows = groupRows(key, matching, (item) => shortAge(item.updatedAt), nested);
       if (active && !query) rows.push(reviewLine());
+      if (active && !query && housed.length) rows.push(housedLines());
       // The whole line is the fold, its folder shut or open with it; + starts
       // a chat in the project.
       const label = btn("project-toggle", `${expanded ? ICON_FOLDER_OPEN : ICON_FOLDER_SHUT}<span>${h(name)}</span>`, { path }, "sidebar-project-name")
@@ -1177,7 +1195,7 @@ function renderCards() {
   const showContext = c.percentage != null && contextInUse(c.percentage);
   // Where (pass 121 E) leads in a project chat; a plain chat only gets it
   // while the daemon isn't fine, so the chat keeps its width otherwise.
-  const where = whereCard({ root, branch: s.session?.workspace?.gitBranch, model: s.model, reasoning: s.reasoning, connection: s.connection, server: s.server, changed: files.length, context: !showContext && c.percentage != null && c.used != null && c.capacity ? { percentage: c.percentage, used: c.used, capacity: c.capacity } : null });
+  const where = whereCard({ root, branch: s.session?.workspace?.gitBranch, model: housedHere(s) ? { id: housedHere(s)!.model, displayName: housedHere(s)!.name, provider: "run by Demesne" } : s.model, reasoning: housedHere(s) ? null : s.reasoning, connection: s.connection, server: s.server, changed: files.length, context: !showContext && c.percentage != null && c.used != null && c.capacity ? { percentage: c.percentage, used: c.used, capacity: c.capacity } : null });
   const showWhere = Boolean(root) || where.state !== "";
   if (!showWhere && !files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
   app.classList.add("cards-on");
@@ -1342,7 +1360,12 @@ function renderStatus() {
   el("status").hidden = inSession();
   // The context used, as a small ring; the numbers wait in its tooltip.
   const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
-  el("composer-model").innerHTML = `${h(state.model.id ? modelWords({ id: state.model.id, displayName: state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName }) : "") || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
+  const housedAgent = housedHere(), modelChip = el("composer-model");
+  // An agent's chat runs that agent: its name, and no model to pick.
+  modelChip.toggleAttribute("disabled", Boolean(housedAgent));
+  modelChip.title = housedAgent ? `This chat runs ${housedAgent.name}, started by Demesne` : "Change model";
+  if (housedAgent) modelChip.textContent = housedAgent.name;
+  else el("composer-model").innerHTML = `${h(state.model.id ? modelWords({ id: state.model.id, displayName: state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName }) : "") || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
   el("composer-context").innerHTML = c2;
   el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
   el("composer-context").hidden = !inSession() || !c2;
@@ -1835,7 +1858,7 @@ function otherModel(run: WorkspaceRun) {
 /// Only the chat's last message, settled, with no images, that changed no files.
 function canAskAgain(run: WorkspaceRun, files: number) {
   const last = lastAsk();
-  return !state!.activeTurnId && !run.kind && !run.fromDrive && !run.fromRoutine && !run.attachments?.length && files === 0
+  return !housedHere() && !state!.activeTurnId && !run.kind && !run.fromDrive && !run.fromRoutine && !run.attachments?.length && files === 0
     && Boolean(last) && (last!.id === run.id || Boolean(versionsOf(run)?.turnIds.includes(last!.id)))
     && ["completed", "failed", "cancelled", "interrupted"].includes(run.status);
 }
@@ -2084,7 +2107,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     const paths = [...new Set(changed.flatMap((t) => t.changes?.map((c) => c.path) ?? [String(t.input.path ?? t.detail ?? "")]))];
     const total = changed.reduce((sum, t) => { const each = totals(run, t); return { added: sum.added + each.added, removed: sum.removed + each.removed }; }, { added: 0, removed: 0 });
     const steps = items.length, thought = run.entries.some((e) => e.type === "reasoning");
-    const model = (receipt?.model ?? "").split("/").at(-1) ?? "";
+    const model = agentWords(receipt?.model ?? "") ?? (receipt?.model ?? "").split("/").at(-1) ?? "";
     const speed = receipt?.tokensPerSecond ? `${Math.round(receipt.tokensPerSecond)} tok/s` : "";
     // "model · 1.7s · 38 tok/s", then what changed, the checks, the steps.
     const parts = [
@@ -5122,9 +5145,14 @@ async function dispatch(
   args: Record<string, any>,
   target?: HTMLElement,
 ) {
-  if (pageOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open", "assistant-open"].includes(action)) openPage("");
+  if (pageOpen && ["select-session", "new-session", "project-new", "project-session", "review-open", "drive-open", "assistant-open", "agent-open"].includes(action)) openPage("");
   // The Assistant row opens its one chat; in its own folder, that folder
   // opens as the window's project, like any chat in another project.
+  if (action === "agent-open") {
+    await api("agent-open", { id: String(args.id) });
+    editor.focus({ preventScroll: true });
+    return;
+  }
   if (action === "assistant-open") {
     const assistant = state?.assistant, here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace;
     if (assistant?.workspace && assistant.workspace !== here) document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: assistant.workspace, sessionId: assistant.sessionId } }));

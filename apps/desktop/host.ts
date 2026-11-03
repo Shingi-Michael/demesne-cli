@@ -278,6 +278,15 @@ export class DesktopHost {
       return this.select(request.args.path, request.args.sessionId, { fresh: request.args.fresh === true, draft: request.args.draft });
     if (this.switching) throw new Error("Wait for the project to open");
     if (!this.host) throw new Error("Choose a project first");
+    // Remove a project from Demesne: its chats are deleted and it leaves the
+    // recent list. The folder on disk is never touched.
+    if (request.method === "remove-project") {
+      const path = desktopWorkspace(request.args.path);
+      await this.host.handle("remove-project-chats", { path });
+      this.prefs = { ...this.prefs, recentProjects: this.prefs.recentProjects.filter((one) => one !== path), lastWorkspace: this.prefs.lastWorkspace === path ? null : this.prefs.lastWorkspace };
+      writePreferences(this.preferencePath, this.prefs);
+      return;
+    }
     const result = await this.host.handle(request.method, request.args);
     // A request can create a session (Trust folder, New session). Remember it
     // now: a project switch can dispose this host before its batched update.

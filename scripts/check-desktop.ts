@@ -1795,6 +1795,23 @@ try {
   await until(() => page.locator("#thread-pane").isVisible(), "picking the thread opens it again");
   await page.locator("#thread-tabs .tp-hide").click();
   await until(() => page.locator("#thread-pane").isHidden(), "the panel icon closes the thread side");
+  // Right-click a chat in the sidebar (pass 136 A): Demesne's own menu, and
+  // Delete asks once, in place, before the chat is gone for good.
+  const chatRows = page.locator("#sidebar-projects .sidebar-item:not(:has([aria-current='page']))");
+  const rowsBefore = await page.locator("#sidebar-projects .sidebar-item").count();
+  await chatRows.last().click({ button: "right" });
+  await until(() => page.locator("#row-menu").isVisible(), "right-click opens the chat's menu");
+  const menuWords = await page.locator("#row-menu").innerText();
+  assert(["Open", "Rename", "Archive", "Delete"].every(word => menuWords.includes(word)), `the chat's menu: ${menuWords}`);
+  await capture("18-row-menu");
+  await page.locator("#row-menu .danger").click();
+  await until(() => page.locator("#row-menu .sure").isVisible(), "Delete asks once, in place");
+  await page.locator("#row-menu .sure").click();
+  await until(() => page.locator("#sidebar-projects .sidebar-item").count().then(count => count === rowsBefore - 1), "the chat is deleted", 20_000);
+  await page.locator("#sidebar-projects .sidebar-project.active .sidebar-project-header").first().click({ button: "right" });
+  await until(() => page.locator("#row-menu").innerText().then(text => text.includes("Show in Finder") && text.includes("Open another project to remove this one")).catch(() => false), "the open project's menu, which can't remove itself");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#row-menu").count().then(count => count === 0), "Esc closes the menu");
   // Switching models resizes the context at once, before the new model's
   // first request.
   const sizeBefore = await page.locator("#composer-context").getAttribute("title");
@@ -1804,7 +1821,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "a thread's own thinking, words and context", "deleting a thread from its tab", "closing the thread side from its tabs", "thread tabs on the top bar"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "a thread's own thinking, words and context", "deleting a thread from its tab", "closing the thread side from its tabs", "thread tabs on the top bar", "right-click a chat or project"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

@@ -5914,13 +5914,18 @@ function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
     threadPaneFor = fix.id; threadPaneSignature = "";
     threadWorking ??= new WorkingLine(spinner);
     threadContextOpen = false;
-    host.innerHTML = `<div class="tp-conv"><div class="tp-turns"></div></div><div class="tp-foot"><div id="tp-context-card" hidden></div><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><span class="tp-merge-host"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button><button type="button" id="tp-context" class="cb" data-action="thread-context" aria-expanded="false" hidden></button></div></form></div>`;
+    host.innerHTML = `<div class="tp-conv"><div class="tp-turns"></div></div><div class="tp-foot"><div id="tp-context-card" hidden></div><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg><svg class="ico send-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><div class="composer-bar"><span class="sp"></span><span class="tp-merge-host"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button><button type="button" id="tp-context" class="cb" data-action="thread-context" aria-expanded="false" hidden></button></div></form></div>`;
     host.querySelector(".tp-conv")!.append(threadWorking.element);
   }
   const chat = state.threads.chat;
   const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.map((item) => [item.id, item.status]), threadDeleteArmed, threadContextOpen, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
   if (signature === threadPaneSignature) return;
   threadPaneSignature = signature;
+  // While it works, an empty composer's send is Stop, as in any chat; words steer it instead.
+  const form = host.querySelector<HTMLFormElement>("#tp-composer")!, working = Boolean(chat?.activeTurnId);
+  form.classList.toggle("working", working);
+  form.classList.toggle("stopping", working && !form.classList.contains("has-draft"));
+  form.querySelector(".send")!.setAttribute("aria-label", form.classList.contains("stopping") ? "Stop this thread" : "Send to this thread");
   const merge = host.querySelector<HTMLElement>(".tp-merge-host")!, mergeHTML = threadMergeHTML(state.threads, fix);
   if (merge.innerHTML !== mergeHTML) merge.innerHTML = mergeHTML;
   const chip = host.querySelector<HTMLElement>("#tp-model")!, chipHTML = threadModelWords();
@@ -5964,9 +5969,9 @@ function renderThreadContext(host: HTMLElement) {
   const inner = asThread(() => contextHalf(c)) ?? "";
   if (card.dataset.html !== inner) { card.innerHTML = inner; card.dataset.html = inner; }
 }
-function sendToThread(form: HTMLFormElement) {
+function sendToThread(form: HTMLFormElement, stop = false) {
   const input = form.querySelector("textarea")!, text = input.value.trim();
-  if (!text) return;
+  if (!text) { if (stop && form.classList.contains("working")) void api("thread-cancel", {}).catch((error) => notice(error instanceof Error ? error.message : String(error))); return; }
   input.value = "";
   form.classList.remove("has-draft");
   void api("thread-send", { text }).catch((error) => { input.value = text; notice(error instanceof Error ? error.message : String(error)); });
@@ -5994,11 +5999,13 @@ document.addEventListener("submit", (event) => {
   const form = (event.target as Element).closest<HTMLFormElement>("[data-thread-form]");
   if (!form) return;
   event.preventDefault();
-  sendToThread(form);
+  sendToThread(form, Boolean((event as SubmitEvent).submitter));
 });
 document.addEventListener("input", (event) => {
-  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea");
-  input?.form?.classList.toggle("has-draft", Boolean(input.value.trim()));
+  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea"), form = input?.form;
+  if (!form) return;
+  form.classList.toggle("has-draft", Boolean(input!.value.trim()));
+  form.classList.toggle("stopping", form.classList.contains("working") && !form.classList.contains("has-draft"));
 });
 document.addEventListener("keydown", (event) => {
   const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea");

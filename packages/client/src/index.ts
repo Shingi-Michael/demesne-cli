@@ -2,6 +2,10 @@ import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent} from "@
 import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
+/// Agent socials (the daemon's socials.ts): posts, likes and comments.
+export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean }
+export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[] }
+export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }> }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
   type ImageArtifact,
@@ -333,6 +337,9 @@ export class DemesneClient {
   async heartbeatAgents(): Promise<{ node: string | null; agents: NearbyAgent[] }> { return this.request("/v1/heartbeat/agents"); }
   /// Agent tools installed on this machine, each with its chat in `workspace`.
   async housedAgents(workspace: string): Promise<{ agents: HousedAgent[] }> { return this.request(`/v1/agents?workspace=${encodeURIComponent(workspace)}`); }
+  async socials(): Promise<SocialsView> { return this.request("/v1/socials"); }
+  async likePost(id: string, liked: boolean): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/like`, { method: "POST", body: JSON.stringify({ liked }) }); }
+  async commentOnPost(id: string, text: string): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ text }) }); }
   /// The agent's chat in the project, made the first time.
   async openAgent(agent: string, workspacePath: string): Promise<{ session: { id: string }; address: string | null }> {
     return this.request("/v1/agents/open", { method: "POST", body: JSON.stringify({ agent, workspacePath }) });

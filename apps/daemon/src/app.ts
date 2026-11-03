@@ -46,6 +46,7 @@ import {
   type UpdateSessionResponse,
 } from "@demesne/protocol";
 import { DemesneStore, InvalidStateError, NotFoundError, QuestionStateError } from "@demesne/storage";
+import { SocialFeed, writeOnce } from "./socials.ts";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
@@ -189,6 +190,8 @@ export function createDaemonApp(options: {
   foundryLook?: FoundryLook;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
+  /// Agent socials: the agents post about the day (the daemon on; tests off).
+  socials?: boolean;
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
   saveSubagentModel?: (model: string | null) => void;
@@ -354,6 +357,8 @@ export function createDaemonApp(options: {
   const commands=new CommandMonitor(store);
   const agentCli = new AgentCli(dirname(options.databasePath), options.agentCli);
   const isAgentChat = (sessionId: string) => agentIdOf(store.getSession(sessionId)?.preferredModel) !== null;
+  /// Turns that answer Heartbeat mail, so the agent's post says so.
+  const mailTurns = new Set<string>();
   const heartbeatClient = new HeartbeatClient(options.heartbeat?.socket ?? heartbeatSocketPath());
   const heartbeat = heartbeatEnabled(options.heartbeat, heartbeatClient) ? new HeartbeatBridge({
     client: heartbeatClient,
@@ -361,6 +366,7 @@ export function createDaemonApp(options: {
       // Mail runs on Auto, like a Drive mission: nobody is at the window to
       // approve, and a turn that waits never answers the sender.
       const { turn } = store.createTurn(sessionId, content, "allow");
+      mailTurns.add(turn.id);
       return { turnId: turn.id, done: queueTurn(turn, inferenceIn(sessionId, undefined)) };
     },
     // An agent tool's chat answers its mail by itself: the answer goes back.
@@ -421,6 +427,36 @@ export function createDaemonApp(options: {
       ...options.agent,
     },
   );
+  // Agent socials (socials.ts): the agents post about the day you have
+  // together, written by the default model with thinking off.
+  const socials = options.socials ? new SocialFeed(join(dirname(options.databasePath), "socials.json"), {
+    agents: () => agentCli.agents().map((agent) => agent.id),
+    write: async (messages) => {
+      const inference = snapshotTurnInference(processor, false);
+      const leaseId = `socials:${randomUUID()}`;
+      const lease = await scheduler.for(inference.providerId).acquire(leaseId, new AbortController().signal);
+      try { return await writeOnce((items, signal) => inference.stream(items, [], signal), messages); } finally { lease.release(); }
+    },
+  }) : null;
+  /// A finished turn the feed hears about: an agent's turn is its post, and
+  /// a chat of yours (one you were at, not Drive, a routine or a thread) is a moment.
+  function noteSocial(turnId: string) {
+    const turn = store.getTurn(turnId);
+    const session = turn && store.getSession(turn.sessionId);
+    const mail = mailTurns.delete(turnId);
+    if (!socials || !turn || !session || turn.status !== "completed" || turn.kind || turn.fromDrive || turn.fromRoutine) return;
+    if (session.id === assistantChat.existing() || driveFixes.isThread(session.id)) return;
+    const workspace = session.workspace?.root ?? null;
+    const agent = agentIdOf(session.preferredModel);
+    if (agent) {
+      const answered = store.getTurnModelMessages(session.id, turnId).filter((message) => message.role === "assistant")
+        .map((message) => typeof message.content === "string" ? message.content : "").filter(Boolean).at(-1) ?? "";
+      void socials.noteAgentTurn(agent, { kind: mail ? "mail" : "work", label: session.title, sessionId: session.id, workspace }, turn.content, answered).catch(() => {});
+    } else if (turn.permissionMode === "ask" && workspace && !inDriveWorktree(workspace)) {
+      // Named a beat later (chat-name.ts), so the moment reads the chat's name.
+      setTimeout(() => { const title = store.getSession(session.id)?.title ?? session.title; void socials.noteMoment(session.id, title, workspace).catch(() => {}); }, 25_000).unref?.();
+    }
+  }
   const activeTurns = new Set<Promise<void>>();
   const compactor = new SessionCompactor(store, scheduler, tools, options, (sessionId) => sessionId !== assistantChat.existing(), keepEdits);
   const activeControllers = new Map<string, AbortController>();
@@ -582,6 +618,7 @@ export function createDaemonApp(options: {
       if (workspace) await Promise.race([heartbeat!.attach(turn.sessionId, workspace), new Promise((resolve) => setTimeout(resolve, 2_000))]);
       if (turn.kind === "compaction") await compactor.run(turn.id, inference, signal);
       else await engine.run(turn.id, inference, signal);
+      if (socials && turn.kind !== "compaction") noteSocial(turn.id);
     } catch (error) {
       if (signal.aborted) return;
       const detail = error instanceof Error ? error.message : "Unknown turn failure";
@@ -1151,6 +1188,24 @@ export function createDaemonApp(options: {
           return json(await decide(signal));
         } catch (error) {
           return apiError("provider_error", error instanceof Error ? error.message : "Drive planning failed", 502);
+        }
+      }
+
+      // Agent socials: the day's posts, likes and comments (socials.ts).
+      if (url.pathname === "/v1/socials" && request.method === "GET") {
+        return json(socials ? socials.view() : { posts: [], agents: [] });
+      }
+      const socialMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/(like|comments)$/);
+      if (socialMatch && request.method === "POST") {
+        if (!socials) return apiError("socials_off", "Agent socials are off", 404);
+        const body = await readJson(request) as { liked?: unknown; text?: unknown };
+        try {
+          const id = decodeURIComponent(socialMatch[1]!);
+          const post = socialMatch[2] === "like" ? socials.like(id, body.liked !== false) : await socials.comment(id, typeof body.text === "string" ? body.text : "");
+          return json({ post });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return apiError(message.startsWith("Post not found") ? "post_not_found" : "invalid_comment", message, message.startsWith("Post not found") ? 404 : 400);
         }
       }
 

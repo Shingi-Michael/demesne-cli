@@ -81,6 +81,7 @@ try {
     databasePath: join(dataDirectory, "demesne.sqlite"),
     processor,
     nameChats: true,
+    socials: true,
     localProviders: [config.provider, ...Object.values(config.additionalProviders ?? {})].filter(isLocalProvider)
       .map((item) => item.id ?? "openai-compatible"),
     reloadProviders: () => reloadProviders(processor),

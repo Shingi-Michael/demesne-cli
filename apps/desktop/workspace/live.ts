@@ -166,12 +166,6 @@ function modelLevel(model: ModelDescriptor): string | undefined {
   if (!levels?.length) return undefined;
   return resolveReasoningLevel(model, modelLevels.get(model.id) ?? (model.id === state?.model.id ? state.reasoning : undefined));
 }
-/// Thinking reads as Markdown (ChatGPT's summaries are "**Checking the
-/// bound**" sections; local models write math), except a very long trace,
-/// which stays plain text so streaming it never reparses a novel.
-function thinkingBody(raw: string) {
-  return raw.length > 24_000 ? `<pre>${h(raw)}</pre>` : `<div class="markdown thinking-text">${markdown(raw)}</div>`;
-}
 /// A provider with more models than this (OpenRouter) collapses in /model.
 const LARGE_CATALOG = 25;
 /// How many models the picker lists before "More models".
@@ -2021,12 +2015,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
-    if (entry.type === "reasoning") {
-      flush();
-      const live = active(run) && i === run.entries.length - 1;
-      const open = detailsOpen.has(key) || (live && !detailsClosed.has(key));
-      body += `<div class="thinking thinking-main ${live ? "live" : ""}"><button type="button" class="thinking-toggle" data-action="toggle-thinking" data-args="${h(JSON.stringify({id:key}))}" aria-expanded="${open}" aria-controls="thinking-body-${h(key)}">${CHEVRON}${live ? "Thinking" : `Thought for ${duration(entry.durationMs)}`}<span class="thinking-disclosure">${open ? "Collapse" : "Show trace"}</span></button><div class="thinking-content" id="thinking-body-${h(key)}"${open ? "" : " hidden"}>${thinkingBody(entry.raw)}</div></div>`;
-    }
+    // Thinking is never shown: like frontier apps, the working line says what it is about while it runs.
     if (entry.type === "tool") {
       // Theme questions stand together; otherwise finished reads, edits and
       // writes up to the next command (or the step running now) are one
@@ -5336,17 +5325,6 @@ async function dispatch(
     compactionCard?.querySelector<HTMLButtonElement>(".compaction-toggle")?.focus({ preventScroll: true });
     return;
   }
-  if(action === "toggle-thinking") {
-    const content=document.getElementById(`thinking-body-${args.id}`), toggle=content?.previousElementSibling;
-    if(!content || !(toggle instanceof HTMLButtonElement))return;
-    const open=toggle.getAttribute("aria-expanded") === "true";
-    if(open){detailsOpen.delete(args.id);detailsClosed.add(args.id);}
-    else{detailsClosed.delete(args.id);detailsOpen.add(args.id);}
-    content.hidden=open;toggle.setAttribute("aria-expanded",String(!open));
-    const label=toggle.querySelector(".thinking-disclosure");
-    if(label)label.textContent=open ? "Show trace" : "Collapse";
-    return;
-  }
   if (action === "rebuild-app") { rebuildAsked = true; return api("rebuild-app", {}); }
   if (action === "question-control") return questionAction(args.action, questionById(args.id) ?? pendingQuestion());
   if (action === "question-pick") {
@@ -6420,7 +6398,7 @@ document.addEventListener("keydown", (event) => {
     ctrl = event.ctrlKey || event.metaKey;
   // Native details and buttons keep Enter and Space.
   if (!ctrl && !event.altKey && (key === "enter" || key === " ") && event.target instanceof Element) {
-    const control = event.target.closest<HTMLElement>(".approval-row button, .thinking-toggle");
+    const control = event.target.closest<HTMLElement>(".approval-row button");
     if (control) { event.preventDefault(); control.click(); return; }
   }
   const run = (task: () => Promise<unknown> | void) => {
@@ -6725,12 +6703,6 @@ window.demesneInspect = () => ({
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",
-  thinking: [...document.querySelectorAll<HTMLElement>("#conversation .thinking-main")].map(trace=>{
-    const toggle=trace.querySelector(".thinking-toggle")!, body=trace.querySelector(".thinking-content")!;
-    const row=toggle.getBoundingClientRect(), content=body.getBoundingClientRect();
-    return {open:toggle.getAttribute("aria-expanded") === "true",live:trace.classList.contains("live"),summary:toggle.textContent,body:body.textContent?.slice(-2000),
-      x:row.x+row.width/2,y:row.y+row.height/2,statusTop:row.top,bodyBottom:content.bottom};
-  }),
   requests: [...document.querySelectorAll<HTMLElement>(".request .text")].map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }),
   controls: [
     ...document.querySelectorAll<HTMLElement>(

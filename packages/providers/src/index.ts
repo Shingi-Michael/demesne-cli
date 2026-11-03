@@ -127,7 +127,11 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     if (body.data.length > MODEL_COUNT_LIMIT) throw new ProviderError(`Model endpoint exceeded the ${MODEL_COUNT_LIMIT} model limit`);
     const seen = new Set<string>();
     const models = body.data.flatMap((value): ModelDescriptor[] => {
-      if (!isRecord(value) || typeof value.id !== "string" || !value.id || seen.has(value.id)) return [];
+      if (!isRecord(value) || typeof value.id !== "string" || !value.id) return [];
+      // Google lists "models/gemini-…" but its chat endpoint only answers to
+      // the plain name, so the plain name is the model's id everywhere.
+      if (this.baseUrl.hostname === "generativelanguage.googleapis.com") value = { ...value, id: value.id.replace(/^models\//, "") as string };
+      if (typeof value.id !== "string" || !value.id || seen.has(value.id)) return [];
       seen.add(value.id);
       const contextWindow = readContextWindow(value);
       const maxOutputTokens = isRecord(value.top_provider) ? positiveInteger(value.top_provider.max_completion_tokens) : undefined;

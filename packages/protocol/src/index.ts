@@ -180,6 +180,9 @@ export interface ModelToolCall {
   id: string;
   name: string;
   arguments: string;
+  /// Provider data that must go back with the call (Gemini's thought
+  /// signature, sent as `extra_content`).
+  extra?: unknown;
 }
 
 export interface WorkspaceFileInfo { path: string; byteLength: number | null; status: string | null; additions?: number; deletions?: number }

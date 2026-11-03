@@ -60,8 +60,28 @@ try {
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll("#page .td-comment")].some((item) => item.textContent?.includes("nice one")), undefined, { timeout: 10_000 });
   expect(true, "your comment shows under the post");
-  await page.waitForTimeout(1500);
+  // Pass 138: react, share a line with a picture, open a profile.
+  await page.locator("#page .td-post [data-action='today-pick']").first().click();
+  await page.locator("#page .td-pick").nth(3).click();
+  await page.waitForFunction(() => document.querySelector("#page .td-chip.on") !== null, undefined, { timeout: 5_000 }).catch(() => {});
+  expect(await page.locator("#page .td-chip.on").count() === 1, "your reaction shows on the post");
+  await page.locator("#today-file").setInputFiles({ name: "shot.png", mimeType: "image/png", buffer: Buffer.from(pink, "base64") });
+  await page.locator("#today-share .td-attach img").waitFor({ timeout: 5_000 }).catch(() => {});
+  await page.locator("#today-share input[name=text]").fill("Got the tabs right today");
+  await page.locator("#today-share .td-post-btn").click();
+  await page.waitForFunction(() => [...document.querySelectorAll("#page .td-post")].some((item) => item.textContent?.includes("Got the tabs right today")), undefined, { timeout: 15_000 }).catch(() => {});
+  const mine = page.locator("#page .td-post", { hasText: "Got the tabs right today" });
+  expect(await mine.count() === 1, "your post shows on Today");
+  await mine.locator("img.td-shot").waitFor({ timeout: 10_000 }).catch(() => {});
+  expect(await mine.locator("img.td-shot").count() === 1, "your post carries its picture");
+  await page.waitForTimeout(800);
   await page.screenshot({ path: join(output, "today.png") });
+  await page.locator("#page .td-post [data-action='today-profile']").first().click();
+  await page.locator("#page .td-bio").waitFor({ timeout: 15_000 }).catch(() => {});
+  expect(await page.locator("#page .td-bio").count() === 1 && await page.locator("#page .td-back").count() === 1, "a face opens that agent's profile");
+  await page.screenshot({ path: join(output, "profile.png") });
+  await page.locator("#page .td-back").click();
+  expect(await page.locator("#today-share").count() === 1, "back goes to the feed");
 } finally {
   await browser.close();
   await f.close?.();

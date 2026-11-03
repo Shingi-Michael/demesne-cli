@@ -29,11 +29,21 @@ export type SocialSource =
   /// Heartbeat mail an agent answered.
   | { kind: "mail"; label: string; sessionId: string; workspace: string | null }
   /// One of your chats that got somewhere: a moment, not an agent's post.
-  | { kind: "moment"; label: string; sessionId: string; workspace: string | null };
+  | { kind: "moment"; label: string; sessionId: string; workspace: string | null }
+  /// The day's first and last posts, a line you shared, and a milestone:
+  /// none of them comes from one chat.
+  | { kind: "morning" | "night" | "share" | "milestone"; label: string; sessionId: ""; workspace: null };
+
+/// Who posts or comments: an agent, you, or Demesne itself (milestones).
+export type SocialWho = "you" | "demesne" | AgentId;
+
+/// The reactions a post can get, besides Like.
+export const REACTIONS = ["🌸", "🔥", "😂", "🙏", "👀"] as const;
+export type Reaction = typeof REACTIONS[number];
 
 export interface SocialComment {
   id: string;
-  by: "you" | AgentId;
+  by: SocialWho;
   at: string;
   text: string;
   /// Your comment asked for work: the feed offers to open the agent's chat.
@@ -42,8 +52,8 @@ export interface SocialComment {
 
 export interface SocialPost {
   id: string;
-  /// The agent who posted, or "you" for a moment from your own chat.
-  by: "you" | AgentId;
+  /// The agent who posted, "you" for your moments and shares, "demesne" for a milestone.
+  by: SocialWho;
   at: string;
   text: string;
   from: SocialSource;
@@ -51,7 +61,26 @@ export interface SocialPost {
   comments: SocialComment[];
   /// A picture of the moment (step 2), served by /v1/socials/:id/picture.
   picture?: boolean;
+  /// Who reacted with what (you and the agents, in character).
+  reactions?: Partial<Record<Reaction, Array<"you" | AgentId>>>;
 }
+
+/// An agent's profile: who they are this week, from what really happened.
+export interface SocialProfile {
+  agent: SocialPersona;
+  /// Written by the agent once a week from its week's posts.
+  bio: string;
+  /// Its first post, or null when it hasn't posted yet.
+  since: string | null;
+  week: { work: number; mail: number; pictures: number; comments: number };
+  /// The agent it talks to most (comments both ways), or null.
+  friend: AgentId | null;
+  /// Its latest posts with pictures, newest first.
+  pictures: string[];
+}
+
+/// What the morning and night posts can say: your chats in the last day and a half, and today.
+export interface DayFacts { recent: string[]; today: string[] }
 
 /// What pictures cost this month, against the monthly cap.
 export interface SocialSpend {
@@ -66,7 +95,14 @@ export interface SocialSpend {
 
 export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[] }
 
-interface SocialsFile { version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number }
+interface SocialsFile {
+  version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number;
+  /// Each agent's weekly bio.
+  bios: Partial<Record<AgentId, { week: string; text: string }>>;
+  /// Milestones already celebrated, and work posts ever (posts are trimmed).
+  milestones: string[];
+  worked: number;
+}
 
 /// One call to the writer model: messages in, words out (null when it
 /// failed or took too long).
@@ -85,6 +121,10 @@ export interface SocialsOptions {
   monthlyDollars?: number;
   /// About what one picture costs, for the cap.
   pictureDollars?: number;
+  /// Your recent chats, for the good morning and good night posts.
+  dayFacts?: () => DayFacts;
+  /// A picture you share made feed-sized.
+  shrink?: (data: Uint8Array) => Promise<Uint8Array>;
 }
 
 const KEEP = 300;
@@ -99,6 +139,11 @@ const MONTHLY_CALLS = 900;
 const PICTURES_A_DAY = 2;
 const DEFAULT_CAP = 10;
 const PICTURE_DOLLARS = 0.04;
+
+/// The day's posts: morning from 8 (until noon), night from 22.
+const MORNING_HOUR = 8, MORNING_UNTIL = 12, NIGHT_HOUR = 22;
+/// Work posts ever that are worth a moment.
+const WORK_MILESTONES = [10, 25, 50, 100, 250, 500, 1000];
 
 const REQUEST = /\b(can|could|would|will) you\b|\bplease\b|^(fix|make|add|change|build|run|write|update|remove|delete|check|look into)\b/i;
 
@@ -138,11 +183,13 @@ export function postMessages(id: AgentId, source: SocialSource, asked: string, a
   ];
 }
 
+const nameOf = (by: SocialWho) => by === "you" ? "Mike" : by === "demesne" ? "Demesne" : PERSONAS[by].name;
+
 export function commentMessages(id: AgentId, post: SocialPost, about: string): ProviderMessage[] {
-  const author = post.by === "you" ? "Mike" : PERSONAS[post.by].name;
+  const author = nameOf(post.by);
   return [
     { role: "system", content: `${persona(id)} Comment on ${author}'s post. You know about it because ${about}. Be kind or playful, never mean. One sentence. ${RULES}` },
-    { role: "user", content: `${author}'s post:\n${post.text}${post.comments.length ? `\n\nComments so far:\n${post.comments.map((item) => `${item.by === "you" ? "Mike" : PERSONAS[item.by].name}: ${item.text}`).join("\n")}` : ""}` },
+    { role: "user", content: `${author}'s post:\n${post.text}${post.comments.length ? `\n\nComments so far:\n${post.comments.map((item) => `${nameOf(item.by)}: ${item.text}`).join("\n")}` : ""}` },
   ];
 }
 
@@ -150,8 +197,45 @@ export function replyMessages(id: AgentId, post: SocialPost, comment: SocialComm
   const work = comment.request ? " Mike's comment asks for work. You can't work from the feed: say you'd love to and that he can open it as a chat with you (there's a button for that), in your own words." : "";
   return [
     { role: "system", content: `${persona(id)} Mike commented on your post. Answer him like a friend would, in one or two sentences.${work} ${RULES}${known.length ? `\n\nThings Mike has said to you before (remember them, bring one up only when it fits):\n${known.map((line) => `- ${line}`).join("\n")}` : ""}` },
-    { role: "user", content: `Your post:\n${post.text}\n\nThe comments:\n${post.comments.map((item) => `${item.by === "you" ? "Mike" : PERSONAS[item.by].name}: ${item.text}`).join("\n")}` },
+    { role: "user", content: `Your post:\n${post.text}\n\nThe comments:\n${post.comments.map((item) => `${nameOf(item.by)}: ${item.text}`).join("\n")}` },
   ];
+}
+
+export function dayMessages(id: AgentId, when: "morning" | "night", facts: string[]): ProviderMessage[] {
+  const ask = when === "morning"
+    ? "It's morning. Post a good morning: say what's waiting for everyone today, using only the chats listed."
+    : "It's late. Post a good night: look back on today, using only what's listed.";
+  return [
+    { role: "system", content: `${persona(id)} ${ask} ${RULES}` },
+    { role: "user", content: facts.length ? facts.map((line) => `- ${clip(line, 160)}`).join("\n") : "(a quiet day)" },
+  ];
+}
+
+export function bioMessages(id: AgentId, week: string[]): ProviderMessage[] {
+  return [
+    { role: "system", content: `${persona(id)} Write your profile bio for this week: one or two short sentences, first person, who you are and what your week was about. Only use what's listed. Reply with the words only.` },
+    { role: "user", content: week.map((line) => `- ${clip(line, 200)}`).join("\n") },
+  ];
+}
+
+/// How each agent reacts, in character, with no model call.
+export function agentReaction(agent: AgentId, post: SocialPost): Reaction | null {
+  if (post.by === agent) return null;
+  if (post.from.kind === "milestone") return "🌸";
+  if (agent === "codex" && /\b(fix(ed)?|merged?|shipped|green|pass(ed)?|done|works?)\b/i.test(post.text)) return "🔥";
+  if (agent === "gemini" && /\?|\b(odd|weird|strange|why|curious|mystery|flaky|surpris\w*)\b/i.test(post.text)) return "👀";
+  if (agent === "claude" && (post.from.kind === "mail" || /\bthank/i.test(post.text))) return "🙏";
+  if (agent === "claude" && (post.from.kind === "moment" || post.from.kind === "share")) return "🌸";
+  return null;
+}
+
+/// The ISO week a date falls in, as 2026-W45.
+export function weekOf(date: Date): string {
+  const day = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const weekday = day.getUTCDay() || 7;
+  day.setUTCDate(day.getUTCDate() + 4 - weekday);
+  const start = new Date(Date.UTC(day.getUTCFullYear(), 0, 1));
+  return `${day.getUTCFullYear()}-W${String(Math.ceil(((day.getTime() - start.getTime()) / 86_400_000 + 1) / 7)).padStart(2, "0")}`;
 }
 
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -194,7 +278,7 @@ export class SocialFeed {
   /// post shows first; its picture follows when the model is done.
   private async addPicture(post: SocialPost): Promise<void> {
     const make = this.options.picture;
-    if (!make || post.by === "you") return;
+    if (!make || post.by === "you" || post.by === "demesne") return;
     const now = this.now();
     const today = this.data.posts.filter((item) => item.by === post.by && item.picture && sameDay(new Date(item.at), now)).length;
     const each = this.options.pictureDollars ?? PICTURE_DOLLARS;
@@ -257,6 +341,136 @@ export class SocialFeed {
     return this.find(post.id);
   }
 
+  /// Your reaction (one at a time), or none.
+  react(postId: string, reaction: string | null): SocialPost {
+    const post = this.must(postId);
+    if (reaction !== null && !(REACTIONS as readonly string[]).includes(reaction)) throw new Error(`Pick one of ${REACTIONS.join(" ")}`);
+    const all = post.reactions ?? {};
+    for (const key of Object.keys(all) as Reaction[]) all[key] = all[key]!.filter((who) => who !== "you");
+    if (reaction) (all[reaction as Reaction] ??= []).push("you");
+    for (const key of Object.keys(all) as Reaction[]) if (!all[key]!.length) delete all[key];
+    post.reactions = all;
+    this.save();
+    return post;
+  }
+
+  /// The agents react to a new post in character (agentReaction).
+  private agentsReact(post: SocialPost) {
+    for (const agent of this.options.agents()) {
+      const reaction = agentReaction(agent, post);
+      if (reaction) ((post.reactions ??= {})[reaction] ??= []).push(agent);
+    }
+  }
+
+  /// An agent's profile; its bio is rewritten once a week from its week.
+  async profile(agent: AgentId): Promise<SocialProfile> {
+    const now = this.now(), week = weekOf(now);
+    const posts = this.data.posts.filter((post) => post.by === agent);
+    const thisWeek = posts.filter((post) => weekOf(new Date(post.at)) === week);
+    const bio = this.data.bios[agent];
+    if (thisWeek.length && bio?.week !== week) {
+      const text = cleanPost(await this.call(bioMessages(agent, thisWeek.map((post) => post.text))), 200);
+      if (text) { this.data.bios[agent] = { week, text }; this.save(); }
+    }
+    const talks = new Map<AgentId, number>();
+    for (const post of this.data.posts) for (const comment of post.comments) {
+      const other = post.by === agent ? comment.by : comment.by === agent ? post.by : null;
+      if (other && other !== agent && other !== "you" && other !== "demesne") talks.set(other, (talks.get(other) ?? 0) + 1);
+    }
+    const friend = [...talks].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const comments = this.data.posts.reduce((count, post) => count + post.comments.filter((comment) => comment.by === agent && weekOf(new Date(comment.at)) === week).length, 0);
+    return {
+      agent: PERSONAS[agent],
+      bio: this.data.bios[agent]?.text ?? (posts.length ? "Settling in." : "New here. Nothing posted yet."),
+      since: posts[0]?.at ?? null,
+      week: { work: thisWeek.filter((post) => post.from.kind === "work").length, mail: thisWeek.filter((post) => post.from.kind === "mail").length, pictures: thisWeek.filter((post) => post.picture).length, comments },
+      friend,
+      pictures: posts.filter((post) => post.picture).map((post) => post.id).reverse().slice(0, 9),
+    };
+  }
+
+  /// A line (and maybe a picture) you share. Agents who were around today
+  /// comment on it, at most two.
+  async share(text: string, image?: Uint8Array | null): Promise<SocialPost> {
+    const words = text.replace(/\s+/g, " ").trim().slice(0, 1000);
+    if (!words && !image) throw new Error("Write something to share first");
+    const post: SocialPost = { id: randomUUID(), by: "you", at: this.now().toISOString(), text: words, from: { kind: "share", label: "", sessionId: "", workspace: null }, liked: false, comments: [] };
+    if (image) {
+      const small = this.options.shrink ? await this.options.shrink(image) : image;
+      mkdirSync(this.pictureDir, { recursive: true });
+      writeFileSync(join(this.pictureDir, `${post.id}.webp`), small);
+      post.picture = true;
+    }
+    this.add(post);
+    const around = (id: AgentId) => this.data.posts.some((item) => item.by === id && sameDay(new Date(item.at), this.now()));
+    await this.friendComments(post, around, "you were around in Demesne today");
+    await this.friendComments(post, around, "you were around in Demesne today");
+    return this.must(post.id);
+  }
+
+  /// Once a minute: the good morning and good night posts, when it's time.
+  async tick(): Promise<SocialPost | null> {
+    const now = this.now(), hour = now.getHours(), agents = this.options.agents();
+    if (!agents.length || !this.options.dayFacts) return null;
+    const today = this.data.posts.filter((post) => sameDay(new Date(post.at), now));
+    const turn = Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 86_400_000);
+    if (hour >= MORNING_HOUR && hour < MORNING_UNTIL && !today.some((post) => post.from.kind === "morning")) {
+      const facts = this.options.dayFacts().recent;
+      if (!facts.length) return null;
+      return this.dayPost(agents[turn % agents.length]!, "morning", facts);
+    }
+    if (hour >= NIGHT_HOUR && !today.some((post) => post.from.kind === "night")) {
+      const happened = today.filter((post) => post.from.kind !== "morning");
+      if (happened.length < 2) return null;
+      const lines = [...happened.map((post) => `${nameOf(post.by)}: ${post.text}`), ...this.options.dayFacts().today.map((title) => `Your chat: ${title}`)];
+      return this.dayPost(agents[(turn + 1) % agents.length]!, "night", lines);
+    }
+    return null;
+  }
+
+  private async dayPost(agent: AgentId, when: "morning" | "night", facts: string[]): Promise<SocialPost | null> {
+    const key = `${when}:${agent}`;
+    if (this.writing.has(key)) return null;
+    this.writing.add(key);
+    try {
+      const text = cleanPost(await this.call(dayMessages(agent, when, facts)));
+      if (!text) return null;
+      const post: SocialPost = { id: randomUUID(), by: agent, at: this.now().toISOString(), text, from: { kind: when, label: when === "morning" ? "Good morning" : "Good night", sessionId: "", workspace: null }, liked: false, comments: [] };
+      this.add(post);
+      await this.addPicture(post);
+      return this.find(post.id);
+    } finally { this.writing.delete(key); }
+  }
+
+  /// Real numbers worth a moment: work done together, an agent's first
+  /// month, a week with posts every day. Each one once.
+  private async milestones(): Promise<void> {
+    const now = this.now(), found: Array<{ key: string; text: string }> = [];
+    // Only the biggest count reached is celebrated; smaller ones it passed count as done.
+    const reached = WORK_MILESTONES.filter((count) => this.data.worked >= count && !this.data.milestones.includes(`work:${count}`));
+    for (const count of reached.slice(0, -1)) this.data.milestones.push(`work:${count}`);
+    const next = reached.at(-1);
+    if (next) found.push({ key: `work:${next}`, text: `${next} things finished together` });
+    for (const agent of this.options.agents()) {
+      const first = this.data.posts.find((post) => post.by === agent);
+      if (first && now.getTime() - Date.parse(first.at) >= 30 * 86_400_000 && !this.data.milestones.includes(`month:${agent}`))
+        found.push({ key: `month:${agent}`, text: `${PERSONAS[agent].name}'s first month in Demesne` });
+    }
+    const days = Array.from({ length: 7 }, (_, index) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - index));
+    if (days.every((day) => this.data.posts.some((post) => post.by !== "demesne" && sameDay(new Date(post.at), day))) && !this.data.milestones.some((key) => key.startsWith("streak:") && now.getTime() - Number(key.slice(7)) < 7 * 86_400_000))
+      found.push({ key: `streak:${now.getTime()}`, text: "A whole week in Demesne, every day" });
+    for (const { key, text } of found) {
+      this.data.milestones.push(key);
+      const post: SocialPost = { id: randomUUID(), by: "demesne", at: this.now().toISOString(), text, from: { kind: "milestone", label: text, sessionId: "", workspace: null }, liked: false, comments: [] };
+      this.agentsReact(post);
+      this.data.posts.push(post);
+      this.save();
+      const anyone = () => true;
+      await this.friendComments(post, anyone, "it's a milestone for all of you");
+      await this.friendComments(post, anyone, "it's a milestone for all of you");
+    }
+  }
+
   like(postId: string, liked: boolean): SocialPost {
     const post = this.must(postId);
     post.liked = liked;
@@ -273,7 +487,7 @@ export class SocialFeed {
     const mine: SocialComment = { id: randomUUID(), by: "you", at: this.now().toISOString(), text: words, ...(asksForWork(words) ? { request: true } : {}) };
     post.comments.push(mine);
     this.save();
-    const answerer = post.by !== "you" ? post.by : [...post.comments].reverse().find((item) => item.by !== "you")?.by as AgentId | undefined;
+    const answerer = post.by !== "you" && post.by !== "demesne" ? post.by : [...post.comments].reverse().find((item) => item.by !== "you" && item.by !== "demesne")?.by as AgentId | undefined;
     if (answerer && this.options.agents().includes(answerer)) {
       const reply = cleanPost(await this.call(replyMessages(answerer, post, mine, this.known(answerer))));
       if (reply) { this.must(postId).comments.push({ id: randomUUID(), by: answerer, at: this.now().toISOString(), text: reply }); this.save(); }
@@ -289,15 +503,17 @@ export class SocialFeed {
 
   /// Another agent comments when it has a reason: it was busy in the same
   /// project today. Never more than two agent comments on a post.
-  private async friendComments(post: SocialPost): Promise<void> {
+  private async friendComments(post: SocialPost, near?: (id: AgentId) => boolean, why?: string): Promise<void> {
     const now = this.now();
     const today = this.data.posts.filter((item) => sameDay(new Date(item.at), now));
     const agentCommentsToday = today.reduce((count, item) => count + item.comments.filter((comment) => comment.by !== "you").length, 0);
     if (agentCommentsToday >= AGENT_COMMENTS_A_DAY) return;
-    const candidates = this.options.agents().filter((id) => id !== post.by && today.some((item) => item.by === id && item.id !== post.id && item.from.workspace && item.from.workspace === post.from.workspace));
+    const sameProject = (id: AgentId) => today.some((item) => item.by === id && item.id !== post.id && item.from.workspace && item.from.workspace === post.from.workspace);
+    const current = this.find(post.id) ?? post;
+    const candidates = this.options.agents().filter((id) => id !== post.by && (near ?? sameProject)(id) && !current.comments.some((item) => item.by === id));
     const friend = candidates[Math.floor(now.getTime() / 60_000) % Math.max(1, candidates.length)];
-    if (!friend || post.comments.filter((item) => item.by !== "you").length >= AGENT_COMMENTS_A_POST || post.comments.some((item) => item.by === friend)) return;
-    const reason = `you were working in the same project (${post.from.workspace?.split(/[\\/]/).at(-1)}) today`;
+    if (!friend || current.comments.filter((item) => item.by !== "you").length >= AGENT_COMMENTS_A_POST) return;
+    const reason = why ?? `you were working in the same project (${post.from.workspace?.split(/[\\/]/).at(-1)}) today`;
     const text = cleanPost(await this.call(commentMessages(friend, post, reason)), 200);
     if (!text) return;
     const fresh = this.find(post.id);
@@ -315,11 +531,14 @@ export class SocialFeed {
   }
 
   private add(post: SocialPost) {
+    this.agentsReact(post);
+    if (post.from.kind === "work") this.data.worked += 1;
     this.data.posts.push(post);
     if (this.data.posts.length > KEEP) {
       for (const old of this.data.posts.splice(0, this.data.posts.length - KEEP)) if (old.picture) rmSync(join(this.pictureDir, `${old.id}.webp`), { force: true });
     }
     this.save();
+    if (post.by !== "demesne") void this.milestones().catch(() => {});
   }
 
   private find(id: string): SocialPost | null { return this.data.posts.find((post) => post.id === id) ?? null; }
@@ -331,11 +550,13 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0 };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, milestones: [], worked: 0 };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;
-      return { ...empty, ...parsed, posts: Array.isArray(parsed.posts) ? parsed.posts : [] };
+      const posts = Array.isArray(parsed.posts) ? parsed.posts : [];
+      // Feeds from before milestones count their work posts once.
+      return { ...empty, ...parsed, posts, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
     } catch { return empty; }
   }
 

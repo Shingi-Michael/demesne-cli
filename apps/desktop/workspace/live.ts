@@ -24,9 +24,9 @@ import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
-import { newSince, todayPage, type TodayUi } from "./today-page.ts";
+import { forYou, newSince, todayPage, whoName, type TodayUi } from "./today-page.ts";
 import { agentFace } from "@demesne/brand";
-import type { SocialPost, SocialsView } from "@demesne/client";
+import type { SocialPost, SocialProfile, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
@@ -675,7 +675,7 @@ function renderSidebar() {
   const housedIds = new Set(housed.flatMap((agent) => agent.sessionId ? [agent.sessionId] : []));
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen())]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -742,7 +742,7 @@ function renderSidebar() {
   // The agents: a letter tile, the name, and how it is (a dot
   // while it works or has a new reply). Clicking opens its chat.
   const todayCount = newSince(socialsView, todaySeen());
-  const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span><small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
+  const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}<small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
   const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${todayRow}${housed.map((agent) => {
     const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
@@ -2858,21 +2858,76 @@ type PageKind = ChatsTab | "scheduled" | "foundry" | "customize" | "settings" | 
 let pageOpen: "" | PageKind = "";
 /// Today (agent socials): the feed, what is open in it, and when you last looked.
 let socialsView: SocialsView | null = null;
-const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new Map() };
+const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new Map(), picking: "", profile: null, share: { text: "", image: null, busy: false } };
+/// What on Today was for you (an agent answering or naming you): ids seen,
+/// and the ones you haven't looked at, for the sidebar's pink dot.
+let todayKnown: Set<string> | null = null;
+const todayDot = new Set<string>();
 const picturesLoading = new Set<string>();
 /// The posts' pictures, fetched once each while Today is open.
 function loadPictures() {
-  for (const post of socialsView?.posts ?? []) {
-    if (!post.picture || todayUi.pictures!.has(post.id) || picturesLoading.has(post.id)) continue;
-    picturesLoading.add(post.id);
-    void api<string>("socials-picture", { id: post.id }).then((src) => { todayUi.pictures!.set(post.id, src); renderPage(); }, () => {}).finally(() => picturesLoading.delete(post.id));
+  const ids = [...(socialsView?.posts ?? []).filter((post) => post.picture).map((post) => post.id), ...(todayUi.profile?.data?.pictures ?? [])];
+  for (const id of ids) {
+    if (todayUi.pictures!.has(id) || picturesLoading.has(id)) continue;
+    picturesLoading.add(id);
+    void api<string>("socials-picture", { id }).then((src) => { todayUi.pictures!.set(id, src); renderPage(); }, () => {}).finally(() => picturesLoading.delete(id));
   }
+}
+/// An agent answered you or named you: a pink dot on Today while you're
+/// elsewhere, and a notification when you're in another app.
+function noticeForYou() {
+  const found = forYou(socialsView);
+  const fresh = todayKnown ? [...found].filter(([id]) => !todayKnown!.has(id)) : [];
+  todayKnown = new Set([...(todayKnown ?? []), ...found.keys()]);
+  if (pageOpen === "today") { todayDot.clear(); return; }
+  for (const [id, item] of fresh) {
+    todayDot.add(id);
+    if (!notifyOn.social || document.hasFocus() || window.demesne.mode !== "desktop") continue;
+    const named = item.post.by === item.by ? "posted about you" : "answered you";
+    void api("desktop-notify", { title: `${whoName(item.by, socialsView)} ${named} on Today`, body: item.text, sessionId: "today" }).catch(() => {});
+  }
+}
+async function openProfile(agent: string) {
+  todayUi.picking = "";
+  todayUi.profile = agent ? { agent, data: null } : null;
+  renderPage();
+  document.getElementById("page")?.scrollTo({ top: 0 });
+  if (!agent) return;
+  try {
+    const data = await api<SocialProfile>("socials-profile", { agent });
+    if (todayUi.profile?.agent === agent) { todayUi.profile = { agent, data }; loadPictures(); }
+  } catch (error) { todayUi.profile = null; todayUi.error = errorWords(error); }
+  renderPage();
+}
+/// A screenshot for your post, from a paste or the file picker.
+function attachPicture(file: File | null | undefined) {
+  if (!file || !file.type.startsWith("image/")) return;
+  if (file.size > 10 * 1024 * 1024) { todayUi.error = "That picture is too big to share (10 MB at most)"; return renderPage(); }
+  const reader = new FileReader();
+  reader.onload = () => { if (typeof reader.result === "string") { todayUi.share!.image = reader.result; todayUi.error = ""; renderPage(); } };
+  reader.readAsDataURL(file);
+}
+async function sharePost() {
+  const share = todayUi.share!;
+  const text = share.text.trim();
+  if ((!text && !share.image) || share.busy) return;
+  share.busy = true;
+  renderPage();
+  try {
+    const post = await api<SocialPost>("socials-share", { text, image: share.image });
+    if (socialsView) socialsView = { ...socialsView, posts: [post, ...socialsView.posts.filter((item) => item.id !== post.id)] };
+    todayUi.share = { text: "", image: null, busy: false };
+    todayUi.error = "";
+    loadPictures();
+  } catch (error) { share.busy = false; todayUi.error = errorWords(error); }
+  renderPage();
 }
 const TODAY_SEEN = "demesne-today-seen";
 const todaySeen = () => { try { return localStorage.getItem(TODAY_SEEN); } catch { return null; } };
 async function loadSocials() {
   try { socialsView = await api<SocialsView>("socials"); todayUi.error = ""; }
   catch (error) { socialsView = socialsView ?? { posts: [], agents: [] }; if (pageOpen === "today") todayUi.error = errorWords(error); }
+  noticeForYou();
   if (pageOpen === "today") { try { localStorage.setItem(TODAY_SEEN, new Date().toISOString()); } catch {} loadPictures(); renderPage(); }
   if (state) renderState({ ...state });
 }
@@ -3127,7 +3182,7 @@ function openPage(kind: "" | PageKind) {
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
   if (kind === "foundry") { if (was !== "foundry") Object.assign(foundryUi, { edit: null, error: "" }); foundrySaves = foundrySaveCount(); void loadFoundry(); }
   if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
-  if (kind === "today") { if (was !== "today") Object.assign(todayUi, { replying: "", error: "" }); void loadSocials(); }
+  if (kind === "today") { if (was !== "today") Object.assign(todayUi, { replying: "", error: "", picking: "", profile: null }); todayDot.clear(); void loadSocials(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
@@ -3256,8 +3311,19 @@ document.getElementById("page")?.addEventListener("input", (event) => {
   glassLevel = Math.min(100, Math.max(0, Number(input.value) || 0));
   applyGlass();
 });
+document.getElementById("page")?.addEventListener("input", (event) => {
+  const input = event.target as HTMLElement;
+  if (input instanceof HTMLInputElement && input.closest("#today-share") && input.name === "text") todayUi.share!.text = input.value;
+});
+// A screenshot pasted into the Today composer goes with your post.
+document.getElementById("page")?.addEventListener("paste", (event) => {
+  if (!(event.target as HTMLElement | null)?.closest?.("#today-share")) return;
+  const file = [...(event.clipboardData?.items ?? [])].find((item) => item.type.startsWith("image/"))?.getAsFile();
+  if (file) { event.preventDefault(); attachPicture(file); }
+});
 document.getElementById("page")?.addEventListener("change", (event) => {
   const input = event.target as HTMLElement;
+  if (input instanceof HTMLInputElement && input.id === "today-file") { attachPicture(input.files?.[0]); input.value = ""; return; }
   if (input instanceof HTMLSelectElement && input.matches("[data-foundry-version]") && foundryOpen) return void openFoundry(foundryOpen.id, Number(input.value));
   if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
 });
@@ -3328,6 +3394,12 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const value = form.querySelector("input")?.value.trim() ?? "";
     if (value) void settingsCall("settings-config", { key: form.dataset.key, value });
+    return;
+  }
+  if (form.id === "today-share") {
+    event.preventDefault();
+    todayUi.share!.text = form.querySelector<HTMLInputElement>("input[name=text]")?.value ?? "";
+    void sharePost();
     return;
   }
   if (form.classList.contains("td-field")) {
@@ -4567,6 +4639,8 @@ document.addEventListener("demesne:notify-answer", (event) => {
 document.addEventListener("demesne:open-chat", (event) => {
   const { sessionId, path } = (event as CustomEvent<{ sessionId?: string; path?: string }>).detail ?? {};
   if (!sessionId || !state) return;
+  // A Today notification opens Today.
+  if (sessionId === "today") return openPage("today");
   if (sessionId === state.session?.id && inSession()) return;
   const here = !path || path === (document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace);
   void act(() => dispatch(here ? "select-session" : "project-session", here ? { id: sessionId } : { id: sessionId, path }));
@@ -5381,6 +5455,24 @@ async function dispatch(
     try { swapPost(await api<SocialPost>("socials-like", { id: String(args.id), liked: args.liked === true })); } catch (error) { todayUi.error = errorWords(error); }
     return renderPage();
   }
+  if (action === "today-pick") { todayUi.picking = todayUi.picking === args.id ? "" : String(args.id); return renderPage(); }
+  if (action === "today-react") {
+    const id = String(args.id), reaction = typeof args.reaction === "string" ? args.reaction : "";
+    todayUi.picking = "";
+    const post = socialsView?.posts.find((item) => item.id === id);
+    if (post) {
+      // Yours moves at once; the daemon's answer settles it.
+      const all: Record<string, string[]> = {};
+      for (const [key, who] of Object.entries(post.reactions ?? {})) { const left = who.filter((by) => by !== "you"); if (left.length) all[key] = left; }
+      if (reaction) all[reaction] = [...(all[reaction] ?? []), "you"];
+      swapPost({ ...post, reactions: all });
+      renderPage();
+    }
+    try { swapPost(await api<SocialPost>("socials-react", { id, reaction })); } catch (error) { todayUi.error = errorWords(error); }
+    return renderPage();
+  }
+  if (action === "today-profile") return openProfile(typeof args.agent === "string" ? args.agent : "");
+  if (action === "today-unattach") { todayUi.share!.image = null; return renderPage(); }
   if (action === "today-reply") {
     todayUi.replying = todayUi.replying === args.id ? "" : String(args.id);
     renderPage();

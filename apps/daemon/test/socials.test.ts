@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProviderMessage } from "@demesne/providers";
-import { asksForWork, cleanPost, SocialFeed, writeOnce } from "../src/socials.ts";
+import { agentReaction, asksForWork, cleanPost, SocialFeed, weekOf, writeOnce, type DayFacts } from "../src/socials.ts";
 import type { AgentId } from "../src/agent-cli.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { picturePrompt, pictureMaker, type PictureMaker } from "../src/social-pictures.ts";
@@ -11,7 +11,7 @@ import { picturePrompt, pictureMaker, type PictureMaker } from "../src/social-pi
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const step of cleanup.splice(0)) step(); });
 
-function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number; picture?: PictureMaker | null; monthlyDollars?: number } = {}) {
+function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number; picture?: PictureMaker | null; monthlyDollars?: number; dayFacts?: () => DayFacts } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "demesne-socials-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const calls: ProviderMessage[][] = [];
@@ -22,6 +22,7 @@ function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?
     monthlyCalls: options.monthlyCalls,
     picture: options.picture,
     monthlyDollars: options.monthlyDollars,
+    dayFacts: options.dayFacts,
     write: async (messages) => { calls.push(messages); return replies.length ? replies.shift()! : "ok"; },
   });
   return { social: make(), calls, reopen: make };
@@ -203,5 +204,92 @@ describe("pictures", () => {
       request: (async () => new Response("no", { status: 500 })) as unknown as typeof fetch })!;
     expect(await no("gemini", "x")).toBeNull();
     expect(pictureMaker({}, { facePng: async () => new Uint8Array(), shrink: async (data) => data })).toBeNull();
+  });
+});
+
+describe("pass 138", () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  test("agents react in character, and your reaction is one at a time", async () => {
+    let at = new Date("2026-11-03T10:00:00");
+    const { social } = feed(["Fixed the flaky smoke test, merged."], { now: () => at });
+    const post = (await social.noteAgentTurn("claude", work("s1"), "fix it", "fixed"))!;
+    expect(post.reactions?.["🔥"]).toEqual(["codex"]);
+    expect(social.react(post.id, "🌸").reactions?.["🌸"]).toEqual(["you"]);
+    const moved = social.react(post.id, "😂");
+    expect(moved.reactions?.["🌸"]).toBeUndefined();
+    expect(moved.reactions?.["😂"]).toEqual(["you"]);
+    expect(social.react(post.id, null).reactions?.["😂"]).toBeUndefined();
+    expect(() => social.react(post.id, "💩")).toThrow();
+    at = new Date(at.getTime() + 1);
+    expect(agentReaction("gemini", { ...post, by: "codex", text: "Why is this flaky?" })).toBe("👀");
+    expect(agentReaction("claude", { ...post, by: "codex" })).toBeNull();
+  });
+
+  test("a profile's bio is written once a week, from that week, with a friend and week numbers", async () => {
+    let at = new Date("2026-11-03T10:00:00");
+    const { social, calls } = feed(["Codex was here.", "Shipped the tabs.", "Nice work.", "Careful week of tab fixes."], { now: () => at, agents: ["claude", "codex"] });
+    await social.noteAgentTurn("codex", work("s0"), "tests", "done");
+    at = new Date("2026-11-03T10:40:00");
+    await social.noteAgentTurn("claude", work("s1"), "tabs", "done");
+    at = new Date("2026-11-03T11:00:00");
+    await settle();
+    const first = await social.profile("claude");
+    expect(first.bio).toBe("Careful week of tab fixes.");
+    expect(first.friend).toBe("codex");
+    expect(first.week.work).toBe(1);
+    const asked = calls.length;
+    await social.profile("claude");
+    expect(calls.length).toBe(asked);
+    expect((await social.profile("gemini")).bio).toContain("Nothing posted");
+    expect(weekOf(new Date("2026-11-03T10:00:00"))).toBe("2026-W45");
+  });
+
+  test("you share a line, and agents who were around today comment", async () => {
+    let at = new Date("2026-11-03T10:00:00");
+    const { social } = feed(["Long day.", "Looks great, Mike!", "Ship it."], { now: () => at, agents: ["claude", "codex"] });
+    await social.noteAgentTurn("claude", work("s1"), "a", "b");
+    at = new Date("2026-11-03T12:00:00");
+    const post = await social.share("Finally got the tabs right", null);
+    expect(post.by).toBe("you");
+    expect(post.from.kind).toBe("share");
+    expect(post.comments.map((comment) => comment.by)).toEqual(["claude"]);
+    await expect(social.share("   ")).rejects.toThrow();
+  });
+
+  test("good morning and good night come once a day, from real chats", async () => {
+    let at = new Date("2026-11-03T07:00:00");
+    const facts: DayFacts = { recent: ["Fix tabs (demesne-cli)"], today: ["Fix tabs (demesne-cli)"] };
+    const { social, calls } = feed(["Morning! Tabs today.", "Post one", "Post two", "Night all."], { now: () => at, agents: ["claude", "codex"], dayFacts: () => facts });
+    expect(await social.tick()).toBeNull();
+    at = new Date("2026-11-03T08:30:00");
+    const morning = await social.tick();
+    expect(morning?.from.kind).toBe("morning");
+    expect(calls.at(-1)![1]!.content).toContain("Fix tabs");
+    expect(await social.tick()).toBeNull();
+    at = new Date("2026-11-03T22:10:00");
+    expect(await social.tick()).toBeNull();
+    at = new Date("2026-11-03T12:00:00");
+    await social.noteAgentTurn("claude", work("s1"), "a", "b");
+    at = new Date("2026-11-03T13:00:00");
+    await social.noteAgentTurn("codex", work("s2", "/p/other"), "a", "b");
+    at = new Date("2026-11-03T22:10:00");
+    const night = await social.tick();
+    expect(night?.from.kind).toBe("night");
+    expect(night?.by).not.toBe(morning?.by);
+    expect(await social.tick()).toBeNull();
+  });
+
+  test("milestones celebrate only the biggest count reached, once", async () => {
+    let at = new Date("2026-11-03T00:00:00");
+    const { social } = feed([], { now: () => at, agents: ["claude"] });
+    for (let index = 0; index < 26; index++) {
+      at = new Date(Date.parse("2026-11-03T00:00:00") + index * 8 * 3_600_000);
+      await social.noteAgentTurn("claude", work(`s${index}`), "a", "b");
+    }
+    await settle();
+    const milestones = social.view().posts.filter((post) => post.from.kind === "milestone" && !post.text.startsWith("A whole week"));
+    expect(milestones.map((post) => post.text)).toEqual(["25 things finished together", "10 things finished together"]);
+    expect(milestones.every((post) => post.by === "demesne" && post.reactions?.["🌸"]?.includes("claude"))).toBe(true);
   });
 });

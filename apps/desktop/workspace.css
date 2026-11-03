@@ -2126,3 +2126,62 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 /* Agent socials step 2: pictures of their day. */
 .td-pic { display: block; width: 100%; aspect-ratio: 1; border-radius: 12px; object-fit: cover; background: var(--tone); }
 .td-pic-wait { animation: td-wait 1.6s ease-in-out infinite; }
+
+/* Agent socials pass 138: profiles, reactions, the day's posts, your posts, milestones. */
+.sidebar-today .today-dot { width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--blossom, #f2b6c8); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blossom, #f2b6c8) 22%, transparent); }
+.sidebar-today .today-dot + small { margin-left: 6px; }
+.td-face-link, .td-name-link, .td-friend-link { display: inline-flex; align-items: center; gap: 6px; padding: 0; border-radius: 50%; color: inherit; font: inherit; text-align: left; }
+.td-name-link { border-radius: 4px; }
+.td-name-link:hover b, .td-friend-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.td-face-link:hover .td-face { box-shadow: 0 0 0 2px var(--hair); }
+.td-face.td-mark { background: var(--tone2); color: var(--t1); }
+.td-face.td-mark svg { width: 70%; height: 70%; }
+.td-face.td-f-profile { width: 72px; height: 72px; }
+.td-text.td-big { font-size: 18px; line-height: 26px; font-weight: 500; letter-spacing: -0.01em; }
+.td-reactions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.td-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 11px; background: var(--tone); color: var(--t2); font-size: 12px; }
+.td-chip span { color: var(--t3); font-size: 11px; }
+.td-chip:hover { background: var(--tone2); }
+.td-chip.on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blossom, #f2b6c8) 70%, transparent); }
+.td-picker { display: inline-flex; gap: 2px; padding: 2px; border-radius: 13px; background: var(--tone2); box-shadow: inset 0 0 0 1px var(--hair); }
+.td-pick { width: 26px; height: 22px; padding: 0; border-radius: 11px; font-size: 14px; transition: transform .12s ease; }
+.td-pick:hover { transform: scale(1.18); background: var(--tone); }
+/* Good morning and good night: the day's first and last posts. */
+.td-post.td-morning, .td-post.td-night { margin: 6px 0; padding: 14px 14px 16px; border-radius: 14px; box-shadow: none; }
+.td-post.td-morning { background: linear-gradient(160deg, color-mix(in srgb, #f6c98f 16%, transparent), color-mix(in srgb, var(--blossom, #f2b6c8) 10%, transparent)); }
+.td-post.td-night { background: linear-gradient(160deg, color-mix(in srgb, #6d7bd8 18%, transparent), color-mix(in srgb, #2a2f55 22%, transparent)); }
+/* Milestones: a card with petals falling across it. */
+.td-post.td-milestone { position: relative; overflow: hidden; margin: 6px 0; padding: 18px 16px; border-radius: 14px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blossom, #f2b6c8) 40%, transparent); background: color-mix(in srgb, var(--blossom, #f2b6c8) 9%, transparent); }
+.td-post.td-milestone > :not(.td-petals) { position: relative; }
+.td-petals { position: absolute; inset: 0; pointer-events: none; }
+.td-petals i { position: absolute; top: -14px; left: var(--x); width: 9px; height: 7px; border-radius: 70% 0 70% 0; background: var(--blossom, #f2b6c8); opacity: .75; transform: scale(var(--s)); animation: td-fall 6s linear var(--d) infinite; }
+@keyframes td-fall { to { transform: translate(-40px, 260px) rotate(320deg) scale(var(--s)); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .td-petals i { animation: none; top: auto; bottom: 10px; } }
+/* You post too. */
+.td-share { display: flex; gap: 10px; margin: 0 0 6px; padding: 12px; border-radius: 14px; background: var(--tone); }
+.td-share-main { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; }
+.td-share input[name=text] { width: 100%; height: 32px; padding: 0; border: 0; background: transparent; color: var(--t1); font: inherit; font-size: 14px; outline: none; }
+.td-share input[name=text]::placeholder { color: var(--t4); }
+.td-share-acts { display: flex; align-items: center; justify-content: space-between; }
+.td-file { cursor: pointer; display: inline-flex; align-items: center; }
+.td-post-btn { height: 26px; padding: 0 14px; border-radius: 13px; background: var(--tone2); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); font-size: 12.5px; font-weight: 500; }
+.td-post-btn:hover:not(:disabled) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blossom, #f2b6c8) 60%, transparent); }
+.td-post-btn:disabled { opacity: .5; }
+.td-share.busy { opacity: .7; }
+.td-attach { position: relative; align-self: flex-start; }
+.td-attach img { display: block; max-width: 220px; max-height: 140px; border-radius: 8px; }
+.td-unattach { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border-radius: 50%; background: rgba(0, 0, 0, .6); color: #fff; font-size: 13px; line-height: 20px; }
+.td-pic.td-shot { width: auto; max-width: 100%; aspect-ratio: auto; max-height: 520px; object-fit: contain; background: none; }
+.td-pic.td-shot.td-pic-wait { aspect-ratio: 16 / 10; }
+/* An agent's profile. */
+.td-back { align-self: flex-start; height: 24px; margin-bottom: 14px; padding: 0 8px 0 4px; border-radius: 6px; color: var(--t3); font-size: 12.5px; }
+.td-back:hover { background: var(--tone); color: var(--t1); }
+.td-profile-top { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.td-profile-top h2 { margin: 0; color: var(--t1); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.td-voice { margin: -6px 0 0; color: var(--t3); font-size: 13px; }
+.td-bio { margin: 16px 0 8px; color: var(--t1); font-size: 15px; line-height: 22px; }
+.td-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 10px; color: var(--t3); font-size: 12.5px; }
+.td-friend { margin: 0 0 14px; color: var(--t3); font-size: 12.5px; }
+.td-friend-link { color: var(--t1); border-radius: 4px; }
+.td-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0 0 8px; }
+.td-grid > * { aspect-ratio: 1; width: 100%; border-radius: 6px; object-fit: cover; background: var(--tone); }

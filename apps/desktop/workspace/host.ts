@@ -15,7 +15,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { homedir, userInfo } from "node:os";
-import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted, type HealthResponse } from "@demesne/client";
+import { DemesneClient, isStalePermissionResolution, isWorkspaceUntrusted, type HealthResponse, type HousedAgent } from "@demesne/client";
 import { DEFAULT_AGENT_LIMITS, loadConfig, parseConfigFile, updateUserConfig } from "@demesne/config";
 import {
   themeByName,
@@ -441,6 +441,7 @@ export class WorkspaceHost {
       setup: this.setup?.snapshot() ?? null,
       processes: this.processes,
       agents: this.agents,
+      housed: this.housed,
       connectors: this.connectors,
       queuePosition: this.queuePosition,
       verificationFingerprint: this.verificationFingerprint,
@@ -1057,6 +1058,8 @@ export class WorkspaceHost {
   agents: NearbyAgent[] = [];
   /// MCP servers and whether Heartbeat is on, for the Connectors card.
   connectors: { servers: { name: string; state: "starting" | "ready" | "failed"; tools: number }[]; heartbeat: boolean } = { servers: [], heartbeat: false };
+  /// Agent tools Demesne runs itself, each with its chat in this project.
+  housed: HousedAgent[] = [];
   private agentsTimer: ReturnType<typeof setTimeout> | null = null;
   private agentsStarted = false;
   async refreshAgents() {
@@ -1070,6 +1073,14 @@ export class WorkspaceHost {
         this.publish();
       }
     } catch { /* an older daemon, or Heartbeat is off */ }
+    try {
+      const root = this.current?.session.workspace?.root ?? (this.options.projectless ? "" : this.workspace);
+      const housed = root ? (await this.client.housedAgents(root)).agents : [];
+      if (JSON.stringify(housed) !== JSON.stringify(this.housed)) {
+        this.housed = housed;
+        this.publish();
+      }
+    } catch { /* an older daemon */ }
     try {
       const connectors = await this.client.connectors();
       if (JSON.stringify(connectors) !== JSON.stringify(this.connectors)) {
@@ -1638,6 +1649,15 @@ export class WorkspaceHost {
       this.assistant = opened;
       this.sessions = await this.client.listSessions();
       await this.select(opened.sessionId, false);
+      return this.snapshot();
+    }
+    // An agent in the sidebar's Agents list: its chat in this project.
+    if (method === "agent-open") {
+      const root = this.current?.session.workspace?.root ?? this.workspace;
+      const opened = await this.client.openAgent(string(args.id, "agent id", 40), root);
+      this.sessions = await this.client.listSessions();
+      await this.select(opened.session.id, false);
+      void this.refreshAgents();
       return this.snapshot();
     }
     if (method === "draft") {

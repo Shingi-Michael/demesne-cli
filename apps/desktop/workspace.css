@@ -2037,3 +2037,15 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop #sidebar-drive .bf-act button { height: 22px; padding: 0 7px; font-size: 11.5px; }
 .desktop #sidebar-drive .bf-foot { flex-wrap: wrap; gap: 2px 8px; padding: 6px 6px 2px; white-space: nowrap; }
 .desktop #sidebar-drive .bf-foot .bf-sep { display: none; }
+
+/* Agents that live in Demesne (agent-cli.ts): under the open project's chats,
+   one row per agent tool Demesne runs itself. Its tile, its name, how it is. */
+.sidebar-housed { margin-top: 6px; }
+.sidebar-housed-label { margin: 4px 0 2px; padding-left: 9px; color: var(--t4); font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; }
+.sidebar-housed-row { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 10px 0 9px; border-radius: 0 var(--r) var(--r) 0; color: var(--t2); text-align: left; font-size: 13px; white-space: nowrap; }
+.sidebar-housed-row:hover { box-shadow: inset 0 0 0 1px var(--hair); }
+.sidebar-housed-row.on { background: var(--tone2); color: var(--t1); }
+.sidebar-housed-row .housed-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-housed-row small { margin-left: auto; color: var(--t3); font-size: 11px; }
+.sidebar-housed-row .sidebar-session-mark { margin-left: auto; }
+.sidebar-housed-row .sidebar-session-mark + small { margin-left: 0; }

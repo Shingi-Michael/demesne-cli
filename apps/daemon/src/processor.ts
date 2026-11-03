@@ -13,6 +13,9 @@ export interface TurnInference {
   readonly maxOutputTokens?: number;
   readonly temperature?: number;
   readonly seed?: number;
+  /// An agent tool that runs on its own (agent-cli.ts): it never names chats,
+  /// and its turn never moves to another provider.
+  readonly external?: boolean;
   /// Close provider-owned state when this conversation's turn ends or fails.
   release?(cacheKey?: string): Promise<void>;
   stream(

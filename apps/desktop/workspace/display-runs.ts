@@ -22,12 +22,18 @@ export class DisplayRuns {
         const key = `${run.id}:${entry.toolCallId}`;
         let cached = this.changes.get(key);
         if (!cached || !sameChanges(cached.source, entry.changes)) {
+          // A finished step's files never change, so its line counts are
+          // remembered across openings of the chat (diffing large files is slow).
+          const print = fingerprint(entry.changes), known = counted.get(key);
           let added = 0, removed = 0;
-          const light = entry.changes.map(change => {
+          if (known?.print === print) ({ added, removed } = known);
+          else for (const change of entry.changes) {
             const diff = codeDiff(change.before ?? "", change.after ?? "");
             added += diff.added; removed += diff.removed;
-            return { ...change, before: null, after: null };
-          });
+          }
+          counted.delete(key); counted.set(key, { print, added, removed });
+          if (counted.size > COUNTED) counted.delete(counted.keys().next().value!);
+          const light = entry.changes.map(change => ({ ...change, before: null, after: null }));
           cached = { source: entry.changes, light, summary: { revision: ++this.revision, added, removed } };
           this.changes.set(key, cached);
         }
@@ -39,6 +45,10 @@ export class DisplayRuns {
     });
   }
 }
+const COUNTED = 5000;
+const counted = new Map<string, { print: string; added: number; removed: number }>();
+const fingerprint = (changes: ToolFileChange[]) => JSON.stringify(changes.map(change =>
+  [change.path, change.before?.length ?? -1, change.after?.length ?? -1, change.beforeExists, change.afterExists, change.unavailable ?? ""]));
 function sameChanges(a: ToolFileChange[], b: ToolFileChange[]) {
   return a === b || a.length === b.length && a.every((x, i) => {
     const y = b[i]!;

@@ -49,6 +49,24 @@ test("bulk history rejects gaps, overlaps, future ranges and partial-page failur
   })).rejects.toThrow("Missing page");
 });
 
+test("reopening fetches only the history after what it already read", async () => {
+  const stream = async function* (): AsyncGenerator<EventEnvelope> { throw new Error("Unexpected SSE fallback"); };
+  const asked: number[] = [];
+  const page = async (_id: string, after: number) => { asked.push(after); return { throughEventId: 7, events: events.filter((item) => item.eventId > after), nextCursor: null }; };
+  expect(await replaySession(state, stream, page, events.slice(0, 4))).toEqual(events);
+  expect(asked).toEqual([4]);
+  // Nothing new: no request at all.
+  expect(await replaySession(state, stream, async () => { throw new Error("fetched again"); }, events)).toEqual(events);
+  // A copy past the saved cursor, or of another chat, is not trusted.
+  asked.length = 0;
+  expect(await replaySession(state, stream, page, [...events, event(8, "turn.completed")])).toEqual(events);
+  expect(await replaySession(state, stream, page, [{ ...events[0]!, sessionId: "other" }])).toEqual(events);
+  expect(asked).toEqual([0, 0]);
+  // An older daemon without pages streams from the same point.
+  const streamed = await replaySession(state, async function* (_id, after) { expect(after).toBe(5); yield* events.slice(5); }, undefined, events.slice(0, 5));
+  expect(streamed).toEqual(events);
+});
+
 test("command completion retains failure status, exit codes and both output streams", () => {
   expect(toolCompletion(event(1, "tool.call_completed", { toolCallId: "cmd", name: "run_command", exitCode: 1, stdout: "1 failed", stderr: "diagnostic", outputTruncated: true }))).toMatchObject({
     state: "failed", exitCode: 1, message: "1 failed\nstderr:\ndiagnostic\n[Recorded output truncated]",

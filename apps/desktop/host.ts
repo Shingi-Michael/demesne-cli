@@ -362,7 +362,7 @@ export function runDesktopHost(args = process.argv.slice(2)) {
       if (newline < 0) break;
       const frame = input.subarray(0, newline);
       input = input.subarray(newline + 1);
-      if (frame.length > MAX_INPUT_BYTES) { send({ kind: "protocol-error", error: "Request exceeds 1 MiB" }); host.dispose(); return; }
+      if (frame.length > MAX_INPUT_BYTES) { send({ kind: "protocol-error", error: "Request exceeds 33 MiB" }); host.dispose(); return; }
       if (!frame.length) continue;
       let raw: unknown;
       try {
@@ -376,7 +376,7 @@ export function runDesktopHost(args = process.argv.slice(2)) {
           : { kind: "protocol-error", error: message });
       }
     }
-    if (input.length > MAX_INPUT_BYTES) { send({ kind: "protocol-error", error: "Request exceeds 1 MiB" }); host.dispose(); }
+    if (input.length > MAX_INPUT_BYTES) { send({ kind: "protocol-error", error: "Request exceeds 33 MiB" }); host.dispose(); }
   });
   return host;
 }

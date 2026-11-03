@@ -33,6 +33,7 @@ import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
+import { fitImage } from "./fit-image.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
@@ -3478,19 +3479,26 @@ async function answerQuestion(value: string | null, source: "typed" | "suggestio
 /// Images for the next message: previews stay here, the host holds the
 /// uploaded artifacts.
 const attachmentPreviews = new Map<string, string>();
-const ATTACHABLE = ["image/png", "image/jpeg", "image/webp"];
+const ATTACHABLE = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
+/// A picture fitted for sending (fit-image.ts). An iPhone photo (HEIC) the
+/// window can't draw is turned into a JPEG by the Mac first.
+async function readPicture(file: File, options: { side: number; bytes: number }): Promise<{ url: string; type: string }> {
+  if (!/^image\/hei[cf]$/.test(file.type) && !/\.hei[cf]$/i.test(file.name)) return fitImage(file, options);
+  if (file.size > 24 * 1024 * 1024) throw new Error("too big");
+  const raw = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+  const jpeg = await api<string>("image-convert", { data: raw });
+  return fitImage(await (await fetch(jpeg)).blob(), options);
+}
 async function attachFiles(files: File[]) {
-  const images = files.filter((file) => ATTACHABLE.includes(file.type));
-  if (images.length < files.length) notice("Only PNG, JPEG and WebP images can be attached.");
+  const images = files.filter((file) => ATTACHABLE.includes(file.type) || /\.hei[cf]$/i.test(file.name));
+  if (images.length < files.length) notice("Only PNG, JPEG, WebP and HEIC images can be attached.");
   for (const file of images) {
-    if (file.size > 20 * 1024 * 1024) { notice(`${file.name} is over 20 MB.`); continue; }
-    const url = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-    const image = await api("attach", { name: file.name || "pasted-image.png", mimeType: file.type, data: url.slice(url.indexOf(",") + 1) }) as { id: string } | undefined;
+    // Big photos and screenshots are redrawn to fit (fit-image.ts), never refused for size.
+    let fitted: { url: string; type: string };
+    try { fitted = await readPicture(file, { side: 4096, bytes: 15 * 1024 * 1024 }); }
+    catch { notice(`${file.name || "That image"} couldn't be read.`); continue; }
+    const url = fitted.url;
+    const image = await api("attach", { name: file.name || "pasted-image.png", mimeType: fitted.type, data: url.slice(url.indexOf(",") + 1) }) as { id: string } | undefined;
     if (image?.id) { attachmentPreviews.set(image.id, url); composerSignature = ""; renderComposer(); renderConversation(); }
   }
 }

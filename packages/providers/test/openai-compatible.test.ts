@@ -465,3 +465,12 @@ test("OpenRouter sends medium by default only for known reasoning models", async
     for await (const _ of provider.stream({ ...request, messages: [] }, new AbortController().signal)) { /* consume */ }
   expect(bodies.map(body => body.reasoning)).toEqual([{ effort: "medium" }, undefined, { effort: "high" }, { effort: "none" }]);
 });
+
+test("Google's models/ ids are listed by their plain chat name", async () => {
+  const provider = new OpenAICompatibleProvider({
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    apiKey: "fixture",
+    fetch: (async () => Response.json({ data: [{ id: "models/gemini-test-flash" }, { id: "gemini-test-flash" }, { id: "models/gemini-test-pro" }] })) as unknown as typeof fetch,
+  });
+  expect((await provider.listModels()).map((model) => model.id)).toEqual(["gemini-test-flash", "gemini-test-pro"]);
+});

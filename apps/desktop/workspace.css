@@ -2010,3 +2010,30 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .thread-report.failed .tr-mark { color: var(--bad); }
 .thread-report .request-meta { margin-left: auto; }
 .tp-turns { display: flex; flex-direction: column; gap: 14px; }
+
+/* Drive lives at the foot of the sidebar, above you and Settings (pass 132 C):
+   the composer has nothing above it. The line wraps to the sidebar's width and
+   its rows unfold under it, scrolling on their own when long. */
+#sidebar-drive { display: flex; flex-direction: column; gap: 2px; margin: 0 -2px 8px; padding: 6px 8px; border-radius: var(--r-sm); }
+#sidebar-drive:has(#briefing[hidden]) { display: none; }
+#sidebar-drive:hover { background: var(--tone); }
+#sidebar-drive + .sidebar-foot { margin-top: 0; }
+#desktop-shell.sidebar-collapsed #sidebar-drive { display: none; }
+.desktop #sidebar-drive #briefing { max-width: none; min-height: 24px; margin: 0; gap: 8px; align-items: flex-start; }
+.desktop #sidebar-drive #briefing .bf-lead { margin-top: 2px; }
+.desktop #sidebar-drive #briefing .bf-chip { flex-wrap: wrap; row-gap: 2px; white-space: normal; font-size: 12.5px; line-height: 20px; }
+.desktop #sidebar-drive #briefing .bf-part { flex-wrap: wrap; max-width: 100%; }
+.desktop #sidebar-drive #briefing .bf-about { display: block; flex-basis: 100%; max-width: 100%; white-space: nowrap; }
+.desktop #sidebar-drive #briefing.open .bf-word { font-size: 12.5px; }
+.desktop #sidebar-drive #briefing .bf-chev { opacity: 1; }
+.desktop #sidebar-drive #briefing .bf-progress { left: 28px; right: 0; width: auto; }
+.desktop #sidebar-drive #drive-reply { max-width: none; max-height: 46vh; overflow: auto; scrollbar-width: none; margin: 0; }
+.desktop #sidebar-drive .bf-row { height: 30px; padding: 0 6px; font-size: 12.5px; }
+.desktop #sidebar-drive #briefing .bf-sep { display: none; }
+.desktop #sidebar-drive #briefing .bf-chip { column-gap: 10px; }
+.desktop #sidebar-drive .bf-title { flex: 1 1 auto; }
+.desktop #sidebar-drive .bf-r { white-space: nowrap; font-size: 11.5px; }
+.desktop #sidebar-drive .bf-act { right: 2px; padding-left: 6px; background: var(--surface2); }
+.desktop #sidebar-drive .bf-act button { height: 22px; padding: 0 7px; font-size: 11.5px; }
+.desktop #sidebar-drive .bf-foot { flex-wrap: wrap; gap: 2px 8px; padding: 6px 6px 2px; white-space: nowrap; }
+.desktop #sidebar-drive .bf-foot .bf-sep { display: none; }

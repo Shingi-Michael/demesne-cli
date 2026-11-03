@@ -575,7 +575,7 @@ try {
   await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
   assert.equal(await page.getByRole("searchbox", { name: "Search chats and projects" }).inputValue(), "", "Escape clears the search");
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
-  assert(await page.locator("#sidebar-drive, #drive-page").count() === 0, "Drive has no sidebar row and no page");
+  assert(await page.locator("#drive-page").count() === 0, "Drive has no page");
   // Projects stay visible, and each project owns a collapsible list of chats.
   assert.equal(await page.locator("#desktop-project-button, #sidebar-open-folder, #sidebar-branches").count(), 0, "The sidebar names the project once, in its group");
   assert((await page.locator(".sidebar-project.active .sidebar-project-name").getAttribute("title"))?.startsWith(f.workspace), "The project's line carries its folder");
@@ -1394,7 +1394,7 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
   await capture("07-project-groups");
-  // Drive has no page: it speaks from a line at the end of the conversation.
+  // Drive has no page: it speaks from a line at the foot of the sidebar.
   const line = page.locator("#briefing");
   const pressAction = (action: string) => evaluate(`const b = document.createElement("button"); b.dataset.action = ${JSON.stringify(action)}; document.body.append(b); b.click(); b.remove();`);
   failSuggestions = true;
@@ -1477,7 +1477,7 @@ try {
   // The finished mission left a worktree without changes; its review card
   // opens from Drive's line and discards it.
   offerIdeas = true;
-  await line.getByRole("button", { name: /to review/ }).click();
+  await page.locator(".sidebar-review:visible, .sidebar-project-review:visible").first().click();
   await until(() => page.locator("#drive-reply.open .bf-row.branch").count().then(count => count === 1), "the branch unfolds as a row under Drive's line");
   await page.locator("#drive-reply .bf-row.branch button.bf-title").click();
   await until(() => page.locator("#drive-reply .bf-sum").isVisible(), "its title unfolds what Drive says it did");
@@ -1487,7 +1487,7 @@ try {
   await until(() => page.locator("#branch-done").innerText().then(text => text.includes("Discarded Verify the Drive controls")), "what Discard did is its own quiet line");
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
-  assert(await page.evaluate(() => Boolean(document.querySelector("#stage > #briefing")) && !document.querySelector("#composer-slot #briefing")), "Drive's line sits where the conversation ends, not on the composer");
+  assert(await page.evaluate(() => Boolean(document.querySelector("#sidebar-drive > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing")), "Drive's line sits at the sidebar's foot, not over the composer");
   // Drive is on by default: the line says when it starts on its own, and one word turns it off.
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes")), "Drive's line says it starts on its own");
   await capture("10-drive-auto");
@@ -1498,9 +1498,9 @@ try {
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas") && text.includes("Turn off")), "Turn on brings it back");
   await page.locator("#briefing .bf-chev").click();
   await until(() => page.locator("#briefing .bf-word").innerText().then(text => text.includes("Three things I could do next")), "the line becomes Drive's reply");
-  await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas open as a reply in the conversation");
+  await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas unfold under its line");
   await page.waitForTimeout(400);
-  assert(await page.evaluate(() => { const stage = document.getElementById("stage")!, reply = document.getElementById("drive-reply")!; return reply.getBoundingClientRect().bottom <= stage.getBoundingClientRect().bottom + 2; }), "the reply is scrolled into view, not covering anything");
+  assert(await page.evaluate(() => { const reply = document.getElementById("drive-reply")!.getBoundingClientRect(), foot = document.querySelector(".sidebar-foot")!.getBoundingClientRect(); return reply.top >= 0 && reply.bottom <= foot.top + 1; }), "the reply unfolds in the sidebar, above you and Settings");
   await page.locator("#drive-reply .bf-row").first().hover();
   await capture("10-drive-reply");
   await page.keyboard.press("Escape");

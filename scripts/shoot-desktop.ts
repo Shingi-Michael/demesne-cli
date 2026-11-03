@@ -127,7 +127,7 @@ if (!readme) {
   await shot("02-turn");
   await page.locator("#sidebar-sessions .sidebar-item").first().hover(); await page.waitForTimeout(300);
   await shot("02-sidebar-delete");
-  // The briefing line above the composer, each part opened; then the
+  // Drive's line at the sidebar's foot, each part opened; then the
   // sidebar folded to its rail, and the project switcher.
   await toggle('#briefing [data-action="review-open"]:visible', "02-review-open");
   await toggle('#briefing [data-action="ideas-show"]:visible', "02-ideas");

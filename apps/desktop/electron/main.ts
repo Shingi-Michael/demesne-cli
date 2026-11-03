@@ -24,7 +24,9 @@ let awakeBlocker: number | null = null;
 // Keep native notifications alive until the OS closes them or they are clicked.
 const notifications = new Set<Notification>();
 // Where the Mac window's own red, yellow and green buttons sit.
-const LIGHTS = { x: 18, y: 17 };
+// 18 from the left and the top: the buttons' centre (y + 6) is the middle of
+// the 48pt top bar, and the sidebar's row text starts under the red button.
+const LIGHTS = { x: 18, y: 18 };
 const args = process.argv.slice(1).filter(arg => /^--(workspace|server|session|model|prompt)=/.test(arg) || arg === "--setup");
 function log(message: string) {
   try { const dir = app.getPath("logs"); mkdirSync(dir, { recursive: true }); appendFileSync(join(dir, "desktop.log"), `${new Date().toISOString()} ${message}\n`); } catch {}

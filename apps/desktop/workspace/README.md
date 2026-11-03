@@ -35,3 +35,32 @@ bun scripts/prepare-desktop.ts && dbus-run-session -- xvfb-run -a bun run deskto
 ```
 
 The unit tests use deterministic or fake providers. The desktop check drives this interface in the real Electron window; see [desktop verification](../README.md#verification) for its coverage.
+### Accessibility DOM regression checks
+
+```sh
+DEMESNE_DOM_TESTS=1 DEMESNE_BROWSER_CHANNEL=chrome bun test apps/desktop/workspace/test/*accessibility.dom.test.ts
+```
+
+These opt-in suites use an already installed Chrome through Playwright; they do not download a browser or start a daemon. Omit `DEMESNE_BROWSER_CHANNEL` to use an already installed Playwright Chromium. Composer and tab tests mount production renderers and keyboard handlers in small DOM fixtures, recording or simulating host actions instead of executing them. Math tests bundle the production Markdown renderer and its existing dependencies in memory. They check focus traversal and retention, completion roles and selection, tab shortcuts, and semantic math through static, cached, and streamed rendering. They are not the full Electron check or a screen-reader validation.
+
+Tab completes a command or file only while its suggestions are open; otherwise it moves focus forward. Shift+Tab always moves focus backward. In the composer, Alt+M changes permission mode and Alt+Right accepts a visible suggestion into an empty draft. On macOS, Alt is Option.
+On the tab strip, Left/Right wrap focus between tabs and Home/End focus the first/last tab. Enter or Space activates a chat; arrows alone do not load it. Tab leaves the strip. Closing a focused tab keeps focus on a neighbor, or New chat when no tabs remain.
+### Google AI Studio
+
+Settings → Providers → Google AI Studio → Add key opens a local password field. It is not a chat input. Get or revoke a key at https://aistudio.google.com/apikey.
+
+- **Check key** reads Google's native and OpenAI-compatible model catalogs, filters to compatible Gemini chat candidates, and reads their token limits. It does not generate text or save a credential.
+- **Test & forget** makes two small, potentially billable streaming requests using a synthetic tool and its result. It sends no chats or workspace files, creates no chat turns, writes no config, and clears the password field afterward. Clear / cancel and leaving the page also clear the form and cancel pending checks. This does not remove an already saved connection.
+- **Save & connect** requires the unchecked storage-consent box. It repeats the tool round-trip test, then writes the selected provider into the user config (mode 0600, not encrypted) and asks the daemon to reload providers without restarting. Existing non-Google providers are preserved. Only the tested model is enabled; Manage lets you choose a different one. A reload failure is reported separately from a successful save.
+- **Remove saved key** removes the active config key and scrubs Google credentials from the config writer's `.bak` copy, then reloads providers. Backup-cleanup failures explicitly warn that a key may remain. This does not revoke the key at Google or remove external filesystem backups; revoke a throwaway key in AI Studio when finished.
+
+The form is a stable DOM island: no key is interpolated into HTML, renderer snapshots, or local storage. Password values and Google request errors are excluded from the inspection helper's diagnostics. Discovery/test replies and errors contain no credentials. JavaScript memory is released normally, not cryptographically wiped.
+
+This desktop-scoped integration uses the existing OpenAI-compatible adapter. It does not add Google-native reasoning/signature handling, image generation, or vision. Models requiring tool metadata the adapter cannot preserve may fail the compatibility test and are not enabled. Live Google behavior and account-specific quota still need verification with a locally entered key; fixture tests are not a claim that every Gemini model works.
+
+Run the Google regression suite without credentials:
+
+```sh
+bun test apps/desktop/workspace/test/google-ai.test.ts apps/desktop/workspace/test/provider-host.test.ts apps/desktop/workspace/test/providers.test.ts apps/desktop/workspace/test/settings-page.test.ts
+DEMESNE_DOM_TESTS=1 DEMESNE_BROWSER_CHANNEL=chrome bun test apps/desktop/workspace/test/google-ai.dom.test.ts
+```

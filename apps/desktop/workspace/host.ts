@@ -810,11 +810,16 @@ export class WorkspaceHost {
       this.stream?.abort();
       this.current = new WorkspaceSession(state, events);
       const selected = this.current;
-      const modelId = state.session.preferredModel || this.model.id;
-      if (this.model.id !== modelId) this.model = { id: modelId, provider: "" };
-      this.reasoning = resolveReasoningLevel(this.model, state.session.preferredReasoning);
-      const restoredModel = this.changeModel(modelId, state.session.preferredReasoning ?? undefined, selected, true);
-      void restoredModel.catch(error => { if (this.current === selected) this.fail(error); });
+      // An agent's chat (agent-cli.ts) runs its tool, not a model: the picker
+      // keeps the model already running, and the daemon isn't asked to switch.
+      let restoredModel: Promise<void> = Promise.resolve();
+      if (!state.session.preferredModel?.startsWith("agent:")) {
+        const modelId = state.session.preferredModel || this.model.id;
+        if (this.model.id !== modelId) this.model = { id: modelId, provider: "" };
+        this.reasoning = resolveReasoningLevel(this.model, state.session.preferredReasoning);
+        restoredModel = this.changeModel(modelId, state.session.preferredReasoning ?? undefined, selected, true);
+        void restoredModel.catch(error => { if (this.current === selected) this.fail(error); });
+      }
       this.planOnly = this.plans.get(id) ?? false;
       this.attachments = [];
       this.reviewRevision++;

@@ -388,6 +388,11 @@ const seen = seenStore.read();
 let catchUpFor = "", catchUpSince: number | null = null, catchUpOpened = 0, catchUpLine: HTMLElement | null = null, catchUpPlaced = false, seenWritten = 0;
 let compactionCard: HTMLElement | null = null;
 let compactionCardSignature = "";
+/// A long chat opens on its newest turns; the older ones mount above them a
+/// few at a time while the window is idle. Turns before this one wait.
+/// "" mounts everything; null means the chat just opened and picks its start.
+let mountFrom: string | null = "", mountIdle = 0;
+const FIRST_TURNS = 6, MORE_TURNS = 4;
 let overlaySignature = "",
   approvalSignature = "",
   heroSignature = "";
@@ -2444,15 +2449,34 @@ function renderConversation() {
     compactionCard.remove(); compactionCard = null; compactionCardSignature = ""; changed = true;
   }
   let position = compactionCard ? 1 : 0;
-  for (const [index, run] of state.runs.entries()) {
-    if (compacted && !historyOpen && (compacted.hiddenIds.has(run.id) || run.id === checkpoint!.turnId)) continue;
+  const visible = state.runs.flatMap((run, index) => {
+    if (compacted && !historyOpen && (compacted.hiddenIds.has(run.id) || run.id === checkpoint!.turnId)) return [];
     // A rewind folds the turns after its cut into one line: on the turn it
     // stopped in, or in place of the first turn it took back.
     const folded = rewoundBy(run);
-    if (folded && (folded.toolCallId || folded.hiddenTurnIds.find((id) => state!.runs.some((item) => item.id === id)) !== run.id)) continue;
+    if (folded && (folded.toolCallId || folded.hiddenTurnIds.find((id) => state!.runs.some((item) => item.id === id)) !== run.id)) return [];
     // Asked again: only the answer left showing takes the spot.
     const versions = versionsOf(run);
-    if (versions && versions.chosen !== run.id) continue;
+    if (versions && versions.chosen !== run.id) return [];
+    return [{ run, index, versions }];
+  });
+  // Just opened: the newest turns, and the turn "Since you looked" opens at.
+  if (mountFrom === null) {
+    let start = Math.max(0, visible.length - FIRST_TURNS);
+    const since = state.session && catchUpFor !== state.session.id ? seen[state.session.id] ?? null : catchUpSince;
+    const before = since === null ? null : catchUp(state.runs, since, { approvals: 0, questions: 0 })?.before;
+    const at = before ? visible.findIndex((item) => item.run.id === before) : -1;
+    if (at >= 0) start = Math.min(start, at);
+    mountFrom = start > 0 ? visible[start]!.run.id : "";
+  }
+  const first = mountFrom ? visible.findIndex((item) => item.run.id === mountFrom) : 0;
+  if (first < 0) mountFrom = "";
+  // Turns mounting above ones already showing: measured, to keep your place.
+  const mountedAt = visible.findIndex((item) => runNodes.has(item.run.id));
+  const prepending = !liveBefore && mountedAt > Math.max(0, first);
+  const heightBefore = prepending ? stage.scrollHeight : 0;
+  for (const [place, { run, index, versions }] of visible.entries()) {
+    if (place < first) continue;
     ids.add(run.id);
     for (const entry of run.entries) if (entry.type === "tool" && entry.state === "running" && !entry.drafting) stepsSeenRunning.add(entry.toolCallId);
     const signature = JSON.stringify([
@@ -2571,9 +2595,17 @@ function renderConversation() {
   if (changed) fillThreadLists();
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
-    else stage.scrollTop = top;
+    // Older turns mounted above keep what you're reading where it was.
+    else stage.scrollTop = top + (prepending && heightBefore ? stage.scrollHeight - heightBefore : 0);
   }
   renderCatchUp();
+  if (first > 0 && !mountIdle) mountIdle = requestIdleCallback(() => {
+    mountIdle = 0;
+    if (!state || !mountFrom) return;
+    const shown = visible.findIndex((item) => item.run.id === mountFrom);
+    mountFrom = shown > MORE_TURNS ? visible[shown - MORE_TURNS]!.run.id : "";
+    renderConversation();
+  }, { timeout: 250 });
 }
 /// One line before the first turn you didn't see, for this visit; on the way
 /// in, the chat opens at it so you read on from where you left.
@@ -5665,6 +5697,7 @@ async function dispatch(
   }
   if (action === "jump-turn") {
     revealCompactedTurn(args.id);
+    mountFrom = "";
     expanded.add(args.id);
     follow = false;
     renderConversation();
@@ -5890,6 +5923,7 @@ async function unfoldTurn(run: WorkspaceRun, phase: "change" | "verify" | "all",
       loads.push(api("panel-watch", { panel: "log", command: record.id }).then(() => api("processes")).catch(() => {}));
   }
   await Promise.all(loads);
+  mountFrom = "";
   renderConversation();
   document.getElementById(`turn-${run.id}`)?.scrollIntoView({ block: "start" });
 }
@@ -6132,6 +6166,7 @@ function renderState(next: Snapshot) {
     compactionCard?.remove(); compactionCard = null; compactionCardSignature = "";
     runNodes.forEach((item) => { item.artifacts.dispose(); item.node.remove(); });
     runNodes.clear();
+    mountFrom = null; cancelIdleCallback(mountIdle); mountIdle = 0;
     heroSignature = overlaySignature = sidebarSignature = "";
     pane.switchSession(next.session?.id ?? "");
   }

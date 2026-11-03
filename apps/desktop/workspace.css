@@ -158,10 +158,12 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-row-actions .sidebar-pin.on { color: var(--t1); }
 .sidebar-row-actions .ico { width: 13px; height: 13px; }
 /* They show on hover, and when the keyboard is on the row, where Delete
-   archives too. */
-.sidebar-item:hover .sidebar-row-actions, .sidebar-row-actions:focus-within, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-row-actions { opacity: 1; pointer-events: auto; }
-.sidebar-item:hover .sidebar-session-age, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-age { visibility: hidden; }
-.sidebar-item:hover .sidebar-session-name, .sidebar-item:has(.sidebar-session:focus-visible) .sidebar-session-name { padding-right: 64px; }
+   archives too. (Sibling selectors, not :has(:focus-visible): that :has made
+   every change anywhere in the window restyle the whole page, which is what
+   made long chats slow to open and to stream into.) */
+.sidebar-item:hover .sidebar-row-actions, .sidebar-row-actions:focus-within, .sidebar-session:focus-visible ~ .sidebar-row-actions { opacity: 1; pointer-events: auto; }
+.sidebar-item:hover .sidebar-session-age, .sidebar-session:focus-visible .sidebar-session-age { visibility: hidden; }
+.sidebar-item:hover .sidebar-session-name, .sidebar-session:focus-visible .sidebar-session-name { padding-right: 64px; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-row-actions { transition: none; }
 }
@@ -1588,7 +1590,7 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
    actions join it on hover. */
 .sidebar-item.has-pr .sidebar-row-actions { opacity: 1; }
 .sidebar-item.has-pr .sidebar-row-actions > :not(.sidebar-pr) { opacity: 0; transition: opacity 140ms var(--ease); }
-.sidebar-item.has-pr:hover .sidebar-row-actions > *, .sidebar-item.has-pr .sidebar-row-actions:focus-within > *, .sidebar-item.has-pr:has(.sidebar-session:focus-visible) .sidebar-row-actions > * { opacity: 1; }
+.sidebar-item.has-pr:hover .sidebar-row-actions > *, .sidebar-item.has-pr .sidebar-row-actions:focus-within > *, .sidebar-item.has-pr .sidebar-session:focus-visible ~ .sidebar-row-actions > * { opacity: 1; }
 .sidebar-row-actions .sidebar-pr { pointer-events: auto; display: flex; gap: 3px; width: auto; padding: 0 5px; color: var(--t3); font-size: 11px; font-variant-numeric: tabular-nums; }
 .sidebar-row-actions .sidebar-pr .ico { width: 12px; height: 12px; }
 .sidebar-row-actions .sidebar-pr.new, .sidebar-row-actions .sidebar-pr.on { color: var(--t1); }
@@ -1597,7 +1599,7 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color: #7a4fcf; }
 .sidebar-row-actions .sidebar-pr.closed span { text-decoration: line-through; }
 .sidebar-item.has-pr .sidebar-session-name { padding-right: 56px; }
-.sidebar-item.has-pr:hover .sidebar-session-name, .sidebar-item.has-pr:has(.sidebar-session:focus-visible) .sidebar-session-name { padding-right: 116px; }
+.sidebar-item.has-pr:hover .sidebar-session-name, .sidebar-item.has-pr .sidebar-session:focus-visible .sidebar-session-name { padding-right: 116px; }
 .sidebar-pr-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0 0 4px 12px; padding: 3px 8px 6px 12px; box-shadow: -1px 0 0 var(--hair2); color: var(--t3); font-size: 12px; line-height: 18px; }
 .sidebar-pr-head { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-pr-head b { color: var(--t1); font-weight: 500; }

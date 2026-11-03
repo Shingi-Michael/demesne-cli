@@ -177,14 +177,21 @@ export async function replaySession(
   state: SessionStateResponse,
   stream: (sessionId: string, after: number, signal: AbortSignal) => AsyncIterable<EventEnvelope>,
   page?: (sessionId: string, after: number, through: number, signal: AbortSignal) => Promise<SessionReplayPage>,
+  /// History already read for this session (oldest first). Only what came
+  /// after it is fetched; history is append-only, so the copy stays exact.
+  known: readonly ReplayEvent[] = [],
 ): Promise<ReplayEvent[]> {
   if (state.lastEventId === 0 || state.session.turns.length === 0) return [];
+  const last = known.at(-1), knownCursor = last ? last.throughEventId ?? last.eventId : 0;
+  if (last && (knownCursor > state.lastEventId || known.some((event) => event.sessionId !== state.session.id))) known = [];
+  const start = known.length ? knownCursor : 0;
+  if (start && start === state.lastEventId) return [...known];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
-  const events: ReplayEvent[] = [];
+  const events: ReplayEvent[] = [...known];
   try {
     if (page) {
-      let after = 0;
+      let after = start;
       try {
         while (after < state.lastEventId) {
           const result = await page(state.session.id, after, state.lastEventId, controller.signal);
@@ -208,12 +215,12 @@ export async function replaySession(
       } catch (error) {
         // Older daemons retain their SSE replay path. Never conceal a malformed
         // response or an interrupted transfer by silently dropping history.
-        if (after !== 0 || !(error instanceof ApiRequestError) || ![404, 405].includes(error.status)) throw error;
-        events.length = 0;
+        if (after !== start || !(error instanceof ApiRequestError) || ![404, 405].includes(error.status)) throw error;
+        events.length = known.length;
       }
     }
-    for await (const event of stream(state.session.id, 0, controller.signal)) {
-      if (event.sessionId !== state.session.id) continue;
+    for await (const event of stream(state.session.id, start, controller.signal)) {
+      if (event.sessionId !== state.session.id || event.eventId <= start) continue;
       if (event.eventId <= state.lastEventId) events.push(event);
       if (event.eventId >= state.lastEventId) return events;
     }

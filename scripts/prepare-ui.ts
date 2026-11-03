@@ -7,7 +7,8 @@ const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop"
 
 export async function prepareUi(out: string) {
   rmSync(out, { recursive: true, force: true }); mkdirSync(out, { recursive: true });
-  const bundle = await Bun.build({ entrypoints: [join(desktop, "frontend.ts")], outdir: out, target: "browser", format: "esm", external: ["electron"], minify: true, splitting: true });
+  // DEMESNE_NO_MINIFY=1 keeps names readable in a renderer CPU profile.
+  const bundle = await Bun.build({ entrypoints: [join(desktop, "frontend.ts")], outdir: out, target: "browser", format: "esm", external: ["electron"], minify: !process.env.DEMESNE_NO_MINIFY, splitting: true });
   if (!bundle.success) throw new Error(bundle.logs.map(String).join("\n"));
   writeFileSync(join(out, "ui.css"), readFileSync(join(workspace, "ui.css"), "utf8").replaceAll(/node_modules\/@fontsource\/[a-z-]+\/files\//g, "vendor/fonts/"));
   cpSync(join(workspace, "live.css"), join(out, "live.css"));

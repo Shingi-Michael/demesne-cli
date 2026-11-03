@@ -44,6 +44,7 @@ import {
   stopDaemon,
 } from "@demesne/setup/daemon-control.ts";
 import { replaySession } from "@demesne/workbench/history.ts";
+import type { ReplayEvent } from "@demesne/protocol";
 import { expandMentions } from "./prompt-editor.ts";
 import {
   isPlaceholderTitle,
@@ -181,6 +182,7 @@ const YOU = (() => {
   } catch { /* fall back to the login name */ }
   try { return userInfo().username; } catch { return ""; }
 })();
+const HISTORY_CHATS = 4, HISTORY_EVENTS = 80_000;
 export class WorkspaceHost {
   settings: CliSettings;
   setup: WorkspaceSetup | null = null;
@@ -302,6 +304,21 @@ export class WorkspaceHost {
   private disposed = false;
   private selectedSession?: string;
   private drafts = new Map<string, string>();
+  /// The saved history of the last few chats opened, so opening one again
+  /// fetches only what happened since instead of the whole chat (a long chat's
+  /// history runs to tens of megabytes). Bounded by chats and by events.
+  private histories = new Map<string, ReplayEvent[]>();
+  private remember(id: string, events: ReplayEvent[]) {
+    this.histories.delete(id);
+    if (!events.length) return;
+    this.histories.set(id, events);
+    let total = [...this.histories.values()].reduce((sum, list) => sum + list.length, 0);
+    for (const [key, list] of this.histories) {
+      if (this.histories.size <= HISTORY_CHATS && total <= HISTORY_EVENTS) break;
+      if (key === id) continue;
+      this.histories.delete(key); total -= list.length;
+    }
+  }
   onAction?: (
     method: string,
     args: Record<string, unknown>,
@@ -804,8 +821,10 @@ export class WorkspaceHost {
           this.client.streamEvents(sessionId, after, signal),
         (sessionId, after, through, signal) =>
           this.client.replayPage(sessionId, after, through, signal),
+        this.histories.get(id),
       );
       if (this.disposed) return;
+      this.remember(id, events);
       this.generation = generation;
       this.stream?.abort();
       this.current = new WorkspaceSession(state, events);

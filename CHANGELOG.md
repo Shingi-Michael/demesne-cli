@@ -4,6 +4,8 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- No thinking in the window: the "Thought for … · Show trace" rows are gone from chats and threads, like frontier apps. While a turn runs, its working line still says what it is about.
+
 - Foundry looks at its own page: after an HTML page is saved, the desktop app renders it off screen at 1280px and 390px and the save's result carries the layout faults it measured (sideways scroll, cut-off or spilling text, clipped badges, text on text, low contrast, broken images, console errors) and a picture of each width. The model fixes what is off with one edit, then answers; two looks per page per turn at most.
 
 - Threads: a chat in a project can split a job into up to three threads (`start_threads`), each a chat of its own in its own git worktree and branch, claiming the files it may change so no two overlap. The window splits in even halves: the orchestrator chat on the left with its thread list (a ring per thread, amber when it needs you), the thread you pick running live on the right with its own composer. Threads report back to the orchestrator as they finish; nothing reaches your checkout until you press Merge. See [Threads](docs/threads.md).

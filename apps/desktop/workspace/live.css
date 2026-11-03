@@ -316,18 +316,6 @@
   line-height: 20px;
 }
 .explored > summary,
-.thinking > summary {
-  cursor: pointer;
-  color: var(--secondary);
-  list-style: none;
-}
-.thinking > summary:before {
-  content: "▸ ";
-  color: var(--muted);
-}
-.thinking[open] > summary:before {
-  content: "▾ ";
-}
 .explored > div {
   border-left: 1px solid #24343f;
   padding-left: 14px;
@@ -340,53 +328,6 @@
   padding: 0;
   min-height: 20px;
 }
-.thinking {
-  font-size: 13px;
-  line-height: 20px;
-}
-.thinking summary,
-.thinking-toggle {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.thinking summary img {
-  display: inline-block;
-}
-.thinking > pre,
-.thinking-content > pre {
-  margin: 6px 0 0;
-  padding: 8px 12px;
-  border-left: 2px solid var(--electric);
-  background: var(--raised);
-  white-space: pre-wrap;
-  color: var(--secondary);
-  font: inherit;
-}
-.thinking > .thinking-text,
-.thinking-content > .thinking-text {
-  margin: 6px 0 0;
-  padding: 8px 12px;
-  border-left: 2px solid var(--electric);
-  background: var(--raised);
-  color: var(--secondary);
-}
-.thinking-text strong,
-.thinking-text .katex {
-  color: var(--paper);
-}
-.thinking-text > p {
-  margin: 0 0 6px;
-}
-.thinking.live summary,
-.thinking.live .thinking-toggle {
-  color: var(--electric);
-}
-.thinking-toggle { color: var(--secondary); cursor: pointer; }
-.thinking-toggle .chev { transition: transform 120ms ease; }
-.thinking-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
-.thinking-content > pre,
-.thinking-content > .thinking-text { margin: 0 0 6px; }
 .live-activity {
   display: flex;
   gap: 8px;
@@ -2107,7 +2048,7 @@ button:disabled {
 .compaction-toggle { margin-top: 14px; color: var(--electric); text-align: left; }
 
 /* The conversation as one column: your ask as a bubble on the right, a
-   "Thought for" line, each step one quiet line on a thin guide (an edit's
+   each step one quiet line on a thin guide (an edit's
    diff or a command's output unfolds under its row), the answer beside a
    small mark, and a receipt line of what it cost and changed. */
 .ico {
@@ -2196,38 +2137,6 @@ button:disabled {
 }
 .turn:hover .request time {
   visibility: visible;
-}
-.thinking-main .thinking-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--secondary);
-}
-.thinking-main .thinking-toggle:hover {
-  color: var(--strong);
-}
-.thinking-main .thinking-content {
-  margin-top: 6px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 14px;
-  line-height: 22px;
-}
-.thinking-main .thinking-text > p,
-.thinking-main .thinking-text li,
-.thinking-main .thinking-content pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.thinking-main .thinking-content pre code {
-  white-space: inherit;
-  overflow-wrap: inherit;
-}
-.thinking-disclosure {
-  margin-left: 8px;
-  color: var(--muted);
-  font-size: 12px;
 }
 .steps {
   display: flex;

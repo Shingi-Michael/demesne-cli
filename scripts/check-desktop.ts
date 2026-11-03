@@ -433,18 +433,10 @@ try {
   await until(() => page.locator(".intro p.away").innerText().then(text => text.length > 0), "Home says what happened while you were away");
   assert.equal(await page.locator(".hero-map, .land").count(), 0, "the map is gone");
   await type(thinkingPrompt);
-  const trace = page.locator(".thinking-main .thinking-content").last();
-  const thinkingToggle = page.locator(".thinking-main .thinking-toggle").last();
-  await trace.waitFor({ state: "visible" });
-  assert.equal(await thinkingToggle.getAttribute("aria-expanded"), "true");
-  assert((await trace.innerText()).includes("First reasoning paragraph."));
-  const layout = await trace.evaluate(element => {
-    const paragraph = element.querySelector("p")!;
-    return { height: paragraph.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(paragraph).lineHeight), width: element.clientWidth, scrollWidth: element.scrollWidth };
-  });
-  assert(layout.height > layout.lineHeight, "Thinking preserves multiple lines");
-  assert(layout.scrollWidth <= layout.width + 1, "Long thinking text wraps without horizontal overflow");
-  await capture("01-thinking-expanded");
+  // Thinking is never shown: no row, no trace, only the working line.
+  await until(() => page.locator(".working-line").last().isVisible(), "the turn works");
+  assert.equal(await page.locator("#conversation .thinking").count(), 0, "no thinking row or trace");
+  assert.equal(await page.getByText("First reasoning paragraph.").count(), 0, "the reasoning text never reaches the window");
   // While it thinks, the working line under the turn carries the cube and the silver words.
   const working = page.locator(".working-line").last();
   assert((await working.locator(".cube-mark svg polygon").count()) >= 8, "the working cube draws its cubelets");
@@ -464,21 +456,14 @@ try {
   if (answerBox) assert(Math.abs(answerBox.x - markBox!.x) < 0.5, "the cube sits under the answer's mark");
   assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "one cube on screen: the sidebar shows a dot");
   assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
-  assert.equal(await thinkingToggle.locator(".shine, .cube-mark").count(), 0, "the thinking row is quiet: one silver line, one cube");
   assert.equal((await working.locator(".wl-words:not(.wl-copy) .wl-word:not(.out)").innerText()).trim(), "Thinking", "a thought without headings says Thinking");
   await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-work") ?? false), "a working turn runs a light along the panel's rim");
   await until(() => page.locator("#workspace-tabs .bar-tab.on .sidebar-session-mark.working").count().then(count => count === 1), "the open tab breathes a working dot");
   assert((await page.locator("#workspace-tabs .bar-tab.on [role=tab]").getAttribute("title"))!.endsWith("· Working"), "the tab's tooltip says it works");
   await capture("01-thinking-cube");
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "hidden" });
   nextThought();
-  await until(() => trace.textContent().then(text => text?.includes("The streamed update arrived.")), "reasoning delta arrived while collapsed");
-  assert.equal(await thinkingToggle.getAttribute("aria-expanded"), "false");
-  assert(!(await trace.isVisible()), "Streaming does not reopen a manually collapsed trace");
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "visible" });
-  await textIncludes("The streamed update arrived.");
+  await Bun.sleep(150);
+  assert.equal(await page.getByText("The streamed update arrived.").count(), 0, "streamed reasoning stays out of the window");
   finishThought();
   await textIncludes("Thinking check complete.");
   await page.locator("textarea").fill("");
@@ -501,11 +486,7 @@ try {
   await pasteChip.getByRole("button", { name: "Remove the pasted text" }).click();
   await until(() => pasteChip.count().then(n => n === 0), "× takes the paste back");
   await click("toggle-steps");
-  await trace.waitFor({ state: "visible" });
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "hidden" });
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "visible" });
+  assert.equal(await page.locator("#conversation .thinking").count(), 0, "opened steps show no thinking either");
   await click("toggle-steps");
   // A project chat that uses no other card has only Where on the right (pass 121 E).
   assert.deepEqual(await evaluate<string[]>("return [...document.querySelectorAll('#cards > .card')].map(card => card.dataset.card);"), ["where"], "a chat that uses no card has only Where on the right");
@@ -1743,10 +1724,10 @@ try {
   await page.keyboard.press("Escape");
   await until(() => page.locator("#overlay").isHidden(), "Escape closes the thread's picker");
   assert(await page.locator("#main > #overlay").count() === 1, "the picker goes back to the chat on the left");
-  // A thread shows its own thinking and words, its working line, and its
+  // A thread shows its own words (never its thinking), its working line, and its
   // own context, like any chat.
   await until(() => page.locator("#thread-pane .tp-turns").innerText().then(text => text.includes("Waiting on the gate before writing the greeting.")), "the thread shows its own words");
-  await until(() => page.locator("#thread-pane .thinking").count().then(count => count >= 1), "the thread shows its own thinking");
+  assert.equal(await page.locator("#thread-pane .thinking").count(), 0, "a thread shows no thinking either");
   await until(() => page.locator("#thread-pane .working-line").isVisible(), "the thread has a working line");
   await until(() => page.locator("#tp-context").isVisible(), "the thread's composer shows its context");
   assert.match(await page.locator("#tp-context").getAttribute("title") ?? "", /of this thread's context used/);

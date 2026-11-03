@@ -2045,7 +2045,8 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 
 /* Agents that live in Demesne (agent-cli.ts): under the open project's chats,
    one row per agent tool Demesne runs itself. Its tile, its name, how it is. */
-.sidebar-housed { margin-top: 6px; }
+#sidebar-housed { margin: 2px 0 8px; }
+.sidebar-housed { margin-top: 0; }
 .sidebar-housed-label { margin: 4px 0 2px; padding-left: 9px; color: var(--t4); font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; }
 .sidebar-housed-row { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 10px 0 9px; border-radius: 0 var(--r) var(--r) 0; color: var(--t2); text-align: left; font-size: 13px; white-space: nowrap; }
 .sidebar-housed-row:hover { box-shadow: inset 0 0 0 1px var(--hair); }

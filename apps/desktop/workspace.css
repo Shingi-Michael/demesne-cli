@@ -1431,8 +1431,11 @@ html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .bar-tab
 html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { padding-left: 84px; }
 /* Folded on the Mac: the traffic lights own the rail's top, so the strip
    starts under them and the toolbar's first button clears them. */
-html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-sidebar { padding-top: 52px; }
-html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-toolbar { padding-left: 24px; }
+/* Folded on the Mac, the top bar runs the window's whole width, so the
+   strip's column starts under it (level with the panel) and no edge cuts
+   through the traffic lights, which are wider than the strip. */
+html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-sidebar { grid-row: 2; padding-top: 4px; }
+html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-toolbar { grid-column: 1 / -1; padding-left: 84px; }
 /* The Mac's simple full screen has no title bar, so the page draws the
    three buttons where the window's own sit (trafficLightPosition 18, 18). */
 /* The window can't move there, so the drag regions go: they'd swallow the

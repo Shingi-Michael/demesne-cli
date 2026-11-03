@@ -5727,7 +5727,8 @@ async function dispatch(
       const forThread = row.action === "model" && modelFor === "thread";
       overlay = null;
       renderOverlay();
-      return forThread ? api("thread-model", row.data) : dispatch(row.action, row.data);
+      if (forThread) { await api("thread-model", row.data); return; }
+      return dispatch(row.action, row.data);
     }
   }
   if (action === "complete-command") return setDraft(`${args.name} `);

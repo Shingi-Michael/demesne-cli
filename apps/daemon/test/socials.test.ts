@@ -11,7 +11,7 @@ import { picturePrompt, pictureMaker, type PictureMaker } from "../src/social-pi
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const step of cleanup.splice(0)) step(); });
 
-function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number; picture?: PictureMaker | null } = {}) {
+function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number; picture?: PictureMaker | null; monthlyDollars?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "demesne-socials-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const calls: ProviderMessage[][] = [];
@@ -21,6 +21,7 @@ function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?
     now: options.now,
     monthlyCalls: options.monthlyCalls,
     picture: options.picture,
+    monthlyDollars: options.monthlyDollars,
     write: async (messages) => { calls.push(messages); return replies.length ? replies.shift()! : "ok"; },
   });
   return { social: make(), calls, reopen: make };
@@ -150,24 +151,22 @@ describe("pictures", () => {
     expect((await social.noteMoment("s9", "Tab names", "/p/demesne-cli"))!.picture).toBeUndefined();
   });
 
-  test("the cap you set stops pictures before it is passed, and a failed picture isn't counted", async () => {
+  test("the monthly cap stops pictures before it is passed, and a failed picture isn't counted", async () => {
     let now = new Date("2026-11-03T09:00:00");
     let fail = true;
-    const { social } = feed([], { now: () => now, picture: async () => fail ? null : new Uint8Array([9]) });
-    expect(social.setCap(0.05).cap).toBe(0.05);
+    const { social } = feed([], { now: () => now, monthlyDollars: 0.05, picture: async () => fail ? null : new Uint8Array([9]) });
     expect((await social.noteAgentTurn("claude", work("s1"), "a", "b"))!.picture).toBeUndefined();
     expect(social.spend().pictures).toBe(0);
     fail = false;
     expect((await social.noteAgentTurn("codex", work("s2"), "a", "b"))!.picture).toBe(true);
     expect((await social.noteAgentTurn("gemini", work("s3"), "a", "b"))!.picture).toBeUndefined();
-    expect(() => social.setCap(-1)).toThrow();
     // A new month starts the count again.
     now = new Date("2026-12-01T09:00:00");
     expect(social.spend().pictures).toBe(0);
   });
 
-  test("without an image model the feed says pictures are off", () => {
-    expect(feed([]).social.view().spend.on).toBe(false);
+  test("without an image model there are no pictures", () => {
+    expect(feed([]).social.spend().on).toBe(false);
   });
 
   test("the picture model gets the agent's face as the reference and a safe, drawn prompt", async () => {

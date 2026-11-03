@@ -2858,7 +2858,7 @@ type PageKind = ChatsTab | "scheduled" | "foundry" | "customize" | "settings" | 
 let pageOpen: "" | PageKind = "";
 /// Today (agent socials): the feed, what is open in it, and when you last looked.
 let socialsView: SocialsView | null = null;
-const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new Map(), editingCap: false };
+const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new Map() };
 const picturesLoading = new Set<string>();
 /// The posts' pictures, fetched once each while Today is open.
 function loadPictures() {
@@ -3328,13 +3328,6 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const value = form.querySelector("input")?.value.trim() ?? "";
     if (value) void settingsCall("settings-config", { key: form.dataset.key, value });
-    return;
-  }
-  if (form.classList.contains("td-cap")) {
-    event.preventDefault();
-    const dollars = Number(form.querySelector("input")?.value);
-    todayUi.editingCap = false;
-    void api<SocialsView["spend"]>("socials-cap", { dollars }).then((spend) => { if (socialsView && spend) socialsView = { ...socialsView, spend }; todayUi.error = ""; }, (error) => { todayUi.error = errorWords(error); }).finally(() => renderPage());
     return;
   }
   if (form.classList.contains("td-field")) {
@@ -5387,12 +5380,6 @@ async function dispatch(
     if (post) { swapPost({ ...post, liked: args.liked === true }); renderPage(); }
     try { swapPost(await api<SocialPost>("socials-like", { id: String(args.id), liked: args.liked === true })); } catch (error) { todayUi.error = errorWords(error); }
     return renderPage();
-  }
-  if (action === "today-cap") {
-    todayUi.editingCap = true;
-    renderPage();
-    document.querySelector<HTMLInputElement>("#page .td-cap input")?.select();
-    return;
   }
   if (action === "today-reply") {
     todayUi.replying = todayUi.replying === args.id ? "" : String(args.id);

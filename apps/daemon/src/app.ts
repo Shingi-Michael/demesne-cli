@@ -1198,12 +1198,6 @@ export function createDaemonApp(options: {
       if (url.pathname === "/v1/socials" && request.method === "GET") {
         return json(socials ? socials.view() : { posts: [], agents: [] });
       }
-      if (url.pathname === "/v1/socials/cap" && request.method === "POST") {
-        if (!socials) return apiError("socials_off", "Agent socials are off", 404);
-        const body = await readJson(request) as { dollars?: unknown };
-        try { return json({ spend: socials.setCap(typeof body.dollars === "number" ? body.dollars : Number.NaN) }); }
-        catch (error) { return apiError("invalid_cap", error instanceof Error ? error.message : String(error), 400); }
-      }
       const pictureMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/picture$/);
       if (pictureMatch && request.method === "GET") {
         const path = socials?.picturePath(decodeURIComponent(pictureMatch[1]!));

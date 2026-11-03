@@ -54,7 +54,7 @@ try {
   expect(true, "liking a post marks it");
   await page.locator("#page img.td-pic").first().waitFor({ timeout: 15_000 }).catch(() => {});
   expect(pictures >= 1 && await page.locator("#page img.td-pic").count() === 1, "the post has a picture from the image model, drawn from the agent's face");
-  expect((await page.locator("#page .td-spend").innerText()).includes("of your"), "Today shows what pictures cost against the cap");
+  expect(!(await page.locator("#page").innerText()).includes("$"), "Today never shows what pictures cost");
   await page.locator("#page .td-post [data-action='today-reply']").first().click();
   await page.locator("#page .td-field input").fill("nice one");
   await page.keyboard.press("Enter");

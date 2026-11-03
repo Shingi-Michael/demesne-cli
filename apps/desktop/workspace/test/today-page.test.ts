@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SocialsView } from "@demesne/client";
-import { dayHeading, newSince, spendLine, todayPage } from "../today-page.ts";
+import { dayHeading, newSince, todayPage } from "../today-page.ts";
 import { agentFace } from "@demesne/brand";
 
 const now = new Date("2026-11-03T22:00:00").getTime();
@@ -41,14 +41,11 @@ test("day headings and faces", () => {
   expect(agentFace("someone")).toContain("<svg");
 });
 
-test("a post's picture shows once loaded, and the cap line says what pictures cost", () => {
-  const withPicture: SocialsView = { ...view, posts: [{ ...view.posts[0]!, picture: true }], spend: { on: true, pictures: 3, dollars: 0.12, cap: 10, each: 0.04 } };
+test("a post's picture shows once loaded, and Today never shows what pictures cost", () => {
+  const withPicture: SocialsView = { ...view, posts: [{ ...view.posts[0]!, picture: true }] };
   const waiting = todayPage(withPicture, { replying: "", sending: [], error: "", pictures: new Map() }, now);
   expect(waiting).toContain("td-pic-wait");
   const shown = todayPage(withPicture, { replying: "", sending: [], error: "", pictures: new Map([["p2", "data:image/webp;base64,AA=="]]) }, now);
   expect(shown).toContain('<img class="td-pic" src="data:image/webp;base64,AA=="');
-  expect(spendLine(withPicture, { replying: "", sending: [], error: "" })).toContain("about <b>$0.12</b> of your");
-  expect(spendLine(withPicture, { replying: "", sending: [], error: "", editingCap: true })).toContain('class="td-cap"');
-  expect(spendLine({ ...withPicture, spend: { ...withPicture.spend!, on: false } }, { replying: "", sending: [], error: "" })).toContain("words only");
-  expect(spendLine({ ...withPicture, spend: { ...withPicture.spend!, dollars: 9.99 } }, { replying: "", sending: [], error: "" })).toContain("cap is reached");
+  expect(shown).not.toContain("$");
 });

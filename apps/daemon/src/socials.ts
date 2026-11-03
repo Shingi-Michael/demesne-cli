@@ -53,7 +53,7 @@ export interface SocialPost {
   picture?: boolean;
 }
 
-/// What pictures cost this month, against the cap you set.
+/// What pictures cost this month, against the monthly cap.
 export interface SocialSpend {
   /// Pictures can be made: an image model is set up.
   on: boolean;
@@ -64,9 +64,9 @@ export interface SocialSpend {
   each: number;
 }
 
-export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[]; spend: SocialSpend }
+export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[] }
 
-interface SocialsFile { version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number; cap: number }
+interface SocialsFile { version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number }
 
 /// One call to the writer model: messages in, words out (null when it
 /// failed or took too long).
@@ -81,6 +81,8 @@ export interface SocialsOptions {
   monthlyCalls?: number;
   /// Makes a picture for a post; absent when no image model is set up.
   picture?: PictureMaker | null;
+  /// The most pictures may cost a month, in dollars (10 by default).
+  monthlyDollars?: number;
   /// About what one picture costs, for the cap.
   pictureDollars?: number;
 }
@@ -169,22 +171,16 @@ export class SocialFeed {
   }
 
   view(): SocialsView {
-    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]), spend: this.spend() };
+    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]) };
   }
 
   spend(): SocialSpend {
     this.rollMonth();
     const each = this.options.pictureDollars ?? PICTURE_DOLLARS;
-    return { on: Boolean(this.options.picture), pictures: this.data.pictures, dollars: Math.round(this.data.pictures * each * 100) / 100, cap: this.data.cap, each };
+    return { on: Boolean(this.options.picture), pictures: this.data.pictures, dollars: Math.round(this.data.pictures * each * 100) / 100, cap: this.cap, each };
   }
 
-  /// The monthly cap you set; pictures stop before it is passed.
-  setCap(dollars: number): SocialSpend {
-    if (!Number.isFinite(dollars) || dollars < 0 || dollars > 1000) throw new Error("The cap is a number of dollars from 0 to 1000");
-    this.data.cap = Math.round(dollars * 100) / 100;
-    this.save();
-    return this.spend();
-  }
+  private get cap() { return this.options.monthlyDollars ?? DEFAULT_CAP; }
 
   /// The post's picture (WebP), or null.
   picturePath(postId: string): string | null {
@@ -203,7 +199,7 @@ export class SocialFeed {
     const today = this.data.posts.filter((item) => item.by === post.by && item.picture && sameDay(new Date(item.at), now)).length;
     const each = this.options.pictureDollars ?? PICTURE_DOLLARS;
     this.rollMonth();
-    if (today >= PICTURES_A_DAY || (this.data.pictures + 1) * each > this.data.cap + 1e-9) return;
+    if (today >= PICTURES_A_DAY || (this.data.pictures + 1) * each > this.cap + 1e-9) return;
     // Counted before the call, so two posts at once can't both pass the cap.
     this.data.pictures += 1;
     this.save();
@@ -335,7 +331,7 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, cap: DEFAULT_CAP };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0 };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;

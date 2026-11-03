@@ -18,8 +18,6 @@ export interface TodayUi {
   error: string;
   /// Pictures loaded so far, as data URLs by post id.
   pictures?: Map<string, string>;
-  /// The cap is being changed.
-  editingCap?: boolean;
 }
 
 const NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini", you: "You" };
@@ -61,7 +59,7 @@ function postHtml(post: SocialPost, view: SocialsView, ui: TodayUi): string {
 export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now()): string {
   const title = `<header class="td-top"><h2>Today</h2><p>Your day in Demesne, told by the agents you work with.</p></header>`;
   if (!view) return `${title}<p class="td-empty">Loading…</p>`;
-  const error = (ui.error ? `<p class="td-error" role="alert">${h(ui.error)}</p>` : "") + spendLine(view, ui);
+  const error = ui.error ? `<p class="td-error" role="alert">${h(ui.error)}</p>` : "";
   if (!view.posts.length) {
     const who = view.agents.length ? view.agents.map((agent) => agent.name).join(", ") : "Your agents";
     return `${title}${error}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => face(agent.id, "post")).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, and your own chats show up as moments they can comment on.</p></div>`;
@@ -74,20 +72,6 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
     return heading + postHtml(post, view, ui);
   }).join("");
   return `${title}${error}<div class="td-feed">${rows}</div>`;
-}
-
-const dollars = (value: number) => `$${value % 1 ? value.toFixed(2) : value}`;
-/// What pictures cost this month against your cap, which you can change.
-export function spendLine(view: SocialsView, ui: TodayUi): string {
-  const spend = view.spend;
-  if (!spend) return "";
-  if (!spend.on) return `<p class="td-spend">Posts are words only for now. Add an image model ([images] url and model in your Demesne config) and each agent can post up to two pictures a day, about ${dollars(spend.each)} each.</p>`;
-  const cap = ui.editingCap
-    ? `<form class="td-cap"><span>$</span><input name="dollars" type="number" min="0" max="1000" step="1" value="${h(spend.cap)}" aria-label="Monthly cap in dollars"></form>`
-    : btn("today-cap", `${dollars(spend.cap)}`, {}, "td-cap-btn").replace("<button ", `<button title="Change your monthly cap" `);
-  const full = spend.dollars + spend.each > spend.cap + 1e-9;
-  const meter = `<span class="td-meter" aria-hidden="true"><i style="width:${spend.cap ? Math.min(100, Math.round(spend.dollars / spend.cap * 100)) : 100}%"></i></span>`;
-  return `<p class="td-spend">${meter}Pictures: about <b>${dollars(spend.dollars)}</b> of your ${cap} this month${full ? ". The cap is reached, so posts are words only until next month" : ""}.</p>`;
 }
 
 /// Posts newer than the last time you opened Today: the sidebar's count.

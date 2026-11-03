@@ -281,7 +281,10 @@ export class DesktopHost {
     // Remove a project from Demesne: its chats are deleted and it leaves the
     // recent list. The folder on disk is never touched.
     if (request.method === "remove-project") {
-      const path = desktopWorkspace(request.args.path);
+      // The folder may already be gone (a cleared Drive worktree), so the
+      // path is checked as text, not resolved on disk.
+      const path = request.args.path;
+      if (typeof path !== "string" || !path || path.length > 4096 || path.includes("\0") || !isAbsolute(path)) throw new Error("Invalid project");
       await this.host.handle("remove-project-chats", { path });
       this.prefs = { ...this.prefs, recentProjects: this.prefs.recentProjects.filter((one) => one !== path), lastWorkspace: this.prefs.lastWorkspace === path ? null : this.prefs.lastWorkspace };
       writePreferences(this.preferencePath, this.prefs);

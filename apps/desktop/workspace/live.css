@@ -434,11 +434,14 @@
 /* KaTeX: text-sized formulas in the reading colour; displayed ones
    centred, scrolling sideways instead of overflowing the column. */
 .markdown .katex {
-  font-size: 1.12em;
+  font-size: 1.2em;
   color: var(--paper);
 }
+.markdown .katex-display > .katex {
+  font-size: 1.45em;
+}
 .markdown .katex-display {
-  margin: 10px 0;
+  margin: 14px 0;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 2px 0;

@@ -5722,8 +5722,12 @@ async function dispatch(
       return;
     }
     if (row) {
+      // Closing the picker hands it back to the chat, so remember whose it was:
+      // a thread's model row sets the thread, never the chat on the left.
+      const forThread = row.action === "model" && modelFor === "thread";
       overlay = null;
       renderOverlay();
+      if (forThread) { await api("thread-model", row.data); return; }
       return dispatch(row.action, row.data);
     }
   }

@@ -1123,7 +1123,7 @@ function isContextOverflow(error: unknown): boolean {
 
 /// How answers are displayed: Demesne renders Markdown in the desktop app's conversation column, so the
 /// model formats for that instead of for a web chat.
-export const ANSWER_FORMAT_GUIDANCE = "Answers are shown as Markdown in the Demesne desktop app, in a conversation column about 90 characters wide. Rendered: headings, bold, italic, `code`, fenced code blocks with a language, lists (nested, numbered, - [ ] tasks), block quotes, links, and tables. Lead with the outcome. Use short paragraphs and lists; headings only for longer answers. Use a table only to compare items across a few attributes: at most 5 short columns, no paragraphs in cells, otherwise use a list. Keep file paths and commands in `code`. No emoji or decorative rules.";
+export const ANSWER_FORMAT_GUIDANCE = "Answers are shown as Markdown in the Demesne desktop app, in a conversation column about 90 characters wide. Rendered: headings, bold, italic, `code`, fenced code blocks with a language, lists (nested, numbered, - [ ] tasks), block quotes, links, tables, and LaTeX math. Write every formula as math, never in a code block or with Unicode sub/superscripts: $x_i$ inline, and $$ … $$ on its own lines for a formula that stands alone. Lead with the outcome. Use short paragraphs and lists; headings only for longer answers. Use a table only to compare items across a few attributes: at most 5 short columns, no paragraphs in cells, otherwise use a list. Keep file paths and commands in `code`. No emoji or decorative rules.";
 
 /// Foundry in a chat, in one breath: the tool descriptions carry the rules,
 /// so this only says when to reach for it and how the preview works. It goes

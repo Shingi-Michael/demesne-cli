@@ -607,9 +607,14 @@ try {
   assert(!await page.locator("#sidebar-sessions").isVisible(), "The rail hides the list");
   await until(() => page.locator("#rail-chats .rail-chat").count().then(count => count >= 1), "the strip shows the open chats");
   assert.equal(await page.locator("#rail-chats .rail-chat.on").count(), 1, "the chat you're in is marked on the strip");
-  await page.locator("#rail-search").hover();
-  // The label fades in after a short delay; wait for it rather than a fixed time.
-  await until(() => page.locator("#rail-search").evaluate(button => getComputedStyle(button, "::after").opacity === "1"), "hovering an icon shows its label");
+  // The strip may still be sliding in from the fold, so a hover at its
+  // first position can land on the panel instead. Hover again on each try
+  // (the label fades in after a short delay) until the label shows.
+  await page.bringToFront();
+  await until(async () => {
+    await page.locator("#rail-search").hover();
+    return page.locator("#rail-search").evaluate(button => getComputedStyle(button, "::after").opacity === "1");
+  }, "hovering an icon shows its label");
   assert.equal(await page.locator("#rail-search").getAttribute("data-tip"), "Search chats");
   const rail = await page.locator(".sidebar-rail").boundingBox();
   await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 160);

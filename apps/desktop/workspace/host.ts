@@ -1083,7 +1083,8 @@ export class WorkspaceHost {
       }
     } catch { /* an older daemon, or Heartbeat is off */ }
     try {
-      const root = this.current?.session.workspace?.root ?? (this.options.projectless ? "" : this.workspace);
+      // Agents show with no project open too; they then work in Home's folder.
+      const root = this.current?.session.workspace?.root ?? this.workspace;
       const housed = root ? (await this.client.housedAgents(root)).agents : [];
       if (JSON.stringify(housed) !== JSON.stringify(this.housed)) {
         this.housed = housed;

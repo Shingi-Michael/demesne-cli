@@ -23,7 +23,8 @@ try {
   await page.setViewportSize({ width: 1180, height: 760 });
   const rows = page.locator(".sidebar-housed-row");
   await rows.first().waitFor({ timeout: 20_000 });
-  expect(await rows.count() === 2, "two installed agents listed under the project");
+  expect(await rows.count() === 2, "two installed agents listed");
+  expect(await page.locator("#sidebar-housed .sidebar-housed-row").count() === 2 && await page.locator(".sidebar-project .sidebar-housed-row").count() === 0, "agents sit in their own list at the top, not under a project");
   expect((await rows.first().innerText()).includes("Claude Code") && (await rows.first().innerText()).includes("ready"), "Claude Code is ready");
   await page.screenshot({ path: join(output, "agents-listed.png") });
   await rows.first().click();

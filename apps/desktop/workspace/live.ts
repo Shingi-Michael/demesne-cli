@@ -731,7 +731,7 @@ function renderSidebar() {
     return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
-  // The project's agents: a letter tile, the name, and how it is (a dot
+  // The agents: a letter tile, the name, and how it is (a dot
   // while it works or has a new reply). Clicking opens its chat.
   const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${housed.map((agent) => {
     const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
@@ -767,6 +767,14 @@ function renderSidebar() {
   };
 
   const reviewLine = () => review.length ? btn("review-open", `Review ${review.length} ${review.length === 1 ? "branch" : "branches"} ›`, { show: true }, "sidebar-more sidebar-review") : "";
+  // Agents are yours, not a project's: one list at the top of the sidebar,
+  // the same whichever project is open. Each works in the open project.
+  const housedList = document.getElementById("sidebar-housed");
+  if (housedList) {
+    const show = !query && housed.length > 0;
+    housedList.hidden = !show;
+    housedList.innerHTML = show ? housedLines() : "";
+  }
   // Chats you asked to bring back lead the list once they're due, until you
   // open them; the time they came back sits on the right.
   const backChats = listed.filter((item) => backOf(item) === "back" && item.id !== current?.id && matches(item));
@@ -799,7 +807,6 @@ function renderSidebar() {
       const key = `p:${path}`, expanded = isOpen(key), active = path === projectWorkspace;
       const rows = groupRows(key, matching, (item) => shortAge(item.updatedAt), nested);
       if (active && !query) rows.push(reviewLine());
-      if (active && !query && housed.length) rows.push(housedLines());
       // The whole line is the fold, its folder shut or open with it; + starts
       // a chat in the project.
       const label = btn("project-toggle", `${expanded ? ICON_FOLDER_OPEN : ICON_FOLDER_SHUT}<span>${h(name)}</span>`, { path }, "sidebar-project-name")

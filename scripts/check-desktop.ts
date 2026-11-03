@@ -1742,6 +1742,13 @@ try {
   await until(() => page.locator("#thread-pane .tp-turns").innerText().then(text => text.includes("Waiting on the gate before writing the greeting.")), "the thread shows its own words");
   assert.equal(await page.locator("#thread-pane .thinking").count(), 0, "a thread shows no thinking either");
   await until(() => page.locator("#thread-pane .working-line").isVisible(), "the thread has a working line");
+  // While it works, the empty composer's send is Stop, as in any chat; typing turns it back to send.
+  await until(() => page.locator('#tp-composer.stopping .send[aria-label="Stop this thread"] .send-stop').isVisible(), "a working thread's send is Stop");
+  await page.locator("#tp-composer textarea").fill("also say hi");
+  await page.locator("#tp-composer textarea").dispatchEvent("input");
+  assert(!(await page.locator("#tp-composer").evaluate((form) => form.classList.contains("stopping"))), "words in the composer make it send again");
+  await page.locator("#tp-composer textarea").fill("");
+  await page.locator("#tp-composer textarea").dispatchEvent("input");
   await until(() => page.locator("#tp-context").isVisible(), "the thread's composer shows its context");
   assert.match(await page.locator("#tp-context").getAttribute("title") ?? "", /of this thread's context used/);
   await page.locator("#tp-context").click();

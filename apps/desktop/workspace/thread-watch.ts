@@ -156,6 +156,13 @@ export class ThreadWatch {
     this.options.publish();
   }
 
+  /// Stop: the open thread's running turn ends where it is, like Stop in a chat.
+  async cancel() {
+    const fix = this.state.open ? this.fix(this.state.open) : null, turn = this.chat?.active;
+    if (!fix?.sessionId || !turn) return;
+    await this.options.client().cancelTurn(turn.id);
+  }
+
   async approve(id: string, decision: "allow_once" | "deny") {
     const chat = this.chat;
     if (!chat?.approvals.has(id)) throw new Error("This permission is no longer pending.");
@@ -243,6 +250,7 @@ export class ThreadWatch {
   async handle(method: string, args: Record<string, unknown>) {
     if (method === "thread-open") return this.show(String(args.id ?? ""));
     if (method === "thread-close") return this.close();
+    if (method === "thread-cancel") return this.cancel();
     if (method === "thread-send") return this.send(String(args.text ?? ""));
     if (method === "thread-approve") return this.approve(String(args.id ?? ""), args.decision === "deny" ? "deny" : "allow_once");
     if (method === "thread-stop") return this.stopThread(String(args.id ?? ""));

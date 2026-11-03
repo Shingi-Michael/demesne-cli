@@ -4,6 +4,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- Drive lives at the foot of the sidebar, above you and Settings: its state, what it's on, Tell Drive and its ideas unfold there, and nothing sits above the composer any more. Branches to review stay on the sidebar's Review line.
 - No thinking in the window: the "Thought for … · Show trace" rows are gone from chats and threads, like frontier apps. While a turn runs, its working line still says what it is about.
 
 - Foundry looks at its own page: after an HTML page is saved, the desktop app renders it off screen at 1280px and 390px and the save's result carries the layout faults it measured (sideways scroll, cut-off or spilling text, clipped badges, text on text, low contrast, broken images, console errors) and a picture of each width. The model fixes what is off with one edit, then answers; two looks per page per turn at most.

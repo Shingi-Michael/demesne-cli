@@ -3760,9 +3760,10 @@ function renderBriefing() {
   if (!broke) brokeShown = false;
   const mark = (kind: "spin" | "idea" | "amber" | "ok" | "bad" | "hollow") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
   let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
-  if (review.length && !broke) {
-    const only = review.length === 1 ? review[0]! : null;
-    const about = only && reviewShown ? "" : only ? `${only.title}${only.diff ? ` · +${only.diff.additions} −${only.diff.deletions}` : ""}` : away && away.status !== "running" ? "Drive ran them while you were away" : "";
+  // Branches to review are the sidebar's Review line; Drive's place names
+  // them only while that line has unfolded them here.
+  if (review.length && !broke && reviewShown) {
+    const about = away && away.status !== "running" ? "Drive ran them while you were away" : "";
     parts.push(`${mark("ok")}${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review`, {}, "bf-word")}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
   }
   const label = (drive: NonNullable<Snapshot["drive"]>) => drive.status === "blocked" ? "Drive stopped" : drive.status === "paused" ? "Drive is paused" : "Drive is working";
@@ -3853,7 +3854,7 @@ function renderBriefing() {
   const chip = `${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}${chevron}`;
   node.innerHTML = `<span class="bf-lead${fold ? " open" : ""}${broke ? " bad" : ""}">${fold && !broke ? ICON_SPARK : lead}</span><div class="bf-chip">${chip}</div>${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
   node.classList.toggle("open", Boolean(fold));
-  // Opening turns the line into Drive speaking in the conversation: its rows
+  // Opening unfolds Drive's rows under its line at the sidebar's foot: its rows
   // unfold under it and scroll with everything else, so nothing is covered.
   const reply = el("drive-reply"), open = Boolean(fold), shown = reply.classList.contains("open");
   if (!open && shown) {
@@ -3874,10 +3875,7 @@ function renderBriefing() {
   reply.hidden = false;
   if (shown) { reply.classList.add("open"); return; }
   void reply.offsetHeight;
-  const stage = el("stage"), end = performance.now() + 340;
   requestAnimationFrame(() => reply.classList.add("open"));
-  const follow = () => { stage.scrollTop = stage.scrollHeight; if (performance.now() < end) requestAnimationFrame(follow); };
-  follow();
 }
 /// Folds Drive's reply away if it is open; true when it was.
 function closeBriefingCard() {

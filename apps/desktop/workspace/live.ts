@@ -5374,6 +5374,19 @@ async function dispatch(
     return renderThreads();
   }
   if (action === "thread-delete") { threadDeleteArmed = null; if (threadDeleteTimer) clearTimeout(threadDeleteTimer); }
+  // A thread tab's × only closes its tab; the next open tab takes over, or
+  // the thread side goes once none is left. Opening the thread brings it back.
+  if (action === "thread-tab-close") {
+    const id = String(args.id ?? ""), view = state!.threads;
+    closedThreadTabs.add(id);
+    const left = view.list.filter((fix) => !closedThreadTabs.has(fix.id));
+    renderThreads();
+    if (view.open !== id) return;
+    const at = view.list.findIndex((fix) => fix.id === id);
+    const next = left.find((fix) => view.list.indexOf(fix) > at) ?? left.at(-1);
+    return act(() => next ? api("thread-open", { id: next.id }) : api("thread-close", {}));
+  }
+  if (action === "thread-open") closedThreadTabs.delete(String(args.id ?? ""));
   if (action.startsWith("thread-") || action.startsWith("threads-")) return act(() => api(action, args));
   if (["provider-signin", "provider-signout", "provider-cancel"].includes(action)) return act(() => api(action, args));
   if (["cleanup-toggle", "cleanup-delete"].includes(action)) return act(() => api(action, args));
@@ -5824,6 +5837,9 @@ let renderedPalette: Snapshot["palette"] | null = null,
 let foldedForThreads = false, threadPaneSignature = "", threadPaneFor = "";
 /// The tab whose × was pressed once: pressing it again deletes the thread.
 let threadDeleteArmed: string | null = null, threadDeleteTimer: ReturnType<typeof setTimeout> | null = null;
+/// Thread tabs you closed, for the orchestrator chat they belong to.
+const closedThreadTabs = new Set<string>();
+let closedThreadTabsFrom: string | null = null;
 /// The thread's context card, opened from the ring in its composer.
 let threadContextOpen = false;
 /// The open thread's working line, kept out of the pane's repaints.
@@ -5860,10 +5876,35 @@ function renderThreads() {
   if (split && !foldedForThreads && shell && toggle && !shell.classList.contains("sidebar-collapsed")) { foldedForThreads = true; toggle.click(); }
   else if (!split && foldedForThreads) { foldedForThreads = false; if (shell?.classList.contains("sidebar-collapsed")) toggle?.click(); }
   renderThreadPane(split ? fix : null);
+  renderThreadTabs(split);
 }
+/// The thread tabs live in the window's top bar (pass 131 A), over the
+/// thread side only: they start at the split line, and go with the split.
+function renderThreadTabs(split: boolean) {
+  const host = el("thread-tabs"), view = state!.threads;
+  if (closedThreadTabsFrom !== view.from) { closedThreadTabsFrom = view.from; closedThreadTabs.clear(); }
+  el("desktop-toolbar").classList.toggle("thread-split", split);
+  host.hidden = !split;
+  if (!split) { host.dataset.html = ""; return; }
+  const html = threadTabsHTML(view, closedThreadTabs);
+  if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
+  placeThreadTabs();
+}
+/// Sizes the top bar's thread tabs so they begin exactly over the thread
+/// side's left edge, whatever the window's width.
+function placeThreadTabs() {
+  const host = document.getElementById("thread-tabs"), pane = document.getElementById("thread-pane"), bar = document.getElementById("desktop-toolbar"), header = document.getElementById("header");
+  if (!host || !pane || !bar || host.hidden || pane.hidden) return;
+  const barBox = bar.getBoundingClientRect(), paneLeft = pane.getBoundingClientRect().left;
+  const right = parseFloat(getComputedStyle(bar).paddingRight) || 0, gap = parseFloat(getComputedStyle(bar).columnGap) || 0;
+  const tail = header && header.offsetParent ? header.getBoundingClientRect().width + gap : 0;
+  host.style.width = `${Math.max(120, barBox.right - right - tail - paneLeft)}px`;
+}
+window.addEventListener("resize", () => placeThreadTabs());
+new ResizeObserver(() => placeThreadTabs()).observe(document.getElementById("thread-pane")!);
 function fillThreadLists() {
   if (!state) return;
-  const list = threadListHTML(state.threads);
+  const list = threadListHTML(state.threads, threadDeleteArmed);
   for (const slot of document.querySelectorAll<HTMLElement>("#conversation [data-threads]"))
     if (slot.dataset.html !== list) { slot.innerHTML = list; slot.dataset.html = list; }
 }
@@ -5875,14 +5916,13 @@ function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
     threadPaneFor = fix.id; threadPaneSignature = "";
     threadWorking ??= new WorkingLine(spinner);
     threadContextOpen = false;
-    host.innerHTML = `<div class="tp-tabs-host"></div><div class="tp-conv"><div class="tp-turns"></div></div><div class="tp-foot"><div id="tp-context-card" hidden></div><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><span class="tp-merge-host"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button><button type="button" id="tp-context" class="cb" data-action="thread-context" aria-expanded="false" hidden></button></div></form></div>`;
+    host.innerHTML = `<div class="tp-conv"><div class="tp-turns"></div></div><div class="tp-foot"><div id="tp-context-card" hidden></div><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button></div><div class="composer-bar"><span class="sp"></span><span class="tp-merge-host"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button><button type="button" id="tp-context" class="cb" data-action="thread-context" aria-expanded="false" hidden></button></div></form></div>`;
     host.querySelector(".tp-conv")!.append(threadWorking.element);
   }
   const chat = state.threads.chat;
   const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.map((item) => [item.id, item.status]), threadDeleteArmed, threadContextOpen, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
   if (signature === threadPaneSignature) return;
   threadPaneSignature = signature;
-  host.querySelector<HTMLElement>(".tp-tabs-host")!.innerHTML = threadTabsHTML(state.threads, threadDeleteArmed);
   const merge = host.querySelector<HTMLElement>(".tp-merge-host")!, mergeHTML = threadMergeHTML(state.threads, fix);
   if (merge.innerHTML !== mergeHTML) merge.innerHTML = mergeHTML;
   const chip = host.querySelector<HTMLElement>("#tp-model")!, chipHTML = threadModelWords();
@@ -5937,7 +5977,7 @@ function sendToThread(form: HTMLFormElement) {
 // chat on the left keeps its own meanings (deny, stop).
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !state || el("thread-pane").hidden) return;
-  if (!(event.target as Element).closest?.("#thread-pane") || document.querySelector("#thread-pane #overlay")) return;
+  if (!(event.target as Element).closest?.("#thread-pane, #thread-tabs") || document.querySelector("#thread-pane #overlay")) return;
   event.preventDefault();
   event.stopImmediatePropagation();
   if (threadContextOpen) { threadContextOpen = false; threadPaneSignature = ""; return renderThreads(); }
@@ -5946,7 +5986,7 @@ document.addEventListener("keydown", (event) => {
 // ⌘[ and ⌘] step through the thread tabs while the split is up.
 document.addEventListener("keydown", (event) => {
   if (!(event.metaKey || event.ctrlKey) || (event.key !== "[" && event.key !== "]") || !state || el("thread-pane").hidden) return;
-  const list = state.threads.list, at = list.findIndex((fix) => fix.id === state!.threads.open);
+  const list = state.threads.list.filter((fix) => !closedThreadTabs.has(fix.id)), at = list.findIndex((fix) => fix.id === state!.threads.open);
   if (list.length < 2 || at < 0) return;
   event.preventDefault();
   const next = list[(at + (event.key === "]" ? 1 : -1) + list.length) % list.length]!;

@@ -18,6 +18,7 @@ export interface ThreadsView {
 const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const button = (action: string, label: string, data: Record<string, unknown>, className = "", disabled = false) =>
   `<button type="button"${disabled ? " disabled" : ""} class="${className}" data-action="${action}" data-args="${esc(JSON.stringify(data))}">${label}</button>`;
+const X = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 const CHECK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
 
 export type ThreadState = "work" | "you" | "ready" | "failed" | "merged";
@@ -65,11 +66,15 @@ function meta(fix: DriveFix): string {
   return "";
 }
 
-export function threadListHTML(view: ThreadsView): string {
+/// The chat's thread list. Each row opens its thread; the × on a row
+/// deletes it (pass 131 A): a merged thread goes at once, one with work on
+/// its branch asks once more, the × turning into "Delete".
+export function threadListHTML(view: ThreadsView, armed: string | null = null): string {
   if (!view.list.length) return "";
   return `<div class="th-label">Threads</div><div class="th-list">${view.list.map((fix) => {
-    const on = !view.closed && view.open === fix.id;
-    return `<button type="button" class="th-row${on ? " on" : ""}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-pressed="${on}" title="${esc(fix.thread?.files.length ? `Claims ${fix.thread.files.join(", ")}` : fix.title)}">${ring(fix)}<span class="th-name">${esc(fix.title)}</span><span class="th-meta">${meta(fix)}</span><span class="th-line">${threadLine(fix)}</span></button>`;
+    const on = !view.closed && view.open === fix.id, merged = fix.status === "applied", sure = merged || armed === fix.id;
+    const del = `<button type="button" class="th-del${armed === fix.id ? " armed" : ""}" data-action="${sure ? "thread-delete" : "thread-delete-arm"}" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Delete ${esc(fix.title)}" title="${merged ? "Delete this thread (its merge stays)" : "Delete this thread and its branch"}"${view.busy ? " disabled" : ""}>${armed === fix.id ? "Delete" : X}</button>`;
+    return `<div class="th-item"><button type="button" class="th-row${on ? " on" : ""}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-pressed="${on}" title="${esc(fix.thread?.files.length ? `Claims ${fix.thread.files.join(", ")}` : fix.title)}">${ring(fix)}<span class="th-name">${esc(fix.title)}</span><span class="th-meta">${meta(fix)}</span><span class="th-line">${threadLine(fix)}</span></button>${del}</div>`;
   }).join("")}</div>`;
 }
 
@@ -91,12 +96,28 @@ export function threadsFootHTML(view: ThreadsView): string {
   return `${message}<div class="th-status">${parts.join(" · ")}</div>`;
 }
 
-/// The right half's head: the thread's name, where it works, and how it is.
-export function threadHeadHTML(view: ThreadsView, fix: DriveFix): string {
-  const state = threadState(fix), index = view.list.indexOf(fix);
-  const pill = state === "you" ? `<span class="th-pill you">Needs you</span>` : state === "work" ? `<span class="th-pill">Working</span>` : state === "ready" ? `<span class="th-pill ok">Ready</span>` : state === "merged" ? `<span class="th-pill ok">Merged</span>` : `<span class="th-pill bad">Stopped</span>`;
-  const stop = state === "work" || state === "you" || state === "failed" ? button("thread-stop", state === "failed" ? "Discard" : "Stop", { id: fix.id }, "th-stop", Boolean(view.busy)) : "";
-  return `<div class="tp-title"><b>${esc(fix.title)}</b><span>Thread ${index + 1} of ${view.list.length} · ${esc(fix.branch)}</span></div><span class="sp"></span>${pill}${stop}${button("thread-close", '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>', {}, "tp-x").replace("<button ", '<button aria-label="Close the thread" title="Close" ')}`;
+/// How a thread stands, in words, for its tab's hover.
+function threadHow(fix: DriveFix): string {
+  return { work: "working", you: "waits for you", ready: "ready", merged: "merged", failed: "stopped" }[threadState(fix)];
+}
+
+/// Merge, in the thread's composer once it is ready (pass 130 A: the thread
+/// side has no head bar).
+export function threadMergeHTML(view: ThreadsView, fix: DriveFix): string {
+  return threadState(fix) === "ready" ? button("thread-merge", view.busy === fix.id ? "Merging…" : "Merge", { id: fix.id }, "tp-merge", Boolean(view.busy)) : "";
+}
+
+const PANEL_CLOSE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/><path d="m8 10 2 2-2 2"/></svg>';
+
+/// The thread tabs, in the window's top bar over the thread side (pass 131
+/// A), one per thread you haven't closed, with its ring. A tab's × only
+/// closes the tab; the panel icon at the end puts the thread side away.
+/// ⌘[ and ⌘] step through them.
+export function threadTabsHTML(view: ThreadsView, closed: ReadonlySet<string> = new Set()): string {
+  return `<div class="tp-tabs" role="tablist" aria-label="Threads">${view.list.filter((fix) => !closed.has(fix.id)).map((fix) => {
+    const on = view.open === fix.id;
+    return `<div class="tp-tab${on ? " on" : ""}"><button type="button" role="tab" class="tp-tab-open" aria-selected="${on}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" title="${esc(`${fix.title}\n${fix.branch} · ${threadHow(fix)}`)}">${ring(fix)}<span>${esc(fix.title)}</span></button><button type="button" class="tp-tab-x" data-action="thread-tab-close" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Close the ${esc(fix.title)} tab" title="Close this tab">${X}</button></div>`;
+  }).join("")}</div><button type="button" class="tp-hide" data-action="thread-close" aria-label="Close the thread side" title="Close the thread side (Esc)">${PANEL_CLOSE}</button>`;
 }
 
 /// What the orchestrator told the thread, at the top of its chat in place

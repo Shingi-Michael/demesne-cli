@@ -4,6 +4,10 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- A working thread can be stopped: its composer's send turns into Stop while the thread works, as in any chat, and turns back to send once you type (words steer it instead).
+- Drive lives at the foot of the sidebar, above you and Settings: its state, what it's on, Tell Drive and its ideas unfold there, and nothing sits above the composer any more. Branches to review stay on the sidebar's Review line.
+- No thinking in the window: the "Thought for … · Show trace" rows are gone from chats and threads, like frontier apps. While a turn runs, its working line still says what it is about.
+
 - Foundry looks at its own page: after an HTML page is saved, the desktop app renders it off screen at 1280px and 390px and the save's result carries the layout faults it measured (sideways scroll, cut-off or spilling text, clipped badges, text on text, low contrast, broken images, console errors) and a picture of each width. The model fixes what is off with one edit, then answers; two looks per page per turn at most.
 
 - Threads: a chat in a project can split a job into up to three threads (`start_threads`), each a chat of its own in its own git worktree and branch, claiming the files it may change so no two overlap. The window splits in even halves: the orchestrator chat on the left with its thread list (a ring per thread, amber when it needs you), the thread you pick running live on the right with its own composer. Threads report back to the orchestrator as they finish; nothing reaches your checkout until you press Merge. See [Threads](docs/threads.md).
@@ -48,6 +52,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ### Fixed
 
+- The assistant's Windows tasks no longer die when a Windows Terminal window is closed. With Windows Terminal as the default terminal, a task started as `powershell.exe -WindowStyle Hidden` was handed to Terminal as a tab, and closing that window sent Ctrl+C to the daemon and the model server at once (three times in a week). `install.ps1` now starts each task inside a headless console host (`conhost.exe --headless`), which has no window and never joins Terminal. Because stopping a task then ends only that console host, `keep-running.ps1` watches it and exits with it, so Stop-ScheduledTask still stops the daemon or the model server.
 - On the Mac, Demesne comes to the front when it opens, once. Opened from a terminal or script it could stay behind the app that launched it, with its window present but hidden.
 - A chat whose project folder was removed (a deleted worktree) no longer makes the daemon throw ENOENT when the window lists its files; the daemon answers "The project folder is gone".
 - The daemon log no longer grows without end: past 5 MB it moves to `daemon.log.1` (replacing the one before) when a daemon starts. One Mac's had reached 28 MB.

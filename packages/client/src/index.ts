@@ -1,5 +1,8 @@
 import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent} from "@demesne/protocol";
 import type { ThemeLibrary } from "@demesne/brand";
+
+/// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
+export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
   type ImageArtifact,
   type TurnAttachment,
@@ -328,6 +331,12 @@ export class DemesneClient {
   /// Other agents Heartbeat sees (empty when Heartbeat is off).
   async connectors(): Promise<{ servers: { name: string; state: "starting" | "ready" | "failed"; tools: number }[]; heartbeat: boolean }> { return this.request("/v1/connectors"); }
   async heartbeatAgents(): Promise<{ node: string | null; agents: NearbyAgent[] }> { return this.request("/v1/heartbeat/agents"); }
+  /// Agent tools installed on this machine, each with its chat in `workspace`.
+  async housedAgents(workspace: string): Promise<{ agents: HousedAgent[] }> { return this.request(`/v1/agents?workspace=${encodeURIComponent(workspace)}`); }
+  /// The agent's chat in the project, made the first time.
+  async openAgent(agent: string, workspacePath: string): Promise<{ session: { id: string }; address: string | null }> {
+    return this.request("/v1/agents/open", { method: "POST", body: JSON.stringify({ agent, workspacePath }) });
+  }
   async commands(sessionId:string,output="all"):Promise<CommandsResponse>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands?output=${encodeURIComponent(output)}`);}
   async stopCommand(sessionId:string,id:string):Promise<{stopping:boolean}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/stop`,{method:"POST",body:"{}"});}
   async rerunCommand(sessionId:string,id:string):Promise<{id:string}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/rerun`,{method:"POST",body:"{}"});}

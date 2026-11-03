@@ -48,8 +48,12 @@ let overlapRound = 0;
 // Threads (pass 126): the chat splits a job into two threads, one held
 // until the window has shown it working beside the chat.
 const threadsPrompt = "Desktop smoke: split this into threads";
-let releaseThread!: () => void, threadsRound = 0;
-const threadGate = new Promise<void>(resolve => { releaseThread = resolve; });
+// The greeting thread waits in a command (not in a model call, which would
+// hold the one inference slot the orchestrator needs to answer) until the
+// check releases it.
+let threadsRound = 0;
+const threadGateFile = join(tmpdir(), `demesne-thread-gate-${process.pid}`);
+const releaseThread = () => writeFileSync(threadGateFile, "go");
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
 // machine, Codex in the second project on a paired one.
 const heartbeatSocket = join(mkdtempSync(join(tmpdir(), "hb-")), "control.sock");
@@ -109,8 +113,15 @@ const f = await fixture({
     }
     if (typeof user === "string" && user.startsWith("You're one of the threads")) {
       const second = user.includes("Write the greeting");
-      if (messages.at(-1)?.role === "tool") { yield { type: "text_delta", delta: second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
-      if (second) await threadGate;
+      const toolResults = messages.filter(message => message.role === "tool").length;
+      if (second && toolResults === 0) {
+        yield { type: "reasoning_delta", delta: "The greeting belongs in its own file, threads-b.md." };
+        yield { type: "text_delta", delta: "Waiting on the gate before writing the greeting." };
+        yield { type: "tool_call_delta", index: 0, idDelta: "thread-b-wait", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: ["sh", "-c", `while [ ! -f '${threadGateFile}' ]; do sleep 0.1; done`] }) };
+        yield { type: "finish", reason: "tool_calls" };
+        return;
+      }
+      if (toolResults >= (second ? 2 : 1)) { yield { type: "text_delta", delta: second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
       yield { type: "tool_call_delta", index: 0, idDelta: `thread-${second ? "b" : "a"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify(second ? { path: "threads-b.md", content: "# Hello\n" } : { path: "threads-a.md", content: "# Notes\n" }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
@@ -422,18 +433,10 @@ try {
   await until(() => page.locator(".intro p.away").innerText().then(text => text.length > 0), "Home says what happened while you were away");
   assert.equal(await page.locator(".hero-map, .land").count(), 0, "the map is gone");
   await type(thinkingPrompt);
-  const trace = page.locator(".thinking-main .thinking-content").last();
-  const thinkingToggle = page.locator(".thinking-main .thinking-toggle").last();
-  await trace.waitFor({ state: "visible" });
-  assert.equal(await thinkingToggle.getAttribute("aria-expanded"), "true");
-  assert((await trace.innerText()).includes("First reasoning paragraph."));
-  const layout = await trace.evaluate(element => {
-    const paragraph = element.querySelector("p")!;
-    return { height: paragraph.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(paragraph).lineHeight), width: element.clientWidth, scrollWidth: element.scrollWidth };
-  });
-  assert(layout.height > layout.lineHeight, "Thinking preserves multiple lines");
-  assert(layout.scrollWidth <= layout.width + 1, "Long thinking text wraps without horizontal overflow");
-  await capture("01-thinking-expanded");
+  // Thinking is never shown: no row, no trace, only the working line.
+  await until(() => page.locator(".working-line").last().isVisible(), "the turn works");
+  assert.equal(await page.locator("#conversation .thinking").count(), 0, "no thinking row or trace");
+  assert.equal(await page.getByText("First reasoning paragraph.").count(), 0, "the reasoning text never reaches the window");
   // While it thinks, the working line under the turn carries the cube and the silver words.
   const working = page.locator(".working-line").last();
   assert((await working.locator(".cube-mark svg polygon").count()) >= 8, "the working cube draws its cubelets");
@@ -453,21 +456,14 @@ try {
   if (answerBox) assert(Math.abs(answerBox.x - markBox!.x) < 0.5, "the cube sits under the answer's mark");
   assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "one cube on screen: the sidebar shows a dot");
   assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
-  assert.equal(await thinkingToggle.locator(".shine, .cube-mark").count(), 0, "the thinking row is quiet: one silver line, one cube");
   assert.equal((await working.locator(".wl-words:not(.wl-copy) .wl-word:not(.out)").innerText()).trim(), "Thinking", "a thought without headings says Thinking");
   await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-work") ?? false), "a working turn runs a light along the panel's rim");
   await until(() => page.locator("#workspace-tabs .bar-tab.on .sidebar-session-mark.working").count().then(count => count === 1), "the open tab breathes a working dot");
   assert((await page.locator("#workspace-tabs .bar-tab.on [role=tab]").getAttribute("title"))!.endsWith("· Working"), "the tab's tooltip says it works");
   await capture("01-thinking-cube");
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "hidden" });
   nextThought();
-  await until(() => trace.textContent().then(text => text?.includes("The streamed update arrived.")), "reasoning delta arrived while collapsed");
-  assert.equal(await thinkingToggle.getAttribute("aria-expanded"), "false");
-  assert(!(await trace.isVisible()), "Streaming does not reopen a manually collapsed trace");
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "visible" });
-  await textIncludes("The streamed update arrived.");
+  await Bun.sleep(150);
+  assert.equal(await page.getByText("The streamed update arrived.").count(), 0, "streamed reasoning stays out of the window");
   finishThought();
   await textIncludes("Thinking check complete.");
   await page.locator("textarea").fill("");
@@ -490,11 +486,7 @@ try {
   await pasteChip.getByRole("button", { name: "Remove the pasted text" }).click();
   await until(() => pasteChip.count().then(n => n === 0), "× takes the paste back");
   await click("toggle-steps");
-  await trace.waitFor({ state: "visible" });
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "hidden" });
-  await thinkingToggle.click();
-  await trace.waitFor({ state: "visible" });
+  assert.equal(await page.locator("#conversation .thinking").count(), 0, "opened steps show no thinking either");
   await click("toggle-steps");
   // A project chat that uses no other card has only Where on the right (pass 121 E).
   assert.deepEqual(await evaluate<string[]>("return [...document.querySelectorAll('#cards > .card')].map(card => card.dataset.card);"), ["where"], "a chat that uses no card has only Where on the right");
@@ -583,7 +575,7 @@ try {
   await page.getByRole("searchbox", { name: "Search chats and projects" }).press("Escape");
   assert.equal(await page.getByRole("searchbox", { name: "Search chats and projects" }).inputValue(), "", "Escape clears the search");
   await until(() => page.locator(".sidebar-session[aria-current='page']").isVisible(), "the list is back after search");
-  assert(await page.locator("#sidebar-drive, #drive-page").count() === 0, "Drive has no sidebar row and no page");
+  assert(await page.locator("#drive-page").count() === 0, "Drive has no page");
   // Projects stay visible, and each project owns a collapsible list of chats.
   assert.equal(await page.locator("#desktop-project-button, #sidebar-open-folder, #sidebar-branches").count(), 0, "The sidebar names the project once, in its group");
   assert((await page.locator(".sidebar-project.active .sidebar-project-name").getAttribute("title"))?.startsWith(f.workspace), "The project's line carries its folder");
@@ -609,21 +601,28 @@ try {
   assert.equal(await page.locator(".sidebar-session:not([aria-current]) .sidebar-session-mark").evaluateAll(marks => marks.filter(mark => getComputedStyle(mark).visibility === "visible").length), 0, "Settled chats carry no mark");
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
   assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false");
-  assert(await page.locator("#rail-expand").isVisible(), "The folded sidebar is a rail");
+  // Folded, the sidebar is a quiet strip (pass 129 A): your open chats as
+  // tiles, a label beside an icon on hover, and nothing slides out.
+  assert(await page.locator(".sidebar-rail").isVisible(), "The folded sidebar is a rail");
   assert(!await page.locator("#sidebar-sessions").isVisible(), "The rail hides the list");
-  await capture("02-rail");
-  // Resting on the rail's empty space peeks the whole sidebar out over the panel.
+  await until(() => page.locator("#rail-chats .rail-chat").count().then(count => count >= 1), "the strip shows the open chats");
+  assert.equal(await page.locator("#rail-chats .rail-chat.on").count(), 1, "the chat you're in is marked on the strip");
+  // The strip may still be sliding in from the fold, so a hover at its
+  // first position can land on the panel instead. Hover again on each try
+  // (the label fades in after a short delay) until the label shows.
+  await page.bringToFront();
+  await until(async () => {
+    await page.locator("#rail-search").hover();
+    return page.locator("#rail-search").evaluate(button => getComputedStyle(button, "::after").opacity === "1");
+  }, "hovering an icon shows its label");
+  assert.equal(await page.locator("#rail-search").getAttribute("data-tip"), "Search chats");
   const rail = await page.locator(".sidebar-rail").boundingBox();
-  await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 120);
-  await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 110);
-  await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 1), "the folded sidebar peeks out");
-  await page.locator(".sidebar-session[aria-current='page']").waitFor();
-  assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "false", "a peek leaves the sidebar folded");
-  await capture("02-rail-peek");
-  await page.locator(".sidebar-session[aria-current='page']").click();
-  await until(() => page.locator("#desktop-shell.sidebar-peek").count().then(count => count === 0), "picking a chat puts the peek away");
-  assert(await page.locator("#rail-expand").isVisible(), "and the rail is back");
-  await page.locator("#rail-expand").click();
+  await page.mouse.move(rail!.x + rail!.width / 2, rail!.y + rail!.height - 160);
+  await page.waitForTimeout(700);
+  assert(!await page.locator("#sidebar-sessions").isVisible(), "resting on the strip slides nothing out");
+  await capture("02-rail");
+  await page.locator("#desktop-toggle-sidebar").click();
+  assert.equal(await page.locator("#desktop-toggle-sidebar").getAttribute("aria-expanded"), "true", "the toggle unfolds it");
   // Rest on a chat: after a moment its card says where it stands.
   await page.locator(".sidebar-session[aria-current='page']").hover();
   const glance = page.locator("#sidebar-glance");
@@ -1163,23 +1162,23 @@ try {
   await capture("02-agent-step");
   await agentStep.click();
   await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
-  // The mode word under the composer: ⇧⇥ steps Ask → Accept edits → Plan → Auto → Ask.
+  // The mode word under the composer: Alt+M steps Ask → Accept edits → Plan → Auto → Orchestrate → Ask.
   await page.locator("textarea").focus();
   for (const [word, policy] of [["Accept edits", { acceptEdits: true, autoApprove: false }], ["Plan", { acceptEdits: false, autoApprove: false }],
-    ["Auto", { acceptEdits: false, autoApprove: true }], ["Ask", { acceptEdits: false, autoApprove: false }]] as const) {
-    await page.keyboard.press("Shift+Tab");
+    ["Auto", { acceptEdits: false, autoApprove: true }], ["Orchestrate", { acceptEdits: false, autoApprove: false, orchestrate: true }], ["Ask", { acceptEdits: false, autoApprove: false }]] as const) {
+    await page.keyboard.press("Alt+KeyM");
     await until(() => page.locator("#composer-mode .mode-opt.on").innerText().then(text => text === word), `mode word ${word}`);
     await until(async () => {
       const session = (await f.client.getSessionState(sessionId)).session;
-      return session.acceptEdits === policy.acceptEdits && session.autoApprove === policy.autoApprove;
+      return session.acceptEdits === policy.acceptEdits && session.autoApprove === policy.autoApprove && (session.orchestrate === true) === ("orchestrate" in policy);
     }, `daemon policy for ${word}`);
     if (word === "Plan") {
-      assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the four modes");
-      assert.equal(await page.locator("#composer-mode .mode-opt").count(), 4, "all four modes are in the bar");
+      assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the five modes");
+      assert.equal(await page.locator("#composer-mode .mode-opt:visible").count(), 5, "all five modes are in the bar of a project chat");
       await capture("03-mode-plan");
     }
   }
-  assert(await page.evaluate(() => document.activeElement?.tagName === "TEXTAREA"), "⇧⇥ keeps focus in the composer");
+  assert(await page.evaluate(() => document.activeElement?.tagName === "TEXTAREA"), "Alt+M keeps focus in the composer");
   // + attaches images: a thumbnail sits in the box above the text, × drops it.
   const shot = join(f.workspace, "..", "shot.png");
   writeFileSync(shot, await sharp({ create: { width: 320, height: 200, channels: 3, background: "#3d5a80" } }).png().toBuffer());
@@ -1395,7 +1394,7 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
   await capture("07-project-groups");
-  // Drive has no page: it speaks from a line at the end of the conversation.
+  // Drive has no page: it speaks from a line at the foot of the sidebar.
   const line = page.locator("#briefing");
   const pressAction = (action: string) => evaluate(`const b = document.createElement("button"); b.dataset.action = ${JSON.stringify(action)}; document.body.append(b); b.click(); b.remove();`);
   failSuggestions = true;
@@ -1478,7 +1477,7 @@ try {
   // The finished mission left a worktree without changes; its review card
   // opens from Drive's line and discards it.
   offerIdeas = true;
-  await line.getByRole("button", { name: /to review/ }).click();
+  await page.locator(".sidebar-review:visible, .sidebar-project-review:visible").first().click();
   await until(() => page.locator("#drive-reply.open .bf-row.branch").count().then(count => count === 1), "the branch unfolds as a row under Drive's line");
   await page.locator("#drive-reply .bf-row.branch button.bf-title").click();
   await until(() => page.locator("#drive-reply .bf-sum").isVisible(), "its title unfolds what Drive says it did");
@@ -1488,7 +1487,7 @@ try {
   await until(() => page.locator("#branch-done").innerText().then(text => text.includes("Discarded Verify the Drive controls")), "what Discard did is its own quiet line");
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
-  assert(await page.evaluate(() => Boolean(document.querySelector("#stage > #briefing")) && !document.querySelector("#composer-slot #briefing")), "Drive's line sits where the conversation ends, not on the composer");
+  assert(await page.evaluate(() => Boolean(document.querySelector("#sidebar-drive > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing")), "Drive's line sits at the sidebar's foot, not over the composer");
   // Drive is on by default: the line says when it starts on its own, and one word turns it off.
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes")), "Drive's line says it starts on its own");
   await capture("10-drive-auto");
@@ -1499,9 +1498,9 @@ try {
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas") && text.includes("Turn off")), "Turn on brings it back");
   await page.locator("#briefing .bf-chev").click();
   await until(() => page.locator("#briefing .bf-word").innerText().then(text => text.includes("Three things I could do next")), "the line becomes Drive's reply");
-  await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas open as a reply in the conversation");
+  await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas unfold under its line");
   await page.waitForTimeout(400);
-  assert(await page.evaluate(() => { const stage = document.getElementById("stage")!, reply = document.getElementById("drive-reply")!; return reply.getBoundingClientRect().bottom <= stage.getBoundingClientRect().bottom + 2; }), "the reply is scrolled into view, not covering anything");
+  assert(await page.evaluate(() => { const reply = document.getElementById("drive-reply")!.getBoundingClientRect(), foot = document.querySelector(".sidebar-foot")!.getBoundingClientRect(); return reply.top >= 0 && reply.bottom <= foot.top + 1; }), "the reply unfolds in the sidebar, above you and Settings");
   await page.locator("#drive-reply .bf-row").first().hover();
   await capture("10-drive-reply");
   await page.keyboard.press("Escape");
@@ -1650,6 +1649,9 @@ try {
   const stretch = page.locator("#stage .steps .explored.stretch").last();
   await until(() => stretch.locator("summary .verb").innerText().then(text => text === "Read 3 files").catch(() => false), "three finished reads fold into one line", 20_000);
   assert.equal(await page.locator("#stage .steps > .tool-row", { hasText: "read_files" }).count(), 0, "no row names the read tool");
+  // The folded line is one line: icon, words and time in a row, not stacked
+  // and centred (a stray rule once made the summary a column).
+  assert.deepEqual(await stretch.locator("summary").evaluate(summary => { const style = getComputedStyle(summary); return [style.flexDirection, style.borderLeftWidth]; }), ["row", "0px"], "the folded line sits in one row");
   assert.equal(await stretch.locator(".tool-row").count(), 2, "the stretch keeps its two steps");
   assert(!(await stretch.locator(".tool-row").first().isVisible()), "the steps wait folded");
   await stretch.locator("summary").click();
@@ -1706,24 +1708,86 @@ try {
   await until(() => threadRows.count().then(count => count === 2), "the chat lists its two threads", 20_000);
   await until(() => page.locator("#thread-pane").isVisible(), "the first thread opens in the right half");
   assert(await page.locator("#app").evaluate(element => element.classList.contains("threads-on")), "the window splits");
-  await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the notes"), "the right half shows the first thread");
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "the right half shows the first thread");
   await until(() => page.locator("#thread-pane .th-brief").isVisible(), "the thread opens on its brief, not its prompt");
   await threadRows.nth(1).click();
-  await until(() => page.locator("#thread-pane .tp-title b").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
+  assert(await page.locator("#thread-tabs .tp-tab").count() === 2, "the top bar has a tab per thread");
+  // The thread tabs live in the top bar over the thread side (pass 131 A):
+  // they start at the split line, and the thread side has no tab row.
+  assert.equal(await page.locator("#thread-pane .tp-tabs").count(), 0, "the thread side keeps no tab row of its own");
+  const [tabsLeft, paneLeft] = await Promise.all([page.locator("#thread-tabs").boundingBox(), page.locator("#thread-pane").boundingBox()]);
+  assert(Math.abs(tabsLeft!.x - paneLeft!.x) <= 2, `the thread tabs start at the split line: ${tabsLeft!.x} vs ${paneLeft!.x}`);
+  await page.locator("#thread-tabs .tp-tab").first().click();
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "a tab switches the right half");
+  await page.keyboard.press("Control+]");
+  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "Ctrl+] steps to the next thread");
   await until(() => page.locator("#threads-foot .th-status").innerText().then(text => text.includes("working")).catch(() => false), "the line above the composer says one is working");
+  // The right half is a chat like the left: the same composer, with the
+  // thread's own model chip, and no head bar.
+  assert(await page.locator("#thread-pane #tp-composer .composer-box textarea").isVisible(), "the thread's composer is the chat's composer");
+  // No head bar over the thread (pass 130 A): the tab names it, the panel
+  // icon at the end of the tabs puts it away.
+  assert.equal(await page.locator("#thread-pane .tp-head").count(), 0, "the thread side has no head bar");
+  assert(await page.locator("#thread-tabs .tp-hide").isVisible(), "the tabs end with the close icon");
+  assert.match(await page.locator("#thread-tabs .tp-tab.on .tp-tab-open").getAttribute("title") ?? "", /thread\/write-the-greeting.*· working/s, "resting on the tab says its branch and state");
+  await until(() => page.locator("#tp-model").innerText().then(text => text.trim().length > 0), "the thread's composer names its model");
+  await page.locator("#tp-model").click();
+  await until(() => page.locator("#thread-pane #overlay").isVisible(), "the thread's model chip opens the picker in the right half");
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#overlay").isHidden(), "Escape closes the thread's picker");
+  assert(await page.locator("#main > #overlay").count() === 1, "the picker goes back to the chat on the left");
+  // A thread shows its own words (never its thinking), its working line, and its
+  // own context, like any chat.
+  await until(() => page.locator("#thread-pane .tp-turns").innerText().then(text => text.includes("Waiting on the gate before writing the greeting.")), "the thread shows its own words");
+  assert.equal(await page.locator("#thread-pane .thinking").count(), 0, "a thread shows no thinking either");
+  await until(() => page.locator("#thread-pane .working-line").isVisible(), "the thread has a working line");
+  // While it works, the empty composer's send is Stop, as in any chat; typing turns it back to send.
+  await until(() => page.locator('#tp-composer.stopping .send[aria-label="Stop this thread"] .send-stop').isVisible(), "a working thread's send is Stop");
+  await page.locator("#tp-composer textarea").fill("also say hi");
+  await page.locator("#tp-composer textarea").dispatchEvent("input");
+  assert(!(await page.locator("#tp-composer").evaluate((form) => form.classList.contains("stopping"))), "words in the composer make it send again");
+  await page.locator("#tp-composer textarea").fill("");
+  await page.locator("#tp-composer textarea").dispatchEvent("input");
+  await until(() => page.locator("#tp-context").isVisible(), "the thread's composer shows its context");
+  assert.match(await page.locator("#tp-context").getAttribute("title") ?? "", /of this thread's context used/);
+  await page.locator("#tp-context").click();
+  await until(() => page.locator("#tp-context-card").isVisible(), "its ring opens the thread's context card");
   await capture("17-threads-working");
+  await page.locator("#tp-context").click();
+  await until(() => page.locator("#tp-context-card").isHidden(), "and closes it");
   releaseThread();
   const merge = page.locator("#threads-foot .th-merge button");
   await until(() => merge.isVisible(), "both back: the Merge bar", 30_000);
   assert.equal(await merge.innerText(), "Merge both");
   await textIncludes("Both threads are back");
   assert(!existsSync(join(f.workspace, "threads-a.md")), "nothing reaches the checkout before Merge");
+  await until(() => page.locator("#thread-pane #tp-composer .tp-merge").isVisible(), "a ready thread's Merge sits in its composer");
   await capture("17-threads-ready");
   await merge.click();
   await until(() => page.locator("#threads-foot .th-msg").innerText().then(text => text.includes("Merged all 2")).catch(() => false), "Merge says what it did", 30_000);
   assert(existsSync(join(f.workspace, "threads-a.md")) && existsSync(join(f.workspace, "threads-b.md")), "both threads reached the checkout");
-  await page.locator("#thread-pane .tp-x").click();
-  await until(() => page.locator("#thread-pane").isHidden(), "× closes the right half");
+  // A tab's × only closes the tab; the next tab takes over, and opening the
+  // thread from the chat's list brings its tab back.
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 2), "both merged threads keep their tabs");
+  await page.locator("#thread-tabs .tp-tab").first().hover();
+  await page.locator("#thread-tabs .tp-tab-x").first().click();
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 1), "× closes the tab");
+  assert.equal(await page.locator("#conversation .th-row").count(), 2, "closing a tab deletes nothing");
+  await page.locator("#conversation .th-row").first().click();
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 2), "opening the thread brings its tab back");
+  // Delete lives on the thread's row in the chat: a merged thread goes at once.
+  await page.locator("#conversation .th-item").first().hover();
+  await page.locator("#conversation .th-del").first().click();
+  await until(() => page.locator("#conversation .th-row").count().then(count => count === 1), "the row's × deletes the thread", 20_000);
+  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 1), "and its tab goes with it");
+  await page.locator("#thread-tabs .tp-tab-open").first().click();
+  await page.keyboard.press("Escape");
+  await until(() => page.locator("#thread-pane").isHidden(), "Esc in the thread side puts it away");
+  await page.locator("#conversation .th-row").first().click();
+  await until(() => page.locator("#thread-pane").isVisible(), "picking the thread opens it again");
+  await page.locator("#thread-tabs .tp-hide").click();
+  await until(() => page.locator("#thread-pane").isHidden(), "the panel icon closes the thread side");
   // Switching models resizes the context at once, before the new model's
   // first request.
   const sizeBefore = await page.locator("#composer-context").getAttribute("title");
@@ -1733,7 +1797,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded sidebar peeks out", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "a thread's own thinking, words and context", "deleting a thread from its tab", "closing the thread side from its tabs", "thread tabs on the top bar"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

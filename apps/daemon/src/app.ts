@@ -75,12 +75,15 @@ import { personalFilesTool } from "./personal-files.ts";
 import { PersonalIndex, searchPersonalFilesTool } from "./personal-index.ts";
 import { notifyPhoneTool, routineMessage, type Phone } from "./notify-phone.ts";
 import { driveContext, driveRunTool } from "./drive-in-chat.ts";
-import { startThreadsTool } from "./threads.ts";
+import { MESSAGE_THREAD_TOOL, START_THREADS_TOOL, messageThreadTool, startThreadsTool } from "./threads.ts";
+/// What a thread never sees: Heartbeat, and starting threads of its own.
+const THREAD_HIDDEN_TOOLS: ReadonlySet<string> = new Set(["heartbeat", START_THREADS_TOOL, MESSAGE_THREAD_TOOL]);
 import { applyCalibration, CalibrationLog } from "./drive-calibration.ts";
 import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
+import { AgentCli, agentIdOf, type AgentCliOptions } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
@@ -156,6 +159,8 @@ export function createDaemonApp(options: {
   mcpServers?: Record<string, McpServerConfig>;
   /// Join Heartbeat, the agent message bus, when its daemon runs here.
   heartbeat?: HeartbeatConfig;
+  /// How agent tools are found and started (tests swap in fakes).
+  agentCli?: AgentCliOptions;
   /// Folders outside any project that the assistant may read, by name.
   assistantFolders?: Record<string, string>;
   /// The assistant's own folder, with its DEMESNE.md: its one chat lives there.
@@ -207,14 +212,20 @@ export function createDaemonApp(options: {
   const calibrationLog = new CalibrationLog(join(dirname(options.databasePath), "drive-calibration.jsonl"));
   // Breakage fixes: a coding turn in its own worktree, applied only on request.
   const driveFixes = new DriveFixes(join(dirname(options.databasePath), "drive-fixes.json"), options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees"), {
-    startSession: (title, workspace) => {
+    startSession: (title, workspace, like) => {
       const root = canonicalWorkspace(workspace);
       // A worktree of a trusted project is the same project's files.
       workspaceTrust.trust(root);
-      return store.createSession(title, root).session.id;
+      const { session } = store.createSession(title, root);
+      const model = like ? store.getSession(like) : null;
+      if (model?.preferredModel || model?.preferredReasoning)
+        store.setSessionInference(session.id, { preferredModel: model.preferredModel ?? null, preferredReasoning: model.preferredReasoning ?? null });
+      return session.id;
     },
     startTurn: (sessionId, prompt) => {
-      const inference = snapshotTurnInference(processor, true);
+      // A chat with a model of its own (a thread, on its orchestrator's) runs on it.
+      const session = store.getSession(sessionId);
+      const inference = session?.preferredModel || session?.preferredReasoning ? inferenceIn(sessionId, true) : snapshotTurnInference(processor, true);
       const { turn } = store.createTurn(sessionId, prompt, "allow", true, false);
       return { turnId: turn.id, done: queueTurn(turn, inference) };
     },
@@ -341,6 +352,8 @@ export function createDaemonApp(options: {
       })
     : Promise.resolve();
   const commands=new CommandMonitor(store);
+  const agentCli = new AgentCli(dirname(options.databasePath), options.agentCli);
+  const isAgentChat = (sessionId: string) => agentIdOf(store.getSession(sessionId)?.preferredModel) !== null;
   const heartbeatClient = new HeartbeatClient(options.heartbeat?.socket ?? heartbeatSocketPath());
   const heartbeat = heartbeatEnabled(options.heartbeat, heartbeatClient) ? new HeartbeatBridge({
     client: heartbeatClient,
@@ -348,7 +361,16 @@ export function createDaemonApp(options: {
       // Mail runs on Auto, like a Drive mission: nobody is at the window to
       // approve, and a turn that waits never answers the sender.
       const { turn } = store.createTurn(sessionId, content, "allow");
-      queueTurn(turn, inferenceIn(sessionId, undefined));
+      return { turnId: turn.id, done: queueTurn(turn, inferenceIn(sessionId, undefined)) };
+    },
+    // An agent tool's chat answers its mail by itself: the answer goes back.
+    answersMail: isAgentChat,
+    answerOf: (turnId) => {
+      const turn = store.getTurn(turnId);
+      if (turn?.status !== "completed") return null;
+      const answer = store.getTurnModelMessages(turn.sessionId, turnId).filter((message) => message.role === "assistant")
+        .map((message) => typeof message.content === "string" ? message.content : "").filter(Boolean).at(-1);
+      return answer?.trim() || null;
     },
     waitForIdle: (sessionId) => new Promise((resolve) => {
       const active = () => store.getSession(sessionId)?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
@@ -357,7 +379,18 @@ export function createDaemonApp(options: {
     }),
     log: (message) => console.warn(message),
   }) : null;
-  if (heartbeat) tools.register(heartbeatTool(heartbeat));
+  if (heartbeat) {
+    // Agent tools' chats hold their addresses from the start, so mail
+    // reaches them (and wakes them) without anyone opening them first.
+    for (const session of store.listSessions(500)) {
+      if (session.workspace && isAgentChat(session.id)) void heartbeat.attach(session.id, session.workspace.root).catch(() => {});
+    }
+    const tool = heartbeatTool(heartbeat);
+    tools.register({ ...tool, execute: (input, context) => {
+      if (context.sessionId && driveFixes.isThread(context.sessionId)) throw new Error("Threads aren't on Heartbeat; report to the orchestrator instead.");
+      return tool.execute(input, context);
+    } });
+  }
   const keepEdits = new KeepEdits(join(dirname(options.databasePath), "keep"));
   const engine = new AgentEngine(
     store,
@@ -382,6 +415,7 @@ export function createDaemonApp(options: {
       keepEdits,
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
+      hiddenTools: (sessionId: string) => driveFixes.isThread(sessionId) ? THREAD_HIDDEN_TOOLS : null,
       lateAnswers: (sessionId: string, turnId: string, texts: string[]) => void answerTurn(sessionId, turnId, texts.join("\n"), undefined),
       ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
@@ -439,7 +473,7 @@ export function createDaemonApp(options: {
       const phone = options.phone;
       if (phone) void run.then(async () => {
         const done = store.getTurn(turn.id);
-        const message = done && routineMessage(title, done.status, done.responseText);
+        const message = done && routineMessage(title, done.status, done.responseText, sessionId);
         if (message) await phone.send(message);
       }).catch((error) => console.warn("Couldn't send a routine's answer to the phone", error));
       return sessionId;
@@ -479,6 +513,20 @@ export function createDaemonApp(options: {
     ideas: (root) => inDriveWorktree(root) || !workspaceTrust.isTrusted(root) ? null : chatIdeas(root),
     run: (root, proposal, signals) => driveFixes.start(root, signals, proposal),
   }));
+  tools.register(messageThreadTool({
+    message: (from, name, text) => {
+      const list = driveFixes.threads(from).filter((fix) => fix.sessionId && fix.status !== "applied" && fix.status !== "discarded");
+      const wanted = name.toLowerCase();
+      const fix = list.find((item) => item.id === name) ?? list.find((item) => item.title.toLowerCase() === wanted) ?? list.find((item) => item.title.toLowerCase().includes(wanted));
+      if (!fix) throw new Error(list.length ? `No open thread called "${name}". Open threads: ${list.map((item) => `"${item.title}"`).join(", ")}` : "This chat has no open threads.");
+      const sessionId = fix.sessionId!;
+      const running = store.getSession(sessionId)?.turns.find((item) => item.status === "running");
+      if (running && engine.steer(running.id, { id: randomUUID(), text })) return { title: fix.title, how: "steered" };
+      const { turn } = store.createTurn(sessionId, text, "allow", true, false);
+      void queueTurn(turn, inferenceIn(sessionId, true));
+      return { title: fix.title, how: "sent" };
+    },
+  }));
   tools.register(startThreadsTool({
     refuse: (root, sessionId) => inDriveWorktree(root) || root.split(/[\\/]/).includes(".demesne-worktrees") ? "A thread can't start threads of its own."
       : sessionId === assistantChat.existing() ? "Threads only work inside a project."
@@ -498,6 +546,9 @@ export function createDaemonApp(options: {
   /// sending the assistant's reading elsewhere.
   function inferenceIn(sessionId: string, thinkingEnabled: boolean | undefined): TurnInference {
     const session = store.getSession(sessionId);
+    // An agent tool's chat runs that tool, never a model.
+    const agent = agentIdOf(session?.preferredModel);
+    if (agent) return agentCli.inference(agent, sessionId, session?.workspace?.root);
     if (!options.assistantModel || sessionId !== assistantChat.existing()) {
       const hasPreference = session?.preferredModel || session?.preferredReasoning;
       return snapshotTurnInference(processor, thinkingEnabled, hasPreference ? {
@@ -526,7 +577,8 @@ export function createDaemonApp(options: {
     try {
       // The chat's Heartbeat address, claimed before its first model request
       // so the model is told it; a slow daemon never holds the turn.
-      const workspace = heartbeat && turn.kind !== "compaction" ? store.getSession(turn.sessionId)?.workspace?.root : undefined;
+      // Threads stay off Heartbeat: they answer only to their orchestrator and you.
+      const workspace = heartbeat && turn.kind !== "compaction" && !driveFixes.isThread(turn.sessionId) ? store.getSession(turn.sessionId)?.workspace?.root : undefined;
       if (workspace) await Promise.race([heartbeat!.attach(turn.sessionId, workspace), new Promise((resolve) => setTimeout(resolve, 2_000))]);
       if (turn.kind === "compaction") await compactor.run(turn.id, inference, signal);
       else await engine.run(turn.id, inference, signal);
@@ -1103,6 +1155,35 @@ export function createDaemonApp(options: {
       }
 
       // Other agents Heartbeat sees, for the sidebar's project lines.
+      // Agents that live in Demesne (agent-cli.ts): the agent tools on this
+      // machine, each with its chat in the project asked about.
+      if (request.method === "GET" && url.pathname === "/v1/agents") {
+        const root = url.searchParams.get("workspace");
+        const chats = root ? store.listSessions(500).filter((session) => session.workspace?.root === root) : [];
+        const agents = agentCli.agents().map((agent) => {
+          const chat = chats.find((session) => session.preferredModel === agent.model);
+          const busy = chat?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
+          return { ...agent, sessionId: chat?.id ?? null, state: busy ? "working" : "ready", address: chat ? heartbeat?.address(chat.id) ?? null : null };
+        });
+        return json({ agents });
+      }
+      if (request.method === "POST" && url.pathname === "/v1/agents/open") {
+        const body = await readJson(request) as { agent?: unknown; workspacePath?: unknown };
+        const agent = agentCli.agents().find((item) => item.id === body.agent);
+        if (!agent) return apiError("agent_not_found", `${String(body.agent)} isn't installed on this machine`, 404);
+        if (typeof body.workspacePath !== "string" || !body.workspacePath) return apiError("invalid_workspace", "An agent works in a project", 400);
+        let root: string;
+        try { root = canonicalWorkspace(body.workspacePath); } catch (error) { return apiError("invalid_workspace", error instanceof Error ? error.message : "Invalid workspace", 400); }
+        if (!workspaceTrust.isTrusted(root)) return apiError("workspace_untrusted", `Do you trust the files in ${root}?`, 403);
+        let session = store.listSessions(500).find((item) => item.workspace?.root === root && item.preferredModel === agent.model) ?? null;
+        if (!session) {
+          session = store.createSession(agent.name, root).session;
+          session = store.setSessionInference(session.id, { preferredModel: agent.model, preferredReasoning: null });
+        }
+        // Reachable over Heartbeat from now on, before its first turn.
+        if (heartbeat) await Promise.race([heartbeat.attach(session.id, root), new Promise((resolve) => setTimeout(resolve, 2_000))]);
+        return json({ session, address: heartbeat?.address(session.id) ?? null });
+      }
       if (request.method === "GET" && url.pathname === "/v1/heartbeat/agents") {
         return json(heartbeat ? await heartbeat.nearby() : { node: null, agents: [] });
       }
@@ -1287,6 +1368,7 @@ export function createDaemonApp(options: {
           eventId = updated.event?.eventId ?? eventId;
           if (body.acceptEdits) permissions.approvePendingSession(path[2]!);
         }
+        if (body.orchestrate !== undefined) session = store.setSessionOrchestrate(path[2]!, body.orchestrate);
         const response: UpdateSessionResponse = { session, eventId };
         return json(response);
       }

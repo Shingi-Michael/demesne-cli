@@ -1,7 +1,7 @@
 # Runs one program and starts it again whenever it exits, so a crash costs
 # seconds, not the rest of the day. The scheduled tasks install.ps1 makes
-# start this at login, hidden. Stopping the task stops this loop, and the
-# program with it.
+# start this at login, in a headless console. Stopping the task stops this
+# loop, and the program with it.
 #
 #   keep-running.ps1 -Program C:\llama\llama-server.exe -ArgsFile ...\llama-server.args -Log ...\llama-server.log
 
@@ -58,6 +58,25 @@ function Join-KillOnCloseJob {
   return $job
 }
 
+# Task Scheduler stops a task by ending the process it started. That is the
+# headless console host (conhost.exe --headless), not this PowerShell, which
+# would live on with its program, and the next start would run a second copy
+# beside them. Watch the parent from a thread of its own (the loop below
+# blocks PowerShell's own event handling): when it ends, end this process,
+# and the job takes the program with it.
+function Stop-WithParent {
+  Add-Type -Namespace Demesne -Name Parent -MemberDefinition @'
+public static void ExitWith(int pid) {
+  var parent = System.Diagnostics.Process.GetProcessById(pid);
+  parent.EnableRaisingEvents = true;
+  parent.Exited += (sender, args) => System.Environment.Exit(0);
+  if (parent.HasExited) System.Environment.Exit(0);
+}
+'@
+  $parent = (Get-CimInstance Win32_Process -Filter "ProcessId = $PID").ParentProcessId
+  if ($parent) { [Demesne.Parent]::ExitWith([int] $parent) }
+}
+
 # A copy from before this script tied programs to their task, or left by a
 # loop that was killed some other way, can still hold the port or the data
 # directory. Stop one left without its loop: same program, same arguments,
@@ -77,6 +96,8 @@ function Stop-LeftOver([string] $Path, [string[]] $Arguments) {
 $arguments = Read-Arguments $ArgsFile
 try { $script:job = Join-KillOnCloseJob }
 catch { Add-Content -LiteralPath $Log -Value "--- $(Get-Date -Format s) could not tie $Program to this task ($_); stopping the task may leave it running" }
+try { Stop-WithParent }
+catch { Add-Content -LiteralPath $Log -Value "--- $(Get-Date -Format s) could not watch this task's console ($_); stopping the task may leave $Program running" }
 Stop-LeftOver $Program $arguments
 while ($true) {
   # Keep the log from growing without end: start over past 20 MB.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InvalidStateError } from "@demesne/storage";
@@ -8,6 +8,7 @@ import {
   formatMail, HeartbeatBridge, HeartbeatClient, heartbeatLabel, heartbeatSocketPath, heartbeatTool, isMailTurn, splitAddress, type Envelope,
 } from "../src/heartbeat.ts";
 import { createDaemonApp, type DaemonApp } from "../src/app.ts";
+import { claudeRun, fakeProcess } from "./agent-cli-fakes.ts";
 
 /// A stand-in for the Heartbeat daemon's control socket: one JSON line per
 /// connection, except `listen`, which stays open and receives what the test
@@ -318,6 +319,48 @@ describe("daemon with Heartbeat", () => {
       // Archiving releases the address.
       await fetch(new URL(`/v1/sessions/${created.session.id}`, server.url), { method: "DELETE" });
       await until(() => !daemon.listeners.has(address!));
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("agents that live in Demesne", () => {
+  test("an agent tool's chat holds an address, mail wakes it, and its answer goes back", async () => {
+    const daemon = fakeDaemon();
+    const directory = mkdtempSync(join(tmpdir(), "demesne-ag-"));
+    directories.push(directory);
+    const workspace = join(mkdtempSync(join(tmpdir(), "demesne-ag-ws-")), "demesne-cli");
+    directories.push(join(workspace, ".."));
+    mkdirSync(workspace);
+    const runs: { argv: string[]; cwd: string }[] = [];
+    const app = createDaemonApp({ databasePath: join(directory, "demesne.sqlite"), heartbeat: { socket: daemon.path }, agentCli: {
+      which: (command) => command === "claude" ? "/usr/bin/claude" : null,
+      spawn: (argv, cwd) => { runs.push({ argv, cwd }); return fakeProcess(claudeRun(argv[argv.indexOf("--session-id") + 1]!, "Smoke reran: it passes.")); },
+    } });
+    apps.push(app);
+    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    try {
+      await fetch(new URL("/v1/sessions", server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "x", workspacePath: workspace, trustWorkspace: true }) });
+      const listed = await (await fetch(new URL(`/v1/agents?workspace=${encodeURIComponent(workspace)}`, server.url))).json() as { agents: { id: string; name: string; sessionId: string | null }[] };
+      expect(listed.agents.map((agent) => [agent.id, agent.name, agent.sessionId])).toEqual([["claude", "Claude Code", null]]);
+      const opened = await (await fetch(new URL("/v1/agents/open", server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent: "claude", workspacePath: workspace }) })).json() as { session: Session; address: string };
+      expect(opened.session.preferredModel).toBe("agent:claude");
+      expect(opened.address).toMatch(/^demesne@testnode\/demesne-cli-[a-z2-7]{5}$/);
+      expect(daemon.listeners.has(opened.address)).toBe(true);
+      // Opening again finds the same chat.
+      const again = await (await fetch(new URL("/v1/agents/open", server.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent: "claude", workspacePath: workspace }) })).json() as { session: Session };
+      expect(again.session.id).toBe(opened.session.id);
+
+      const asked = daemon.send(opened.address, "demesne@testnode/desktop-smoke", "rerun the smoke");
+      const turns = await pollTurns(server.url, opened.session.id, (list) => list.some((turn) => turn.status === "completed"));
+      expect(turns[0]!.responseText).toBe("Smoke reran: it passes.");
+      expect(runs[0]!.cwd).toBe(realpathSync(workspace));
+      expect(runs[0]!.argv.at(-1)).toContain("rerun the smoke");
+      await until(() => daemon.requests.some((request) => request.command === "say" && String(request.line).startsWith(`DONE#_ ^${asked.id} →demesne@testnode/desktop-smoke`)));
+      const said = daemon.requests.find((request) => request.command === "say")!;
+      expect(said.as).toBe(opened.address);
+      expect(String(said.line)).toContain('why:"Smoke reran: it passes."');
     } finally {
       await server.stop(true);
     }

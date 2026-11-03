@@ -13,6 +13,7 @@ It was built in small steps, each one usable on its own:
 | [3. File index](#step-3-file-index) | `search_personal_files`, a search index over those folders, so it finds the right file without reading them all |
 | [4. Push to your phone](#step-4-push-to-your-phone) | Routines send their answers to your iPhone through ntfy, and chats get `notify_phone` |
 | [5. Use it from anywhere](#step-5-use-it-from-anywhere) | The Demesne window on another computer talks to the daemon on the PC, over Tailscale, with the daemon's token |
+| [6. The iPhone app](#step-6-the-iphone-app) | The Demesne iPhone app pairs with the daemon from a QR code, and a tapped notification opens its chat there |
 
 ### Setting it up, start to finish
 
@@ -29,7 +30,7 @@ Everything the assistant reads from a file, an email or a web page is data, neve
 
 ### Why a service
 
-Until now you started llama-server in a terminal and Demesne's daemon from the window. That's fine for coding, but an assistant has to be awake when you aren't looking: a routine set for 8:00 only fires if the daemon is running at 8:00. On Windows, **Task Scheduler** is the built-in way to start programs on their own. [`install.ps1`](../scripts/assistant/install.ps1) adds two tasks, under a **Demesne** folder in Task Scheduler, that start hidden when you log in:
+Until now you started llama-server in a terminal and Demesne's daemon from the window. That's fine for coding, but an assistant has to be awake when you aren't looking: a routine set for 8:00 only fires if the daemon is running at 8:00. On Windows, **Task Scheduler** is the built-in way to start programs on their own. [`install.ps1`](../scripts/assistant/install.ps1) adds two tasks, under a **Demesne** folder in Task Scheduler, that start when you log in with no window at all (each runs inside a headless console host, so Windows Terminal never shows it as a tab; a task that did show as a tab died with every other tab when that Terminal window was closed):
 
 - **llama-server** runs the model on port 8081.
 - **demesned** runs Demesne's daemon.
@@ -266,3 +267,23 @@ Port 8443 leaves 443 free for anything you already publish (the iOS gateway, for
 4. Open Demesne. It connects to the PC, and **Assistant** in the sidebar is the PC's chat. **Start daemon** isn't offered for a daemon on another computer: the PC's login task starts it.
 
 (`DEMESNE_DAEMON_TOKEN` in the environment still overrides the file, as before.)
+
+## Step 6: the iPhone app
+
+The Demesne iPhone app ([demesne-ios](https://github.com/Shingi-Michael/demesne-ios)) is a remote for the daemon, like the window on another computer in step 5: the daemon on the PC keeps the chats, the model and your folders, and the phone shows them and sends your messages. It reaches the daemon the same way, through `tailscale serve` and with the daemon's token, so step 5's Tailscale setup on the PC comes first. The phone needs the Tailscale app, signed in with the same account.
+
+### Pair it
+
+On the PC, from this repository:
+
+```powershell
+bun run pair:iphone
+```
+
+It finds the PC's Tailscale name, checks that the daemon answers there, and prints a QR code in the terminal. Point the iPhone's camera at it and tap the banner: the Demesne app opens and saves the address, and the token in the iPhone's Keychain. If it can't find the name, pass the address `tailscale serve status` shows: `bun run pair:iphone -- --url https://<pc>.<tailnet>.ts.net:8443`. To use the iOS simulator, which has no camera, add `-- --link`. It also prints the link, which you copy and paste into the app with its Paste button.
+
+The code holds the token, which can do anything the Demesne window can. It's printed only in the terminal and never saved to a file: scan it, then clear the screen (`cls`). The script refuses a plain `http://` address or one outside Tailscale (`.ts.net`), so the token only travels encrypted inside your tailnet.
+
+### Notifications open the app
+
+Every notification the daemon sends through ntfy (step 4) carries a link: tapping a routine's answer opens its chat in the app, and a note sent with `notify_phone` opens the chat that sent it. Without the app, the tap does nothing more than open ntfy, as before.

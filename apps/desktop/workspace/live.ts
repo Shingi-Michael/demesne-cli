@@ -2721,12 +2721,14 @@ function renderHero() {
   const sentences = plain ? [] : awaySentences({
     now: Date.now(),
     leftAt,
-    branches: review.map((job) => ({ title: job.title, status: job.status === "failed" ? "failed" : "ready", finishedAt: job.finishedAt, failedCheck: job.checks?.find((check) => !check.passed)?.command, unchanged: job.unchanged })),
-    running: running ? { title: running.title, steps: running.activity?.steps ?? 0 } : null,
+    // Drive isn't on Home: its state and ideas live at the sidebar's foot,
+    // its branches under Review.
+    branches: [],
+    running: null,
     waiting: waiting.map((session) => ({ sessionId: session.id, title: chatTitle(session.id), ask: session.ask })),
     busy: here.filter((session) => !session.waiting && (session.status === "running" || session.status === "queued") && !ran.some((run) => run.sessionId === session.id)).map((session) => ({ sessionId: session.id, title: chatTitle(session.id) })),
     routines: ran,
-    ideas: next.proposals.length,
+    ideas: 0,
     asks: state.asks,
     shown: { branches: reviewShown, drive: driveShown, ideas: ideasShown, ask: awayAskShown },
   });
@@ -2746,14 +2748,9 @@ function renderHero() {
   // Each underlined phrase unfolds that thing right under it.
   const paragraph = sentences.length ? `<p class="away">${sentences.map((sentence) => sentence.map(awayPart).join("")).join(" ")}</p>` : "";
   const folds = [
-    reviewShown && review.length ? branchRows(review) : "",
     asked?.kind === "permission" ? awayApproval(awayAskShown!, asked) : "",
-    driveShown && running ? branchRows([running]) : "",
-    ideasShown && next.proposals.length ? `${proposalRows(next.proposals)}<p class="proposals-footer">${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}${next.generatedAt ? `<span class="muted"> · looked ${age(next.generatedAt)}</span>` : ""}</p>` : "",
   ].filter(Boolean);
   const fold = (folds.length ? `<div class="away-fold">${folds.join("")}</div>` : "") + branchNote();
-  // While Drive works, its phrase carries a moving line.
-  const bar = running ? '<span class="away-bar" aria-hidden="true"></span>' : "";
   const pick = last
     ? btn("select-session", `<span class="pick-word">Pick up</span><b>${h(chatTitle(last.id))}</b>${last.lastAsk ? `<q>${h(last.lastAsk)}</q>` : ""}<span class="pick-age">${h(age(last.updatedAt))}</span><span class="pick-go" aria-hidden="true">›</span>`, { id: last.id }, "hero-pick")
     : "";
@@ -2761,7 +2758,7 @@ function renderHero() {
   // back once a project is picked.
   el("hero").innerHTML = plain
     ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
-    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${bar}${fold}${pick}</div><div id="hero-composer"></div>`;
+    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${fold}${pick}</div><div id="hero-composer"></div>`;
   el("hero-composer").append(composer);
   // Home grew or lost lines (ideas unfolded, a branch to review): the
   // blossom ends above the greeting again, so no text sits on the boughs.

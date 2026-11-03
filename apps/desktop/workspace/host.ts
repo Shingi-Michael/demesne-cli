@@ -2319,6 +2319,33 @@ export class WorkspaceHost {
       this.restartFor.clear();
       return this.settingsInfo();
     }
+    // From the sidebar's right-click menu: delete one chat for good, show a
+    // project's folder, or delete every chat in a project (its files stay).
+    if (method === "delete-chat") {
+      const id = string(args.id, "chat id", 200);
+      const { skipped } = await this.client.deleteSessions([id]);
+      if (skipped.length) throw new Error(`Could not delete the chat: ${skipped[0]!.reason}`);
+      if (id === this.current?.session.id) await this.newSession();
+      await this.refreshSessions();
+      return;
+    }
+    if (method === "reveal-project" || method === "remove-project-chats") {
+      const path = string(args.path, "project", 4096);
+      const known = path === this.workspace || this.sessions.some((session) => session.workspace?.root === path);
+      if (method === "reveal-project") {
+        if (!known) throw new Error("That project isn't one Demesne knows");
+        await this.open(path);
+        return;
+      }
+      if (path === this.workspace) throw new Error("Open another project to remove this one");
+      const ids = this.sessions.filter((session) => session.workspace?.root === path).map((session) => session.id);
+      for (let at = 0; at < ids.length; at += 500) {
+        const { skipped } = await this.client.deleteSessions(ids.slice(at, at + 500));
+        if (skipped.length) throw new Error(`Kept ${skipped.length} ${skipped.length === 1 ? "chat" : "chats"}: ${skipped[0]!.reason}`);
+      }
+      await this.refreshSessions();
+      return;
+    }
     if (method === "open-link") {
       const url = new URL(string(args.url, "link", 8000));
       if (!["http:", "https:"].includes(url.protocol))

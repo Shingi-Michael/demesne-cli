@@ -912,6 +912,89 @@ document.getElementById("sidebar-projects")?.addEventListener("keydown", (event)
     remove.click();
   }
 });
+// Right-click a chat or a project in the sidebar (pass 136 A): Demesne's own
+// menu at the pointer. Deleting asks once, in place: the row turns into
+// "Delete forever?" and a second click confirms. Removing a project deletes
+// its chats in Demesne; its folder and files on disk are never touched.
+type RowMenu = { kind: "chat"; id: string } | { kind: "project"; path: string };
+let rowMenu: RowMenu | null = null, rowMenuSure = false, rowMenuAt = { x: 0, y: 0 };
+function closeRowMenu() {
+  rowMenu = null; rowMenuSure = false;
+  document.getElementById("row-menu")?.remove();
+  document.querySelectorAll(".row-menu-on").forEach((node) => node.classList.remove("row-menu-on"));
+}
+function renderRowMenu() {
+  if (!rowMenu || !state) return closeRowMenu();
+  let menu = document.getElementById("row-menu");
+  if (!menu) { menu = document.createElement("div"); menu.id = "row-menu"; menu.setAttribute("role", "menu"); document.body.append(menu); }
+  const item = (label: string, what: string, extra = "", cls = "") => btn("row-menu", `<span>${label}</span>${extra ? `<small>${extra}</small>` : ""}`, { what }, `row-menu-item${cls ? ` ${cls}` : ""}`).replace("<button ", '<button role="menuitem" ');
+  const line = '<hr class="row-menu-line">';
+  if (rowMenu.kind === "chat") {
+    const chat = state.sessions.find((one) => one.id === (rowMenu as { id: string }).id);
+    const working = chat?.status === "running" || chat?.status === "queued";
+    menu.innerHTML = item("Open", "open") + item("Rename", "rename") + item(chat?.pinned ? "Unpin" : "Pin", "pin") + line
+      + (working ? '<p class="row-menu-note">It is working. Stop it to archive or delete it.</p>'
+        : item("Archive", "archive") + (rowMenuSure ? item("Delete forever?", "delete", "", "danger sure") + '<p class="row-menu-note">The chat and its history are gone for good.</p>' : item("Delete…", "delete", "", "danger")));
+  } else {
+    const path = rowMenu.path, here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+    const count = state.sessions.filter((one) => one.workspace === path).length;
+    menu.innerHTML = item("New chat here", "new") + item("Show in Finder", "reveal") + line
+      + (count ? item("Archive all its chats", "archive-all", String(count)) : "")
+      + (path === here ? '<p class="row-menu-note">Open another project to remove this one.</p>'
+        : rowMenuSure ? item("Remove from Demesne?", "remove", "", "danger sure") + `<p class="row-menu-note">${count ? `Its ${count} ${count === 1 ? "chat is" : "chats are"} deleted. ` : ""}The folder and your code stay on disk.</p>`
+        : item("Remove from Demesne…", "remove", "", "danger"));
+  }
+  const box = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(rowMenuAt.x, innerWidth - box.width - 6))}px`;
+  menu.style.top = `${Math.max(4, Math.min(rowMenuAt.y, innerHeight - box.height - 6))}px`;
+}
+document.addEventListener("contextmenu", (event) => {
+  const target = event.target as HTMLElement;
+  const chatRow = target.closest<HTMLElement>("#sidebar-projects .sidebar-item");
+  const chatButton = chatRow?.querySelector<HTMLElement>('[data-action="select-session"], [data-action="project-session"]');
+  const projectRow = target.closest<HTMLElement>("#sidebar-projects .sidebar-project-header");
+  const projectButton = projectRow?.querySelector<HTMLElement>('[data-action="project-toggle"]');
+  const args = JSON.parse((chatButton ?? projectButton)?.dataset.args ?? "{}");
+  if (!(chatButton && args.id) && !(projectButton && args.path)) { if (rowMenu) closeRowMenu(); return; }
+  event.preventDefault();
+  closeRowMenu();
+  rowMenu = chatButton ? { kind: "chat", id: String(args.id) } : { kind: "project", path: String(args.path) };
+  rowMenuAt = { x: event.clientX, y: event.clientY };
+  (chatRow ?? projectRow)!.classList.add("row-menu-on");
+  renderRowMenu();
+  document.querySelector<HTMLButtonElement>("#row-menu button")?.focus({ preventScroll: true });
+});
+document.addEventListener("mousedown", (event) => { if (rowMenu && !(event.target as Element).closest("#row-menu")) closeRowMenu(); }, true);
+document.addEventListener("keydown", (event) => { if (rowMenu && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeRowMenu(); } }, true);
+window.addEventListener("blur", () => { if (rowMenu) closeRowMenu(); });
+async function rowMenuAction(what: string): Promise<unknown> {
+  const menu = rowMenu;
+  if (!menu || !state) return;
+  if ((what === "delete" || what === "remove") && !rowMenuSure) { rowMenuSure = true; renderRowMenu(); document.querySelector<HTMLButtonElement>("#row-menu .sure")?.focus({ preventScroll: true }); return; }
+  closeRowMenu();
+  if (menu.kind === "chat") {
+    const id = menu.id, chat = state.sessions.find((one) => one.id === id);
+    if (what === "open") return goChat(id);
+    if (what === "rename") { renaming = id; sidebarSignature = ""; renderSidebar(); return; }
+    if (what === "pin") return dispatch("pin-session", { id, pinned: !chat?.pinned });
+    if (what === "archive") return dispatch("delete-session", { id });
+    if (what === "delete") {
+      deletedSessions.add(id); renderSidebar();
+      try { await api("delete-chat", { id }); } catch (error) { deletedSessions.delete(id); renderSidebar(); throw error; }
+    }
+    return;
+  }
+  const path = menu.path;
+  if (what === "new") return dispatch("project-new", { path });
+  if (what === "reveal") return api("reveal-project", { path });
+  if (what === "archive-all") { for (const chat of state.sessions.filter((one) => one.workspace === path)) await api("archive", { id: chat.id }); return; }
+  if (what === "remove") {
+    await api("remove-project", { path });
+    const list = document.getElementById("sidebar-sessions");
+    if (list) list.dataset.projects = JSON.stringify((JSON.parse(list.dataset.projects ?? "[]") as string[]).filter((one) => one !== path));
+    sidebarSignature = ""; renderSidebar();
+  }
+}
 // Double-click a title to rename it in place: Enter or leaving the field
 // keeps it, Escape puts it back.
 // The first click opens the chat and redraws the row, so the second click
@@ -5378,6 +5461,7 @@ async function dispatch(
     await api("bring-back", { id: String(args.id), at: args.at === null ? null : String(args.at) });
     return;
   }
+  if (action === "row-menu") return rowMenuAction(String(args.what));
   if (action === "pin-session") {
     await api("pin", { id: String(args.id), pinned: args.pinned === true });
     return;

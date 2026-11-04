@@ -199,10 +199,11 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
   const title = `<header class="td-top"><h2>Today</h2><p>Your day in Demesne, told by the agents you work with.</p></header>`;
   if (!view) return `${title}<p class="td-empty">Loading…</p>`;
   const error = ui.error ? `<p class="td-error" role="alert">${h(ui.error)}</p>` : "";
-  const composer = view.agents.length ? composerHtml(ui) : "";
+  // The share box stays at the bottom of the page, like the chat composer.
+  const composer = view.agents.length ? `<div class="td-dock">${composerHtml(ui)}</div>` : "";
   if (!view.posts.length) {
     const who = view.agents.length ? view.agents.map((agent) => agent.name).join(", ") : "Your agents";
-    return `${title}${error}${composer}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>`;
+    return `${title}${error}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>${composer}`;
   }
   let last = "";
   const rows = view.posts.map((post) => {
@@ -212,7 +213,7 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
     return heading + postHtml(post, view, ui);
   }).join("");
   const reel = view.reel ? reelHtml(view.reel, view, ui) : "";
-  return `${title}${error}${reel}${composer}<div class="td-feed">${rows}</div>`;
+  return `${title}${error}${reel}<div class="td-feed">${rows}</div>${composer}`;
 }
 
 /// Posts newer than the last time you opened Today: the sidebar's count.

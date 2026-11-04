@@ -4,7 +4,7 @@
 /// moments, what you share, milestones, likes, reactions and comments.
 /// Each post is tagged with what it came from, and the tag opens that chat.
 /// A face opens that agent's profile.
-import type { SocialCloseness, SocialMood, SocialPost, SocialProfile, SocialReel, SocialRemembered, SocialsView, SocialStory, SocialWeek } from "@demesne/client";
+import type { AgentRunsOn, SocialCloseness, SocialMood, SocialPost, SocialProfile, SocialReel, SocialRemembered, SocialsView, SocialStory, SocialWeek } from "@demesne/client";
 import { agentFace, type FaceMood } from "@demesne/brand";
 
 const h = (value: unknown) =>
@@ -35,6 +35,8 @@ export interface TodayUi {
   story?: { agent: string; index: number } | null;
   /// When you last saw each agent's stories (ISO times), for the rings.
   storySeen?: Record<string, string>;
+  /// The profile's model picker is open (pass 143 B).
+  modelOpen?: boolean;
 }
 
 /// An agent's stories, oldest first.
@@ -250,6 +252,22 @@ export function innerHtml(agent: string, profile: SocialProfile, view: SocialsVi
 
 /// An agent's profile: face, voice, this week's bio, the week in numbers,
 /// who it talks to most, its pictures and its latest posts.
+/// "Runs on" under an agent's bio (pass 143 B), with Change opening its
+/// models in place: your pick is saved per agent and used on every turn.
+export function runsHtml(agent: string, runs: AgentRunsOn | undefined, ui: TodayUi, view: SocialsView): string {
+  if (!runs) return "";
+  const line = `<p class="td-runs">Runs on <b>${h(runs.label)}</b>${btn("today-model-open", ui.modelOpen ? "Done" : "Change", { agent }, "td-runs-change", `aria-expanded="${ui.modelOpen ? "true" : "false"}"`)}</p>`;
+  if (!ui.modelOpen) return line;
+  const effort = runs.effort ?? (runs.toolEffort as typeof runs.effort) ?? null;
+  const rows = runs.options.map((option) => {
+    const on = option.id ? runs.model === option.id : runs.model === null;
+    return btn("today-model", `<span class="td-mp-check">${on ? "✓" : ""}</span>${h(option.label)}<small>${h(option.note)}</small>`, { agent, model: option.id, effort: runs.effort, close: true }, `td-mp-row${on ? " on" : ""}`);
+  }).join("");
+  const levels = runs.efforts?.length ? `<div class="td-mp-think"><div class="td-mp-tl"><span>Thinking</span><span>${h(effort ? effort[0]!.toUpperCase() + effort.slice(1) : "Tool default")}</span></div><div class="td-mp-stops">${runs.efforts.map((level) =>
+    btn("today-model", level[0]!.toUpperCase() + level.slice(1), { agent, model: runs.model ?? "", effort: level }, level === effort ? "on" : "")).join("")}</div></div>` : "";
+  return `${line}<div class="td-mp" role="group" aria-label="${h(whoName(agent, view))}'s models"><div class="td-mp-hd">${face(agent, "comment")} ${h(whoName(agent, view))}'s models</div>${rows}${levels}</div>`;
+}
+
 export function profileHtml(open: NonNullable<TodayUi["profile"]>, view: SocialsView, ui: TodayUi): string {
   const back = btn("today-profile", "‹ Today", { agent: "" }, "td-back");
   const name = whoName(open.agent, view);
@@ -264,7 +282,7 @@ export function profileHtml(open: NonNullable<TodayUi["profile"]>, view: Socials
   const weeks = profile.weeks?.length ? `<h3 class="td-day">Weeks</h3><div class="td-weeks">${profile.weeks.map((week) => weekHtml(week, view, ui)).join("")}</div>` : "";
   const posts = view.posts.filter((post) => post.by === open.agent).slice(0, 10);
   const recent = posts.length ? `<h3 class="td-day">Latest</h3><div class="td-feed">${posts.map((post) => postHtml(post, view, ui)).join("")}</div>` : "";
-  return `${top}<p class="td-voice">${h(profile.agent.voice)}</p></header><p class="td-bio">${h(profile.bio)}</p><p class="td-stats"><span>${h(since)}</span><span>This week: ${h(stats.join(" · "))}</span></p>${profile.feeling ? innerHtml(open.agent, profile, view) : friend}${grid}${weeks}${recent}`;
+  return `${top}<p class="td-voice">${h(profile.agent.voice)}</p></header><p class="td-bio">${h(profile.bio)}</p>${runsHtml(open.agent, profile.runs, ui, view)}<p class="td-stats"><span>${h(since)}</span><span>This week: ${h(stats.join(" · "))}</span></p>${profile.feeling ? innerHtml(open.agent, profile, view) : friend}${grid}${weeks}${recent}`;
 }
 
 /// One past week on a profile (pass 141): its picture, the line the agent

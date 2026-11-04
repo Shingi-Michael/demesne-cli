@@ -358,6 +358,15 @@ export function createDaemonApp(options: {
     : Promise.resolve();
   const commands=new CommandMonitor(store);
   const agentCli = new AgentCli(dirname(options.databasePath), options.agentCli);
+  /// Codex's models on Demesne's own Codex plan, for its model picker
+  /// (best effort: none when the plan can't be listed in a few seconds).
+  const codexPlan = async (agent: string): Promise<string[]> => {
+    if (agent !== "codex") return [];
+    try {
+      const models = await Promise.race([processor.listModels(AbortSignal.timeout(3_000)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("slow")), 3_000))]);
+      return models.filter((model) => model.id.startsWith("codex/")).map((model) => model.id.slice("codex/".length));
+    } catch { return []; }
+  };
   const isAgentChat = (sessionId: string) => agentIdOf(store.getSession(sessionId)?.preferredModel) !== null;
   /// Turns that answer Heartbeat mail, so the agent's post says so.
   const mailTurns = new Set<string>();
@@ -1248,7 +1257,19 @@ export function createDaemonApp(options: {
       if (profileMatch && request.method === "GET") {
         const agent = decodeURIComponent(profileMatch[1]!);
         if (!socials || !agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
-        return json({ profile: await socials.profile(agent as Parameters<typeof socials.profile>[0]) });
+        return json({ profile: { ...await socials.profile(agent as Parameters<typeof socials.profile>[0]), runs: agentCli.runsOn(agent as AgentId, await codexPlan(agent)) } });
+      }
+      // The model an agent runs on (pass 143 B): your pick, saved per agent.
+      const modelMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)\/model$/);
+      if (modelMatch && request.method === "POST") {
+        const agent = decodeURIComponent(modelMatch[1]!) as AgentId;
+        if (!agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
+        const body = await readJson(request) as { model?: unknown; effort?: unknown };
+        const model = typeof body.model === "string" && body.model ? body.model : null;
+        const effort = body.effort === "low" || body.effort === "medium" || body.effort === "high" ? body.effort : null;
+        try { agentCli.choose(agent, model, effort); }
+        catch (error) { return apiError("bad_request", error instanceof Error ? error.message : "Can't pick that model", 400); }
+        return json({ runs: agentCli.runsOn(agent, await codexPlan(agent)) });
       }
       // What an agent remembers about you: add a line, or forget one (pass 142 B).
       const rememberMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)\/remember(?:\/([^/]+))?$/);

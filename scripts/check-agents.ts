@@ -47,8 +47,13 @@ const seed = (data: string) => {
       { id: "st-2", by: "codex", at: new Date(now - 20 * 60_000).toISOString(), kind: "done", text: "Merged it: Fix the login redirect", label: "Chat · demesne-cli", mood: "happy", sessionId: "seed" },
     ] }));
 };
+// The tools' own settings, read for "Runs on" (pass 143 B): Codex says gpt-6-astra at medium.
+const toolHome = join(output, "tool-home");
+mkdirSync(join(toolHome, ".codex"), { recursive: true });
+writeFileSync(join(toolHome, ".codex", "config.toml"), 'model = "gpt-6-astra"\nmodel_reasoning_effort = "medium"\n');
 const f = await fixture(undefined, { seed, socials: true, images: { url: `http://127.0.0.1:${imageServer.port}/v1`, model: "fake-image" }, agentCli: {
   which: (command) => command === "claude" || command === "codex" ? `/usr/local/bin/${command}` : null,
+  home: toolHome,
   spawn: (argv) => { runs.push(argv); return fakeProcess(claudeRun(argv[argv.indexOf("--session-id") + 1] ?? "s", "The bundle step type-checks twice. Dropping the second pass saves about 40s.")); },
 } });
 const browser = await electron.launch({ args: [join(desktop, "build/app"), `--user-data-dir=${join(f.root, "electron")}`, `--workspace=${f.workspace}`, `--server=${f.server.url}`], env: { ...f.env, XDG_CONFIG_HOME: join(f.home, ".config") } });
@@ -148,6 +153,16 @@ try {
   expect(await page.locator("#page .td-close", { hasText: "commented on my post" }).count() === 1, "the profile shows who Codex is close to and why");
   expect(await page.locator("#page .td-diary", { hasText: "Two failures, then the redirect." }).count() === 1 && await page.locator("#page .td-plan", { hasText: "flaky login test" }).count() === 1, "the profile shows last night's diary and the plan");
   await page.screenshot({ path: join(output, "profile-inner.png") });
+  expect(await page.locator("#page .td-runs", { hasText: "Runs on gpt-6-astra · Medium" }).count() === 1, "the profile says what Codex runs on, from its own config");
+  await page.locator("#page .td-runs-change").click();
+  await page.locator("#page .td-mp-stops button", { hasText: "High" }).click();
+  await page.locator("#page .td-runs", { hasText: "gpt-6-astra · High" }).waitFor({ timeout: 10_000 }).catch(() => {});
+  expect(await page.locator("#page .td-runs", { hasText: "gpt-6-astra · High" }).count() === 1 && await page.locator("#page .td-mp").count() === 1, "Change opens Codex's models in place, and a thinking level sticks");
+  await page.screenshot({ path: join(output, "profile-model.png") });
+  await page.locator(`#page .td-mp-row[data-args*='"model":"gpt-6-astra"']`).click();
+  await page.waitForTimeout(600);
+  expect(await page.locator("#page .td-mp").count() === 0 && await page.locator("#page .td-runs", { hasText: "gpt-6-astra · High" }).count() === 1, "picking a model saves it with the thinking level and closes the picker");
+
   await page.locator("#page .td-remember input").fill("Ships on Fridays");
   await page.locator("#page .td-remember input").press("Enter");
   await page.locator("#page .td-remembers li", { hasText: "Ships on Fridays" }).waitFor({ timeout: 10_000 }).catch(() => {});

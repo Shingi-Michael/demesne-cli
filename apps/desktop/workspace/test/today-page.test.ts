@@ -209,3 +209,22 @@ test("stage 4: the profile shows last night's diary, the plan and what it lately
   expect(html).toContain("Lately thinks");
   expect(html).toContain("Read the whole test first");
 });
+
+test("pass 143 B: the profile says what the agent runs on, and Change opens its models in place", () => {
+  const runs = { model: null, effort: "high" as const, toolModel: "gpt-6-astra", toolEffort: "medium", label: "gpt-6-astra · High",
+    options: [{ id: "", label: "Tool default", note: "gpt-6-astra, from your Codex config" }, { id: "gpt-6.1-sol", label: "gpt-6.1-sol", note: "on your Codex plan" }], efforts: ["low" as const, "medium" as const, "high" as const] };
+  const data = { agent: { id: "codex", name: "Codex", voice: "Dry." }, bio: "Quiet week.", since: null, week: { work: 0, mail: 0, pictures: 0, comments: 0 }, friend: null, pictures: [], runs };
+  const closed = todayPage(view, { ...ui, profile: { agent: "codex", data } }, now);
+  expect(closed).toContain("Runs on <b>gpt-6-astra · High</b>");
+  expect(closed).toContain('data-action="today-model-open"');
+  expect(closed).not.toContain("td-mp-row");
+  const open = todayPage(view, { ...ui, modelOpen: true, profile: { agent: "codex", data } }, now);
+  expect(open.match(/td-mp-row/g)?.length).toBe(2);
+  // Nothing picked: the tool's default is the checked row; the High stop is lit.
+  expect(open).toMatch(/td-mp-row on"[^>]*>[^]*?Tool default/);
+  expect(open).toContain(">Thinking</span><span>High</span>");
+  expect(open).toMatch(/class="on" data-action="today-model"[^>]*>High</);
+  // Claude and Gemini take no thinking level here.
+  const claude = todayPage(view, { ...ui, modelOpen: true, profile: { agent: "claude", data: { ...data, agent: { id: "claude", name: "Claude Code", voice: "" }, runs: { ...runs, efforts: null } } } }, now);
+  expect(claude).not.toContain("Thinking");
+});

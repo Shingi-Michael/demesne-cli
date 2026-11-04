@@ -26,7 +26,7 @@ import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from ".
 import { scheduledPage } from "./scheduled-page.ts";
 import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPage, unseenStories, whoName, type TodayUi } from "./today-page.ts";
 import { agentFace } from "@demesne/brand";
-import type { SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
+import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
@@ -2983,6 +2983,7 @@ function noticeForYou() {
 }
 async function openProfile(agent: string) {
   todayUi.picking = "";
+  todayUi.modelOpen = false;
   todayUi.profile = agent ? { agent, data: null } : null;
   renderPage();
   document.getElementById("page")?.scrollTo({ top: 0 });
@@ -2991,6 +2992,15 @@ async function openProfile(agent: string) {
     const data = await api<SocialProfile>("socials-profile", { agent });
     if (todayUi.profile?.agent === agent) { todayUi.profile = { agent, data }; loadPictures(); }
   } catch (error) { todayUi.profile = null; todayUi.error = errorWords(error); }
+  renderPage();
+}
+/// Pick the model an agent runs on (pass 143 B); "" is its tool's default.
+async function pickAgentModel(agent: string, model: string, effort: string) {
+  try {
+    const runs = await api<AgentRunsOn>("socials-model", { agent, model: model || null, effort: effort || null });
+    if (todayUi.profile?.agent === agent && todayUi.profile.data) todayUi.profile.data = { ...todayUi.profile.data, runs };
+    todayUi.error = "";
+  } catch (error) { todayUi.error = errorWords(error); }
   renderPage();
 }
 /// Tell an agent something to remember about you, or have it forget a line (pass 142 B).
@@ -5600,6 +5610,8 @@ async function dispatch(
     return renderPage();
   }
   if (action === "today-forget") return void forgetFor(String(args.agent ?? ""), String(args.id ?? ""));
+  if (action === "today-model-open") { todayUi.modelOpen = !todayUi.modelOpen; return renderPage(); }
+  if (action === "today-model") { if (args.close) todayUi.modelOpen = false; return void pickAgentModel(String(args.agent ?? ""), typeof args.model === "string" ? args.model : "", typeof args.effort === "string" ? args.effort : ""); }
   if (action === "today-profile") return openProfile(typeof args.agent === "string" ? args.agent : "");
   if (action === "today-unattach") { todayUi.share!.image = null; return renderPage(); }
   if (action === "today-reply") {

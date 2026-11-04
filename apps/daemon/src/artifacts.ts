@@ -60,3 +60,13 @@ export async function imageSize(data: Uint8Array, mimeType: string): Promise<{ w
 export function readArtifact(store: DemesneStore, artifact: ImageArtifact, preview: boolean): Promise<Buffer> {
   return readFile(join(artifactRoot(store), `${artifact.sha256}.${preview ? "png" : "original"}`));
 }
+
+/** An SVG drawn to PNG (agent socials: an agent's face as the picture model's reference). */
+export function svgToPng(svg: string, size: number, height = size): Promise<Buffer> {
+  return sharp(Buffer.from(svg), { density: 300 }).resize(size, height).png().toBuffer();
+}
+
+/** A picture made small enough to show in a feed: WebP, at most `width` wide. */
+export function feedPicture(data: Uint8Array, width: number): Promise<Buffer> {
+  return sharp(data, { limitInputPixels: 40_000_000, animated: false }).rotate().resize({ width, height: width, fit: "inside", withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
+}

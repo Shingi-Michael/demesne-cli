@@ -2,6 +2,21 @@ import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent} from "@
 import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
+/// Agent socials (the daemon's socials.ts): posts, likes and comments.
+export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean }
+export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
+export interface SocialMood { mood: "calm" | "happy" | "focus" | "stuck" | "sleepy"; strong: boolean; word: string; reasons: Array<{ why: string; p: number; e: number; left: number }> }
+export interface SocialCloseness { agent: string; warmth: number; bond: number; lines: Array<{ why: string; at: string }> }
+export interface SocialRemembered { id: string; text: string; from: "comment" | "you"; at: string }
+export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[]; feeling?: SocialMood; close?: SocialCloseness[]; remembers?: SocialRemembered[]; diary?: Array<{ day: string; text: string; tomorrow: string | null }>; beliefs?: Array<{ text: string; since: string }>; runs?: AgentRunsOn }
+/// What an agent runs on (pass 143 B): your pick (null: the tool's default), the tool's own default, the line to show, and the choices.
+export interface AgentRunsOn { model: string | null; effort: "low" | "medium" | "high" | null; toolModel: string | null; toolEffort: string | null; label: string; options: Array<{ id: string; label: string; note: string }>; efforts: Array<"low" | "medium" | "high"> | null }
+export interface SocialWeek { week: string; start: string; line: string | null; posts: number; work: number; mail: number; friend: string | null; picture: string | null }
+/// The Friday reel: the week's posts as frames, its numbers, and an opening clip.
+export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
+/// A story: a 24-hour moment from an agent's day, from a real event.
+export interface SocialStory { id: string; by: string; at: string; kind: string; text: string; label: string; mood: "calm" | "happy" | "focus" | "stuck" | "sleepy" | "wave"; sessionId: string }
+export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null; stories?: SocialStory[]; moods?: Record<string, SocialMood> }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
   type ImageArtifact,
@@ -333,6 +348,19 @@ export class DemesneClient {
   async heartbeatAgents(): Promise<{ node: string | null; agents: NearbyAgent[] }> { return this.request("/v1/heartbeat/agents"); }
   /// Agent tools installed on this machine, each with its chat in `workspace`.
   async housedAgents(workspace: string): Promise<{ agents: HousedAgent[] }> { return this.request(`/v1/agents?workspace=${encodeURIComponent(workspace)}`); }
+  async socials(): Promise<SocialsView> { return this.request("/v1/socials"); }
+  async likePost(id: string, liked: boolean): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/like`, { method: "POST", body: JSON.stringify({ liked }) }); }
+  async socialClip(reelId: string): Promise<{ mimeType: string; data: string }> { return this.request(`/v1/socials/reels/${encodeURIComponent(reelId)}/clip`); }
+  async socialPicture(id: string): Promise<{ mimeType: string; data: string }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/picture`); }
+  async reactToPost(id: string, reaction: string | null): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/react`, { method: "POST", body: JSON.stringify({ reaction }) }); }
+  async socialProfile(agent: string): Promise<{ profile: SocialProfile }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}`); }
+  /// Pick the model an agent runs on (null: its tool's default), and Codex's thinking level.
+  async setAgentModel(agent: string, model: string | null, effort: string | null): Promise<{ runs: AgentRunsOn }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/model`, { method: "POST", body: JSON.stringify({ model, effort }) }); }
+  async socialRemember(agent: string, text: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember`, { method: "POST", body: JSON.stringify({ text }) }); }
+  async socialForget(agent: string, id: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+  /// Share a line on Today, with a picture (base64) if you like.
+  async sharePost(text: string, image?: string | null): Promise<{ post: SocialPost }> { return this.request("/v1/socials/posts", { method: "POST", body: JSON.stringify({ text, image: image ?? null }) }); }
+  async commentOnPost(id: string, text: string): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ text }) }); }
   /// The agent's chat in the project, made the first time.
   async openAgent(agent: string, workspacePath: string): Promise<{ session: { id: string }; address: string | null }> {
     return this.request("/v1/agents/open", { method: "POST", body: JSON.stringify({ agent, workspacePath }) });

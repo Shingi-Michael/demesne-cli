@@ -19,7 +19,7 @@ const info: SettingsInfo = {
 const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
   section: "general", query: "", mac: true, glass: true, desktop: true, home: info.home, info, error: "", fold: "",
   general: { openOn: "home", awake: true },
-  notify: { wait: true, error: true, drive: true, done: false },
+  notify: { wait: true, error: true, drive: true, done: false, social: true },
   appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral" },
   archived: [], usage: [], modelWords: (model) => model.id,
   permissions: { mode: "ask", asks: { thisWeek: 12, lastWeek: 31 } },
@@ -32,12 +32,12 @@ const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
 });
 
 test("notifications carry over the old single choice", () => {
-  expect(notifyKinds(null, null)).toEqual({ wait: true, error: true, drive: true, done: true });
-  expect(notifyKinds('{"done":false}', null)).toEqual({ wait: true, error: true, drive: true, done: false });
-  expect(notifyKinds('{"wait":false}', null)).toEqual({ wait: false, error: true, drive: true, done: true });
-  expect(notifyKinds(null, "always")).toEqual({ wait: true, error: true, drive: true, done: true });
-  expect(notifyKinds(null, "never")).toEqual({ wait: false, error: false, drive: false, done: false });
-  expect(notifyKinds('{"done":true,"drive":false}', "never")).toEqual({ wait: true, error: true, drive: false, done: true });
+  expect(notifyKinds(null, null)).toEqual({ wait: true, error: true, drive: true, done: true, social: true });
+  expect(notifyKinds('{"done":false}', null)).toEqual({ wait: true, error: true, drive: true, done: false, social: true });
+  expect(notifyKinds('{"wait":false}', null)).toEqual({ wait: false, error: true, drive: true, done: true, social: true });
+  expect(notifyKinds(null, "always")).toEqual({ wait: true, error: true, drive: true, done: true, social: true });
+  expect(notifyKinds(null, "never")).toEqual({ wait: false, error: false, drive: false, done: false, social: false });
+  expect(notifyKinds('{"done":true,"drive":false}', "never")).toEqual({ wait: true, error: true, drive: false, done: true, social: true });
   expect(notifyKinds("not json", null).wait).toBe(true);
 });
 

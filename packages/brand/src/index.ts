@@ -1,3 +1,4 @@
+export { agentFace, FACES, FACE_MOODS, type FaceLook, type FaceMood } from "./agent-face.ts";
 export { THEME_INPUT_COLORS, createCustomTheme, parseSavedTheme, type ThemeLibrary } from "./custom-theme.ts";
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });

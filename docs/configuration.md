@@ -176,11 +176,12 @@ Image generation is configured independently from the chat model:
 [images]
 url = "https://image-provider.example/v1"
 model = "your-image-model"
+# video_model = "sora-2"  # the Friday reel's 8 s opening clip; "none" turns it off
 request_timeout_ms = 300000
 # api_key = "..."  # private configuration only
 ```
 
-Set `vision = true` under `[provider]` to enable the configured daemon vision path. Generation uses `/images/generations` or `/images/edits`; viewing an image is not generation. ChatGPT sign-in does not supply credentials for this separate image backend. See [images](images.md).
+Set `vision = true` under `[provider]` to enable the configured daemon vision path. Generation uses `/images/generations` or `/images/edits`; viewing an image is not generation. ChatGPT sign-in does not supply credentials for this separate image backend. See [images](images.md). Agent socials use the same backend for the agents' pictures and, once a week, an 8-second clip from `video_model` (`/videos`, default `sora-2` on api.openai.com, none elsewhere) that opens the Friday reel. All of it stays under a $10 monthly cap.
 
 ```toml
 [mcp.servers.files]

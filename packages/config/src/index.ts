@@ -42,6 +42,9 @@ export interface ProviderConfig {
 export interface ImageGenerationConfig {
   url?: string;
   model?: string;
+  /// The video model for the Friday reel's opening clip (an OpenAI-style
+  /// /videos API). Unset on api.openai.com means sora-2; "none" turns it off.
+  videoModel?: string;
   apiKey?: string;
   requestTimeoutMs?: number;
 }
@@ -337,12 +340,13 @@ function applyDocument(
 
   if (document.images !== undefined) {
     const images = objectValue(document.images, "images");
-    assertKnownKeys(images, ["url", "model", "api_key", "request_timeout_ms"], `${path}.images`);
+    assertKnownKeys(images, ["url", "model", "video_model", "api_key", "request_timeout_ms"], `${path}.images`);
     const target = config.images ??= {};
     assignInto(target, "url", images.url, source, sources, "images.url", (value, key) => {
       const text = stringValue(value, key); assertProviderUrl(text, key); return text;
     });
     assignInto(target, "model", images.model, source, sources, "images.model", optionalString);
+    assignInto(target, "videoModel", images.video_model, source, sources, "images.videoModel", optionalString);
     assignInto(target, "apiKey", images.api_key, source, sources, "images.apiKey", optionalString);
     assignInto(target, "requestTimeoutMs", images.request_timeout_ms, source, sources, "images.requestTimeoutMs", optionalPositiveInteger);
   }
@@ -509,6 +513,7 @@ export const ENV_VARIABLE_NAMES: Record<string, string> = {
   "agent.subagentModel": "DEMESNE_SUBAGENT_MODEL",
   "images.url": "DEMESNE_IMAGE_URL",
   "images.model": "DEMESNE_IMAGE_MODEL",
+  "images.videoModel": "DEMESNE_VIDEO_MODEL",
   "images.apiKey": "DEMESNE_IMAGE_API_KEY",
   "images.requestTimeoutMs": "DEMESNE_IMAGE_REQUEST_TIMEOUT_MS",
   "daemon.port": "DEMESNE_PORT",
@@ -552,10 +557,11 @@ function applyEnvironment(
   setFromEnv(config.provider, "firstEventTimeoutMs", env.DEMESNE_PROVIDER_FIRST_EVENT_TIMEOUT_MS, "provider.firstEventTimeoutMs", sources, optionalPositiveInteger);
   setFromEnv(config.provider, "requestTimeoutMs", env.DEMESNE_PROVIDER_REQUEST_TIMEOUT_MS, "provider.requestTimeoutMs", sources, optionalPositiveInteger);
 
-  if (Object.keys(env).some((key) => key.startsWith("DEMESNE_IMAGE_") && env[key])) {
+  if (Object.keys(env).some((key) => (key.startsWith("DEMESNE_IMAGE_") || key === "DEMESNE_VIDEO_MODEL") && env[key])) {
     const images = config.images ??= {};
     setFromEnv(images, "url", env.DEMESNE_IMAGE_URL, "images.url", sources, (value, key) => { assertProviderUrl(value, key); return value; });
     setFromEnv(images, "model", env.DEMESNE_IMAGE_MODEL, "images.model", sources, optionalString);
+    setFromEnv(images, "videoModel", env.DEMESNE_VIDEO_MODEL, "images.videoModel", sources, optionalString);
     setFromEnv(images, "apiKey", env.DEMESNE_IMAGE_API_KEY, "images.apiKey", sources, optionalString);
     setFromEnv(images, "requestTimeoutMs", env.DEMESNE_IMAGE_REQUEST_TIMEOUT_MS, "images.requestTimeoutMs", sources, optionalPositiveInteger);
   }

@@ -75,23 +75,24 @@ export const SETTINGS_ORDER = SETTINGS_GROUPS.flatMap(([, items]) => items.map((
 export const isSettingsSection = (value: unknown): value is SettingsSection => SETTINGS_ORDER.includes(value as SettingsSection);
 
 /// Native desktop notifications, each kind with its own switch.
-export type NotifyKind = "wait" | "error" | "drive" | "done";
+export type NotifyKind = "wait" | "error" | "drive" | "done" | "social";
 export const NOTIFY_KINDS: [NotifyKind, string, string][] = [
   ["wait", "A chat waits on you", "An approval or a question"],
   ["error", "A chat stops with an error", "The model or a tool failed and the turn ended"],
   ["drive", "Drive has a branch ready", "A fix or an idea it worked on, waiting for your review"],
   ["done", "A chat finishes", "Every answer that ends while you look elsewhere"],
+  ["social", "An agent answers you on Today", "A reply to your comment or post, or an agent naming you"],
 ];
 /// Reads the saved switches; the older single choice (When it needs you,
 /// Always, Never) carries over.
 export function notifyKinds(saved: string | null, old: string | null): Record<NotifyKind, boolean> {
-  const needs = { wait: true, error: true, drive: true, done: true };
+  const needs = { wait: true, error: true, drive: true, done: true, social: true };
   try {
     const parsed = saved ? JSON.parse(saved) as Record<string, unknown> : null;
     if (parsed && typeof parsed === "object") return Object.fromEntries(NOTIFY_KINDS.map(([kind]) => [kind, typeof parsed[kind] === "boolean" ? parsed[kind] : needs[kind]])) as Record<NotifyKind, boolean>;
   } catch {}
-  if (old === "always") return { wait: true, error: true, drive: true, done: true };
-  if (old === "never") return { wait: false, error: false, drive: false, done: false };
+  if (old === "always") return { wait: true, error: true, drive: true, done: true, social: true };
+  if (old === "never") return { wait: false, error: false, drive: false, done: false, social: false };
   return needs;
 }
 

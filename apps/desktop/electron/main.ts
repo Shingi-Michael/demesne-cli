@@ -354,6 +354,16 @@ if (!lookJob) void app.whenReady().then(async () => {
       await writeFile(selected.filePath, found.kind === "html" ? exportedSource(found.source, { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8") }) : found.source, "utf8");
       return { path: selected.filePath };
     }
+    // Today › Save video: the Friday reel's clip, saved where you choose.
+    if (method === "desktop-save-reel") {
+      const { id, week } = args as Record<string, unknown>;
+      const url = await backend!.request("socials-clip", { id }) as string;
+      const name = `Demesne week ${String(week ?? "").replace(/[^\w-]/g, "") || "reel"}.mp4`;
+      const selected = await dialog.showSaveDialog(window!, { title: "Save the week's video", defaultPath: join(app.getPath("downloads"), name) });
+      if (selected.canceled || !selected.filePath) return null;
+      await writeFile(selected.filePath, Buffer.from(url.slice(url.indexOf(",") + 1), "base64"));
+      return { path: selected.filePath };
+    }
     // A folder for a chat to move into: the path, or null when cancelled.
     if (method === "desktop-pick-folder") {
       const selected = await dialog.showOpenDialog(window!, { title: "Move this chat to a project", properties: ["openDirectory"] });

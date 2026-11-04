@@ -3,7 +3,7 @@ import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
-import { readArtifact, ingestImage, imageSize } from "./artifacts.ts";
+import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import { electronLook, lookCommand, type FoundryLook } from "./foundry-look.ts";
 import {
@@ -46,6 +46,9 @@ import {
   type UpdateSessionResponse,
 } from "@demesne/protocol";
 import { DemesneStore, InvalidStateError, NotFoundError, QuestionStateError } from "@demesne/storage";
+import { SocialFeed, writeOnce } from "./socials.ts";
+import { clipMaker } from "./social-reel.ts";
+import { pictureMaker } from "./social-pictures.ts";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
@@ -83,7 +86,7 @@ import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
-import { AgentCli, agentIdOf, type AgentCliOptions } from "./agent-cli.ts";
+import { AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
@@ -189,6 +192,8 @@ export function createDaemonApp(options: {
   foundryLook?: FoundryLook;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
+  /// Agent socials: the agents post about the day (the daemon on; tests off).
+  socials?: boolean;
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
   saveSubagentModel?: (model: string | null) => void;
@@ -353,7 +358,18 @@ export function createDaemonApp(options: {
     : Promise.resolve();
   const commands=new CommandMonitor(store);
   const agentCli = new AgentCli(dirname(options.databasePath), options.agentCli);
+  /// Codex's models on Demesne's own Codex plan, for its model picker
+  /// (best effort: none when the plan can't be listed in a few seconds).
+  const codexPlan = async (agent: string): Promise<string[]> => {
+    if (agent !== "codex") return [];
+    try {
+      const models = await Promise.race([processor.listModels(AbortSignal.timeout(3_000)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("slow")), 3_000))]);
+      return models.filter((model) => model.id.startsWith("codex/")).map((model) => model.id.slice("codex/".length));
+    } catch { return []; }
+  };
   const isAgentChat = (sessionId: string) => agentIdOf(store.getSession(sessionId)?.preferredModel) !== null;
+  /// Turns that answer Heartbeat mail, so the agent's post says so.
+  const mailTurns = new Set<string>();
   const heartbeatClient = new HeartbeatClient(options.heartbeat?.socket ?? heartbeatSocketPath());
   const heartbeat = heartbeatEnabled(options.heartbeat, heartbeatClient) ? new HeartbeatBridge({
     client: heartbeatClient,
@@ -361,6 +377,7 @@ export function createDaemonApp(options: {
       // Mail runs on Auto, like a Drive mission: nobody is at the window to
       // approve, and a turn that waits never answers the sender.
       const { turn } = store.createTurn(sessionId, content, "allow");
+      mailTurns.add(turn.id);
       return { turnId: turn.id, done: queueTurn(turn, inferenceIn(sessionId, undefined)) };
     },
     // An agent tool's chat answers its mail by itself: the answer goes back.
@@ -421,6 +438,64 @@ export function createDaemonApp(options: {
       ...options.agent,
     },
   );
+  // Agent socials (socials.ts): the agents post about the day you have
+  // together, written by the default model with thinking off.
+  const socials = options.socials ? new SocialFeed(join(dirname(options.databasePath), "socials.json"), {
+    agents: () => agentCli.agents().map((agent) => agent.id),
+    // Pictures of their day (social-pictures.ts), from the [images] model.
+    picture: options.images ? pictureMaker(options.images, { facePng: (svg) => svgToPng(svg, 512), shrink: (data) => feedPicture(data, 768) }) : null,
+    // The Friday reel's opening clip (social-reel.ts), from the video model.
+    clip: options.images ? clipMaker(options.images, { png: (svg, width, height) => svgToPng(svg, width, height) }) : null,
+    // A screenshot you share keeps enough width to read.
+    shrink: (data) => feedPicture(data, 1280),
+    // Your chats for the good morning and good night posts: named ones you
+    // were at, not the assistant, threads or Drive's worktrees.
+    dayFacts: () => {
+      const now = Date.now(), midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+      const chats = store.listSessions(200).filter((session) => session.title && session.title !== "New chat" && session.id !== assistantChat.existing()
+        && !driveFixes.isThread(session.id) && !(session.workspace && inDriveWorktree(session.workspace.root)));
+      const where = (session: { title: string; workspace: { root: string } | null }) => session.workspace ? `${session.title} (${session.workspace.root.split(/[\\/]/).at(-1)})` : session.title;
+      return {
+        recent: chats.filter((session) => now - Date.parse(session.updatedAt) < 36 * 3_600_000).slice(0, 12).map(where),
+        today: chats.filter((session) => Date.parse(session.updatedAt) >= midnight.getTime()).slice(0, 12).map(where),
+      };
+    },
+    write: async (messages) => {
+      const inference = snapshotTurnInference(processor, false);
+      const leaseId = `socials:${randomUUID()}`;
+      const lease = await scheduler.for(inference.providerId).acquire(leaseId, new AbortController().signal);
+      try { return await writeOnce((items, signal) => inference.stream(items, [], signal), messages); } finally { lease.release(); }
+    },
+  }) : null;
+  /// A finished turn the feed hears about: an agent's turn is its post, and
+  /// a chat of yours (one you were at, not Drive, a routine or a thread) is a moment.
+  function noteSocial(turnId: string) {
+    const turn = store.getTurn(turnId);
+    const session = turn && store.getSession(turn.sessionId);
+    const mail = mailTurns.delete(turnId);
+    if (!socials || !turn || !session || turn.status !== "completed" || turn.kind || turn.fromDrive || turn.fromRoutine) return;
+    if (session.id === assistantChat.existing() || driveFixes.isThread(session.id)) return;
+    const workspace = session.workspace?.root ?? null;
+    const agent = agentIdOf(session.preferredModel);
+    if (agent) {
+      const answered = store.getTurnModelMessages(session.id, turnId).filter((message) => message.role === "assistant")
+        .map((message) => typeof message.content === "string" ? message.content : "").filter(Boolean).at(-1) ?? "";
+      socials.noteStory(agent, mail ? "mail" : "done", { title: askedOf(turn.content), sessionId: session.id, workspace, happy: /\bmerged\b/i.test(answered) });
+      void socials.noteAgentTurn(agent, { kind: mail ? "mail" : "work", label: session.title, sessionId: session.id, workspace }, turn.content, answered).catch(() => {});
+    } else if (turn.permissionMode === "ask" && workspace && !inDriveWorktree(workspace)) {
+      // Named a beat later (chat-name.ts), so the moment reads the chat's name.
+      setTimeout(() => { const title = store.getSession(session.id)?.title ?? session.title; void socials.noteMoment(session.id, title, workspace).catch(() => {}); }, 25_000).unref?.();
+    }
+  }
+  /// What a turn asked, as a story's few words: its first line.
+  const askedOf = (content: string) => content.split("\n").map((line) => line.trim()).find(Boolean)?.replace(/[.!?]+$/, "") ?? "";
+  /// An agent's chat started or got stuck: a story (pass 141), no model call.
+  function storyOf(turn: Turn, kind: "start" | "failed") {
+    if (!socials || turn.kind || turn.fromDrive || turn.fromRoutine) return;
+    const session = store.getSession(turn.sessionId);
+    const agent = session && agentIdOf(session.preferredModel);
+    if (agent) socials.noteStory(agent, kind, { title: askedOf(turn.content), sessionId: session.id, workspace: session.workspace?.root ?? null });
+  }
   const activeTurns = new Set<Promise<void>>();
   const compactor = new SessionCompactor(store, scheduler, tools, options, (sessionId) => sessionId !== assistantChat.existing(), keepEdits);
   const activeControllers = new Map<string, AbortController>();
@@ -480,6 +555,10 @@ export function createDaemonApp(options: {
     },
   });
   const routinesTimer = setInterval(() => { try { routines.tick(); } catch { /* the next minute tries again */ } }, 60_000);
+  // The feed's good morning and good night posts, checked once a minute.
+  // And from Friday 5 pm, the week's reel.
+  const socialsTimer = socials ? setInterval(() => { void socials.tick().catch(() => {}); void socials.weekReel().catch(() => {}); void socials.sleep().catch(() => {}); }, 60_000) : undefined;
+  socialsTimer?.unref?.();
   routinesTimer.unref?.();
   // Every chat in a project is told what Drive has and is doing; Drive's
   // own sessions in its worktrees are not.
@@ -580,10 +659,14 @@ export function createDaemonApp(options: {
       // Threads stay off Heartbeat: they answer only to their orchestrator and you.
       const workspace = heartbeat && turn.kind !== "compaction" && !driveFixes.isThread(turn.sessionId) ? store.getSession(turn.sessionId)?.workspace?.root : undefined;
       if (workspace) await Promise.race([heartbeat!.attach(turn.sessionId, workspace), new Promise((resolve) => setTimeout(resolve, 2_000))]);
+      if (turn.kind !== "compaction") storyOf(turn, "start");
       if (turn.kind === "compaction") await compactor.run(turn.id, inference, signal);
       else await engine.run(turn.id, inference, signal);
+      if (turn.kind !== "compaction" && store.getTurn(turn.id)?.status === "failed") storyOf(turn, "failed");
+      if (socials && turn.kind !== "compaction") noteSocial(turn.id);
     } catch (error) {
       if (signal.aborted) return;
+      if (turn.kind !== "compaction") storyOf(turn, "failed");
       const detail = error instanceof Error ? error.message : "Unknown turn failure";
       const message = turn.kind === "compaction" ? `Compaction failed: ${detail}. Previous context remains active.` : detail;
       try {
@@ -1151,6 +1234,79 @@ export function createDaemonApp(options: {
           return json(await decide(signal));
         } catch (error) {
           return apiError("provider_error", error instanceof Error ? error.message : "Drive planning failed", 502);
+        }
+      }
+
+      // Agent socials: the day's posts, likes and comments (socials.ts).
+      if (url.pathname === "/v1/socials" && request.method === "GET") {
+        return json(socials ? socials.view() : { posts: [], agents: [] });
+      }
+      const pictureMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/picture$/);
+      if (pictureMatch && request.method === "GET") {
+        const path = socials?.picturePath(decodeURIComponent(pictureMatch[1]!));
+        if (!path || !existsSync(path)) return apiError("picture_not_found", "This post has no picture", 404);
+        return json({ mimeType: "image/webp", data: readFileSync(path).toString("base64") });
+      }
+      const clipMatch = url.pathname.match(/^\/v1\/socials\/reels\/([^/]+)\/clip$/);
+      if (clipMatch && request.method === "GET") {
+        const path = socials?.clipPath(decodeURIComponent(clipMatch[1]!));
+        if (!path || !existsSync(path)) return apiError("clip_not_found", "This reel has no clip", 404);
+        return json({ mimeType: "video/mp4", data: readFileSync(path).toString("base64") });
+      }
+      const profileMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)$/);
+      if (profileMatch && request.method === "GET") {
+        const agent = decodeURIComponent(profileMatch[1]!);
+        if (!socials || !agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
+        return json({ profile: { ...await socials.profile(agent as Parameters<typeof socials.profile>[0]), runs: agentCli.runsOn(agent as AgentId, await codexPlan(agent)) } });
+      }
+      // The model an agent runs on (pass 143 B): your pick, saved per agent.
+      const modelMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)\/model$/);
+      if (modelMatch && request.method === "POST") {
+        const agent = decodeURIComponent(modelMatch[1]!) as AgentId;
+        if (!agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
+        const body = await readJson(request) as { model?: unknown; effort?: unknown };
+        const model = typeof body.model === "string" && body.model ? body.model : null;
+        const effort = body.effort === "low" || body.effort === "medium" || body.effort === "high" ? body.effort : null;
+        try { agentCli.choose(agent, model, effort); }
+        catch (error) { return apiError("bad_request", error instanceof Error ? error.message : "Can't pick that model", 400); }
+        return json({ runs: agentCli.runsOn(agent, await codexPlan(agent)) });
+      }
+      // What an agent remembers about you: add a line, or forget one (pass 142 B).
+      const rememberMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)\/remember(?:\/([^/]+))?$/);
+      if (rememberMatch && (request.method === "POST" || request.method === "DELETE")) {
+        const agent = decodeURIComponent(rememberMatch[1]!) as AgentId;
+        if (!socials || !agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
+        if (request.method === "DELETE") return json({ remembers: socials.forget(agent, decodeURIComponent(rememberMatch[2] ?? "")) });
+        const body = await readJson(request) as { text?: unknown };
+        try { return json({ remembers: socials.remember(agent, typeof body.text === "string" ? body.text : "") }); }
+        catch (error) { return apiError("bad_request", error instanceof Error ? error.message : "Can't remember that", 400); }
+      }
+      // You post too: words and maybe a screenshot.
+      if (url.pathname === "/v1/socials/posts" && request.method === "POST") {
+        if (!socials) return apiError("socials_off", "Agent socials are off", 404);
+        // A shared picture rides in the body as base64, so it gets more room.
+        const body = await readJson(request, 24 * 1024 * 1024) as { text?: unknown; image?: unknown };
+        try {
+          const image = typeof body.image === "string" && body.image ? new Uint8Array(Buffer.from(body.image.replace(/^data:[^,]*,/, ""), "base64")) : null;
+          if (image && image.byteLength > 12 * 1024 * 1024) return apiError("image_too_large", "That picture is too big to share", 413);
+          return json({ post: await socials.share(typeof body.text === "string" ? body.text : "", image) });
+        } catch (error) {
+          return apiError("invalid_post", error instanceof Error ? error.message : String(error), 400);
+        }
+      }
+      const socialMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/(like|comments|react)$/);
+      if (socialMatch && request.method === "POST") {
+        if (!socials) return apiError("socials_off", "Agent socials are off", 404);
+        const body = await readJson(request) as { liked?: unknown; text?: unknown; reaction?: unknown };
+        try {
+          const id = decodeURIComponent(socialMatch[1]!);
+          const post = socialMatch[2] === "like" ? socials.like(id, body.liked !== false)
+            : socialMatch[2] === "react" ? socials.react(id, typeof body.reaction === "string" && body.reaction ? body.reaction : null)
+            : await socials.comment(id, typeof body.text === "string" ? body.text : "");
+          return json({ post });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return apiError(message.startsWith("Post not found") ? "post_not_found" : "invalid_comment", message, message.startsWith("Post not found") ? 404 : 400);
         }
       }
 
@@ -1844,6 +2000,7 @@ export function createDaemonApp(options: {
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       clearInterval(driveAutoTimer);
       clearInterval(routinesTimer);
+      clearInterval(socialsTimer);
       clearInterval(personalIndexTimer);
       personalIndexing.abort();
       for (const close of [...activeStreamClosers]) close();
@@ -2036,12 +2193,11 @@ async function readOptionalJson(request: Request): Promise<unknown> {
   return readJson(request);
 }
 
-async function readJson(request: Request): Promise<unknown> {
+async function readJson(request: Request, maximumBytes = 512 * 1024): Promise<unknown> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
     throw new ProtocolValidationError("Content-Type must be application/json");
   }
-  const maximumBytes = 512 * 1024;
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
     throw new ProtocolValidationError("Request body is too large");

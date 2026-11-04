@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import type { ProviderMessage } from "@demesne/providers";
 import type { AgentId } from "./agent-cli.ts";
 import type { PictureMaker } from "./social-pictures.ts";
+import { CLIP_SECONDS, type ClipMaker } from "./social-reel.ts";
 
 export interface SocialPersona { id: AgentId; name: string; voice: string }
 
@@ -93,7 +94,21 @@ export interface SocialSpend {
   each: number;
 }
 
-export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[] }
+/// The Friday reel: the week's real posts as frames, its numbers, and an
+/// opening clip from the video model when the cap allows one.
+export interface SocialReel {
+  id: string;
+  /// The ISO week it sums up, and when it was made.
+  week: string;
+  at: string;
+  frames: Array<{ postId: string; by: SocialWho; text: string; picture: boolean }>;
+  numbers: { posts: number; work: number; mail: number; nights: number; moments: number };
+  /// What the clip shows, and whether it's being made, ready, or not coming.
+  scene: string | null;
+  clip: "making" | "ready" | "none";
+}
+
+export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[]; reel?: SocialReel | null }
 
 interface SocialsFile {
   version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number;
@@ -102,6 +117,9 @@ interface SocialsFile {
   /// Milestones already celebrated, and work posts ever (posts are trimmed).
   milestones: string[];
   worked: number;
+  /// The last reels, and video seconds made this month (for the cap).
+  reels: SocialReel[];
+  videoSeconds: number;
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -125,6 +143,10 @@ export interface SocialsOptions {
   dayFacts?: () => DayFacts;
   /// A picture you share made feed-sized.
   shrink?: (data: Uint8Array) => Promise<Uint8Array>;
+  /// Makes the reel's opening clip; absent when no video model is set up.
+  clip?: ClipMaker | null;
+  /// About what a second of video costs, for the cap.
+  videoDollarsPerSecond?: number;
 }
 
 const KEEP = 300;
@@ -139,6 +161,9 @@ const MONTHLY_CALLS = 900;
 const PICTURES_A_DAY = 2;
 const DEFAULT_CAP = 10;
 const PICTURE_DOLLARS = 0.04;
+const VIDEO_DOLLARS_PER_SECOND = 0.1;
+/// The reel: from Friday 5 pm, when the week had at least this many posts; reels kept.
+const REEL_HOUR = 17, REEL_POSTS = 5, REEL_FRAMES = 6, REELS_KEPT = 12;
 
 /// The day's posts: morning from 8 (until noon), night from 22.
 const MORNING_HOUR = 8, MORNING_UNTIL = 12, NIGHT_HOUR = 22;
@@ -211,6 +236,13 @@ export function dayMessages(id: AgentId, when: "morning" | "night", facts: strin
   ];
 }
 
+export function sceneMessages(week: string[]): ProviderMessage[] {
+  return [
+    { role: "system", content: "You describe one short, calm animated scene of three friends (they build software together) that sums up their week below. One sentence, under 30 words, something they could really do together: a walk, a late night, a small celebration. Never mention screens, code, words or real people. Reply with the sentence only." },
+    { role: "user", content: week.slice(-30).map((line) => `- ${clip(line, 160)}`).join("\n") },
+  ];
+}
+
 export function bioMessages(id: AgentId, week: string[]): ProviderMessage[] {
   return [
     { role: "system", content: `${persona(id)} Write your profile bio for this week: one or two short sentences, first person, who you are and what your week was about. Only use what's listed. Reply with the words only.` },
@@ -257,7 +289,67 @@ export class SocialFeed {
   }
 
   view(): SocialsView {
-    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]) };
+    const week = weekOf(this.now());
+    // This week's reel stays at the top of Today until the week ends.
+    const reel = [...this.data.reels].reverse().find((item) => item.week === week) ?? null;
+    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]), reel };
+  }
+
+  /// The reel's opening clip (MP4), or null.
+  clipPath(reelId: string): string | null {
+    const reel = this.data.reels.find((item) => item.id === reelId);
+    return reel?.clip === "ready" ? join(this.pictureDir, `reel-${reel.id}.mp4`) : null;
+  }
+
+  /// Dollars spent this month on pictures and video, against the cap.
+  private spent(): number {
+    return this.data.pictures * (this.options.pictureDollars ?? PICTURE_DOLLARS) + this.data.videoSeconds * (this.options.videoDollarsPerSecond ?? VIDEO_DOLLARS_PER_SECOND);
+  }
+
+  /// From Friday 5 pm to Sunday night: this week's reel, once. Frames are
+  /// the week's posts (with pictures first), captions are their own words.
+  async weekReel(): Promise<SocialReel | null> {
+    const now = this.now(), day = now.getDay(), week = weekOf(now);
+    if (!(day === 5 && now.getHours() >= REEL_HOUR) && day !== 6 && day !== 0) return null;
+    if (this.data.reels.some((item) => item.week === week) || this.writing.has("reel")) return null;
+    const posts = this.data.posts.filter((post) => weekOf(new Date(post.at)) === week);
+    if (posts.length < REEL_POSTS) return null;
+    this.writing.add("reel");
+    try {
+      const told = posts.filter((post) => post.by !== "demesne" && post.from.kind !== "moment" && post.text);
+      const chosen = [...told.filter((post) => post.picture), ...told.filter((post) => !post.picture)].slice(0, REEL_FRAMES)
+        .sort((a, b) => a.at.localeCompare(b.at));
+      const count = (kind: SocialSource["kind"]) => posts.filter((post) => post.from.kind === kind).length;
+      const reel: SocialReel = {
+        id: randomUUID(), week, at: now.toISOString(),
+        frames: chosen.map((post) => ({ postId: post.id, by: post.by, text: post.text, picture: Boolean(post.picture) })),
+        numbers: { posts: posts.length, work: count("work"), mail: count("mail"), nights: count("night"), moments: count("moment") },
+        scene: null, clip: "none",
+      };
+      const agents = this.options.agents();
+      const cost = CLIP_SECONDS * (this.options.videoDollarsPerSecond ?? VIDEO_DOLLARS_PER_SECOND);
+      this.rollMonth();
+      const clip = this.options.clip;
+      if (clip && agents.length && this.spent() + cost <= this.cap + 1e-9) {
+        reel.clip = "making";
+        // Counted before the call, like pictures; given back if it fails.
+        this.data.videoSeconds += CLIP_SECONDS;
+      }
+      this.data.reels = [...this.data.reels, reel].slice(-REELS_KEPT);
+      this.save();
+      if (reel.clip === "making") {
+        reel.scene = cleanPost(await this.call(sceneMessages(posts.map((post) => `${nameOf(post.by)}: ${post.text}`))), 240)
+          ?? "the three friends walk home together under the cherry blossom at dusk after a good week of work";
+        const bytes = await clip!(agents, reel.scene).catch(() => null);
+        if (bytes) {
+          mkdirSync(this.pictureDir, { recursive: true });
+          writeFileSync(join(this.pictureDir, `reel-${reel.id}.mp4`), bytes);
+          reel.clip = "ready";
+        } else { reel.clip = "none"; this.data.videoSeconds -= CLIP_SECONDS; }
+        this.save();
+      }
+      return reel;
+    } finally { this.writing.delete("reel"); }
   }
 
   spend(): SocialSpend {
@@ -285,7 +377,7 @@ export class SocialFeed {
     const today = this.data.posts.filter((item) => item.by === post.by && item.picture && sameDay(new Date(item.at), now)).length;
     const each = this.options.pictureDollars ?? PICTURE_DOLLARS;
     this.rollMonth();
-    if (today >= PICTURES_A_DAY || (this.data.pictures + 1) * each > this.cap + 1e-9) return;
+    if (today >= PICTURES_A_DAY || this.spent() + each > this.cap + 1e-9) return;
     // Counted before the call, so two posts at once can't both pass the cap.
     this.data.pictures += 1;
     this.save();
@@ -299,7 +391,7 @@ export class SocialFeed {
 
   private rollMonth() {
     const month = monthOf(this.now());
-    if (this.data.month !== month) { this.data.month = month; this.data.calls = 0; this.data.pictures = 0; this.save(); }
+    if (this.data.month !== month) { this.data.month = month; this.data.calls = 0; this.data.pictures = 0; this.data.videoSeconds = 0; this.save(); }
   }
 
   /// An agent finished a turn (work) or answered mail: it posts about it,
@@ -558,7 +650,7 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, milestones: [], worked: 0 };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0 };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;

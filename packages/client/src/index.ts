@@ -6,7 +6,9 @@ import type { ThemeLibrary } from "@demesne/brand";
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean }
 export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
 export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[] }
-export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }> }
+/// The Friday reel: the week's posts as frames, its numbers, and an opening clip.
+export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
+export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
   type ImageArtifact,
@@ -340,6 +342,7 @@ export class DemesneClient {
   async housedAgents(workspace: string): Promise<{ agents: HousedAgent[] }> { return this.request(`/v1/agents?workspace=${encodeURIComponent(workspace)}`); }
   async socials(): Promise<SocialsView> { return this.request("/v1/socials"); }
   async likePost(id: string, liked: boolean): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/like`, { method: "POST", body: JSON.stringify({ liked }) }); }
+  async socialClip(reelId: string): Promise<{ mimeType: string; data: string }> { return this.request(`/v1/socials/reels/${encodeURIComponent(reelId)}/clip`); }
   async socialPicture(id: string): Promise<{ mimeType: string; data: string }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/picture`); }
   async reactToPost(id: string, reaction: string | null): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/react`, { method: "POST", body: JSON.stringify({ reaction }) }); }
   async socialProfile(agent: string): Promise<{ profile: SocialProfile }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}`); }

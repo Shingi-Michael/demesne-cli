@@ -7,11 +7,12 @@ import { agentReaction, asksForWork, cleanPost, SocialFeed, weekOf, writeOnce, t
 import type { AgentId } from "../src/agent-cli.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { picturePrompt, pictureMaker, type PictureMaker } from "../src/social-pictures.ts";
+import { clipMaker, referenceSvg, videoModel, type ClipMaker } from "../src/social-reel.ts";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const step of cleanup.splice(0)) step(); });
 
-function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number; picture?: PictureMaker | null; monthlyDollars?: number; dayFacts?: () => DayFacts } = {}) {
+function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?: () => Date; monthlyCalls?: number; picture?: PictureMaker | null; monthlyDollars?: number; dayFacts?: () => DayFacts; clip?: ClipMaker | null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "demesne-socials-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const calls: ProviderMessage[][] = [];
@@ -23,6 +24,7 @@ function feed(replies: Array<string | null>, options: { agents?: AgentId[]; now?
     picture: options.picture,
     monthlyDollars: options.monthlyDollars,
     dayFacts: options.dayFacts,
+    clip: options.clip,
     write: async (messages) => { calls.push(messages); return replies.length ? replies.shift()! : "ok"; },
   });
   return { social: make(), calls, reopen: make };
@@ -299,5 +301,94 @@ describe("pass 138", () => {
     const milestones = social.view().posts.filter((post) => post.from.kind === "milestone" && !post.text.startsWith("A whole week"));
     expect(milestones.map((post) => post.text)).toEqual(["25 things finished together", "10 things finished together"]);
     expect(milestones.every((post) => post.by === "demesne" && post.reactions?.["🌸"]?.includes("claude"))).toBe(true);
+  });
+});
+
+describe("the Friday reel", () => {
+  // Friday 2026-11-06; the week's posts go in from Monday on.
+  async function week(clip: ClipMaker | null, monthlyDollars?: number) {
+    let at = new Date("2026-11-02T10:00:00");
+    const made = feed([], { now: () => at, agents: ["claude", "codex"], clip, monthlyDollars });
+    for (let index = 0; index < 6; index++) {
+      at = new Date(Date.parse("2026-11-02T10:00:00") + index * 13 * 3_600_000);
+      await made.social.noteAgentTurn(index % 2 ? "codex" : "claude", work(`s${index}`), "a", `b${index}`);
+    }
+    return { ...made, at: (value: string) => { at = new Date(value); } };
+  }
+
+  test("comes from Friday 5 pm, once, from the week's real posts, with a clip when there's a video model", async () => {
+    const scenes: string[] = [];
+    const { social, at } = await week(async (agents, scene) => { scenes.push(`${agents.join("+")}: ${scene}`); return new Uint8Array([1, 2, 3]); });
+    at("2026-11-06T16:00:00");
+    expect(await social.weekReel()).toBeNull();
+    at("2026-11-06T17:05:00");
+    const reel = (await social.weekReel())!;
+    expect(reel.week).toBe("2026-W45");
+    expect(reel.frames.length).toBe(6);
+    expect(reel.numbers.work).toBe(6);
+    expect(reel.clip).toBe("ready");
+    expect(scenes[0]).toStartWith("claude+codex: ");
+    expect(existsSync(social.clipPath(reel.id)!)).toBe(true);
+    expect(social.view().reel?.id).toBe(reel.id);
+    expect(await social.weekReel()).toBeNull();
+    at("2026-11-09T09:00:00");
+    expect(social.view().reel).toBeNull();
+  });
+
+  test("a failed clip is given back to the cap, and a full cap means no clip", async () => {
+    const failed = await week(async () => null);
+    failed.at("2026-11-07T12:00:00");
+    expect((await failed.social.weekReel())!.clip).toBe("none");
+    let asked = 0;
+    const full = await week(async () => { asked++; return new Uint8Array([1]); }, 0.5);
+    full.at("2026-11-07T12:00:00");
+    expect((await full.social.weekReel())!.clip).toBe("none");
+    expect(asked).toBe(0);
+  });
+
+  test("a quiet week has no reel", async () => {
+    let at = new Date("2026-11-06T18:00:00");
+    const { social } = feed([], { now: () => at, clip: async () => new Uint8Array([1]) });
+    await social.noteAgentTurn("claude", work("s1"), "a", "b");
+    at = new Date("2026-11-06T19:00:00");
+    expect(await social.weekReel()).toBeNull();
+  });
+});
+
+describe("the clip maker", () => {
+  test("sora-2 on OpenAI unless set; none turns it off", () => {
+    expect(videoModel({ url: "https://api.openai.com/v1" })).toBe("sora-2");
+    expect(videoModel({ url: "https://other.example/v1" })).toBeNull();
+    expect(videoModel({ url: "https://api.openai.com/v1", videoModel: "none" })).toBeNull();
+    expect(videoModel({ url: "https://other.example/v1", videoModel: "veo" })).toBe("veo");
+  });
+
+  test("starts a job with the faces as reference, waits for it, and downloads the video", async () => {
+    const calls: string[] = [];
+    let polls = 0;
+    const request = (async (url: string | URL, init?: RequestInit) => {
+      const path = String(url).replace("https://api.openai.com/v1", "");
+      calls.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/videos") {
+        const form = init!.body as FormData;
+        expect(form.get("model")).toBe("sora-2");
+        expect(form.get("seconds")).toBe("8");
+        expect(form.get("size")).toBe("720x1280");
+        expect(form.get("input_reference")).toBeInstanceOf(Blob);
+        return Response.json({ id: "video_1", status: "queued" });
+      }
+      if (path === "/videos/video_1") return Response.json({ status: ++polls < 2 ? "in_progress" : "completed" });
+      return new Response(new Uint8Array([9, 9]));
+    }) as typeof fetch;
+    const make = clipMaker({ url: "https://api.openai.com/v1", apiKey: "k" }, { png: async () => new Uint8Array([1]), request, sleep: async () => {}, pollMs: 1 })!;
+    expect(await make(["claude", "codex"], "a walk")).toEqual(new Uint8Array([9, 9]));
+    expect(calls).toEqual(["POST /videos", "GET /videos/video_1", "GET /videos/video_1", "GET /videos/video_1/content"]);
+    expect(referenceSvg(["claude", "codex", "gemini"]).match(/<svg x=/g)).toHaveLength(3);
+  });
+
+  test("a failed job is null", async () => {
+    const request = (async (url: string | URL) => String(url).endsWith("/videos") ? Response.json({ id: "v", status: "queued" }) : Response.json({ status: "failed" })) as typeof fetch;
+    const make = clipMaker({ url: "https://api.openai.com/v1" }, { png: async () => new Uint8Array([1]), request, sleep: async () => {} })!;
+    expect(await make(["claude"], "x")).toBeNull();
   });
 });

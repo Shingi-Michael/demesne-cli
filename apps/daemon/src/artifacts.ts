@@ -62,8 +62,8 @@ export function readArtifact(store: DemesneStore, artifact: ImageArtifact, previ
 }
 
 /** An SVG drawn to PNG (agent socials: an agent's face as the picture model's reference). */
-export function svgToPng(svg: string, size: number): Promise<Buffer> {
-  return sharp(Buffer.from(svg), { density: 300 }).resize(size, size).png().toBuffer();
+export function svgToPng(svg: string, size: number, height = size): Promise<Buffer> {
+  return sharp(Buffer.from(svg), { density: 300 }).resize(size, height).png().toBuffer();
 }
 
 /** A picture made small enough to show in a feed: WebP, at most `width` wide. */

@@ -47,6 +47,7 @@ import {
 } from "@demesne/protocol";
 import { DemesneStore, InvalidStateError, NotFoundError, QuestionStateError } from "@demesne/storage";
 import { SocialFeed, writeOnce } from "./socials.ts";
+import { clipMaker } from "./social-reel.ts";
 import { pictureMaker } from "./social-pictures.ts";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
@@ -434,6 +435,8 @@ export function createDaemonApp(options: {
     agents: () => agentCli.agents().map((agent) => agent.id),
     // Pictures of their day (social-pictures.ts), from the [images] model.
     picture: options.images ? pictureMaker(options.images, { facePng: (svg) => svgToPng(svg, 512), shrink: (data) => feedPicture(data, 768) }) : null,
+    // The Friday reel's opening clip (social-reel.ts), from the video model.
+    clip: options.images ? clipMaker(options.images, { png: (svg, width, height) => svgToPng(svg, width, height) }) : null,
     // A screenshot you share keeps enough width to read.
     shrink: (data) => feedPicture(data, 1280),
     // Your chats for the good morning and good night posts: named ones you
@@ -534,7 +537,8 @@ export function createDaemonApp(options: {
   });
   const routinesTimer = setInterval(() => { try { routines.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   // The feed's good morning and good night posts, checked once a minute.
-  const socialsTimer = socials ? setInterval(() => { void socials.tick().catch(() => {}); }, 60_000) : undefined;
+  // And from Friday 5 pm, the week's reel.
+  const socialsTimer = socials ? setInterval(() => { void socials.tick().catch(() => {}); void socials.weekReel().catch(() => {}); }, 60_000) : undefined;
   socialsTimer?.unref?.();
   routinesTimer.unref?.();
   // Every chat in a project is told what Drive has and is doing; Drive's
@@ -1220,6 +1224,12 @@ export function createDaemonApp(options: {
         const path = socials?.picturePath(decodeURIComponent(pictureMatch[1]!));
         if (!path || !existsSync(path)) return apiError("picture_not_found", "This post has no picture", 404);
         return json({ mimeType: "image/webp", data: readFileSync(path).toString("base64") });
+      }
+      const clipMatch = url.pathname.match(/^\/v1\/socials\/reels\/([^/]+)\/clip$/);
+      if (clipMatch && request.method === "GET") {
+        const path = socials?.clipPath(decodeURIComponent(clipMatch[1]!));
+        if (!path || !existsSync(path)) return apiError("clip_not_found", "This reel has no clip", 404);
+        return json({ mimeType: "video/mp4", data: readFileSync(path).toString("base64") });
       }
       const profileMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)$/);
       if (profileMatch && request.method === "GET") {

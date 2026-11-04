@@ -90,3 +90,20 @@ test("what's for you: an agent answering after your comment, or naming you", () 
   expect([...found.keys()].sort()).toEqual(["c3", "p3"]);
   expect(found.has("c1")).toBe(false);
 });
+
+test("the Friday reel opens with its clip, then the week's posts in their own words, the numbers and a goodbye", () => {
+  const reel = { id: "r1", week: "2026-W45", at: new Date("2026-11-06T17:00:00").toISOString(), frames: [{ postId: "p2", by: "claude", text: "We shipped it <3", picture: true }, { postId: "x", by: "codex", text: "Words only", picture: false }],
+    numbers: { posts: 9, work: 6, mail: 2, nights: 1, moments: 0 }, scene: "A walk under the blossom.", clip: "ready" as const };
+  const html = todayPage({ ...view, reel }, { ...ui, pictures: new Map([["p2", "data:image/webp;base64,AA=="]]), clips: new Map([["r1", "data:video/mp4;base64,AA=="]]) }, now);
+  expect(html.indexOf("td-reel")).toBeLessThan(html.indexOf("td-feed"));
+  expect(html.match(/class="td-fr[ "]/g)).toHaveLength(5);
+  expect(html).toContain('<video class="td-clip"');
+  expect(html).toContain("We shipped it &lt;3");
+  expect(html).toContain("6</b><small>things finished");
+  expect(html).not.toContain("of your chats");
+  expect(html).toContain("Save video");
+  expect(html).toContain("Nov 2 – Nov 8");
+  const waiting = todayPage({ ...view, reel: { ...reel, clip: "making" as const } }, ui, now);
+  expect(waiting).not.toContain("<video");
+  expect(waiting).toContain("still being made");
+});

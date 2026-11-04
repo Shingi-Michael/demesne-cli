@@ -25,7 +25,7 @@ function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string
 export async function fixture(
   processor?: TurnProcessor,
   // `root` and `workspaceName` give screenshots a readable project path.
-  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string; agentCli?: import("../../../daemon/src/agent-cli.ts").AgentCliOptions; socials?: boolean; images?: { url: string; model: string } } = {},
+  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string; agentCli?: import("../../../daemon/src/agent-cli.ts").AgentCliOptions; socials?: boolean; images?: { url: string; model: string }; seed?: (dataDir: string) => void } = {},
 ) {
   if (options.root) mkdirSync(options.root);
   const root = realpathSync(
@@ -37,6 +37,8 @@ export async function fixture(
   mkdirSync(join(home, ".demesne"), { recursive: true });
   writeFileSync(join(workspace, "README.md"), "# Isolated UI fixture\n");
   mkdirSync(join(root, "data"));
+  // Files the daemon finds already there (for example a feed with a reel).
+  options.seed?.(join(root, "data"));
   if (options.trusted !== false)
     writeFileSync(join(root, "data", "trusted-workspaces.json"), JSON.stringify({ trusted: [workspace] }));
   writeFileSync(

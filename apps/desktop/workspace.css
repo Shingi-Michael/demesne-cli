@@ -2185,6 +2185,15 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-friend-link { color: var(--t1); border-radius: 4px; }
 .td-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0 0 8px; }
 .td-grid > * { aspect-ratio: 1; width: 100%; border-radius: 6px; object-fit: cover; background: var(--tone); }
+.td-weeks { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; }
+.td-week { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--hair); }
+.td-week:last-child { border-bottom: 0; }
+.td-week-pic { flex: none; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--tone); }
+.td-week-none { display: grid; place-items: center; color: var(--blossom, #f2b6c8); font-size: 18px; }
+.td-week-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.td-week-main b { color: var(--t1); font-weight: 500; }
+.td-week-main p { margin: 0; color: var(--t2); }
+.td-week-main small { color: var(--t3); font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 
 /* Agent socials pass 139 B: the Friday reel at the top of Today. */
 .sidebar-today .today-reel { width: 7px; height: 7px; margin-left: auto; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--blossom, #f2b6c8); }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SocialsView } from "@demesne/client";
-import { agentMood, dayHeading, forYou, newSince, postMood, todayPage } from "../today-page.ts";
+import { agentMood, dayHeading, forYou, newSince, postMood, todayPage, weekHtml } from "../today-page.ts";
 import { agentFace, FACE_MOODS } from "@demesne/brand";
 
 const now = new Date("2026-11-03T22:00:00").getTime();
@@ -136,4 +136,18 @@ test("the Friday reel opens with its clip, then the week's posts in their own wo
   const waiting = todayPage({ ...view, reel: { ...reel, clip: "making" as const } }, ui, now);
   expect(waiting).not.toContain("<video");
   expect(waiting).toContain("still being made");
+});
+
+test("a past week shows its line, what the agent did, its friend and its picture", () => {
+  const ui = { replying: "", sending: [], error: "", pictures: new Map([["pic1", "data:image/webp;base64,AAAA"]]) };
+  const html = weekHtml({ week: "2026-W44", start: "2026-10-26", line: "Calm week of tab fixes.", posts: 4, work: 2, mail: 1, friend: "codex", picture: "pic1" }, view, ui);
+  expect(html).toContain("Week of");
+  expect(html).toContain("Calm week of tab fixes.");
+  expect(html).toContain("4 posts · 2 finished · 1 mail");
+  expect(html).toContain("talked most with");
+  expect(html).toContain("data:image/webp;base64,AAAA");
+  const quiet = weekHtml({ week: "2026-W43", start: "2026-10-19", line: null, posts: 1, work: 0, mail: 0, friend: null, picture: null }, view, ui);
+  expect(quiet).toContain("1 post");
+  expect(quiet).not.toContain("<p>");
+  expect(quiet).toContain("td-week-none");
 });

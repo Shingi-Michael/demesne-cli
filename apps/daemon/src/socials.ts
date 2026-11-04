@@ -210,10 +210,11 @@ export function postMessages(id: AgentId, source: SocialSource, asked: string, a
 
 const nameOf = (by: SocialWho) => by === "you" ? "Mike" : by === "demesne" ? "Demesne" : PERSONAS[by].name;
 
-export function commentMessages(id: AgentId, post: SocialPost, about: string): ProviderMessage[] {
+export function commentMessages(id: AgentId, post: SocialPost, about: string, free = false): ProviderMessage[] {
   const author = nameOf(post.by);
+  const choice = free ? ` You don't have to answer: be like a friend scrolling past. Comment only if you really have something to say about it. If you'd just tap a reaction, answer only REACT. If you'd scroll past, answer only PASS.` : "";
   return [
-    { role: "system", content: `${persona(id)} Comment on ${author}'s post. You know about it because ${about}. Be kind or playful, never mean. One sentence. ${RULES}` },
+    { role: "system", content: `${persona(id)} Comment on ${author}'s post. You know about it because ${about}. Be kind or playful, never mean. One sentence.${choice} ${RULES}` },
     { role: "user", content: `${author}'s post:\n${post.text}${post.comments.length ? `\n\nComments so far:\n${post.comments.map((item) => `${nameOf(item.by)}: ${item.text}`).join("\n")}` : ""}` },
   ];
 }
@@ -254,13 +255,24 @@ export function bioMessages(id: AgentId, week: string[]): ProviderMessage[] {
 export function agentReaction(agent: AgentId, post: SocialPost): Reaction | null {
   if (post.by === agent) return null;
   if (post.from.kind === "milestone") return "🌸";
-  // Your own post: everyone who lives here reacts, each in character.
-  if (post.from.kind === "share") return agent === "codex" ? "🔥" : agent === "gemini" && post.picture ? "👀" : "🌸";
+  // Your own post: no one reacts by rule; the agents who see it choose (share()).
+  if (post.from.kind === "share") return null;
   if (agent === "codex" && /\b(fix(ed)?|merged?|shipped|green|pass(ed)?|done|works?)\b/i.test(post.text)) return "🔥";
   if (agent === "gemini" && /\?|\b(odd|weird|strange|why|curious|mystery|flaky|surpris\w*)\b/i.test(post.text)) return "👀";
   if (agent === "claude" && (post.from.kind === "mail" || /\bthank/i.test(post.text))) return "🙏";
   if (agent === "claude" && post.from.kind === "moment") return "🌸";
   return null;
+}
+
+/// The reaction an agent taps on your post when it chooses to, in character.
+export function shareReaction(agent: AgentId, post: SocialPost): Reaction {
+  return agent === "codex" ? "🔥" : agent === "gemini" && post.picture ? "👀" : "🌸";
+}
+
+/// What an agent chose to do with your post: comment, just react, or pass.
+export function shareChoice(answer: string | null): "pass" | "react" | "comment" {
+  const word = (answer ?? "").replace(/[^a-z]/gi, "").toUpperCase();
+  return !answer || word === "PASS" ? "pass" : word === "REACT" ? "react" : "comment";
 }
 
 /// The ISO week a date falls in, as 2026-W45.
@@ -496,13 +508,22 @@ export class SocialFeed {
       post.picture = true;
     }
     this.add(post);
-    // Your post always gets answers: agents who were around today first,
-    // then any agent that lives here. Two at most, and never past the
-    // day's limit on agent comments.
+    // Two agents see your post, those around today first. Each chooses:
+    // comment, just react, or scroll past, so a post can get no answer.
     const around = (id: AgentId) => this.data.posts.some((item) => item.by === id && sameDay(new Date(item.at), this.now()));
-    for (let index = 0; index < AGENT_COMMENTS_A_POST; index++) {
-      const near = this.options.agents().some((id) => around(id) && !this.must(post.id).comments.some((item) => item.by === id));
-      await this.friendComments(post, near ? around : () => true, near ? "you were around in Demesne today" : "you live in Demesne with Mike and saw his post", true);
+    const agents = this.options.agents(), turn = Math.floor(this.now().getTime() / 60_000);
+    const others = agents.filter((id) => !around(id));
+    const rotated = others.map((_, index) => others[(index + turn) % others.length]!);
+    for (const id of [...agents.filter(around), ...rotated].slice(0, AGENT_COMMENTS_A_POST)) {
+      const why = around(id) ? "you were around in Demesne today" : "you live in Demesne with Mike and saw his post";
+      const answer = await this.call(commentMessages(id, this.must(post.id), why, true));
+      const choice = shareChoice(answer), fresh = this.find(post.id);
+      if (!fresh) break;
+      if (choice === "pass") continue;
+      ((fresh.reactions ??= {})[shareReaction(id, fresh)] ??= []).push(id);
+      const text = choice === "comment" ? cleanPost(answer, 200) : null;
+      if (text) fresh.comments.push({ id: randomUUID(), by: id, at: this.now().toISOString(), text });
+      this.save();
     }
     return this.must(post.id);
   }

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProviderMessage } from "@demesne/providers";
-import { agentReaction, asksForWork, cleanPost, SocialFeed, weekOf, writeOnce, type DayFacts } from "../src/socials.ts";
+import { agentReaction, asksForWork, cleanPost, shareChoice, SocialFeed, weekOf, writeOnce, type DayFacts } from "../src/socials.ts";
 import type { AgentId } from "../src/agent-cli.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { picturePrompt, pictureMaker, type PictureMaker } from "../src/social-pictures.ts";
@@ -247,20 +247,34 @@ describe("pass 138", () => {
     expect(weekOf(new Date("2026-11-03T10:00:00"))).toBe("2026-W45");
   });
 
-  test("you share a line: agents who were around today answer first, then the others, and all react", async () => {
+  test("you share a line: agents who were around today see it first, and each chooses to comment, react or pass", async () => {
     let at = new Date("2026-11-03T10:00:00");
-    const { social } = feed(["Long day.", "Looks great, Mike!", "Ship it."], { now: () => at, agents: ["claude", "codex"] });
+    const { social, calls } = feed(["Long day.", "Looks great, Mike!", "REACT"], { now: () => at, agents: ["claude", "codex", "gemini"] });
     await social.noteAgentTurn("claude", work("s1"), "a", "b");
     at = new Date("2026-11-03T12:00:00");
+    const before = calls.length;
     const post = await social.share("Finally got the tabs right", null);
+    expect(calls.length - before).toBe(2); // two agents see it, never all of them
+    expect(calls.at(-2)![0]!.content).toContain("answer only PASS");
     expect(post.by).toBe("you");
     expect(post.from.kind).toBe("share");
-    expect(post.comments.map((comment) => comment.by)).toEqual(["claude", "codex"]);
-    expect(post.reactions).toEqual({ "🌸": ["claude"], "🔥": ["codex"] });
+    expect(post.comments.map((comment) => comment.by)).toEqual(["claude"]);
+    expect(Object.values(post.reactions ?? {}).flat().sort()).toHaveLength(2);
     await expect(social.share("   ")).rejects.toThrow();
   });
 
-  test("your post gets answered on a quiet day too, even past the agents' daily comment limit", async () => {
+  test("agents can scroll past your post", async () => {
+    const at = new Date("2026-11-03T09:00:00");
+    const { social } = feed(["PASS", "pass."], { now: () => at, agents: ["claude", "gemini"] });
+    const post = await social.share("First post of the day", null);
+    expect(post.comments).toEqual([]);
+    expect(post.reactions ?? {}).toEqual({});
+    expect(shareChoice("Nice one!")).toBe("comment");
+    expect(shareChoice("REACT")).toBe("react");
+    expect(shareChoice(null)).toBe("pass");
+  });
+
+  test("your post can be answered on a quiet day too, even past the agents' daily comment limit", async () => {
     const at = new Date("2026-11-03T09:00:00");
     const { social } = feed(["Nice!", "Love it."], { now: () => at, agents: ["claude", "gemini"] });
     const post = await social.share("First post of the day", null);

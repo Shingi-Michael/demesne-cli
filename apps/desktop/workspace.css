@@ -2088,7 +2088,37 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .agent-face-svg { display: block; width: 100%; height: 100%; }
 .agent-mark.today-mark { border-radius: 50%; background: var(--blossom, #f2b6c8); color: #141416; font-size: 10px; }
 .sidebar-today small { color: var(--blossom, #f2b6c8); }
-.desktop #page[data-kind="today"] { max-width: 520px; }
+/* Pass 144 A: Today on a desktop. A readable feed (about 600px) and the
+   room beside it as cards; a narrow window puts the cards above the feed. */
+.desktop #page[data-kind="today"] { max-width: 900px; }
+.td-solo { max-width: 600px; }
+.td-wrap { container-type: inline-size; }
+.td-layout { display: grid; grid-template-columns: minmax(0, 600px) 236px; gap: 32px; align-items: start; }
+.td-main { min-width: 0; }
+.td-side { position: sticky; top: 8px; display: flex; flex-direction: column; gap: 10px; padding-top: 52px; }
+@container (max-width: 760px) {
+  .td-layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .td-side { position: static; order: -1; flex-direction: row; flex-wrap: wrap; padding: 0 0 14px; }
+  .td-side .td-card { flex: 1 1 200px; }
+}
+.td-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair); }
+.td-card h3 { margin: 0 0 2px; color: var(--t4, var(--t3)); font-size: 10.5px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+.td-card p { margin: 0; color: var(--t2); font-size: 12.5px; }
+.td-card-link { align-self: flex-start; height: 22px; padding: 0; color: var(--acc); font-size: 12px; }
+.td-card-agent, .td-card-reply { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 4px 6px; margin: 0 -6px; border-radius: 7px; text-align: left; color: var(--t2); font-size: 12.5px; line-height: 17px; }
+.td-card-agent:hover, .td-card-reply:hover { background: var(--tone2); }
+.td-card-agent b, .td-card-reply b { color: var(--t1); font-weight: 500; }
+.td-card-agent small, .td-card-reply small { display: block; color: var(--t3); font-size: 11.5px; }
+.td-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding-left: 42px; }
+.td-pic-open { display: block; align-self: flex-start; width: min(360px, 100%); padding: 0; border-radius: 12px; cursor: zoom-in; }
+.td-pic-open .td-pic { width: 100%; }
+.td-pic-open.td-shot-open { width: auto; max-width: min(440px, 100%); }
+.td-pic-open .td-pic.td-shot { width: auto; max-width: 100%; }
+.td-zoom { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 40px; background: rgba(0, 0, 0, .72); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.td-zoom-close { padding: 0; cursor: zoom-out; }
+.td-zoom img { display: block; max-width: calc(100vw - 80px); max-height: calc(100vh - 80px); border-radius: 12px; object-fit: contain; }
+.td-flash { animation: td-flash 1.2s ease-out; }
+@keyframes td-flash { 0% { background: color-mix(in srgb, var(--blossom, #f2b6c8) 14%, transparent); } 100% { background: transparent; } }
 .td-top { display: block; }
 .td-top h2 { margin: 0 0 4px; color: var(--t1); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
 .td-top p { margin: 0 0 18px; color: var(--t3); font-size: 13px; }
@@ -2304,3 +2334,8 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-mp-stops { display: flex; gap: 4px; }
 .td-mp-stops button { all: unset; flex: 1; text-align: center; cursor: pointer; padding: 4px 0; border-radius: 6px; color: var(--t3); font-size: 12px; background: var(--tone); }
 .td-mp-stops button.on { color: var(--t1); box-shadow: inset 0 0 0 1px var(--acc); }
+
+/* Pass 144 A: pictures at a desktop size, not edge to edge. */
+.td-pic { width: min(360px, 100%); aspect-ratio: 16 / 10; max-height: 240px; }
+.td-pic.td-shot { width: auto; max-width: min(440px, 100%); max-height: 300px; aspect-ratio: auto; }
+.td-pic.td-shot.td-pic-wait { width: min(360px, 100%); aspect-ratio: 16 / 10; }

@@ -16,7 +16,7 @@ export interface SocialWeek { week: string; start: string; line: string | null; 
 export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
 /// A story: a 24-hour moment from an agent's day, from a real event.
 export interface SocialStory { id: string; by: string; at: string; kind: string; text: string; label: string; mood: "calm" | "happy" | "focus" | "stuck" | "sleepy" | "wave"; sessionId: string }
-export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null; stories?: SocialStory[]; moods?: Record<string, SocialMood> }
+export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null; stories?: SocialStory[]; moods?: Record<string, SocialMood>; runs?: Record<string, string> }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
   type ImageArtifact,

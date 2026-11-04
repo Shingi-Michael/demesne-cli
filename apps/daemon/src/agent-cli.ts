@@ -360,6 +360,18 @@ export class AgentCli {
     return next;
   }
 
+  /// The "Runs on" words alone, without listing any models (for Today's
+  /// cards: a model list can take seconds). A pick Antigravity hasn't
+  /// named yet shows as its id.
+  runsLabel(id: AgentId): string {
+    const choice = this.choice(id);
+    const tool = toolDefault(id, this.home);
+    const model = choice.model ?? tool.model;
+    const named = id === "gemini" && choice.model ? this.agyListed?.find((option) => option.id === choice.model)?.label : undefined;
+    const effort = id === "codex" ? choice.effort ?? tool.effort : null;
+    return (named ?? (model ? modelLabel(id, model) : "Tool default")) + (effort ? ` · ${capital(effort)}` : "");
+  }
+
   /// What an agent runs on, for its profile. `plan` is the Codex models on
   /// Demesne's own Codex plan (their slugs), when it has one.
   runsOn(id: AgentId, plan: string[] = []): AgentRunsOn {

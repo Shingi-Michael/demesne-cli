@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SocialsView } from "@demesne/client";
-import { agentMood, dayHeading, forYou, newSince, postMood, todayPage, weekHtml } from "../today-page.ts";
+import { agentMood, dayHeading, forYou, newSince, postMood, storyAgents, todayPage, unseenStories, weekHtml } from "../today-page.ts";
 import { agentFace, FACE_MOODS } from "@demesne/brand";
 
 const now = new Date("2026-11-03T22:00:00").getTime();
@@ -150,4 +150,24 @@ test("a past week shows its line, what the agent did, its friend and its picture
   expect(quiet).toContain("1 post");
   expect(quiet).not.toContain("<p>");
   expect(quiet).toContain("td-week-none");
+});
+
+test("stories: a row atop Today, new ones first with a ring, and a player", () => {
+  const story = (by: string, at: string, text: string, mood: "focus" | "happy" = "focus") => ({ id: `${by}-${at}`, by, at: new Date(at).toISOString(), kind: "start", text, label: "Chat · demesne-cli", mood, sessionId: "s1" });
+  const withStories: SocialsView = { ...view, stories: [story("claude", "2026-11-03T20:00:00", "Started on tabs"), story("codex", "2026-11-03T21:00:00", "Merged it: login", "happy")] };
+  const seen = { codex: new Date("2026-11-03T21:00:00").toISOString() };
+  expect([...unseenStories(withStories, seen)]).toEqual(["claude"]);
+  expect(storyAgents(withStories, seen)).toEqual(["claude", "codex"]);
+  const ui = { replying: "", sending: [], error: "", storySeen: seen };
+  const page = todayPage(withStories, ui, now);
+  expect(page).toContain('class="td-stories"');
+  expect(page.indexOf("td-stories")).toBeLessThan(page.indexOf("td-feed"));
+  expect(page.match(/class="td-ring"/g)).toHaveLength(1);
+  expect(page.match(/class="td-ring seen"/g)).toHaveLength(1);
+  expect(page).not.toContain('class="td-story"');
+  const playing = todayPage(withStories, { ...ui, story: { agent: "codex", index: 0 } }, now);
+  expect(playing).toContain('class="td-story"');
+  expect(playing).toContain("Merged it: login");
+  expect(playing).toContain('data-mood="happy"');
+  expect(todayPage(view, ui, now)).not.toContain("td-stories");
 });

@@ -35,7 +35,11 @@ const seed = (data: string) => {
   mkdirSync(join(data, "socials"), { recursive: true });
   const made = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=pink:s=360x640:d=2", "-pix_fmt", "yuv420p", "-y", join(data, "socials", "reel-reel-1.mp4")]);
   if (made.status !== 0) writeFileSync(join(data, "socials", "reel-reel-1.mp4"), new Uint8Array([0]));
-  writeFileSync(join(data, "socials.json"), JSON.stringify({ version: 1, posts: [...old, ...posts], month: "", calls: 0, pictures: 0, bios: {}, pastBios: { codex: [{ week: weekOf(new Date(then)), text: "A week of chasing flaky tests." }] }, milestones: [], worked: 5, reels: [reel], videoSeconds: 8 }));
+  writeFileSync(join(data, "socials.json"), JSON.stringify({ version: 1, posts: [...old, ...posts], month: "", calls: 0, pictures: 0, bios: {}, pastBios: { codex: [{ week: weekOf(new Date(then)), text: "A week of chasing flaky tests." }] }, milestones: [], worked: 5, reels: [reel], videoSeconds: 8,
+    stories: [
+      { id: "st-1", by: "codex", at: new Date(now - 50 * 60_000).toISOString(), kind: "start", text: "Started on Fix the login redirect", label: "Chat · demesne-cli", mood: "focus", sessionId: "seed" },
+      { id: "st-2", by: "codex", at: new Date(now - 20 * 60_000).toISOString(), kind: "done", text: "Merged it: Fix the login redirect", label: "Chat · demesne-cli", mood: "happy", sessionId: "seed" },
+    ] }));
 };
 const f = await fixture(undefined, { seed, socials: true, images: { url: `http://127.0.0.1:${imageServer.port}/v1`, model: "fake-image" }, agentCli: {
   which: (command) => command === "claude" || command === "codex" ? `/usr/local/bin/${command}` : null,
@@ -113,6 +117,19 @@ try {
   expect(await mine.locator("img.td-shot").count() === 1, "your post carries its picture");
   await page.waitForTimeout(800);
   await page.screenshot({ path: join(output, "today.png") });
+  // Pass 141 B: the stories row, a ring in the Agents list, and the player.
+  expect(await page.locator("#page .td-stories .td-ring:not(.seen)").count() >= 1, "Today shows a stories row with a new ring");
+  expect(await page.locator("#sidebar-housed .agent-face.has-story").count() >= 1, "an agent with a new story has a ring in the Agents list");
+  await page.locator("#page .td-story-pick[data-args*='codex']").click();
+  await page.locator("#page .td-story").waitFor({ timeout: 5_000 }).catch(() => {});
+  expect(await page.locator("#page .td-story-body", { hasText: "Started on Fix the login redirect" }).count() === 1, "tapping a face plays its stories");
+  await page.screenshot({ path: join(output, "story.png") });
+  await page.locator("#page .td-story-head").waitFor({ timeout: 2_000 }).catch(() => {});
+  await page.locator("#page .td-story-next").click();
+  expect(await page.locator("#page .td-story-body", { hasText: "Merged it" }).count() === 1, "tapping goes on to the next story");
+  await page.locator("#page .td-story-x").click();
+  expect(await page.locator("#page .td-story").count() === 0 && await page.locator("#page .td-story-pick[data-args*='codex'] .td-ring.seen").count() === 1, "closing it leaves the ring seen");
+  expect(await page.locator("#page .td-story-pick[data-args*='claude']").count() === 1, "Claude Code's real turn made its own stories");
   await page.locator("#page .td-post [data-action='today-profile']").first().click();
   await page.locator("#page .td-bio").waitFor({ timeout: 15_000 }).catch(() => {});
   expect(await page.locator("#page .td-bio").count() === 1 && await page.locator("#page .td-back").count() === 1, "a face opens that agent's profile");

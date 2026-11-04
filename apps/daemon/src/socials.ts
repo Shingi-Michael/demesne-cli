@@ -124,7 +124,22 @@ export interface SocialReel {
   clip: "making" | "ready" | "none";
 }
 
-export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[]; reel?: SocialReel | null }
+/// A story (pass 141 B): a small moment from an agent's day that lasts 24
+/// hours. Each comes from a real event, in words taken from the event
+/// itself (no model call), with the mood its face shows.
+export type StoryKind = "start" | "done" | "failed" | "mail" | "morning" | "night";
+export interface SocialStory {
+  id: string; by: AgentId; at: string; kind: StoryKind;
+  text: string;
+  /// What it came from, shown under the words ("Chat · demesne-cli").
+  label: string;
+  mood: "calm" | "happy" | "focus" | "stuck" | "sleepy" | "wave";
+  sessionId: string;
+}
+export const STORY_HOURS = 24;
+const STORIES_A_DAY = 8;
+
+export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[]; reel?: SocialReel | null; stories?: SocialStory[] }
 
 interface SocialsFile {
   version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number;
@@ -138,6 +153,8 @@ interface SocialsFile {
   /// The last reels, and video seconds made this month (for the cap).
   reels: SocialReel[];
   videoSeconds: number;
+  /// The last day's stories.
+  stories: SocialStory[];
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -201,9 +218,18 @@ const clip = (text: string, max: number) => {
 };
 
 /// The writer's reply as one short social line, or null when it isn't one.
+/// Em and en dashes out: a number range keeps a hyphen, the rest become commas.
+export function undash(text: string): string {
+  if (!/[–—]/.test(text)) return text;
+  return text.replace(/(\d)\s*[–—]\s*(\d)/g, "$1-$2").replace(/\s*[—–]+\s*/g, ", ").replace(/,\s*([,.!?])/g, "$1").replace(/^,\s*|,\s*$/g, "").trim();
+}
+
 export function cleanPost(reply: string | null, max = 280): string | null {
   if (!reply) return null;
   let text = reply.replace(/^\s*(post|comment|reply)\s*:\s*/i, "").replace(/^["“]+|["”]+$/g, "").replace(/#\w+/g, "").replace(/\s+/g, " ").trim();
+  // No em or en dashes (Mike: "its not clean"): a number range keeps a
+  // hyphen, anything else becomes a comma.
+  text = undash(text);
   if (!/\p{L}/u.test(text)) return null;
   if (text.length > max) {
     const cut = text.slice(0, max);
@@ -213,7 +239,7 @@ export function cleanPost(reply: string | null, max = 280): string | null {
   return text;
 }
 
-const RULES = "Write like a person posting on their own social feed: first person, casual, one to three short sentences, under 240 characters. No hashtags, no emoji spam (one at most), no quotes around it. Only say what really happened in the notes; never invent people, places, events or numbers. Reply with the words only.";
+const RULES = "Write like a person posting on their own social feed: first person, casual, one to three short sentences, under 240 characters. No hashtags, no emoji spam (one at most), no quotes around it, no em or en dashes (use a comma or a full stop). Only say what really happened in the notes; never invent people, places, events or numbers. Reply with the words only.";
 
 function persona(id: AgentId): string {
   const who = PERSONAS[id];
@@ -340,7 +366,38 @@ export class SocialFeed {
     const week = weekOf(this.now());
     // This week's reel stays at the top of Today until the week ends.
     const reel = [...this.data.reels].reverse().find((item) => item.week === week) ?? null;
-    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]), reel };
+    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]), reel, stories: this.liveStories() };
+  }
+
+  /// Stories from the last 24 hours, oldest first.
+  private liveStories(): SocialStory[] {
+    const since = this.now().getTime() - STORY_HOURS * 3_600_000;
+    return this.data.stories.filter((story) => Date.parse(story.at) > since).sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  /// Something happened in an agent's day: a story, in the event's own
+  /// words. The same thing twice in ten minutes counts once, and an agent
+  /// gets at most eight a day.
+  noteStory(agent: AgentId, kind: StoryKind, detail: { text?: string; title?: string; sessionId?: string; workspace?: string | null; happy?: boolean }): SocialStory | null {
+    if (!this.options.agents().includes(agent)) return null;
+    const now = this.now(), title = clip((detail.title ?? "").trim() || "a chat", 70);
+    const live = this.liveStories();
+    if (live.some((story) => story.by === agent && story.kind === kind && story.sessionId === (detail.sessionId ?? "") && now.getTime() - Date.parse(story.at) < 10 * 60_000)) return null;
+    if (live.filter((story) => story.by === agent).length >= STORIES_A_DAY) return null;
+    const place = detail.workspace ? ` · ${detail.workspace.split(/[\\/]/).filter(Boolean).at(-1)}` : "";
+    const shape: Record<StoryKind, { text: string; label: string; mood: SocialStory["mood"] }> = {
+      start: { text: `Started on ${title}`, label: `Chat${place}`, mood: "focus" },
+      done: { text: detail.happy ? `Merged it: ${title}` : `Finished ${title}`, label: `Chat${place}`, mood: detail.happy ? "happy" : "calm" },
+      failed: { text: `Stuck on ${title}`, label: `Chat${place}`, mood: "stuck" },
+      mail: { text: `Answered mail: ${title}`, label: "Mail", mood: "calm" },
+      morning: { text: clip(detail.text ?? "Good morning", 160), label: "Good morning", mood: "wave" },
+      night: { text: clip(detail.text ?? "Good night", 160), label: "Good night", mood: "sleepy" },
+    };
+    const story: SocialStory = { id: randomUUID(), by: agent, at: now.toISOString(), kind, sessionId: detail.sessionId ?? "", ...shape[kind] };
+    const since = now.getTime() - STORY_HOURS * 3_600_000;
+    this.data.stories = [...this.data.stories.filter((item) => Date.parse(item.at) > since), story];
+    this.save();
+    return story;
   }
 
   /// The reel's opening clip (MP4), or null.
@@ -612,6 +669,7 @@ export class SocialFeed {
       if (!text) return null;
       const post: SocialPost = { id: randomUUID(), by: agent, at: this.now().toISOString(), text, from: { kind: when, label: when === "morning" ? "Good morning" : "Good night", sessionId: "", workspace: null }, liked: false, comments: [] };
       this.add(post);
+      this.noteStory(agent, when, { text });
       await this.addPicture(post);
       return this.find(post.id);
     } finally { this.writing.delete(key); }
@@ -726,12 +784,17 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0 };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0, stories: [] };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;
       const posts = Array.isArray(parsed.posts) ? parsed.posts : [];
       // Feeds from before milestones count their work posts once.
+      // Words written before dashes were cleaned out lose them too.
+      for (const post of posts) {
+        if (post.from?.kind !== "moment" && post.by !== "you") post.text = undash(post.text);
+        for (const comment of post.comments ?? []) if (comment.by !== "you") comment.text = undash(comment.text);
+      }
       return { ...empty, ...parsed, posts, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
     } catch { return empty; }
   }

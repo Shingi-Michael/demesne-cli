@@ -2229,3 +2229,33 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-player.hold:not(.done) .td-paused { display: grid; }
 .td-making { align-self: center; color: var(--t3); font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { .td-fr.td-kb.on img, .td-fr-bye.on .td-face { animation: none; } }
+
+/* Stories (pass 141 B): a row of faces atop Today, rings in the Agents list, a player. */
+.agent-mark.agent-face.has-story { box-shadow: 0 0 0 1.5px var(--side, var(--surface)), 0 0 0 3px var(--blossom, #f2b6c8); }
+.td-stories { display: flex; gap: 14px; margin: 0 0 16px; padding: 2px 2px 14px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--hair); }
+.td-story-pick { display: flex; flex: none; flex-direction: column; align-items: center; gap: 5px; padding: 0; color: var(--t2); font: inherit; font-size: 11.5px; }
+.td-ring { display: grid; place-items: center; padding: 2.5px; border-radius: 50%; background: conic-gradient(var(--blossom, #f2b6c8), #f7a9c0, var(--acc), var(--blossom, #f2b6c8)); }
+.td-ring.seen { background: var(--hair2); }
+.td-ring .td-face { box-shadow: 0 0 0 2.5px var(--surface); }
+.td-face.td-f-story { width: 52px; height: 52px; }
+.td-story-pick:hover .td-story-name { color: var(--t1); }
+.td-story { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: rgba(0, 0, 0, .62); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.td-story-card { position: relative; display: flex; flex-direction: column; width: min(360px, 92vw); height: min(620px, 86vh); border-radius: 16px; overflow: hidden; background: #0f0f12; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .8); color: #fff; }
+.td-story-bars { display: flex; gap: 3px; padding: 10px 10px 0; position: relative; z-index: 3; }
+.td-story-bars i { flex: 1; height: 2.5px; border-radius: 2px; background: rgba(255, 255, 255, .25); overflow: hidden; }
+.td-story-bars b { display: block; height: 100%; width: 0; background: #fff; }
+.td-story-bars i.done b { width: 100%; }
+.td-story-bars i.now b { animation: td-story-fill 4s linear forwards; }
+@keyframes td-story-fill { to { width: 100%; } }
+.td-story-head { position: relative; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12.5px; }
+.td-story-head b { font-weight: 600; }
+.td-story-head small { color: rgba(255, 255, 255, .6); }
+.td-story-x { margin-left: auto; padding: 0 4px; color: rgba(255, 255, 255, .75); font-size: 20px; line-height: 1; }
+.td-story-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 0 26px 40px; text-align: center; }
+.td-story-body .td-face { width: 120px; height: 120px; }
+.td-story-body p { margin: 0; max-width: 280px; font-size: 17px; line-height: 24px; font-weight: 500; }
+.td-story-src { padding: 3px 10px; border-radius: 99px; background: rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .6); font-size: 12px; }
+.td-story-back, .td-story-next { position: absolute; top: 56px; bottom: 0; z-index: 2; padding: 0; background: none; cursor: pointer; }
+.td-story-back { left: 0; width: 33%; }
+.td-story-next { right: 0; width: 67%; }
+@media (prefers-reduced-motion: reduce) { .td-story-bars i.now b { animation: none; width: 100%; } }

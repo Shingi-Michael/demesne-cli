@@ -24,7 +24,7 @@ import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
-import { agentMood, forYou, newSince, todayPage, whoName, type TodayUi } from "./today-page.ts";
+import { agentMood, forYou, newSince, storiesOf, storyAgents, todayPage, unseenStories, whoName, type TodayUi } from "./today-page.ts";
 import { agentFace } from "@demesne/brand";
 import type { SocialPost, SocialProfile, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
@@ -744,10 +744,11 @@ function renderSidebar() {
   // while it works or has a new reply). Clicking opens its chat.
   const todayCount = newSince(socialsView, todaySeen());
   const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}${socialsView?.reel && reelSeen() !== socialsView.reel.id ? `<i class="today-reel" title="This week's reel is ready"></i>` : ""}<small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
+  const storyRings = unseenStories(socialsView, todayUi.storySeen);
   const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${todayRow}${housed.map((agent) => {
     const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
-    return btn("agent-open", `<span class="agent-mark agent-face" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts))}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
+    return btn("agent-open", `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts))}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
       { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
       .replace("<button ", `<button title="${h(agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
   }).join("")}</div>`;
@@ -2863,6 +2864,41 @@ const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new M
 /// The Friday reel's player: which frame it's on (kept across redraws), and
 /// whether you've watched this week's reel (the Today row's pink ring).
 const reelPlay = { id: "", index: 0, at: 0, hold: false, frame: 0 };
+/// Stories (pass 141 B): when you last saw each agent's, and the player's clock.
+const STORY_SEEN = "demesne-story-seen";
+todayUi.storySeen = (() => { try { const value = JSON.parse(localStorage.getItem(STORY_SEEN) ?? "{}"); return value && typeof value === "object" ? value : {}; } catch { return {}; } })();
+let storyTimer: ReturnType<typeof setTimeout> | undefined;
+const STORY_MS = 4_000;
+function showStory(agent: string, index: number) {
+  clearTimeout(storyTimer);
+  const story = storiesOf(socialsView, agent)[index];
+  if (!story) { todayUi.story = null; renderPage(); renderSidebar(); return; }
+  todayUi.story = { agent, index };
+  if (story.at > (todayUi.storySeen![agent] ?? "")) {
+    todayUi.storySeen![agent] = story.at;
+    try { localStorage.setItem(STORY_SEEN, JSON.stringify(todayUi.storySeen)); } catch {}
+  }
+  renderPage();
+  renderSidebar();
+  storyTimer = setTimeout(() => pageOpen === "today" ? stepStory(1) : closeStory(), STORY_MS);
+}
+/// On through one agent's stories, then the next agent's you haven't seen.
+function stepStory(by: number) {
+  const open = todayUi.story;
+  if (!open) return;
+  const index = Math.max(0, open.index + by);
+  if (index < storiesOf(socialsView, open.agent).length) return showStory(open.agent, index);
+  const next = storyAgents(socialsView, todayUi.storySeen).find((agent) => agent !== open.agent && unseenStories(socialsView, todayUi.storySeen).has(agent));
+  if (next) return showStory(next, 0);
+  closeStory();
+}
+function closeStory() { clearTimeout(storyTimer); todayUi.story = null; renderPage(); renderSidebar(); }
+document.addEventListener("keydown", (event) => {
+  if (!todayUi.story || pageOpen !== "today") return;
+  if (event.key === "Escape") { event.preventDefault(); closeStory(); }
+  else if (event.key === "ArrowRight") { event.preventDefault(); stepStory(1); }
+  else if (event.key === "ArrowLeft") { event.preventDefault(); stepStory(-1); }
+});
 const REEL_SEEN = "demesne-reel-seen";
 const reelSeen = () => { try { return localStorage.getItem(REEL_SEEN); } catch { return null; } };
 function mountReel(root: HTMLElement) {
@@ -5522,6 +5558,9 @@ async function dispatch(
   }
   if (action === "today-reel-again") { Object.assign(reelPlay, { index: 0, at: 0, hold: false }); const root = document.getElementById("page"); if (root) mountReel(root); document.querySelector("#page .td-player")?.classList.remove("hold", "done"); return; }
   if (action === "today-save-reel") { try { await api("desktop-save-reel", { id: String(args.id), week: String(args.week ?? "") }); } catch (error) { todayUi.error = errorWords(error); renderPage(); } return; }
+  if (action === "today-story") return showStory(String(args.agent ?? ""), 0);
+  if (action === "today-story-step") { if (todayUi.story) stepStory(Number(args.d) < 0 ? -1 : 1); return; }
+  if (action === "today-story-close") return closeStory();
   if (action === "today-pick") { todayUi.picking = todayUi.picking === args.id ? "" : String(args.id); return renderPage(); }
   if (action === "today-react") {
     const id = String(args.id), reaction = typeof args.reaction === "string" ? args.reaction : "";

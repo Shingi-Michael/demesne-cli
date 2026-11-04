@@ -70,6 +70,9 @@ try {
   await page.locator("#page .td-reel video").waitFor({ timeout: 10_000 }).catch(() => {});
   expect(await page.locator("#page .td-reel").count() === 1 && await page.locator("#page .td-reel .td-fr").count() === 8, "the week's reel sits at the top of Today: clip, five posts, numbers, goodbye");
   expect(await page.locator("#page .td-reel .td-fr.on video").count() === 1, "the reel opens with the video clip");
+  // It really plays: the page's security policy must let a data: video load.
+  const loaded = await page.waitForFunction(() => { const video = document.querySelector<HTMLVideoElement>("#page .td-reel video"); return !!video && video.readyState >= 2 && video.videoWidth > 0; }, undefined, { timeout: 10_000 }).then(() => true, () => false);
+  expect(loaded, "the clip loads and shows a picture");
   await page.waitForFunction(() => [...document.querySelectorAll("#page .td-reel .td-fr")].findIndex((frame) => frame.classList.contains("on")) >= 1, undefined, { timeout: 10_000 }).catch(() => {});
   expect(await page.locator("#page .td-reel .td-fr").nth(0).evaluate((frame) => !frame.classList.contains("on")), "the reel plays on to the next frame");
   await page.screenshot({ path: join(output, "reel.png") });

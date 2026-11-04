@@ -676,7 +676,7 @@ function renderSidebar() {
   const housedIds = new Set(housed.flatMap((agent) => agent.sessionId ? [agent.sessionId] : []));
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen()]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -743,7 +743,7 @@ function renderSidebar() {
   // The agents: a letter tile, the name, and how it is (a dot
   // while it works or has a new reply). Clicking opens its chat.
   const todayCount = newSince(socialsView, todaySeen());
-  const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}<small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
+  const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}${socialsView?.reel && reelSeen() !== socialsView.reel.id ? `<i class="today-reel" title="This week's reel is ready"></i>` : ""}<small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
   const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${todayRow}${housed.map((agent) => {
     const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
@@ -2859,7 +2859,59 @@ type PageKind = ChatsTab | "scheduled" | "foundry" | "customize" | "settings" | 
 let pageOpen: "" | PageKind = "";
 /// Today (agent socials): the feed, what is open in it, and when you last looked.
 let socialsView: SocialsView | null = null;
-const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new Map(), picking: "", profile: null, share: { text: "", image: null, busy: false } };
+const todayUi: TodayUi = { replying: "", sending: [], error: "", pictures: new Map(), picking: "", profile: null, share: { text: "", image: null, busy: false }, clips: new Map() };
+/// The Friday reel's player: which frame it's on (kept across redraws), and
+/// whether you've watched this week's reel (the Today row's pink ring).
+const reelPlay = { id: "", index: 0, at: 0, hold: false, frame: 0 };
+const REEL_SEEN = "demesne-reel-seen";
+const reelSeen = () => { try { return localStorage.getItem(REEL_SEEN); } catch { return null; } };
+function mountReel(root: HTMLElement) {
+  cancelAnimationFrame(reelPlay.frame);
+  const section = root.querySelector<HTMLElement>(".td-reel"), player = section?.querySelector<HTMLElement>(".td-player");
+  if (!section || !player) return;
+  const id = section.dataset.reel ?? "";
+  if (reelPlay.id !== id) Object.assign(reelPlay, { id, index: 0, at: 0, hold: false });
+  const frames = [...player.querySelectorAll<HTMLElement>(".td-fr")], bars = [...player.querySelectorAll<HTMLElement>(".td-bars b")];
+  const length = (index: number) => { const video = frames[index]?.querySelector("video"); return video && Number.isFinite(video.duration) && video.duration > 0 ? video.duration * 1000 : 3600; };
+  const show = (index: number) => {
+    reelPlay.index = Math.max(0, Math.min(frames.length - 1, index));
+    frames.forEach((frame, at) => {
+      frame.classList.toggle("on", at === reelPlay.index);
+      const video = frame.querySelector("video");
+      if (video) { if (at === reelPlay.index && !reelPlay.hold) { video.currentTime = 0; void video.play().catch(() => {}); } else video.pause(); }
+    });
+    bars.forEach((bar, at) => { bar.style.width = at < reelPlay.index ? "100%" : "0"; });
+  };
+  player.classList.toggle("hold", reelPlay.hold);
+  show(reelPlay.index);
+  let last = performance.now();
+  const tick = (now: number) => {
+    if (!player.isConnected) return;
+    const step = now - last; last = now;
+    if (!reelPlay.hold && pageOpen === "today" && document.visibilityState === "visible") {
+      reelPlay.at += step;
+      const total = length(reelPlay.index);
+      bars[reelPlay.index]!.style.width = `${Math.min(100, reelPlay.at / total * 100)}%`;
+      if (reelPlay.at >= total) {
+        reelPlay.at = 0;
+        // The last frame stays; you've seen this week's reel.
+        if (reelPlay.index >= frames.length - 1) { reelPlay.hold = true; player.classList.add("hold", "done"); try { localStorage.setItem(REEL_SEEN, id); } catch {} renderSidebar(); return; }
+        show(reelPlay.index + 1);
+      }
+    }
+    reelPlay.frame = requestAnimationFrame(tick);
+  };
+  reelPlay.frame = requestAnimationFrame(tick);
+  player.onclick = (event) => {
+    const box = player.getBoundingClientRect(), x = (event.clientX - box.left) / box.width;
+    if (x < 0.3 || x > 0.7) { reelPlay.at = 0; if (player.classList.contains("done")) { player.classList.remove("done"); reelPlay.hold = false; player.classList.remove("hold"); mountReel(root); } show(reelPlay.index + (x < 0.3 ? -1 : 1)); return; }
+    reelPlay.hold = !reelPlay.hold;
+    player.classList.toggle("hold", reelPlay.hold);
+    const video = frames[reelPlay.index]?.querySelector("video");
+    if (video) { if (reelPlay.hold) video.pause(); else void video.play().catch(() => {}); }
+    if (!reelPlay.hold && player.classList.contains("done")) { player.classList.remove("done"); Object.assign(reelPlay, { index: 0, at: 0 }); mountReel(root); }
+  };
+}
 /// What on Today was for you (an agent answering or naming you): ids seen,
 /// and the ones you haven't looked at, for the sidebar's pink dot.
 let todayKnown: Set<string> | null = null;
@@ -2867,6 +2919,11 @@ const todayDot = new Set<string>();
 const picturesLoading = new Set<string>();
 /// The posts' pictures, fetched once each while Today is open.
 function loadPictures() {
+  const reel = socialsView?.reel;
+  if (reel?.clip === "ready" && !todayUi.clips!.has(reel.id) && !picturesLoading.has(`clip:${reel.id}`)) {
+    picturesLoading.add(`clip:${reel.id}`);
+    void api<string>("socials-clip", { id: reel.id }).then((src) => { todayUi.clips!.set(reel.id, src); renderPage(); }, () => {}).finally(() => picturesLoading.delete(`clip:${reel.id}`));
+  }
   const ids = [...(socialsView?.posts ?? []).filter((post) => post.picture).map((post) => post.id), ...(todayUi.profile?.data?.pictures ?? [])];
   for (const id of ids) {
     if (todayUi.pictures!.has(id) || picturesLoading.has(id)) continue;
@@ -2934,7 +2991,7 @@ async function loadSocials() {
 // The feed fills while you work: a look once a minute keeps the count
 // fresh, and every 10 seconds while Today is open so pictures arrive.
 let socialTicks = 0;
-setInterval(() => { if (state?.housed?.length && (pageOpen === "today" || ++socialTicks % 6 === 0)) void loadSocials(); }, 10_000);
+setInterval(() => { if (state?.housed?.length && (pageOpen === "today" || socialTicks++ % 6 === 0)) void loadSocials(); }, 10_000);
 function swapPost(post: SocialPost) {
   if (socialsView) socialsView = { ...socialsView, posts: socialsView.posts.map((item) => item.id === post.id ? post : item) };
 }
@@ -3292,6 +3349,7 @@ function renderPage() {
     ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
   root.innerHTML = html;
   root.dataset.html = html;
+  if (pageOpen === "today") mountReel(root);
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.googleProvider!;
@@ -5462,6 +5520,8 @@ async function dispatch(
     try { swapPost(await api<SocialPost>("socials-like", { id: String(args.id), liked: args.liked === true })); } catch (error) { todayUi.error = errorWords(error); }
     return renderPage();
   }
+  if (action === "today-reel-again") { Object.assign(reelPlay, { index: 0, at: 0, hold: false }); const root = document.getElementById("page"); if (root) mountReel(root); document.querySelector("#page .td-player")?.classList.remove("hold", "done"); return; }
+  if (action === "today-save-reel") { try { await api("desktop-save-reel", { id: String(args.id), week: String(args.week ?? "") }); } catch (error) { todayUi.error = errorWords(error); renderPage(); } return; }
   if (action === "today-pick") { todayUi.picking = todayUi.picking === args.id ? "" : String(args.id); return renderPage(); }
   if (action === "today-react") {
     const id = String(args.id), reaction = typeof args.reaction === "string" ? args.reaction : "";

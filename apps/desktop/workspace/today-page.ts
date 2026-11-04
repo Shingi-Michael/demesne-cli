@@ -4,7 +4,7 @@
 /// moments, what you share, milestones, likes, reactions and comments.
 /// Each post is tagged with what it came from, and the tag opens that chat.
 /// A face opens that agent's profile.
-import type { SocialPost, SocialProfile, SocialsView } from "@demesne/client";
+import type { SocialPost, SocialProfile, SocialReel, SocialsView } from "@demesne/client";
 import { agentFace } from "@demesne/brand";
 
 const h = (value: unknown) =>
@@ -29,6 +29,8 @@ export interface TodayUi {
   profile?: { agent: string; data: SocialProfile | null } | null;
   /// What you're about to share: words, a picture, and whether it's posting.
   share?: { text: string; image: string | null; busy: boolean };
+  /// The reel's clip once loaded (a data URL), by reel id.
+  clips?: Map<string, string>;
 }
 
 const NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini", you: "You", demesne: "Demesne" };
@@ -99,6 +101,40 @@ function postHtml(post: SocialPost, view: SocialsView, ui: TodayUi): string {
   return `<article class="${classes}" data-post="${h(post.id)}">${petals}${head}${picture}${body}${from}${reactionsHtml(post, ui)}<div class="td-acts">${like}${react}${reply}</div>${comments}${sending}${field}</article>`;
 }
 
+/// The week the reel sums up, Monday to Sunday, in words.
+export function reelDates(reel: SocialReel): string {
+  const at = new Date(reel.at), monday = new Date(at.getFullYear(), at.getMonth(), at.getDate() - ((at.getDay() + 6) % 7));
+  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+  const day = (date: Date) => date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${day(monday)} – ${day(sunday)}`;
+}
+
+/// The Friday reel (pass 139 B): the opening clip from the video model, then
+/// the week's posts with their own words as captions, the week's numbers and
+/// a goodbye. live.ts plays it (mountReel); frames say how long they last.
+export function reelHtml(reel: SocialReel, view: SocialsView, ui: TodayUi): string {
+  const frames: string[] = [];
+  const clip = reel.clip === "ready" ? ui.clips?.get(reel.id) : undefined;
+  if (clip) frames.push(`<div class="td-fr td-fr-clip" data-clip="1"><video class="td-clip" src="${h(clip)}" muted playsinline preload="auto"></video>${reel.scene ? `<div class="td-cap">${h(reel.scene)}</div>` : ""}<span class="td-tag">Video · 8 s</span></div>`);
+  for (const frame of reel.frames) {
+    const src = frame.picture ? ui.pictures?.get(frame.postId) : undefined;
+    const who = `<div class="td-who">${face(frame.by, "comment")}${h(whoName(frame.by, view))}</div>`;
+    frames.push(src
+      ? `<div class="td-fr td-kb"><img src="${h(src)}" alt=""><div class="td-cap">${who}${h(frame.text)}</div></div>`
+      : `<div class="td-fr td-fr-words"><p>${h(frame.text)}</p><div class="td-cap">${who}</div></div>`);
+  }
+  const numbers = reel.numbers;
+  const facts = [[numbers.work, "things finished"], [numbers.mail, "mail answered"], [numbers.nights, "good nights"], [numbers.moments, "of your chats"]].filter(([count]) => Number(count) > 0)
+    .map(([count, words]) => `<div><b>${count}</b><small>${words}</small></div>`).join("");
+  frames.push(`<div class="td-fr td-fr-nums">${facts || `<div><b>${numbers.posts}</b><small>posts</small></div>`}</div>`);
+  frames.push(`<div class="td-fr td-fr-bye">See you Monday<div>${view.agents.map((agent) => face(agent.id, "post")).join("")}</div></div>`);
+  const save = reel.clip === "ready" ? btn("today-save-reel", "Save video", { id: reel.id, week: reel.week }, "td-act") : "";
+  const making = reel.clip === "making" ? `<small class="td-making">The video is still being made</small>` : "";
+  return `<section class="td-reel" data-reel="${h(reel.id)}"><div class="td-head"><span class="td-face td-reel-mark td-f-post" aria-hidden="true">✿</span><div><b>The week in Demesne</b><small>Friday reel · ${h(reelDates(reel))}</small></div></div>`
+    + `<div class="td-player" role="group" aria-label="The week's reel. Tap the sides to go back or forward, the middle to pause.">${frames.join("")}<div class="td-bars">${frames.map(() => "<i><b></b></i>").join("")}</div><div class="td-paused" aria-hidden="true">❚❚</div></div>`
+    + `<div class="td-acts">${btn("today-reel-again", "Watch again", { id: reel.id }, "td-act")}${save}${making}</div></section>`;
+}
+
 /// You post too: a line, and a screenshot pasted or attached.
 function composerHtml(ui: TodayUi): string {
   const share = ui.share ?? { text: "", image: null, busy: false };
@@ -143,7 +179,8 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
     last = key;
     return heading + postHtml(post, view, ui);
   }).join("");
-  return `${title}${error}${composer}<div class="td-feed">${rows}</div>`;
+  const reel = view.reel ? reelHtml(view.reel, view, ui) : "";
+  return `${title}${error}${reel}${composer}<div class="td-feed">${rows}</div>`;
 }
 
 /// Posts newer than the last time you opened Today: the sidebar's count.

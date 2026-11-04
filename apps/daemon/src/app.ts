@@ -1230,7 +1230,8 @@ export function createDaemonApp(options: {
       // You post too: words and maybe a screenshot.
       if (url.pathname === "/v1/socials/posts" && request.method === "POST") {
         if (!socials) return apiError("socials_off", "Agent socials are off", 404);
-        const body = await readJson(request) as { text?: unknown; image?: unknown };
+        // A shared picture rides in the body as base64, so it gets more room.
+        const body = await readJson(request, 24 * 1024 * 1024) as { text?: unknown; image?: unknown };
         try {
           const image = typeof body.image === "string" && body.image ? new Uint8Array(Buffer.from(body.image.replace(/^data:[^,]*,/, ""), "base64")) : null;
           if (image && image.byteLength > 12 * 1024 * 1024) return apiError("image_too_large", "That picture is too big to share", 413);
@@ -2138,12 +2139,11 @@ async function readOptionalJson(request: Request): Promise<unknown> {
   return readJson(request);
 }
 
-async function readJson(request: Request): Promise<unknown> {
+async function readJson(request: Request, maximumBytes = 512 * 1024): Promise<unknown> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
     throw new ProtocolValidationError("Content-Type must be application/json");
   }
-  const maximumBytes = 512 * 1024;
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
     throw new ProtocolValidationError("Request body is too large");

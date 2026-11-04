@@ -24,6 +24,7 @@ test("IPC rejects malformed and oversized requests", () => {
   for (const [method, args] of [["", {}], ["x".repeat(65), {}], ["submit", []], ["submit", null], ["submit", { text: "x".repeat(260000) }]]) expect(() => validateRequest(method, args)).toThrow();
   // A picture (a 5 MB screenshot as base64) fits; the same size elsewhere doesn't.
   expect(() => validateRequest("attach", { data: "x".repeat(7_000_000) })).not.toThrow();
+  expect(() => validateRequest("socials-share", { image: "x".repeat(7_000_000) })).not.toThrow();
   expect(() => validateRequest("attach", { data: "x".repeat(34_000_000) })).toThrow();
 });
 test("external opening accepts web URLs or absolute files, never executable URL schemes", () => {

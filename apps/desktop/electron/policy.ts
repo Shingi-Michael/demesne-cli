@@ -127,7 +127,7 @@ export function assetPath(root: string, value: string) {
 }
 /// Requests that carry a picture (base64) get room for one; the page fits
 /// big pictures first (fit-image.ts), so this is a backstop.
-export const PICTURE_REQUESTS = new Set(["attach", "image-convert"]);
+export const PICTURE_REQUESTS = new Set(["attach", "socials-share", "image-convert"]);
 export const PICTURE_REQUEST_BYTES = 32 * 1024 * 1024;
 export function validateRequest(method: unknown, args: unknown): asserts method is string {
   if (typeof method !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(method) || !args || typeof args !== "object" || Array.isArray(args)) throw new Error("Invalid desktop request");

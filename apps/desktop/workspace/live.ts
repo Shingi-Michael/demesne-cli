@@ -2901,12 +2901,11 @@ async function openProfile(agent: string) {
   renderPage();
 }
 /// A screenshot for your post, from a paste or the file picker.
+/// Any size works: big ones are redrawn at 2048px (the feed shows 1280).
 function attachPicture(file: File | null | undefined) {
-  if (!file || !file.type.startsWith("image/")) return;
-  if (file.size > 10 * 1024 * 1024) { todayUi.error = "That picture is too big to share (10 MB at most)"; return renderPage(); }
-  const reader = new FileReader();
-  reader.onload = () => { if (typeof reader.result === "string") { todayUi.share!.image = reader.result; todayUi.error = ""; renderPage(); } };
-  reader.readAsDataURL(file);
+  if (!file || !(file.type.startsWith("image/") || /\.hei[cf]$/i.test(file.name))) return;
+  void readPicture(file, { side: 2048, bytes: 3 * 1024 * 1024 }).then(({ url }) => { todayUi.share!.image = url; todayUi.error = ""; renderPage(); },
+    () => { todayUi.error = "That picture couldn't be read. Try a PNG, JPEG or WebP."; renderPage(); });
 }
 async function sharePost() {
   const share = todayUi.share!;

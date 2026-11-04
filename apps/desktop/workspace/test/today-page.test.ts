@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SocialsView } from "@demesne/client";
-import { agentMood, dayHeading, forYou, newSince, postMood, storyAgents, todayPage, unseenStories, weekHtml } from "../today-page.ts";
+import { agentMood, dayHeading, forYou, moodTitle, newSince, postMood, storyAgents, todayPage, unseenStories, weekHtml } from "../today-page.ts";
 import { agentFace, FACE_MOODS } from "@demesne/brand";
 
 const now = new Date("2026-11-03T22:00:00").getTime();
@@ -170,4 +170,26 @@ test("stories: a row atop Today, new ones first with a ring, and a player", () =
   expect(playing).toContain("Merged it: login");
   expect(playing).toContain('data-mood="happy"');
   expect(todayPage(view, ui, now)).not.toContain("td-stories");
+});
+
+test("pass 142 B: the face follows the mood, and the profile says why, who it's close to and what it remembers", () => {
+  const happy = { mood: "happy" as const, strong: false, word: "happy", reasons: [{ why: "Merged the login fix", p: 3.1, e: 1, left: 5 }, { why: "Login test failed", p: -1.2, e: 0.5, left: 1 }] };
+  expect(agentMood("claude", "", [], now, { claude: happy })).toBe("happy");
+  expect(agentMood("claude", "working", [], now, { claude: happy })).toBe("focus");
+  expect(moodTitle("Claude Code", happy)).toBe("Claude Code is happy\nMerged the login fix (5h left)\nLogin test failed (1h left)");
+  const data = {
+    agent: { id: "claude", name: "Claude Code", voice: "warm" }, bio: "Settling in.", since: null, week: { work: 1, mail: 0, pictures: 0, comments: 0 }, friend: "codex", pictures: [], weeks: [],
+    feeling: happy,
+    close: [{ agent: "codex", warmth: 0.4, bond: 0.2, lines: [{ why: "commented on my post", at: "2026-11-03T21:05:00Z" }] }],
+    remembers: [{ id: "m1", text: "You like <short> answers", from: "comment" as const, at: "2026-11-03T21:06:00Z" }],
+  };
+  const html = todayPage(view, { replying: "", sending: [], error: "", profile: { agent: "claude", data } }, now);
+  expect(html).toContain("Feeling happy");
+  expect(html).toContain("Merged the login fix");
+  expect(html).toContain('class="down">-1.2');
+  expect(html).toContain("commented on my post");
+  expect(html).toContain('style="width:40%"');
+  expect(html).toContain("You like &lt;short&gt; answers");
+  expect(html).toContain('data-action="today-forget"');
+  expect(html).toContain('class="td-remember" data-agent="claude"');
 });

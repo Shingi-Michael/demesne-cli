@@ -4,7 +4,7 @@
 /// moments, what you share, milestones, likes, reactions and comments.
 /// Each post is tagged with what it came from, and the tag opens that chat.
 /// A face opens that agent's profile.
-import type { SocialPost, SocialProfile, SocialReel, SocialsView, SocialStory, SocialWeek } from "@demesne/client";
+import type { SocialCloseness, SocialMood, SocialPost, SocialProfile, SocialReel, SocialRemembered, SocialsView, SocialStory, SocialWeek } from "@demesne/client";
 import { agentFace, type FaceMood } from "@demesne/brand";
 
 const h = (value: unknown) =>
@@ -107,11 +107,14 @@ export function postMood(post: SocialPost): FaceMood {
   return "calm";
 }
 /// How an agent looks right now, in the sidebar and on its profile:
-/// focused while it works, stuck when its chat failed, otherwise the
-/// mood of its own post from the last two hours, otherwise calm.
-export function agentMood(agent: string, tone: string, posts: SocialPost[] = [], now = Date.now()): FaceMood {
+/// focused while it works, stuck when its chat failed, otherwise its mood
+/// from what really happened lately (pass 142, the daemon's inner life),
+/// or for an older daemon the mood of its own post from the last two hours.
+export function agentMood(agent: string, tone: string, posts: SocialPost[] = [], now = Date.now(), moods?: Record<string, SocialMood>): FaceMood {
   if (tone === "working") return "focus";
   if (tone === "bad") return "stuck";
+  const mood = moods?.[agent];
+  if (mood) return mood.mood;
   const latest = posts.filter((post) => post.by === agent).reduce<SocialPost | null>((best, post) => !best || post.at > best.at ? post : best, null);
   return latest && now - Date.parse(latest.at) < 2 * 3_600_000 ? postMood(latest) : "calm";
 }
@@ -212,12 +215,33 @@ function composerHtml(ui: TodayUi): string {
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
+/// An agent's mood in words, with what's behind it, for the sidebar's hover.
+export function moodTitle(name: string, mood: SocialMood | undefined): string {
+  if (!mood) return name;
+  return [`${name} is ${mood.word}`, ...mood.reasons.map((reason) => `${reason.why} (${reason.left}h left)`)].join("\n");
+}
+
+const signed = (value: number) => value > 0 ? `+${value}` : `${value}`;
+
+/// Pass 142 B: how it feels and why, who it's close to, what it remembers about you.
+export function innerHtml(agent: string, profile: SocialProfile, view: SocialsView): string {
+  const first = whoName(agent, view).split(" ")[0];
+  const feeling = profile.feeling;
+  const why = feeling?.reasons.length
+    ? `<ul class="td-why">${feeling.reasons.map((reason) => `<li><span>${h(reason.why)}</span><small><b class="${reason.p < 0 ? "down" : reason.p > 0 ? "up" : ""}">${h(signed(reason.p))}</b> · ${reason.left}h left</small></li>`).join("")}</ul>`
+    : `<p class="td-quiet">Nothing much has happened lately.</p>`;
+  const close = (profile.close ?? []).map((item: SocialCloseness) => `<div class="td-close">${btn("today-profile", face(item.agent, "comment"), { agent: item.agent }, "td-face-link", `title="${h(`${whoName(item.agent, view)}'s profile`)}"`)}<div class="td-close-main"><small><b>${h(whoName(item.agent, view))}</b>${item.lines[0] ? ` · ${h(item.lines[0].why)}` : ""}</small><i class="td-bar warm" title="Warmth: fades in a few days"><b style="width:${Math.round(item.warmth * 100)}%"></b></i><i class="td-bar bond" title="Bond: grows over weeks"><b style="width:${Math.round(item.bond * 100)}%"></b></i></div></div>`).join("");
+  const closeBlock = close ? `<h3 class="td-day">Close to</h3>${close}<p class="td-key"><span class="warm">━</span> warmth, fades in days · <span class="bond">━</span> bond, lasts weeks</p>` : "";
+  const remembers = (profile.remembers ?? []).map((item: SocialRemembered) => `<li><span>${h(item.text)}</span><small>${item.from === "comment" ? "from a comment" : "you told it"}</small>${btn("today-forget", "×", { agent, id: item.id }, "td-forget", `title="Forget this" aria-label="Forget this"`)}</li>`).join("");
+  return `<section class="td-inner"><h3 class="td-day">Feeling ${h(feeling?.word ?? "calm")}</h3>${why}${closeBlock}<h3 class="td-day">What ${h(first)} remembers about you</h3><ul class="td-remembers">${remembers}</ul><form class="td-remember" data-agent="${h(agent)}"><input name="text" maxlength="140" autocomplete="off" placeholder="Tell ${h(first)} something to remember…" aria-label="Tell ${h(first)} something to remember"></form></section>`;
+}
+
 /// An agent's profile: face, voice, this week's bio, the week in numbers,
 /// who it talks to most, its pictures and its latest posts.
 export function profileHtml(open: NonNullable<TodayUi["profile"]>, view: SocialsView, ui: TodayUi): string {
   const back = btn("today-profile", "‹ Today", { agent: "" }, "td-back");
   const name = whoName(open.agent, view);
-  const top = `<header class="td-profile-top">${back}${face(open.agent, "profile", agentMood(open.agent, "", view.posts))}<h2>${h(name)}</h2>`;
+  const top = `<header class="td-profile-top">${back}${face(open.agent, "profile", open.data?.feeling?.mood ?? agentMood(open.agent, "", view.posts, Date.now(), view.moods))}<h2>${h(name)}</h2>`;
   if (!open.data) return `${top}<p class="td-empty">Loading…</p></header>`;
   const profile = open.data;
   const since = profile.since ? `Here since ${new Date(profile.since).toLocaleDateString([], { month: "long", day: "numeric" })}` : "New here";
@@ -228,7 +252,7 @@ export function profileHtml(open: NonNullable<TodayUi["profile"]>, view: Socials
   const weeks = profile.weeks?.length ? `<h3 class="td-day">Weeks</h3><div class="td-weeks">${profile.weeks.map((week) => weekHtml(week, view, ui)).join("")}</div>` : "";
   const posts = view.posts.filter((post) => post.by === open.agent).slice(0, 10);
   const recent = posts.length ? `<h3 class="td-day">Latest</h3><div class="td-feed">${posts.map((post) => postHtml(post, view, ui)).join("")}</div>` : "";
-  return `${top}<p class="td-voice">${h(profile.agent.voice)}</p></header><p class="td-bio">${h(profile.bio)}</p><p class="td-stats"><span>${h(since)}</span><span>This week: ${h(stats.join(" · "))}</span></p>${friend}${grid}${weeks}${recent}`;
+  return `${top}<p class="td-voice">${h(profile.agent.voice)}</p></header><p class="td-bio">${h(profile.bio)}</p><p class="td-stats"><span>${h(since)}</span><span>This week: ${h(stats.join(" · "))}</span></p>${profile.feeling ? innerHtml(open.agent, profile, view) : friend}${grid}${weeks}${recent}`;
 }
 
 /// One past week on a profile (pass 141): its picture, the line the agent

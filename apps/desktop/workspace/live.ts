@@ -24,9 +24,9 @@ import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
-import { agentMood, forYou, newSince, storiesOf, storyAgents, todayPage, unseenStories, whoName, type TodayUi } from "./today-page.ts";
+import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPage, unseenStories, whoName, type TodayUi } from "./today-page.ts";
 import { agentFace } from "@demesne/brand";
-import type { SocialPost, SocialProfile, SocialsView } from "@demesne/client";
+import type { SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
@@ -748,9 +748,9 @@ function renderSidebar() {
   const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${todayRow}${housed.map((agent) => {
     const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
-    return btn("agent-open", `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts))}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
+    return btn("agent-open", `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts, Date.now(), socialsView?.moods))}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
       { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
-      .replace("<button ", `<button title="${h(agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
+      .replace("<button ", `<button title="${h(socialsView?.moods?.[agent.id] ? moodTitle(agent.name, socialsView.moods[agent.id]) : agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
   }).join("")}</div>`;
   const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
@@ -2993,6 +2993,21 @@ async function openProfile(agent: string) {
   } catch (error) { todayUi.profile = null; todayUi.error = errorWords(error); }
   renderPage();
 }
+/// Tell an agent something to remember about you, or have it forget a line (pass 142 B).
+async function rememberFor(agent: string, text: string, input?: HTMLInputElement | null) {
+  try { setRemembers(agent, await api<SocialRemembered[]>("socials-remember", { agent, text })); if (input) input.value = ""; todayUi.error = ""; }
+  catch (error) { todayUi.error = errorWords(error); }
+  renderPage();
+  document.querySelector<HTMLInputElement>("#page .td-remember input")?.focus();
+}
+async function forgetFor(agent: string, id: string) {
+  try { setRemembers(agent, await api<SocialRemembered[]>("socials-forget", { agent, id })); todayUi.error = ""; }
+  catch (error) { todayUi.error = errorWords(error); }
+  renderPage();
+}
+function setRemembers(agent: string, remembers: SocialRemembered[]) {
+  if (todayUi.profile?.agent === agent && todayUi.profile.data) todayUi.profile.data = { ...todayUi.profile.data, remembers };
+}
 /// A screenshot for your post, from a paste or the file picker.
 /// Any size works: big ones are redrawn at 2048px (the feed shows 1280).
 function attachPicture(file: File | null | undefined) {
@@ -3494,6 +3509,13 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     todayUi.share!.text = form.querySelector<HTMLInputElement>("input[name=text]")?.value ?? "";
     void sharePost();
+    return;
+  }
+  if (form.classList.contains("td-remember")) {
+    event.preventDefault();
+    const input = form.querySelector("input");
+    const text = input?.value.trim() ?? "";
+    if (text) void rememberFor(form.dataset.agent ?? "", text, input);
     return;
   }
   if (form.classList.contains("td-field")) {
@@ -5577,6 +5599,7 @@ async function dispatch(
     try { swapPost(await api<SocialPost>("socials-react", { id, reaction })); } catch (error) { todayUi.error = errorWords(error); }
     return renderPage();
   }
+  if (action === "today-forget") return void forgetFor(String(args.agent ?? ""), String(args.id ?? ""));
   if (action === "today-profile") return openProfile(typeof args.agent === "string" ? args.agent : "");
   if (action === "today-unattach") { todayUi.share!.image = null; return renderPage(); }
   if (action === "today-reply") {

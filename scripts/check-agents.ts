@@ -36,6 +36,10 @@ const seed = (data: string) => {
   const made = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=pink:s=360x640:d=2", "-pix_fmt", "yuv420p", "-y", join(data, "socials", "reel-reel-1.mp4")]);
   if (made.status !== 0) writeFileSync(join(data, "socials", "reel-reel-1.mp4"), new Uint8Array([0]));
   writeFileSync(join(data, "socials.json"), JSON.stringify({ version: 1, posts: [...old, ...posts], month: "", calls: 0, pictures: 0, bios: {}, pastBios: { codex: [{ week: weekOf(new Date(then)), text: "A week of chasing flaky tests." }] }, milestones: [], worked: 5, reels: [reel], videoSeconds: 8,
+    // Pass 142 B: Codex merged something an hour ago, Claude commented on its post, and it remembers Mike.
+    feelings: { codex: [{ kind: "merged", p: 5.2, e: 2, at: new Date(now - 60 * 60_000).toISOString(), hours: 6, why: "Merged Fix the login redirect" }] },
+    ties: { codex: [{ with: "claude", at: new Date(now - 2 * 3_600_000).toISOString(), why: "commented on my post", w: 0.3 }] },
+    remembered: { codex: [{ id: "m-1", text: "Likes short answers", from: "comment", at: new Date(now - 86_400_000).toISOString() }] },
     stories: [
       { id: "st-1", by: "codex", at: new Date(now - 50 * 60_000).toISOString(), kind: "start", text: "Started on Fix the login redirect", label: "Chat · demesne-cli", mood: "focus", sessionId: "seed" },
       { id: "st-2", by: "codex", at: new Date(now - 20 * 60_000).toISOString(), kind: "done", text: "Merged it: Fix the login redirect", label: "Chat · demesne-cli", mood: "happy", sessionId: "seed" },
@@ -138,6 +142,16 @@ try {
   await page.locator("#page .td-bio").waitFor({ timeout: 15_000 }).catch(() => {});
   await page.locator("#page .td-week").first().waitFor({ timeout: 10_000 }).catch(() => {});
   expect(await page.locator("#page .td-week", { hasText: "A week of chasing flaky tests." }).count() === 1, "the profile looks back on a past week");
+  expect(await page.locator("#page .td-inner .td-why", { hasText: "Merged Fix the login redirect" }).count() === 1, "the profile says how Codex feels and why");
+  expect(await page.locator("#page .td-close", { hasText: "commented on my post" }).count() === 1, "the profile shows who Codex is close to and why");
+  await page.screenshot({ path: join(output, "profile-inner.png") });
+  await page.locator("#page .td-remember input").fill("Ships on Fridays");
+  await page.locator("#page .td-remember input").press("Enter");
+  await page.locator("#page .td-remembers li", { hasText: "Ships on Fridays" }).waitFor({ timeout: 10_000 }).catch(() => {});
+  expect(await page.locator("#page .td-remembers li", { hasText: "Ships on Fridays" }).count() === 1, "you can tell Codex something to remember");
+  await page.locator("#page .td-remembers li", { hasText: "Likes short answers" }).locator("[data-action='today-forget']").click();
+  await page.waitForTimeout(800);
+  expect(await page.locator("#page .td-remembers li", { hasText: "Likes short answers" }).count() === 0, "and make it forget");
   await page.locator("#page .td-weeks").scrollIntoViewIfNeeded().catch(() => {});
   await page.screenshot({ path: join(output, "profile.png") });
   await page.locator("#page .td-back").click();

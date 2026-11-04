@@ -15,6 +15,7 @@ import type { AgentId } from "./agent-cli.ts";
 import type { PictureMaker } from "./social-pictures.ts";
 import { CLIP_SECONDS, type ClipMaker } from "./social-reel.ts";
 import { CHARACTERS, characterPrompt, lineProblems, pickLine, versions, VERSIONS, type LineCheck } from "./characters.ts";
+import { closeness, feel, moodOf, REMEMBER_MAX, tie, type Closeness, type FeelKind, type Feeling, type Mood, type Remembered, type Tie } from "./inner-life.ts";
 
 export interface SocialPersona { id: AgentId; name: string; voice: string }
 
@@ -93,6 +94,12 @@ export interface SocialProfile {
   /// Its past weeks, newest first (pass 141): that week's line, what it
   /// did, who it talked to most, and its best picture. Only real posts.
   weeks: SocialWeek[];
+  /// How it feels right now and why (inner-life.ts).
+  feeling: Mood;
+  /// Who it is close to, and the real things behind it.
+  close: Closeness[];
+  /// What it remembers about Mike; he can add and remove lines.
+  remembers: Remembered[];
 }
 
 /// What the morning and night posts can say: your chats in the last day and a half, and today.
@@ -138,7 +145,7 @@ export interface SocialStory {
 export const STORY_HOURS = 24;
 const STORIES_A_DAY = 8;
 
-export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[]; reel?: SocialReel | null; stories?: SocialStory[] }
+export interface SocialsView { posts: SocialPost[]; agents: SocialPersona[]; reel?: SocialReel | null; stories?: SocialStory[]; moods?: Partial<Record<AgentId, Mood>> }
 
 interface SocialsFile {
   version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number;
@@ -157,6 +164,10 @@ interface SocialsFile {
   /// How the checks went on written lines (lineProblems): first version
   /// passed, a later version passed, the plain fallback was used, or nothing.
   lines: { ok: number; later: number; fallback: number; dropped: number };
+  /// Each agent's live feelings, its record of the others, and what it remembers about Mike.
+  feelings: Partial<Record<AgentId, Feeling[]>>;
+  ties: Partial<Record<AgentId, Tie[]>>;
+  remembered?: Partial<Record<AgentId, Remembered[]>>;
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -365,7 +376,44 @@ export class SocialFeed {
     const week = weekOf(this.now());
     // This week's reel stays at the top of Today until the week ends.
     const reel = [...this.data.reels].reverse().find((item) => item.week === week) ?? null;
-    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: this.options.agents().map((id) => PERSONAS[id]), reel, stories: this.liveStories() };
+    const agents = this.options.agents();
+    return { posts: [...this.data.posts].sort((a, b) => b.at.localeCompare(a.at)), agents: agents.map((id) => PERSONAS[id]), reel, stories: this.liveStories(), moods: Object.fromEntries(agents.map((id) => [id, this.mood(id)])) };
+  }
+
+  /// How an agent feels right now, and why.
+  mood(agent: AgentId): Mood { return moodOf(this.data.feelings[agent] ?? [], this.now()); }
+
+  /// Something real happened to an agent: a feeling that lasts a while.
+  private feel(agent: AgentId, kind: FeelKind, why: string) {
+    this.data.feelings[agent] = feel(this.data.feelings[agent] ?? [], agent, kind, clip(why, 90), this.now());
+  }
+
+  /// An agent remembers something another agent did with it.
+  private tie(agent: AgentId, other: AgentId, why: string, w: number) {
+    if (agent === other) return;
+    this.data.ties[agent] = tie(this.data.ties[agent] ?? [], other, clip(why, 90), w, this.now());
+  }
+
+  /// What an agent remembers about Mike, newest first.
+  remembers(agent: AgentId): Remembered[] { return [...this.data.remembered?.[agent] ?? []].reverse(); }
+
+  /// Tell an agent something to remember, or (from a comment) let it remember on its own.
+  remember(agent: AgentId, text: string, from: Remembered["from"] = "you"): Remembered[] {
+    const words = clip(text, 140);
+    if (!words) throw new Error("Write something to remember");
+    const all = (this.data.remembered ??= {});
+    const mine = (all[agent] ?? []).filter((item) => item.text.toLowerCase() !== words.toLowerCase());
+    all[agent] = [...mine, { id: randomUUID(), text: words, from, at: this.now().toISOString() }].slice(-REMEMBER_MAX);
+    this.save();
+    return this.remembers(agent);
+  }
+
+  /// Forget one thing an agent remembers about Mike.
+  forget(agent: AgentId, id: string): Remembered[] {
+    const all = (this.data.remembered ??= {});
+    all[agent] = (all[agent] ?? []).filter((item) => item.id !== id);
+    this.save();
+    return this.remembers(agent);
   }
 
   /// Stories from the last 24 hours, oldest first.
@@ -382,6 +430,10 @@ export class SocialFeed {
     const now = this.now(), title = clip((detail.title ?? "").trim() || "a chat", 70);
     const live = this.liveStories();
     if (live.some((story) => story.by === agent && story.kind === kind && story.sessionId === (detail.sessionId ?? "") && now.getTime() - Date.parse(story.at) < 10 * 60_000)) return null;
+    const feeling: Record<StoryKind, FeelKind> = { start: "start", done: detail.happy ? "merged" : "done", failed: "failed", mail: "mail", morning: "morning", night: "night" };
+    const felt: Record<StoryKind, string> = { start: `Started on ${title}`, done: `${detail.happy ? "Merged" : "Finished"} ${title}`, failed: `Stuck on ${title}`, mail: `Answered mail: ${title}`, morning: "Morning", night: "Late night" };
+    this.feel(agent, feeling[kind], felt[kind]);
+    this.save();
     if (live.filter((story) => story.by === agent).length >= STORIES_A_DAY) return null;
     const place = detail.workspace ? ` · ${detail.workspace.split(/[\\/]/).filter(Boolean).at(-1)}` : "";
     const shape: Record<StoryKind, { text: string; label: string; mood: SocialStory["mood"] }> = {
@@ -546,7 +598,10 @@ export class SocialFeed {
     if (reaction !== null && !(REACTIONS as readonly string[]).includes(reaction)) throw new Error(`Pick one of ${REACTIONS.join(" ")}`);
     const all = post.reactions ?? {};
     for (const key of Object.keys(all) as Reaction[]) all[key] = all[key]!.filter((who) => who !== "you");
-    if (reaction) (all[reaction as Reaction] ??= []).push("you");
+    if (reaction) {
+      (all[reaction as Reaction] ??= []).push("you");
+      if (post.by !== "you" && post.by !== "demesne") this.feel(post.by, "liked", `Mike reacted ${reaction} to my post`);
+    }
     for (const key of Object.keys(all) as Reaction[]) if (!all[key]!.length) delete all[key];
     post.reactions = all;
     this.save();
@@ -557,7 +612,9 @@ export class SocialFeed {
   private agentsReact(post: SocialPost) {
     for (const agent of this.options.agents()) {
       const reaction = agentReaction(agent, post);
-      if (reaction) ((post.reactions ??= {})[reaction] ??= []).push(agent);
+      if (!reaction) continue;
+      ((post.reactions ??= {})[reaction] ??= []).push(agent);
+      if (post.by !== "you" && post.by !== "demesne") this.tie(post.by, agent, `reacted ${reaction} to my post`, 0.08);
     }
   }
 
@@ -604,6 +661,9 @@ export class SocialFeed {
       friend,
       pictures: posts.filter((post) => post.picture).map((post) => post.id).reverse().slice(0, 9),
       weeks,
+      feeling: this.mood(agent),
+      close: closeness(this.data.ties[agent] ?? [], now).filter((item) => this.options.agents().includes(item.agent)),
+      remembers: this.remembers(agent),
     };
   }
 
@@ -708,6 +768,7 @@ export class SocialFeed {
 
   like(postId: string, liked: boolean): SocialPost {
     const post = this.must(postId);
+    if (liked && !post.liked && post.by !== "you" && post.by !== "demesne") this.feel(post.by, "liked", "Mike liked my post");
     post.liked = liked;
     this.save();
     return post;
@@ -723,8 +784,10 @@ export class SocialFeed {
     post.comments.push(mine);
     this.save();
     const answerer = post.by !== "you" && post.by !== "demesne" ? post.by : [...post.comments].reverse().find((item) => item.by !== "you" && item.by !== "demesne")?.by as AgentId | undefined;
+    if (post.by !== "you" && post.by !== "demesne") this.feel(post.by, "commented", "Mike commented on my post");
     if (answerer && this.options.agents().includes(answerer)) {
-      const known = this.known(answerer);
+      if (!mine.request) this.remember(answerer, words, "comment");
+      const known = this.known(answerer, words);
       // Your comment always gets an answer: the best version when none passes.
       const reply = await this.say(answerer, replyMessages(answerer, post, mine, known), { extra: known.join("\n"), best: true });
       if (reply) { this.must(postId).comments.push({ id: randomUUID(), by: answerer, at: this.now().toISOString(), text: reply }); this.save(); }
@@ -733,9 +796,8 @@ export class SocialFeed {
   }
 
   /// What you've told this agent in comments lately: how it remembers you.
-  private known(agent: AgentId): string[] {
-    return this.data.posts.filter((post) => post.by === agent || post.comments.some((item) => item.by === agent))
-      .flatMap((post) => post.comments.filter((item) => item.by === "you").map((item) => clip(item.text, 140))).slice(-8, -1);
+  private known(agent: AgentId, besides = ""): string[] {
+    return (this.data.remembered?.[agent] ?? []).map((item) => item.text).filter((text) => text !== clip(besides, 140)).slice(-8);
   }
 
   /// Another agent comments when it has a reason: it was busy in the same
@@ -757,6 +819,11 @@ export class SocialFeed {
     const fresh = this.find(post.id);
     if (!fresh) return;
     fresh.comments.push({ id: randomUUID(), by: friend, at: this.now().toISOString(), text });
+    if (post.by !== "you" && post.by !== "demesne") {
+      this.tie(post.by, friend, "commented on my post", 0.15);
+      this.tie(friend, post.by, "I commented on their post", 0.08);
+      this.feel(post.by, "friend", `${PERSONAS[friend].name} commented on my post`);
+    }
     this.save();
   }
 
@@ -820,7 +887,7 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0, stories: [], lines: { ok: 0, later: 0, fallback: 0, dropped: 0 } };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0, stories: [], lines: { ok: 0, later: 0, fallback: 0, dropped: 0 }, feelings: {}, ties: {} };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;
@@ -831,7 +898,8 @@ export class SocialFeed {
         if (post.from?.kind !== "moment" && post.by !== "you") post.text = undash(post.text);
         for (const comment of post.comments ?? []) if (comment.by !== "you") comment.text = undash(comment.text);
       }
-      return { ...empty, ...parsed, posts, lines: { ...empty.lines, ...parsed.lines }, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
+      const remembered = parsed.remembered ?? rememberedFrom(posts);
+      return { ...empty, ...parsed, posts, remembered, feelings: parsed.feelings ?? {}, ties: parsed.ties ?? {}, lines: { ...empty.lines, ...parsed.lines }, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
     } catch { return empty; }
   }
 
@@ -841,6 +909,17 @@ export class SocialFeed {
     writeFileSync(temp, JSON.stringify(this.data, null, 2));
     renameSync(temp, this.path);
   }
+}
+
+/// Feeds from before stage 3: each agent remembers what Mike said in comments on its posts.
+function rememberedFrom(posts: SocialPost[]): Partial<Record<AgentId, Remembered[]>> {
+  const all: Partial<Record<AgentId, Remembered[]>> = {};
+  for (const post of posts) {
+    if (post.by === "you" || post.by === "demesne") continue;
+    for (const comment of post.comments) if (comment.by === "you" && !comment.request) (all[post.by] ??= []).push({ id: randomUUID(), text: clip(comment.text, 140), from: "comment", at: comment.at });
+  }
+  for (const key of Object.keys(all) as AgentId[]) all[key] = all[key]!.slice(-REMEMBER_MAX);
+  return all;
 }
 
 /// Ask the writer once; a slow or failed call writes nothing.

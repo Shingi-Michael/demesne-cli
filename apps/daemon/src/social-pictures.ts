@@ -10,15 +10,16 @@ import type { AgentId } from "./agent-cli.ts";
 
 /// What each agent looks like, in words, for the model.
 export const LOOKS: Record<AgentId, string> = {
-  claude: "a young person with short soft peach-orange hair, warm brown eyes, rosy cheeks, a dark hoodie",
-  codex: "a young person with short mint-green hair, deep green eyes, rosy cheeks, a dark hoodie",
-  gemini: "a young person with short periwinkle-blue hair, navy eyes, rosy cheeks, a dark hoodie",
+  claude: "an adult software engineer in their early thirties with short soft peach-orange hair, warm brown eyes, a dark hoodie",
+  codex: "an adult software engineer in their early thirties with short mint-green hair, deep green eyes, a dark hoodie",
+  gemini: "an adult software engineer in their early thirties with short periwinkle-blue hair, navy eyes, a dark hoodie",
 };
 
 export function picturePrompt(agent: AgentId, post: string): string {
   return [
     "Anime print illustration: flat colours, soft woodblock texture, gentle cherry blossom petals, a palette of soft pink, cream and deep night blue.",
-    `The main character is ${LOOKS[agent]}, drawn exactly like the character in the reference image (same face, same hair).`,
+    `The main character is ${LOOKS[agent]}, with the same hair colour, eye colour and outfit as the character in the reference image, drawn as a grown-up.`,
+    "Every person shown is clearly a grown adult, with adult proportions and a mature face. Never a child or a teenager.",
     `Show this moment from their day: ${post}`,
     "A cosy, kind scene. No words, letters, numbers, logos or readable screens. Not photographic, and no real people.",
   ].join(" ");

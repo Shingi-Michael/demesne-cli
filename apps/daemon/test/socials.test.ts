@@ -196,6 +196,12 @@ describe("pictures", () => {
     expect(asked).toEqual(["medium"]);
     expect(picturePrompt("codex", "x")).toContain("mint-green");
     expect(picturePrompt("codex", "x")).toContain("no real people");
+    for (const agent of ["claude", "codex", "gemini"] as const) {
+      const prompt = picturePrompt(agent, "x");
+      expect(prompt).toContain("grown adult");
+      expect(prompt).toContain("Never a child");
+      expect(prompt).not.toMatch(/young|rosy/i);
+    }
   });
 
   test("a provider without edits gets a plain generation; one that refuses both makes nothing", async () => {

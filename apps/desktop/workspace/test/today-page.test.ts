@@ -53,6 +53,17 @@ test("each agent is its own character, and every mood draws", () => {
   expect(new Set(FACE_MOODS.map((mood) => agentFace("claude", mood))).size).toBe(FACE_MOODS.length);
 });
 
+test("faces are grown-up and grouped so a story can move them", () => {
+  for (const id of ["claude", "codex", "gemini", "someone"]) {
+    const svg = agentFace(id);
+    for (const part of ["face-body", "face-head", "face-hair", "face-eyes"]) expect(svg).toContain(`class="${part}"`);
+    expect(svg).toContain("C52.8 79.8 47.2 79.8 44 78"); // the chin
+  }
+  // Ids belong to the character, so many copies on one page agree.
+  expect(agentFace("codex")).toContain('id="af-tile-codex"');
+  expect(agentFace("someone")).toContain('id="af-face-grey"');
+});
+
 test("moods come only from what really happened", () => {
   const base = view.posts[0]!;
   const post = (over: Partial<typeof base>) => ({ ...base, liked: false, reactions: {}, ...over });

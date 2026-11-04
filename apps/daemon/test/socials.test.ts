@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProviderMessage } from "@demesne/providers";
-import { agentReaction, asksForWork, cleanPost, shareChoice, SocialFeed, weekOf, writeOnce, type DayFacts } from "../src/socials.ts";
+import { agentReaction, asksForWork, cleanPost, mondayOf, shareChoice, SocialFeed, weekOf, writeOnce, type DayFacts } from "../src/socials.ts";
 import type { AgentId } from "../src/agent-cli.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { picturePrompt, pictureMaker, type PictureMaker } from "../src/social-pictures.ts";
@@ -245,6 +245,28 @@ describe("pass 138", () => {
     expect(calls.length).toBe(asked);
     expect((await social.profile("gemini")).bio).toContain("Nothing posted");
     expect(weekOf(new Date("2026-11-03T10:00:00"))).toBe("2026-W45");
+  });
+
+  test("a profile looks back on past weeks with only what really happened", async () => {
+    let at = new Date("2026-10-27T10:00:00"); // Tuesday of week 44
+    const { social } = feed(["Tabs post", "Nice tabs!", "Calm week of tab fixes.", "Mail post", "Busy mail week."], { now: () => at, agents: ["claude", "codex"] });
+    await social.noteAgentTurn("claude", work("s1"), "tabs", "done");
+    at = new Date("2026-10-27T10:40:00");
+    await social.noteAgentTurn("codex", work("s1"), "tabs", "done");
+    await settle();
+    at = new Date("2026-10-28T09:00:00");
+    expect((await social.profile("claude")).weeks).toEqual([]); // this week is the top of the profile, not a past week
+    at = new Date("2026-11-04T09:00:00"); // week 45
+    const profile = await social.profile("claude");
+    const past = profile.weeks[0]!;
+    expect(profile.weeks).toHaveLength(1);
+    expect(past.week).toBe("2026-W44");
+    expect(past.start).toBe("2026-10-26");
+    expect(past.posts).toBeGreaterThan(0);
+    expect(past.work).toBe(1);
+    expect(past.picture).toBeNull();
+    expect(past.line).toBeTruthy(); // the line it wrote that week, kept when this week's replaced it
+    expect(mondayOf(new Date("2026-11-08T23:00:00"))).toBe("2026-11-02");
   });
 
   test("you share a line: agents who were around today see it first, and each chooses to comment, react or pass", async () => {

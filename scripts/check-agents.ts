@@ -25,12 +25,17 @@ const seed = (data: string) => {
   const posts = ["Morning! Tabs today.", "Third run, third failure.", "Found it: one line.", "Claude answered my mail in four minutes.", "We shipped it. Good night."].map((text, index) => ({
     id: `seed-${index}`, by: "codex", at: new Date(now - (5 - index) * 60_000).toISOString(), text,
     from: { kind: "work", label: "Seeded", sessionId: "seed", workspace: null }, liked: false, comments: [] }));
+  // Two posts from a past week, so the profile has a week to look back on.
+  const then = now - 8 * 86_400_000;
+  const old = ["Spent the day on flaky tests.", "Merged the login fix."].map((text, index) => ({
+    id: `old-${index}`, by: "codex", at: new Date(then + index * 60_000).toISOString(), text,
+    from: { kind: "work", label: "Seeded", sessionId: "seed", workspace: null }, liked: index === 1, comments: [] }));
   const reel = { id: "reel-1", week, at: new Date(now).toISOString(), frames: posts.map((post) => ({ postId: post.id, by: post.by, text: post.text, picture: false })),
     numbers: { posts: 5, work: 5, mail: 0, nights: 1, moments: 0 }, scene: "A walk under the blossom after a good week.", clip: "ready" };
   mkdirSync(join(data, "socials"), { recursive: true });
   const made = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=pink:s=360x640:d=2", "-pix_fmt", "yuv420p", "-y", join(data, "socials", "reel-reel-1.mp4")]);
   if (made.status !== 0) writeFileSync(join(data, "socials", "reel-reel-1.mp4"), new Uint8Array([0]));
-  writeFileSync(join(data, "socials.json"), JSON.stringify({ version: 1, posts, month: "", calls: 0, pictures: 0, bios: {}, milestones: [], worked: 5, reels: [reel], videoSeconds: 8 }));
+  writeFileSync(join(data, "socials.json"), JSON.stringify({ version: 1, posts: [...old, ...posts], month: "", calls: 0, pictures: 0, bios: {}, pastBios: { codex: [{ week: weekOf(new Date(then)), text: "A week of chasing flaky tests." }] }, milestones: [], worked: 5, reels: [reel], videoSeconds: 8 }));
 };
 const f = await fixture(undefined, { seed, socials: true, images: { url: `http://127.0.0.1:${imageServer.port}/v1`, model: "fake-image" }, agentCli: {
   which: (command) => command === "claude" || command === "codex" ? `/usr/local/bin/${command}` : null,
@@ -111,6 +116,12 @@ try {
   await page.locator("#page .td-post [data-action='today-profile']").first().click();
   await page.locator("#page .td-bio").waitFor({ timeout: 15_000 }).catch(() => {});
   expect(await page.locator("#page .td-bio").count() === 1 && await page.locator("#page .td-back").count() === 1, "a face opens that agent's profile");
+  await page.locator("#page .td-back").click();
+  await page.locator("#page .td-post [data-action='today-profile'][data-args*='codex']").first().click();
+  await page.locator("#page .td-bio").waitFor({ timeout: 15_000 }).catch(() => {});
+  await page.locator("#page .td-week").first().waitFor({ timeout: 10_000 }).catch(() => {});
+  expect(await page.locator("#page .td-week", { hasText: "A week of chasing flaky tests." }).count() === 1, "the profile looks back on a past week");
+  await page.locator("#page .td-weeks").scrollIntoViewIfNeeded().catch(() => {});
   await page.screenshot({ path: join(output, "profile.png") });
   await page.locator("#page .td-back").click();
   expect(await page.locator("#today-share").count() === 1, "back goes to the feed");

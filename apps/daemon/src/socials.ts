@@ -66,6 +66,19 @@ export interface SocialPost {
   reactions?: Partial<Record<Reaction, Array<"you" | AgentId>>>;
 }
 
+/// One past week on an agent's profile.
+export interface SocialWeek {
+  week: string;
+  /// The Monday it started, as YYYY-MM-DD (local).
+  start: string;
+  /// The line the agent wrote about itself that week, if it wrote one.
+  line: string | null;
+  posts: number; work: number; mail: number;
+  friend: AgentId | null;
+  /// Its most loved picture that week (likes, reactions, comments).
+  picture: string | null;
+}
+
 /// An agent's profile: who they are this week, from what really happened.
 export interface SocialProfile {
   agent: SocialPersona;
@@ -78,6 +91,9 @@ export interface SocialProfile {
   friend: AgentId | null;
   /// Its latest posts with pictures, newest first.
   pictures: string[];
+  /// Its past weeks, newest first (pass 141): that week's line, what it
+  /// did, who it talked to most, and its best picture. Only real posts.
+  weeks: SocialWeek[];
 }
 
 /// What the morning and night posts can say: your chats in the last day and a half, and today.
@@ -114,6 +130,8 @@ interface SocialsFile {
   version: 1; posts: SocialPost[]; month: string; calls: number; pictures: number;
   /// Each agent's weekly bio.
   bios: Partial<Record<AgentId, { week: string; text: string }>>;
+  /// Lines from weeks gone by, kept when a new week's line replaces them.
+  pastBios: Partial<Record<AgentId, Array<{ week: string; text: string }>>>;
   /// Milestones already celebrated, and work posts ever (posts are trimmed).
   milestones: string[];
   worked: number;
@@ -155,6 +173,8 @@ const POST_GAP_MS = 30 * 60_000;
 const POSTS_A_DAY = 8;
 /// Agent comments on one post, and agent comments in a day across the feed.
 const AGENT_COMMENTS_A_POST = 2;
+/// Past weeks shown on a profile.
+const WEEKS_KEPT = 8;
 const AGENT_COMMENTS_A_DAY = 12;
 const MONTHLY_CALLS = 900;
 /// Pictures an agent posts a day, the default monthly cap, and a picture's price.
@@ -282,6 +302,22 @@ export function weekOf(date: Date): string {
   day.setUTCDate(day.getUTCDate() + 4 - weekday);
   const start = new Date(Date.UTC(day.getUTCFullYear(), 0, 1));
   return `${day.getUTCFullYear()}-W${String(Math.ceil(((day.getTime() - start.getTime()) / 86_400_000 + 1) / 7)).padStart(2, "0")}`;
+}
+
+/// The agent it talks to most in these posts (comments both ways), or null.
+function friendOf(agent: AgentId, posts: SocialPost[]): AgentId | null {
+  const talks = new Map<AgentId, number>();
+  for (const post of posts) for (const comment of post.comments) {
+    const other = post.by === agent ? comment.by : comment.by === agent ? post.by : null;
+    if (other && other !== agent && other !== "you" && other !== "demesne") talks.set(other as AgentId, (talks.get(other as AgentId) ?? 0) + 1);
+  }
+  return [...talks].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+/// The Monday a date's week starts on, as YYYY-MM-DD (local).
+export function mondayOf(date: Date): string {
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7));
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
 }
 
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -476,14 +512,32 @@ export class SocialFeed {
     const bio = this.data.bios[agent];
     if (thisWeek.length && bio?.week !== week) {
       const text = cleanPost(await this.call(bioMessages(agent, thisWeek.map((post) => post.text))), 200);
-      if (text) { this.data.bios[agent] = { week, text }; this.save(); }
+      if (text) {
+        if (bio) {
+          const past = (this.data.pastBios[agent] ??= []).filter((item) => item.week !== bio.week);
+          this.data.pastBios[agent] = [...past, bio].slice(-WEEKS_KEPT);
+        }
+        this.data.bios[agent] = { week, text };
+        this.save();
+      }
     }
-    const talks = new Map<AgentId, number>();
-    for (const post of this.data.posts) for (const comment of post.comments) {
-      const other = post.by === agent ? comment.by : comment.by === agent ? post.by : null;
-      if (other && other !== agent && other !== "you" && other !== "demesne") talks.set(other, (talks.get(other) ?? 0) + 1);
+    const friend = friendOf(agent, this.data.posts);
+    const byWeek = new Map<string, SocialPost[]>();
+    for (const post of this.data.posts) {
+      const when = weekOf(new Date(post.at));
+      if (when !== week) byWeek.set(when, [...byWeek.get(when) ?? [], post]);
     }
-    const friend = [...talks].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const loved = (post: SocialPost) => (post.liked ? 1 : 0) + Object.values(post.reactions ?? {}).reduce((count, who) => count + (who?.length ?? 0), 0) + post.comments.length;
+    const weeks = [...byWeek].filter(([, list]) => list.some((post) => post.by === agent)).sort((a, b) => b[0].localeCompare(a[0])).slice(0, WEEKS_KEPT).map(([when, list]): SocialWeek => {
+      const own = list.filter((post) => post.by === agent);
+      const best = own.filter((post) => post.picture).sort((a, b) => loved(b) - loved(a) || b.at.localeCompare(a.at))[0];
+      return {
+        week: when, start: mondayOf(new Date(own[0]!.at)),
+        line: [...this.data.pastBios[agent] ?? [], this.data.bios[agent]].find((item) => item?.week === when)?.text ?? null,
+        posts: own.length, work: own.filter((post) => post.from.kind === "work").length, mail: own.filter((post) => post.from.kind === "mail").length,
+        friend: friendOf(agent, list), picture: best?.id ?? null,
+      };
+    });
     const comments = this.data.posts.reduce((count, post) => count + post.comments.filter((comment) => comment.by === agent && weekOf(new Date(comment.at)) === week).length, 0);
     return {
       agent: PERSONAS[agent],
@@ -492,6 +546,7 @@ export class SocialFeed {
       week: { work: thisWeek.filter((post) => post.from.kind === "work").length, mail: thisWeek.filter((post) => post.from.kind === "mail").length, pictures: thisWeek.filter((post) => post.picture).length, comments },
       friend,
       pictures: posts.filter((post) => post.picture).map((post) => post.id).reverse().slice(0, 9),
+      weeks,
     };
   }
 
@@ -671,7 +726,7 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0 };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0 };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;

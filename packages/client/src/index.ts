@@ -5,7 +5,8 @@ import type { ThemeLibrary } from "@demesne/brand";
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean }
 export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
-export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[] }
+export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[] }
+export interface SocialWeek { week: string; start: string; line: string | null; posts: number; work: number; mail: number; friend: string | null; picture: string | null }
 /// The Friday reel: the week's posts as frames, its numbers, and an opening clip.
 export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
 export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null }

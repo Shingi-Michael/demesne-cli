@@ -4,7 +4,7 @@
 /// moments, what you share, milestones, likes, reactions and comments.
 /// Each post is tagged with what it came from, and the tag opens that chat.
 /// A face opens that agent's profile.
-import type { SocialPost, SocialProfile, SocialReel, SocialsView } from "@demesne/client";
+import type { SocialPost, SocialProfile, SocialReel, SocialsView, SocialWeek } from "@demesne/client";
 import { agentFace, type FaceMood } from "@demesne/brand";
 
 const h = (value: unknown) =>
@@ -176,9 +176,22 @@ export function profileHtml(open: NonNullable<TodayUi["profile"]>, view: Socials
   const stats = [`${plural(week.work, "thing")} finished`, week.mail ? `${week.mail} mail answered` : "", week.pictures ? plural(week.pictures, "picture") : "", week.comments ? plural(week.comments, "comment") : ""].filter(Boolean);
   const friend = profile.friend ? `<p class="td-friend">Talks most with ${btn("today-profile", `${face(profile.friend, "comment")} ${h(whoName(profile.friend, view))}`, { agent: profile.friend }, "td-friend-link")}</p>` : "";
   const grid = profile.pictures.length ? `<div class="td-grid">${profile.pictures.map((id) => { const src = ui.pictures?.get(id); return src ? `<img src="${h(src)}" alt="">` : `<div class="td-pic-wait"></div>`; }).join("")}</div>` : "";
+  const weeks = profile.weeks?.length ? `<h3 class="td-day">Weeks</h3><div class="td-weeks">${profile.weeks.map((week) => weekHtml(week, view, ui)).join("")}</div>` : "";
   const posts = view.posts.filter((post) => post.by === open.agent).slice(0, 10);
   const recent = posts.length ? `<h3 class="td-day">Latest</h3><div class="td-feed">${posts.map((post) => postHtml(post, view, ui)).join("")}</div>` : "";
-  return `${top}<p class="td-voice">${h(profile.agent.voice)}</p></header><p class="td-bio">${h(profile.bio)}</p><p class="td-stats"><span>${h(since)}</span><span>This week: ${h(stats.join(" · "))}</span></p>${friend}${grid}${recent}`;
+  return `${top}<p class="td-voice">${h(profile.agent.voice)}</p></header><p class="td-bio">${h(profile.bio)}</p><p class="td-stats"><span>${h(since)}</span><span>This week: ${h(stats.join(" · "))}</span></p>${friend}${grid}${weeks}${recent}`;
+}
+
+/// One past week on a profile (pass 141): its picture, the line the agent
+/// wrote that week, what it did, and who it talked to most.
+export function weekHtml(week: SocialWeek, view: SocialsView, ui: TodayUi): string {
+  const [year, month, day] = week.start.split("-").map(Number);
+  const title = `Week of ${new Date(year!, month! - 1, day!).toLocaleDateString([], { month: "long", day: "numeric" })}`;
+  const src = week.picture ? ui.pictures?.get(week.picture) : null;
+  const art = src ? `<img class="td-week-pic" src="${h(src)}" alt="">` : week.picture ? `<div class="td-week-pic td-pic-wait"></div>` : `<div class="td-week-pic td-week-none" aria-hidden="true">✿</div>`;
+  const did = [plural(week.posts, "post"), week.work ? `${week.work} finished` : "", week.mail ? `${week.mail} mail` : ""].filter(Boolean).join(" · ");
+  const friend = week.friend ? ` · talked most with ${btn("today-profile", `${face(week.friend, "comment")} ${h(whoName(week.friend, view))}`, { agent: week.friend }, "td-friend-link")}` : "";
+  return `<div class="td-week">${art}<div class="td-week-main"><b>${h(title)}</b>${week.line ? `<p>${h(week.line)}</p>` : ""}<small>${h(did)}${friend}</small></div></div>`;
 }
 
 export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now()): string {

@@ -2924,7 +2924,7 @@ function loadPictures() {
     picturesLoading.add(`clip:${reel.id}`);
     void api<string>("socials-clip", { id: reel.id }).then((src) => { todayUi.clips!.set(reel.id, src); renderPage(); }, () => {}).finally(() => picturesLoading.delete(`clip:${reel.id}`));
   }
-  const ids = [...(socialsView?.posts ?? []).filter((post) => post.picture).map((post) => post.id), ...(todayUi.profile?.data?.pictures ?? [])];
+  const ids = [...(socialsView?.posts ?? []).filter((post) => post.picture).map((post) => post.id), ...(todayUi.profile?.data?.pictures ?? []), ...(todayUi.profile?.data?.weeks ?? []).flatMap((week) => week.picture ? [week.picture] : [])];
   for (const id of ids) {
     if (todayUi.pictures!.has(id) || picturesLoading.has(id)) continue;
     picturesLoading.add(id);

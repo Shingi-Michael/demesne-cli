@@ -2286,3 +2286,21 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-story-back { left: 0; width: 33%; }
 .td-story-next { right: 0; width: 67%; }
 @media (prefers-reduced-motion: reduce) { .td-story-bars i.now b { animation: none; width: 100%; } }
+
+/* Runs on (pass 143 B): the model an agent runs on, picked in place. */
+.td-runs { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; padding: 8px 10px; border-radius: 9px; background: var(--tone); color: var(--t3); font-size: 13px; }
+.td-runs b { color: var(--t1); font-weight: 500; }
+.td-runs-change { all: unset; margin-left: auto; cursor: pointer; padding: 2px 8px; border-radius: 6px; color: var(--acc); font-size: 12.5px; }
+.td-runs-change:hover, .td-runs-change:focus-visible { background: var(--surface2); }
+.td-mp { margin: -4px 0 12px; padding: 6px; border-radius: 10px; background: var(--surface2); box-shadow: 0 0 0 1px var(--hair), 0 14px 40px -16px rgba(0, 0, 0, .5); }
+.td-mp-hd { display: flex; align-items: center; gap: 6px; padding: 4px 8px 6px; color: var(--t3); font-size: 11.5px; }
+.td-mp-hd .agent-face { width: 16px; height: 16px; }
+.td-mp-row { all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; color: var(--t1); font-size: 13px; }
+.td-mp-row:hover, .td-mp-row:focus-visible { background: var(--tone); }
+.td-mp-row small { margin-left: auto; color: var(--t3); font-size: 11.5px; }
+.td-mp-check { width: 14px; color: var(--acc); }
+.td-mp-think { margin: 6px 8px 4px; padding-top: 8px; border-top: 1px solid var(--hair); }
+.td-mp-tl { display: flex; justify-content: space-between; margin-bottom: 6px; color: var(--t3); font-size: 11.5px; }
+.td-mp-stops { display: flex; gap: 4px; }
+.td-mp-stops button { all: unset; flex: 1; text-align: center; cursor: pointer; padding: 4px 0; border-radius: 6px; color: var(--t3); font-size: 12px; background: var(--tone); }
+.td-mp-stops button.on { color: var(--t1); box-shadow: inset 0 0 0 1px var(--acc); }

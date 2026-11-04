@@ -2135,6 +2135,7 @@ export class WorkspaceHost {
     if (method === "socials-picture") { const picture = await this.client.socialPicture(string(args.id, "post", 200)); return `data:${picture.mimeType};base64,${picture.data}`; }
     if (method === "socials-react") return (await this.client.reactToPost(string(args.id, "post", 200), typeof args.reaction === "string" && args.reaction ? args.reaction.slice(0, 8) : null)).post;
     if (method === "socials-profile") return (await this.client.socialProfile(string(args.agent, "agent", 40))).profile;
+    if (method === "socials-model") return (await this.client.setAgentModel(string(args.agent, "agent", 40), args.model ? string(args.model, "model", 80) : null, args.effort ? string(args.effort, "thinking level", 10) : null)).runs;
     if (method === "socials-remember") return (await this.client.socialRemember(string(args.agent, "agent", 40), string(args.text, "memory", 140))).remembers;
     if (method === "socials-forget") return (await this.client.socialForget(string(args.agent, "agent", 40), string(args.id, "memory", 80))).remembers;
     if (method === "socials-share") return (await this.client.sharePost(typeof args.text === "string" ? args.text.slice(0, 1000) : "", typeof args.image === "string" && args.image ? args.image : null)).post;

@@ -9,6 +9,7 @@
 /// working lines and its last message as the answer.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ProviderMessage, ProviderStreamEvent } from "@demesne/providers";
 import type { TurnInference } from "./processor.ts";
@@ -52,15 +53,74 @@ export interface AgentCliOptions {
   /// Where a command is on PATH, or null (Bun.which by default).
   which?: (command: string) => string | null;
   spawn?: (argv: string[], cwd: string) => AgentProcess;
+  /// Where the tools keep their own settings (your home folder by default).
+  home?: string;
+}
+
+/// The model you picked for an agent (pass 143 B), saved per agent and
+/// passed to its tool on every turn. Nothing picked: the tool's own default.
+/// The tools' own config files are only read, never changed.
+export type AgentEffort = "low" | "medium" | "high";
+export const AGENT_EFFORTS: readonly AgentEffort[] = ["low", "medium", "high"];
+export interface AgentChoice { model?: string; effort?: AgentEffort }
+export interface AgentModelOption { id: string; label: string; note: string }
+/// What an agent runs on, for its profile: your pick, the tool's own
+/// default, the line to show, and what you can pick from.
+export interface AgentRunsOn {
+  model: string | null;
+  effort: AgentEffort | null;
+  toolModel: string | null;
+  toolEffort: string | null;
+  label: string;
+  options: AgentModelOption[];
+  /// Thinking levels, for the tools that take one (Codex).
+  efforts: AgentEffort[] | null;
+}
+
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
+const ALIASES: Record<AgentId, AgentModelOption[]> = {
+  claude: [{ id: "opus", label: "Opus", note: "the strongest" }, { id: "sonnet", label: "Sonnet", note: "balanced" }, { id: "haiku", label: "Haiku", note: "quickest" }],
+  codex: [],
+  gemini: [{ id: "pro", label: "Pro", note: "Gemini's strongest" }, { id: "flash", label: "Flash", note: "quicker" }],
+};
+const capital = (text: string) => text ? text[0]!.toUpperCase() + text.slice(1) : text;
+
+function modelLabel(id: AgentId, model: string): string {
+  return ALIASES[id].find((option) => option.id === model.toLowerCase())?.label ?? model;
+}
+
+/// The model each tool runs when Demesne passes none, read from its own
+/// settings: Claude Code's settings.json, Codex's config.toml, Gemini's
+/// settings.json. Unreadable or unset: null.
+export function toolDefault(id: AgentId, home: string): { model: string | null; effort: string | null } {
+  const read = (...parts: string[]) => { try { return readFileSync(join(home, ...parts), "utf8"); } catch { return ""; } };
+  if (id === "codex") {
+    // Only top-level keys: they end at the first [table].
+    const top = read(".codex", "config.toml").split(/^\s*\[/m)[0] ?? "";
+    const key = (name: string) => top.match(new RegExp(`^\\s*${name}\\s*=\\s*["']([^"']+)["']`, "m"))?.[1] ?? null;
+    return { model: key("model"), effort: key("model_reasoning_effort") };
+  }
+  let settings: { model?: unknown } = {};
+  try { settings = JSON.parse(read(id === "claude" ? ".claude" : ".gemini", "settings.json") || "{}"); } catch { /* unreadable */ }
+  const model = typeof settings.model === "string" ? settings.model
+    : settings.model && typeof settings.model === "object" && typeof (settings.model as { name?: unknown }).name === "string" ? (settings.model as { name: string }).name : null;
+  return { model, effort: null };
 }
 
 /// One run's command line: the prompt is the last argument, and `resume` is
 /// the tool's session to carry on (or, for Claude Code, the id to start).
-export function agentArgs(id: AgentId, prompt: string, resume: { id: string; fresh: boolean } | null): string[] {
+/// `choice` is the model (and Codex thinking level) you picked, if any.
+export function agentArgs(id: AgentId, prompt: string, resume: { id: string; fresh: boolean } | null, choice: AgentChoice = {}): string[] {
+  const model = choice.model && MODEL_NAME.test(choice.model) ? choice.model : null;
   if (id === "claude") return ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
-    ...(resume ? [resume.fresh ? "--session-id" : "--resume", resume.id] : []), prompt];
-  if (id === "codex") return ["exec", "--json", "--full-auto", "--skip-git-repo-check", ...(resume ? ["resume", resume.id] : []), prompt];
-  return ["-p", prompt, "--output-format", "stream-json", "--approval-mode", "auto_edit"];
+    ...(model ? ["--model", model] : []), ...(resume ? [resume.fresh ? "--session-id" : "--resume", resume.id] : []), prompt];
+  if (id === "codex") {
+    // Config overrides (-c) hold for `exec resume` too.
+    const effort = choice.effort && AGENT_EFFORTS.includes(choice.effort) ? choice.effort : null;
+    const overrides = [...(model ? ["-c", `model="${model}"`] : []), ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : [])];
+    return ["exec", "--json", "--full-auto", "--skip-git-repo-check", ...overrides, ...(resume ? ["resume", resume.id] : []), prompt];
+  }
+  return ["-p", prompt, "--output-format", "stream-json", "--approval-mode", "auto_edit", ...(model ? ["-m", model] : [])];
 }
 
 /// What one line of a tool's output means for the turn.
@@ -190,11 +250,53 @@ export class AgentCli {
   private readonly which: (command: string) => string | null;
   private readonly spawn: (argv: string[], cwd: string) => AgentProcess;
   private readonly sessionsPath: string;
+  private readonly modelsPath: string;
+  private readonly home: string;
 
   constructor(dataDirectory: string, options: AgentCliOptions = {}) {
     this.which = options.which ?? ((command) => Bun.which(command));
     this.spawn = options.spawn ?? defaultSpawn;
     this.sessionsPath = join(dataDirectory, "agent-sessions.json");
+    this.modelsPath = join(dataDirectory, "agent-models.json");
+    this.home = options.home ?? homedir();
+  }
+
+  private choices(): Partial<Record<AgentId, AgentChoice>> {
+    try { return existsSync(this.modelsPath) ? JSON.parse(readFileSync(this.modelsPath, "utf8")) : {}; } catch { return {}; }
+  }
+
+  /// The model you picked for an agent ({} : the tool's own default).
+  choice(id: AgentId): AgentChoice { return this.choices()[id] ?? {}; }
+
+  /// Pick an agent's model (null: back to the tool's default) and, for
+  /// Codex, its thinking level (null: the tool's own).
+  choose(id: AgentId, model: string | null, effort: AgentEffort | null = null): AgentChoice {
+    if (model !== null && !MODEL_NAME.test(model)) throw new Error("That isn't a model name");
+    if (effort !== null && (id !== "codex" || !AGENT_EFFORTS.includes(effort))) throw new Error("That thinking level isn't one this agent takes");
+    const all = this.choices();
+    const next: AgentChoice = { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+    if (next.model || next.effort) all[id] = next; else delete all[id];
+    mkdirSync(dirname(this.modelsPath), { recursive: true });
+    const temporary = `${this.modelsPath}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(all, null, 2));
+    renameSync(temporary, this.modelsPath);
+    return next;
+  }
+
+  /// What an agent runs on, for its profile. `plan` is the Codex models on
+  /// Demesne's own Codex plan (their slugs), when it has one.
+  runsOn(id: AgentId, plan: string[] = []): AgentRunsOn {
+    const choice = this.choice(id);
+    const tool = toolDefault(id, this.home);
+    const fromTool = id === "claude" ? "your Claude Code settings" : id === "codex" ? "your Codex config" : "Gemini's settings";
+    const fallback: AgentModelOption = { id: "", label: "Tool default", note: tool.model ? `${modelLabel(id, tool.model)}, from ${fromTool}` : `${AGENT_KINDS.find((kind) => kind.id === id)!.name} picks` };
+    const listed = id === "codex"
+      ? [...new Set([...plan, ...(tool.model ? [tool.model] : []), ...(choice.model ? [choice.model] : [])])].map((slug) => ({ id: slug, label: slug, note: plan.includes(slug) ? "on your Codex plan" : "from your Codex config" }))
+      : [...ALIASES[id], ...(choice.model && !ALIASES[id].some((option) => option.id === choice.model) ? [{ id: choice.model, label: choice.model, note: "your pick" }] : [])];
+    const model = choice.model ?? tool.model;
+    const effort = id === "codex" ? choice.effort ?? tool.effort : null;
+    const label = (model ? modelLabel(id, model) : "Tool default") + (effort ? ` · ${capital(effort)}` : "");
+    return { model: choice.model ?? null, effort: choice.effort ?? null, toolModel: tool.model, toolEffort: tool.effort, label, options: [fallback, ...listed], efforts: id === "codex" ? [...AGENT_EFFORTS] : null };
   }
 
   /// The agent tools on this machine, looked up each time (one installed
@@ -248,7 +350,7 @@ export class AgentCli {
     // Claude Code takes the session id we give it; Codex names its own.
     const resume = known ? { id: known, fresh: false } : kind.id === "claude" ? { id: randomUUID(), fresh: true } : null;
     const prompt = agentPrompt(messages, !known);
-    const child = this.spawn([path, ...agentArgs(kind.id, prompt, resume)], cwd);
+    const child = this.spawn([path, ...agentArgs(kind.id, prompt, resume, this.choice(kind.id))], cwd);
     const stop = () => child.kill();
     signal.addEventListener("abort", stop, { once: true });
     const stderr = tail(child.stderr);

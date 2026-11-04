@@ -8,7 +8,9 @@ export interface SocialPost { id: string; by: string; at: string; text: string; 
 export interface SocialMood { mood: "calm" | "happy" | "focus" | "stuck" | "sleepy"; strong: boolean; word: string; reasons: Array<{ why: string; p: number; e: number; left: number }> }
 export interface SocialCloseness { agent: string; warmth: number; bond: number; lines: Array<{ why: string; at: string }> }
 export interface SocialRemembered { id: string; text: string; from: "comment" | "you"; at: string }
-export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[]; feeling?: SocialMood; close?: SocialCloseness[]; remembers?: SocialRemembered[]; diary?: Array<{ day: string; text: string; tomorrow: string | null }>; beliefs?: Array<{ text: string; since: string }> }
+export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[]; feeling?: SocialMood; close?: SocialCloseness[]; remembers?: SocialRemembered[]; diary?: Array<{ day: string; text: string; tomorrow: string | null }>; beliefs?: Array<{ text: string; since: string }>; runs?: AgentRunsOn }
+/// What an agent runs on (pass 143 B): your pick (null: the tool's default), the tool's own default, the line to show, and the choices.
+export interface AgentRunsOn { model: string | null; effort: "low" | "medium" | "high" | null; toolModel: string | null; toolEffort: string | null; label: string; options: Array<{ id: string; label: string; note: string }>; efforts: Array<"low" | "medium" | "high"> | null }
 export interface SocialWeek { week: string; start: string; line: string | null; posts: number; work: number; mail: number; friend: string | null; picture: string | null }
 /// The Friday reel: the week's posts as frames, its numbers, and an opening clip.
 export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
@@ -352,6 +354,8 @@ export class DemesneClient {
   async socialPicture(id: string): Promise<{ mimeType: string; data: string }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/picture`); }
   async reactToPost(id: string, reaction: string | null): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/react`, { method: "POST", body: JSON.stringify({ reaction }) }); }
   async socialProfile(agent: string): Promise<{ profile: SocialProfile }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}`); }
+  /// Pick the model an agent runs on (null: its tool's default), and Codex's thinking level.
+  async setAgentModel(agent: string, model: string | null, effort: string | null): Promise<{ runs: AgentRunsOn }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/model`, { method: "POST", body: JSON.stringify({ model, effort }) }); }
   async socialRemember(agent: string, text: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember`, { method: "POST", body: JSON.stringify({ text }) }); }
   async socialForget(agent: string, id: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember/${encodeURIComponent(id)}`, { method: "DELETE" }); }
   /// Share a line on Today, with a picture (base64) if you like.

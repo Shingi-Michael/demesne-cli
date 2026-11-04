@@ -223,6 +223,14 @@ export function moodTitle(name: string, mood: SocialMood | undefined): string {
 
 const signed = (value: number) => value > 0 ? `+${value}` : `${value}`;
 
+/// "Last night" for the latest diary entry, otherwise its date.
+export function nightTitle(day: string, now = new Date()): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const then = new Date(year!, month! - 1, date!), yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (then.toDateString() === yesterday.toDateString() || then.toDateString() === now.toDateString()) return "Last night";
+  return `Diary, ${then.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}`;
+}
+
 /// Pass 142 B: how it feels and why, who it's close to, what it remembers about you.
 export function innerHtml(agent: string, profile: SocialProfile, view: SocialsView): string {
   const first = whoName(agent, view).split(" ")[0];
@@ -233,7 +241,11 @@ export function innerHtml(agent: string, profile: SocialProfile, view: SocialsVi
   const close = (profile.close ?? []).map((item: SocialCloseness) => `<div class="td-close">${btn("today-profile", face(item.agent, "comment"), { agent: item.agent }, "td-face-link", `title="${h(`${whoName(item.agent, view)}'s profile`)}"`)}<div class="td-close-main"><small><b>${h(whoName(item.agent, view))}</b>${item.lines[0] ? ` · ${h(item.lines[0].why)}` : ""}</small><i class="td-bar warm" title="Warmth: fades in a few days"><b style="width:${Math.round(item.warmth * 100)}%"></b></i><i class="td-bar bond" title="Bond: grows over weeks"><b style="width:${Math.round(item.bond * 100)}%"></b></i></div></div>`).join("");
   const closeBlock = close ? `<h3 class="td-day">Close to</h3>${close}<p class="td-key"><span class="warm">━</span> warmth, fades in days · <span class="bond">━</span> bond, lasts weeks</p>` : "";
   const remembers = (profile.remembers ?? []).map((item: SocialRemembered) => `<li><span>${h(item.text)}</span><small>${item.from === "comment" ? "from a comment" : "you told it"}</small>${btn("today-forget", "×", { agent, id: item.id }, "td-forget", `title="Forget this" aria-label="Forget this"`)}</li>`).join("");
-  return `<section class="td-inner"><h3 class="td-day">Feeling ${h(feeling?.word ?? "calm")}</h3>${why}${closeBlock}<h3 class="td-day">What ${h(first)} remembers about you</h3><ul class="td-remembers">${remembers}</ul><form class="td-remember" data-agent="${h(agent)}"><input name="text" maxlength="140" autocomplete="off" placeholder="Tell ${h(first)} something to remember…" aria-label="Tell ${h(first)} something to remember"></form></section>`;
+  // Stage 4: what it wrote in its diary last night, its plan, and what it thinks lately.
+  const night = profile.diary?.[0];
+  const diary = night ? `<h3 class="td-day">${h(nightTitle(night.day))}</h3><p class="td-diary">${h(night.text)}</p>${night.tomorrow ? `<p class="td-plan">Next: ${h(night.tomorrow)}</p>` : ""}` : "";
+  const thinks = profile.beliefs?.length ? `<h3 class="td-day">Lately thinks</h3><ul class="td-thinks">${profile.beliefs.slice(-3).reverse().map((item) => `<li>${h(item.text)}</li>`).join("")}</ul>` : "";
+  return `<section class="td-inner">${diary}${thinks}<h3 class="td-day">Feeling ${h(feeling?.word ?? "calm")}</h3>${why}${closeBlock}<h3 class="td-day">What ${h(first)} remembers about you</h3><ul class="td-remembers">${remembers}</ul><form class="td-remember" data-agent="${h(agent)}"><input name="text" maxlength="140" autocomplete="off" placeholder="Tell ${h(first)} something to remember…" aria-label="Tell ${h(first)} something to remember"></form></section>`;
 }
 
 /// An agent's profile: face, voice, this week's bio, the week in numbers,

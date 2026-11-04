@@ -193,3 +193,19 @@ test("pass 142 B: the face follows the mood, and the profile says why, who it's 
   expect(html).toContain('data-action="today-forget"');
   expect(html).toContain('class="td-remember" data-agent="claude"');
 });
+
+test("stage 4: the profile shows last night's diary, the plan and what it lately thinks", () => {
+  const today = new Date(now), yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const day = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+  const data = {
+    agent: { id: "codex", name: "Codex", voice: "dry" }, bio: "Fast.", since: null, week: { work: 1, mail: 0, pictures: 0, comments: 0 }, friend: null, pictures: [], weeks: [],
+    feeling: { mood: "calm" as const, strong: false, word: "calm", reasons: [] }, close: [], remembers: [],
+    diary: [{ day, text: "Found the redirect after two failures.", tomorrow: "Look at the flaky test" }],
+    beliefs: [{ text: "Read the whole test first", since: day }],
+  };
+  const html = todayPage(view, { replying: "", sending: [], error: "", profile: { agent: "codex", data } }, now);
+  expect(html).toContain("Found the redirect after two failures.");
+  expect(html).toContain("Next: Look at the flaky test");
+  expect(html).toContain("Lately thinks");
+  expect(html).toContain("Read the whole test first");
+});

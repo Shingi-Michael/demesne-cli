@@ -548,7 +548,7 @@ export function createDaemonApp(options: {
   const routinesTimer = setInterval(() => { try { routines.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   // The feed's good morning and good night posts, checked once a minute.
   // And from Friday 5 pm, the week's reel.
-  const socialsTimer = socials ? setInterval(() => { void socials.tick().catch(() => {}); void socials.weekReel().catch(() => {}); }, 60_000) : undefined;
+  const socialsTimer = socials ? setInterval(() => { void socials.tick().catch(() => {}); void socials.weekReel().catch(() => {}); void socials.sleep().catch(() => {}); }, 60_000) : undefined;
   socialsTimer?.unref?.();
   routinesTimer.unref?.();
   // Every chat in a project is told what Drive has and is doing; Drive's

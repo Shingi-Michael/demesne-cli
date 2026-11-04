@@ -2186,6 +2186,9 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-friend-link { color: var(--t1); border-radius: 4px; }
 /* Pass 142 B: how it feels and why, who it's close to, what it remembers about you. */
 .td-inner .td-day:first-child { margin-top: 16px; }
+.td-diary { margin: 0; color: var(--t1); font-size: 14px; line-height: 21px; }
+.td-plan { margin: 6px 0 0; color: var(--t3); font-size: 12.5px; }
+.td-thinks { margin: 0; padding-left: 18px; color: var(--t2); font-size: 13px; line-height: 20px; }
 .td-why, .td-remembers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .td-why li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; color: var(--t1); font-size: 13px; }
 .td-why small { flex: none; color: var(--t3); font-size: 12px; }

@@ -222,10 +222,12 @@ export function bioMessages(id: AgentId, week: string[]): ProviderMessage[] {
 export function agentReaction(agent: AgentId, post: SocialPost): Reaction | null {
   if (post.by === agent) return null;
   if (post.from.kind === "milestone") return "🌸";
+  // Your own post: everyone who lives here reacts, each in character.
+  if (post.from.kind === "share") return agent === "codex" ? "🔥" : agent === "gemini" && post.picture ? "👀" : "🌸";
   if (agent === "codex" && /\b(fix(ed)?|merged?|shipped|green|pass(ed)?|done|works?)\b/i.test(post.text)) return "🔥";
   if (agent === "gemini" && /\?|\b(odd|weird|strange|why|curious|mystery|flaky|surpris\w*)\b/i.test(post.text)) return "👀";
   if (agent === "claude" && (post.from.kind === "mail" || /\bthank/i.test(post.text))) return "🙏";
-  if (agent === "claude" && (post.from.kind === "moment" || post.from.kind === "share")) return "🌸";
+  if (agent === "claude" && post.from.kind === "moment") return "🌸";
   return null;
 }
 
@@ -402,9 +404,14 @@ export class SocialFeed {
       post.picture = true;
     }
     this.add(post);
+    // Your post always gets answers: agents who were around today first,
+    // then any agent that lives here. Two at most, and never past the
+    // day's limit on agent comments.
     const around = (id: AgentId) => this.data.posts.some((item) => item.by === id && sameDay(new Date(item.at), this.now()));
-    await this.friendComments(post, around, "you were around in Demesne today");
-    await this.friendComments(post, around, "you were around in Demesne today");
+    for (let index = 0; index < AGENT_COMMENTS_A_POST; index++) {
+      const near = this.options.agents().some((id) => around(id) && !this.must(post.id).comments.some((item) => item.by === id));
+      await this.friendComments(post, near ? around : () => true, near ? "you were around in Demesne today" : "you live in Demesne with Mike and saw his post", true);
+    }
     return this.must(post.id);
   }
 
@@ -503,11 +510,12 @@ export class SocialFeed {
 
   /// Another agent comments when it has a reason: it was busy in the same
   /// project today. Never more than two agent comments on a post.
-  private async friendComments(post: SocialPost, near?: (id: AgentId) => boolean, why?: string): Promise<void> {
+  private async friendComments(post: SocialPost, near?: (id: AgentId) => boolean, why?: string, forYou = false): Promise<void> {
     const now = this.now();
     const today = this.data.posts.filter((item) => sameDay(new Date(item.at), now));
     const agentCommentsToday = today.reduce((count, item) => count + item.comments.filter((comment) => comment.by !== "you").length, 0);
-    if (agentCommentsToday >= AGENT_COMMENTS_A_DAY) return;
+    // Agents chatting among themselves stop at the day's limit; answering you doesn't.
+    if (!forYou && agentCommentsToday >= AGENT_COMMENTS_A_DAY) return;
     const sameProject = (id: AgentId) => today.some((item) => item.by === id && item.id !== post.id && item.from.workspace && item.from.workspace === post.from.workspace);
     const current = this.find(post.id) ?? post;
     const candidates = this.options.agents().filter((id) => id !== post.by && (near ?? sameProject)(id) && !current.comments.some((item) => item.by === id));

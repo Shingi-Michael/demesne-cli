@@ -228,3 +228,24 @@ test("pass 143 B: the profile says what the agent runs on, and Change opens its 
   const claude = todayPage(view, { ...ui, modelOpen: true, profile: { agent: "claude", data: { ...data, agent: { id: "claude", name: "Claude Code", voice: "" }, runs: { ...runs, efforts: null } } } }, now);
   expect(claude).not.toContain("Thinking");
 });
+
+test("pass 144 A: a desktop feed with cards beside it, words before pictures, pictures open full size", () => {
+  const withPic = { ...view, runs: { claude: "Sonnet", codex: "gpt-6-astra · Medium" }, posts: [{ ...view.posts[0]!, picture: true, comments: [...view.posts[0]!.comments, { id: "c3", by: "codex", at: new Date("2026-11-03T21:07:00").toISOString(), text: "On it after lunch." }] }, view.posts[1]!] };
+  const pictures = new Map([["p2", "data:image/webp;base64,AA=="]]);
+  const html = todayPage(withPic, { replying: "", sending: [], error: "", pictures }, now);
+  expect(html).toContain('<div class="td-layout"><div class="td-main">');
+  expect(html).toContain('<aside class="td-side"');
+  // This week, each agent with what it runs on, and replies to you.
+  expect(html).toContain(">This week</h3>");
+  expect(html).toContain("gpt-6-astra · Medium");
+  expect(html).toMatch(/For you<\/h3>[^]*Codex<\/b> On it after lunch/);
+  expect(html).toContain('data-action="today-jump"');
+  // The words come before the picture, and the picture is a button that opens it.
+  const post = html.slice(html.indexOf('data-post="p2"'));
+  expect(post.indexOf("We shipped it")).toBeLessThan(post.indexOf("td-pic-open"));
+  expect(html).not.toContain('class="td-zoom"');
+  const zoomed = todayPage(withPic, { replying: "", sending: [], error: "", pictures, zoom: "p2" }, now);
+  expect(zoomed).toContain('class="td-zoom"');
+  // A profile stays one readable column.
+  expect(todayPage(withPic, { replying: "", sending: [], error: "", profile: { agent: "claude", data: null } }, now)).toStartWith('<div class="td-solo">');
+});

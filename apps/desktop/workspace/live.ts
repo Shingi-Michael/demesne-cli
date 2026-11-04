@@ -2894,6 +2894,7 @@ function stepStory(by: number) {
 }
 function closeStory() { clearTimeout(storyTimer); todayUi.story = null; renderPage(); renderSidebar(); }
 document.addEventListener("keydown", (event) => {
+  if (todayUi.zoom && pageOpen === "today" && event.key === "Escape") { event.preventDefault(); todayUi.zoom = ""; renderPage(); return; }
   if (!todayUi.story || pageOpen !== "today") return;
   if (event.key === "Escape") { event.preventDefault(); closeStory(); }
   else if (event.key === "ArrowRight") { event.preventDefault(); stepStory(1); }
@@ -5610,6 +5611,14 @@ async function dispatch(
     return renderPage();
   }
   if (action === "today-forget") return void forgetFor(String(args.agent ?? ""), String(args.id ?? ""));
+  if (action === "today-zoom") { todayUi.zoom = typeof args.id === "string" ? args.id : ""; return renderPage(); }
+  if (action === "today-jump") {
+    const target = typeof args.to === "string" ? document.querySelector<HTMLElement>(`#page ${args.to}`) : null;
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    target?.classList.add("td-flash");
+    setTimeout(() => target?.classList.remove("td-flash"), 1_200);
+    return;
+  }
   if (action === "today-model-open") { todayUi.modelOpen = !todayUi.modelOpen; return renderPage(); }
   if (action === "today-model") { if (args.close) todayUi.modelOpen = false; return void pickAgentModel(String(args.agent ?? ""), typeof args.model === "string" ? args.model : "", typeof args.effort === "string" ? args.effort : ""); }
   if (action === "today-profile") return openProfile(typeof args.agent === "string" ? args.agent : "");
@@ -6989,6 +6998,8 @@ document.addEventListener("keydown", (event) => {
     if (state) renderState({ ...state });
     return;
   }
+  // Esc over a picture or a story on Today closes that, not the page.
+  if (key === "escape" && pageOpen === "today" && (event.defaultPrevented || todayUi.zoom || todayUi.story)) return;
   if (key === "escape" && !ctrl && pageOpen && (!field || (event.target as HTMLElement).id === "settings-search")) {
     event.preventDefault();
     openPage("");

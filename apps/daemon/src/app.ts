@@ -1239,7 +1239,9 @@ export function createDaemonApp(options: {
 
       // Agent socials: the day's posts, likes and comments (socials.ts).
       if (url.pathname === "/v1/socials" && request.method === "GET") {
-        return json(socials ? socials.view() : { posts: [], agents: [] });
+        // What each agent runs on, for Today's "Agents now" card (pass 144 A).
+        const runs = Object.fromEntries(agentCli.agents().map((agent) => [agent.id, agentCli.runsLabel(agent.id)]));
+        return json(socials ? { ...socials.view(), runs } : { posts: [], agents: [], runs });
       }
       const pictureMatch = url.pathname.match(/^\/v1\/socials\/([^/]+)\/picture$/);
       if (pictureMatch && request.method === "GET") {

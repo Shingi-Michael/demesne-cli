@@ -117,8 +117,12 @@ try {
   const noise = new Uint8Array(3200 * 2000 * 3).map(() => Math.floor(Math.random() * 256));
   const big = await sharp(noise, { raw: { width: 3200, height: 2000, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
   expect(big.byteLength > 15 * 1024 * 1024, "the test screenshot is a big file");
-  await page.locator("#today-file").setInputFiles({ name: "shot.png", mimeType: "image/png", buffer: big });
-  await page.locator("#today-share .td-attach img").waitFor({ timeout: 5_000 }).catch(() => {});
+  // Handing 19 MB to the page takes the test seconds; a live redraw in that
+  // time (a mood changing in the side cards) replaces the input, so try twice.
+  for (let attempt = 0; attempt < 2 && await page.locator("#today-share .td-attach img").count() === 0; attempt++) {
+    await page.locator("#today-file").setInputFiles({ name: "shot.png", mimeType: "image/png", buffer: big });
+    await page.locator("#today-share .td-attach img").waitFor({ timeout: 5_000 }).catch(() => {});
+  }
   await page.locator("#today-share input[name=text]").fill("Got the tabs right today");
   await page.locator("#today-share .td-post-btn").click();
   await page.waitForFunction(() => [...document.querySelectorAll("#page .td-post")].some((item) => item.textContent?.includes("Got the tabs right today")), undefined, { timeout: 15_000 }).catch(() => {});
@@ -126,6 +130,20 @@ try {
   expect(await mine.count() === 1, "your post shows on Today");
   await mine.locator("img.td-shot").waitFor({ timeout: 10_000 }).catch(() => {});
   expect(await mine.locator("img.td-shot").count() === 1, "your post carries its picture");
+  expect(await page.locator("#page .td-side .td-card").count() >= 2 && await page.locator("#page .td-side .td-card-agent").count() === 2, "cards beside the feed: this week and the agents now");
+  const feedBox = await page.locator("#page .td-main").boundingBox(), sideBox = await page.locator("#page .td-side").boundingBox();
+  expect(!!feedBox && !!sideBox && feedBox.width <= 601 && sideBox.x > feedBox.x + feedBox.width, "the feed is a readable column with the cards to its right");
+  const shot = await mine.locator("img.td-shot").boundingBox();
+  expect(!!shot && shot.width <= 441 && shot.height <= 301, "a big screenshot shows at a desktop size, not edge to edge");
+  await mine.locator(".td-pic-open").click();
+  await page.locator("#page .td-zoom img").waitFor({ timeout: 5_000 }).catch(() => {});
+  const full = await page.locator("#page .td-zoom img").boundingBox();
+  expect(!!full && !!shot && full.width > shot.width, "clicking a picture opens it full size");
+  await page.screenshot({ path: join(output, "today-zoom.png") });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  expect(await page.locator("#page .td-zoom").count() === 0, "Esc closes it");
+  await page.screenshot({ path: join(output, "today-desktop.png") });
   await page.waitForTimeout(800);
   await page.screenshot({ path: join(output, "today.png") });
   // Pass 141 B: the stories row, a ring in the Agents list, and the player.

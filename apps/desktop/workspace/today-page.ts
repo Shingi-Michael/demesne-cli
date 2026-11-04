@@ -37,6 +37,8 @@ export interface TodayUi {
   storySeen?: Record<string, string>;
   /// The profile's model picker is open (pass 143 B).
   modelOpen?: boolean;
+  /// The post whose picture is open full size (pass 144 A).
+  zoom?: string;
 }
 
 /// An agent's stories, oldest first.
@@ -168,10 +170,11 @@ function postHtml(post: SocialPost, view: SocialsView, ui: TodayUi): string {
     ? `<form class="td-field" data-id="${h(post.id)}"><input name="text" maxlength="1000" autocomplete="off" placeholder="${h(isAgent(post.by) ? `Comment to ${whoName(post.by, view)}…` : "Say something about it…")}" aria-label="Comment"></form>` : "";
   const src = post.picture ? ui.pictures?.get(post.id) : undefined;
   const picClass = shared ? "td-pic td-shot" : "td-pic";
-  const picture = post.picture ? (src ? `<img class="${picClass}" src="${h(src)}" alt="${h(`${whoName(post.by, view)}: ${post.text}`)}">` : `<div class="${picClass} td-pic-wait" aria-hidden="true"></div>`) : "";
+  // Pictures sit at a desktop size under the words; a click opens them full size.
+  const picture = post.picture ? (src ? btn("today-zoom", `<img class="${picClass}" src="${h(src)}" alt="${h(`${whoName(post.by, view)}: ${post.text}`)}">`, { id: post.id }, shared ? "td-pic-open td-shot-open" : "td-pic-open", `title="Open full size"`) : `<div class="${picClass} td-pic-wait" aria-hidden="true"></div>`) : "";
   const classes = ["td-post", moment && "td-is-moment", milestone && "td-milestone", day && `td-${kind}`].filter(Boolean).join(" ");
   const petals = milestone ? `<div class="td-petals" aria-hidden="true">${PETALS}</div>` : "";
-  return `<article class="${classes}" data-post="${h(post.id)}">${petals}${head}${picture}${body}${from}${reactionsHtml(post, ui)}<div class="td-acts">${like}${react}${reply}</div>${comments}${sending}${field}</article>`;
+  return `<article class="${classes}" data-post="${h(post.id)}">${petals}${head}<div class="td-body">${body}${picture}${from}${reactionsHtml(post, ui)}<div class="td-acts">${like}${react}${reply}</div>${comments}${sending}${field}</div></article>`;
 }
 
 /// The week the reel sums up, Monday to Sunday, in words.
@@ -298,15 +301,17 @@ export function weekHtml(week: SocialWeek, view: SocialsView, ui: TodayUi): stri
 }
 
 export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now()): string {
-  if (view && ui.profile) return profileHtml(ui.profile, view, ui);
+  if (view && ui.profile) return `<div class="td-solo">${profileHtml(ui.profile, view, ui)}</div>`;
   const title = `<header class="td-top"><h2>Today</h2><p>Your day in Demesne, told by the agents you work with.</p></header>`;
-  if (!view) return `${title}<p class="td-empty">Loading…</p>`;
+  if (!view) return `<div class="td-solo">${title}<p class="td-empty">Loading…</p></div>`;
   const error = ui.error ? `<p class="td-error" role="alert">${h(ui.error)}</p>` : "";
   // The share box stays at the bottom of the page, like the chat composer.
   const composer = view.agents.length ? `<div class="td-dock">${composerHtml(ui)}</div>` : "";
+  // Pass 144 A: a readable feed, and the room beside it as cards.
+  const layout = (main: string) => `<div class="td-wrap"><div class="td-layout"><div class="td-main">${main}</div>${sideHtml(view, ui, now)}</div></div>${storyViewer(view, ui, now)}${zoomHtml(view, ui)}`;
   if (!view.posts.length) {
     const who = view.agents.length ? view.agents.map((agent) => agent.name).join(", ") : "Your agents";
-    return `${title}${error}${storiesRow(view, ui)}${storyViewer(view, ui, now)}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>${composer}`;
+    return layout(`${title}${error}${storiesRow(view, ui)}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>${composer}`);
   }
   let last = "";
   const rows = view.posts.map((post) => {
@@ -316,7 +321,40 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
     return heading + postHtml(post, view, ui);
   }).join("");
   const reel = view.reel ? reelHtml(view.reel, view, ui) : "";
-  return `${title}${error}${storiesRow(view, ui)}${storyViewer(view, ui, now)}${reel}<div class="td-feed">${rows}</div>${composer}`;
+  return layout(`${title}${error}${storiesRow(view, ui)}${reel}<div class="td-feed">${rows}</div>${composer}`);
+}
+
+/// The cards beside the feed (pass 144 A): this week, each agent now, and
+/// what's for you. A narrow window puts them above the feed.
+export function sideHtml(view: SocialsView, ui: TodayUi, now = Date.now()): string {
+  const card = (label: string, body: string, extra = "") => `<section class="td-card${extra}"><h3>${h(label)}</h3>${body}</section>`;
+  const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const week = view.posts.filter((post) => Date.parse(post.at) >= monday.getTime());
+  const done = week.filter((post) => post.from.kind === "work").length, mail = week.filter((post) => post.from.kind === "mail").length;
+  const facts = [plural(week.length, "post"), done ? `${done} finished` : "", mail ? `${mail} mail` : ""].filter(Boolean).join(" · ");
+  const reel = view.reel ? btn("today-jump", "Watch the week's reel", { to: ".td-reel" }, "td-card-link") : "";
+  const thisWeek = week.length || view.reel ? card("This week", `<p>${h(facts || "Nothing yet")}</p>${reel}`) : "";
+  const agents = view.agents.length ? card("Agents now", view.agents.map((agent) => {
+    const mood = view.moods?.[agent.id];
+    const runs = view.runs?.[agent.id];
+    const line = [mood?.word ?? "", runs ?? ""].filter(Boolean).join(" · ");
+    return btn("today-profile", `${face(agent.id, "comment", agentMood(agent.id, "", view.posts, now, view.moods))}<span><b>${h(agent.name)}</b>${line ? `<small>${h(line)}</small>` : ""}</span>`, { agent: agent.id }, "td-card-agent", `title="${h(moodTitle(agent.name, mood))}"`);
+  }).join("")) : "";
+  // Clock times, not "2m ago": the page redraws only when something changes.
+  const mine = [...forYou(view).entries()].map(([id, item]) => ({ ...item, at: item.post.comments.find((comment) => comment.id === id)?.at ?? item.post.at }))
+    .sort((a, b) => (b.at > a.at ? 1 : -1)).slice(0, 4);
+  const replies = mine.length ? card("For you", mine.map((item) =>
+    btn("today-jump", `${face(item.by, "comment")}<span><b>${h(whoName(item.by, view))}</b> ${h(item.text.length > 60 ? `${item.text.slice(0, 59)}…` : item.text)}<small>${h(clock(item.at))}</small></span>`, { to: `[data-post="${item.post.id}"]` }, "td-card-reply")).join("")) : "";
+  const cards = thisWeek + agents + replies;
+  return cards ? `<aside class="td-side" aria-label="Today at a glance">${cards}</aside>` : "";
+}
+
+/// A picture full size, over the page (pass 144 A). Click or Esc closes it.
+export function zoomHtml(view: SocialsView, ui: TodayUi): string {
+  const post = ui.zoom ? view.posts.find((item) => item.id === ui.zoom) : undefined;
+  const src = post ? ui.pictures?.get(post.id) : undefined;
+  if (!post || !src) return "";
+  return `<div class="td-zoom" role="dialog" aria-label="Picture">${btn("today-zoom", `<img src="${h(src)}" alt="${h(`${whoName(post.by, view)}: ${post.text}`)}">`, { id: "" }, "td-zoom-close", `title="Close"`)}</div>`;
 }
 
 /// Posts newer than the last time you opened Today: the sidebar's count.

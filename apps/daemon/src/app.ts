@@ -471,11 +471,21 @@ export function createDaemonApp(options: {
     if (agent) {
       const answered = store.getTurnModelMessages(session.id, turnId).filter((message) => message.role === "assistant")
         .map((message) => typeof message.content === "string" ? message.content : "").filter(Boolean).at(-1) ?? "";
+      socials.noteStory(agent, mail ? "mail" : "done", { title: askedOf(turn.content), sessionId: session.id, workspace, happy: /\bmerged\b/i.test(answered) });
       void socials.noteAgentTurn(agent, { kind: mail ? "mail" : "work", label: session.title, sessionId: session.id, workspace }, turn.content, answered).catch(() => {});
     } else if (turn.permissionMode === "ask" && workspace && !inDriveWorktree(workspace)) {
       // Named a beat later (chat-name.ts), so the moment reads the chat's name.
       setTimeout(() => { const title = store.getSession(session.id)?.title ?? session.title; void socials.noteMoment(session.id, title, workspace).catch(() => {}); }, 25_000).unref?.();
     }
+  }
+  /// What a turn asked, as a story's few words: its first line.
+  const askedOf = (content: string) => content.split("\n").map((line) => line.trim()).find(Boolean)?.replace(/[.!?]+$/, "") ?? "";
+  /// An agent's chat started or got stuck: a story (pass 141), no model call.
+  function storyOf(turn: Turn, kind: "start" | "failed") {
+    if (!socials || turn.kind || turn.fromDrive || turn.fromRoutine) return;
+    const session = store.getSession(turn.sessionId);
+    const agent = session && agentIdOf(session.preferredModel);
+    if (agent) socials.noteStory(agent, kind, { title: askedOf(turn.content), sessionId: session.id, workspace: session.workspace?.root ?? null });
   }
   const activeTurns = new Set<Promise<void>>();
   const compactor = new SessionCompactor(store, scheduler, tools, options, (sessionId) => sessionId !== assistantChat.existing(), keepEdits);
@@ -640,11 +650,14 @@ export function createDaemonApp(options: {
       // Threads stay off Heartbeat: they answer only to their orchestrator and you.
       const workspace = heartbeat && turn.kind !== "compaction" && !driveFixes.isThread(turn.sessionId) ? store.getSession(turn.sessionId)?.workspace?.root : undefined;
       if (workspace) await Promise.race([heartbeat!.attach(turn.sessionId, workspace), new Promise((resolve) => setTimeout(resolve, 2_000))]);
+      if (turn.kind !== "compaction") storyOf(turn, "start");
       if (turn.kind === "compaction") await compactor.run(turn.id, inference, signal);
       else await engine.run(turn.id, inference, signal);
+      if (turn.kind !== "compaction" && store.getTurn(turn.id)?.status === "failed") storyOf(turn, "failed");
       if (socials && turn.kind !== "compaction") noteSocial(turn.id);
     } catch (error) {
       if (signal.aborted) return;
+      if (turn.kind !== "compaction") storyOf(turn, "failed");
       const detail = error instanceof Error ? error.message : "Unknown turn failure";
       const message = turn.kind === "compaction" ? `Compaction failed: ${detail}. Previous context remains active.` : detail;
       try {

@@ -4,7 +4,7 @@
 /// moments, what you share, milestones, likes, reactions and comments.
 /// Each post is tagged with what it came from, and the tag opens that chat.
 /// A face opens that agent's profile.
-import type { SocialPost, SocialProfile, SocialReel, SocialsView, SocialWeek } from "@demesne/client";
+import type { SocialPost, SocialProfile, SocialReel, SocialsView, SocialStory, SocialWeek } from "@demesne/client";
 import { agentFace, type FaceMood } from "@demesne/brand";
 
 const h = (value: unknown) =>
@@ -31,6 +31,55 @@ export interface TodayUi {
   share?: { text: string; image: string | null; busy: boolean };
   /// The reel's clip once loaded (a data URL), by reel id.
   clips?: Map<string, string>;
+  /// The story being watched: whose, and which one.
+  story?: { agent: string; index: number } | null;
+  /// When you last saw each agent's stories (ISO times), for the rings.
+  storySeen?: Record<string, string>;
+}
+
+/// An agent's stories, oldest first.
+export const storiesOf = (view: SocialsView | null, agent: string): SocialStory[] => (view?.stories ?? []).filter((story) => story.by === agent);
+/// Agents with a story you haven't seen.
+export function unseenStories(view: SocialsView | null, seen: Record<string, string> = {}): Set<string> {
+  return new Set((view?.stories ?? []).filter((story) => story.at > (seen[story.by] ?? "")).map((story) => story.by));
+}
+/// The agents with stories, those with something new first, then newest.
+export function storyAgents(view: SocialsView | null, seen: Record<string, string> = {}): string[] {
+  const unseen = unseenStories(view, seen), latest = new Map<string, string>();
+  for (const story of view?.stories ?? []) latest.set(story.by, story.at);
+  return [...latest.keys()].sort((a, b) => Number(unseen.has(b)) - Number(unseen.has(a)) || latest.get(b)!.localeCompare(latest.get(a)!));
+}
+const ago = (at: string, now: number) => {
+  const minutes = Math.max(1, Math.round((now - Date.parse(at)) / 60_000));
+  return minutes < 60 ? `${minutes}m` : `${Math.round(minutes / 60)}h`;
+};
+
+/// Pass 141 B: the row of faces at the top of Today. A pink ring means a
+/// story you haven't seen; tapping a face plays that agent's stories.
+export function storiesRow(view: SocialsView, ui: TodayUi): string {
+  const agents = storyAgents(view, ui.storySeen);
+  if (!agents.length) return "";
+  const unseen = unseenStories(view, ui.storySeen);
+  return `<div class="td-stories" role="list" aria-label="Stories">${agents.map((agent) => {
+    const latest = storiesOf(view, agent).at(-1)!;
+    return btn("today-story", `<span class="td-ring${unseen.has(agent) ? "" : " seen"}">${face(agent, "story", latest.mood)}</span><span class="td-story-name">${h(whoName(agent, view).split(" ")[0])}</span>`, { agent }, "td-story-pick", `role="listitem" title="${h(`${whoName(agent, view)}'s stories`)}"`);
+  }).join("")}</div>`;
+}
+
+/// The story player: one moment at a time, bars along the top, the left
+/// third goes back, the rest goes on.
+export function storyViewer(view: SocialsView, ui: TodayUi, now = Date.now()): string {
+  const open = ui.story;
+  const list = open ? storiesOf(view, open.agent) : [];
+  const story = open ? list[open.index] : undefined;
+  if (!open || !story) return "";
+  const bars = list.map((_, index) => `<i class="${index < open.index ? "done" : index === open.index ? "now" : ""}"><b></b></i>`).join("");
+  return `<div class="td-story" role="dialog" aria-label="${h(`${whoName(open.agent, view)}'s stories`)}"><div class="td-story-card" data-story="${h(story.id)}">`
+    + `<div class="td-story-bars">${bars}</div>`
+    + `<div class="td-story-head">${face(open.agent, "comment")}<b>${h(whoName(open.agent, view))}</b><small>${h(ago(story.at, now))}</small>${btn("today-story-close", "×", {}, "td-story-x", 'aria-label="Close"')}</div>`
+    + `<div class="td-story-body">${face(open.agent, "profile", story.mood)}<p>${h(story.text)}</p><span class="td-story-src">${h(story.label)}</span></div>`
+    + btn("today-story-step", "", { d: -1 }, "td-story-back", 'aria-label="Back"') + btn("today-story-step", "", { d: 1 }, "td-story-next", 'aria-label="Next"')
+    + `</div></div>`;
 }
 
 const NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini", you: "You", demesne: "Demesne" };
@@ -66,7 +115,7 @@ export function agentMood(agent: string, tone: string, posts: SocialPost[] = [],
   const latest = posts.filter((post) => post.by === agent).reduce<SocialPost | null>((best, post) => !best || post.at > best.at ? post : best, null);
   return latest && now - Date.parse(latest.at) < 2 * 3_600_000 ? postMood(latest) : "calm";
 }
-const face = (by: string, size: "post" | "comment" | "profile", mood: FaceMood = "calm") => by === "you"
+const face = (by: string, size: "post" | "comment" | "profile" | "story", mood: FaceMood = "calm") => by === "you"
   ? `<span class="td-face td-you td-f-${size}" aria-hidden="true">You</span>`
   : by === "demesne" ? `<span class="td-face td-mark td-f-${size}" aria-hidden="true">${MARK}</span>`
   : `<span class="td-face td-f-${size}" data-agent="${h(by)}" aria-hidden="true">${agentFace(by, mood)}</span>`;
@@ -203,7 +252,7 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
   const composer = view.agents.length ? `<div class="td-dock">${composerHtml(ui)}</div>` : "";
   if (!view.posts.length) {
     const who = view.agents.length ? view.agents.map((agent) => agent.name).join(", ") : "Your agents";
-    return `${title}${error}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>${composer}`;
+    return `${title}${error}${storiesRow(view, ui)}${storyViewer(view, ui, now)}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>${composer}`;
   }
   let last = "";
   const rows = view.posts.map((post) => {
@@ -213,7 +262,7 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
     return heading + postHtml(post, view, ui);
   }).join("");
   const reel = view.reel ? reelHtml(view.reel, view, ui) : "";
-  return `${title}${error}${reel}<div class="td-feed">${rows}</div>${composer}`;
+  return `${title}${error}${storiesRow(view, ui)}${storyViewer(view, ui, now)}${reel}<div class="td-feed">${rows}</div>${composer}`;
 }
 
 /// Posts newer than the last time you opened Today: the sidebar's count.

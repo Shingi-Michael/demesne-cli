@@ -36,6 +36,8 @@ describe("cleanPost", () => {
   test("strips labels, quotes and hashtags, and keeps it short", () => {
     expect(cleanPost('Post: "Fixed the flaky test. #win"')).toBe("Fixed the flaky test.");
     expect(cleanPost("   ")).toBeNull();
+    expect(cleanPost("Fixed the tabs — finally. Took 3–4 tries — worth it")).toBe("Fixed the tabs, finally. Took 3-4 tries, worth it");
+    expect(cleanPost("Done—")).toBe("Done");
     expect(cleanPost(null)).toBeNull();
     const long = cleanPost(`${"Long day. ".repeat(40)}`, 100)!;
     expect(long.length).toBeLessThanOrEqual(100);
@@ -267,6 +269,23 @@ describe("pass 138", () => {
     expect(past.picture).toBeNull();
     expect(past.line).toBeTruthy(); // the line it wrote that week, kept when this week's replaced it
     expect(mondayOf(new Date("2026-11-08T23:00:00"))).toBe("2026-11-02");
+  });
+
+  test("stories come from real events in their own words, last a day, and never repeat", async () => {
+    let at = new Date("2026-11-03T10:00:00");
+    const { social, calls } = feed([], { now: () => at, agents: ["claude", "codex"] });
+    const started = social.noteStory("codex", "start", { title: "Fix the login redirect", sessionId: "s1", workspace: "/p/demesne-cli" });
+    expect(started).toMatchObject({ by: "codex", kind: "start", text: "Started on Fix the login redirect", label: "Chat · demesne-cli", mood: "focus" });
+    expect(social.noteStory("codex", "start", { title: "Fix the login redirect", sessionId: "s1" })).toBeNull(); // the same thing twice
+    expect(social.noteStory("codex", "failed", { title: "Fix the login redirect", sessionId: "s1" })?.mood).toBe("stuck");
+    expect(social.noteStory("codex", "done", { title: "Fix the login redirect", sessionId: "s1", happy: true })).toMatchObject({ text: "Merged it: Fix the login redirect", mood: "happy" });
+    expect(social.noteStory("gemini", "start", { title: "x" })).toBeNull(); // not installed here
+    expect(calls).toHaveLength(0); // stories never call the model
+    expect(social.view().stories?.map((story) => story.kind)).toEqual(["start", "failed", "done"]);
+    at = new Date("2026-11-04T10:30:00");
+    expect(social.view().stories).toEqual([]);
+    for (let index = 0; index < 10; index++) social.noteStory("claude", "start", { title: `job ${index}`, sessionId: `s${index}` });
+    expect(social.view().stories).toHaveLength(8);
   });
 
   test("you share a line: agents who were around today see it first, and each chooses to comment, react or pass", async () => {

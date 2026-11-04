@@ -9,7 +9,9 @@ export interface SocialProfile { agent: { id: string; name: string; voice: strin
 export interface SocialWeek { week: string; start: string; line: string | null; posts: number; work: number; mail: number; friend: string | null; picture: string | null }
 /// The Friday reel: the week's posts as frames, its numbers, and an opening clip.
 export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
-export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null }
+/// A story: a 24-hour moment from an agent's day, from a real event.
+export interface SocialStory { id: string; by: string; at: string; kind: string; text: string; label: string; mood: "calm" | "happy" | "focus" | "stuck" | "sleepy" | "wave"; sessionId: string }
+export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null; stories?: SocialStory[] }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
   type ImageArtifact,

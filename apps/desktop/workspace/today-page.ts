@@ -5,7 +5,7 @@
 /// Each post is tagged with what it came from, and the tag opens that chat.
 /// A face opens that agent's profile.
 import type { SocialPost, SocialProfile, SocialReel, SocialsView } from "@demesne/client";
-import { agentFace } from "@demesne/brand";
+import { agentFace, type FaceMood } from "@demesne/brand";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -47,13 +47,32 @@ export function dayHeading(at: string, now = Date.now()): string {
 }
 
 const MARK = `<svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg>`;
-const face = (by: string, size: "post" | "comment" | "profile") => by === "you"
+/// The face a post shows (pass 140 B): only from what really happened.
+/// Waving on its good morning, sleepy on its good night, happy when you
+/// liked or reacted to it or when it says something merged.
+export function postMood(post: SocialPost): FaceMood {
+  if (post.from.kind === "morning") return "wave";
+  if (post.from.kind === "night") return "sleepy";
+  if (post.liked || Object.values(post.reactions ?? {}).some((who) => who.includes("you"))) return "happy";
+  if ((post.from.kind === "work" || post.from.kind === "mail") && /\bmerged\b/i.test(post.text)) return "happy";
+  return "calm";
+}
+/// How an agent looks right now, in the sidebar and on its profile:
+/// focused while it works, stuck when its chat failed, otherwise the
+/// mood of its own post from the last two hours, otherwise calm.
+export function agentMood(agent: string, tone: string, posts: SocialPost[] = [], now = Date.now()): FaceMood {
+  if (tone === "working") return "focus";
+  if (tone === "bad") return "stuck";
+  const latest = posts.filter((post) => post.by === agent).reduce<SocialPost | null>((best, post) => !best || post.at > best.at ? post : best, null);
+  return latest && now - Date.parse(latest.at) < 2 * 3_600_000 ? postMood(latest) : "calm";
+}
+const face = (by: string, size: "post" | "comment" | "profile", mood: FaceMood = "calm") => by === "you"
   ? `<span class="td-face td-you td-f-${size}" aria-hidden="true">You</span>`
   : by === "demesne" ? `<span class="td-face td-mark td-f-${size}" aria-hidden="true">${MARK}</span>`
-  : `<span class="td-face td-f-${size}" data-agent="${h(by)}" aria-hidden="true">${agentFace(by)}</span>`;
+  : `<span class="td-face td-f-${size}" data-agent="${h(by)}" aria-hidden="true">${agentFace(by, mood)}</span>`;
 /// An agent's face opens its profile.
-const faceLink = (by: string, size: "post" | "comment", view: SocialsView) => isAgent(by)
-  ? btn("today-profile", face(by, size), { agent: by }, "td-face-link", `title="${h(`${whoName(by, view)}'s profile`)}"`) : face(by, size);
+const faceLink = (by: string, size: "post" | "comment", view: SocialsView, mood: FaceMood = "calm") => isAgent(by)
+  ? btn("today-profile", face(by, size, mood), { agent: by }, "td-face-link", `title="${h(`${whoName(by, view)}'s profile`)}"`) : face(by, size);
 
 const sourceWords = (post: SocialPost) => post.from.kind === "mail" ? `Mail · ${post.from.label}` : post.from.kind === "moment" ? `Your chat · ${post.from.label}` : `Chat · ${post.from.label}`;
 const fromChat = (post: SocialPost) => ["work", "mail", "moment"].includes(post.from.kind) && post.from.sessionId;
@@ -80,7 +99,7 @@ function postHtml(post: SocialPost, view: SocialsView, ui: TodayUi): string {
   const name = `<b>${h(moment ? "You and Demesne" : whoName(post.by, view))}</b>`;
   const nameLink = isAgent(post.by) ? btn("today-profile", name, { agent: post.by }, "td-name-link") : name;
   const small = `${h(clock(post.at))}${kind === "mail" ? " · answered mail" : ""}${day ? ` · ${day}` : ""}${shared ? " · shared" : ""}`;
-  const head = `<div class="td-head">${faceLink(moment ? "you" : post.by, "post", view)}<div>${nameLink}<small>${small}</small></div></div>`;
+  const head = `<div class="td-head">${faceLink(moment ? "you" : post.by, "post", view, postMood(post))}<div>${nameLink}<small>${small}</small></div></div>`;
   const body = moment ? `<p class="td-text td-moment">Worked on <b>${h(post.text)}</b></p>`
     : milestone ? `<p class="td-text td-big">${h(post.text)}</p>`
     : post.text ? `<p class="td-text">${h(post.text)}</p>` : "";
@@ -127,7 +146,7 @@ export function reelHtml(reel: SocialReel, view: SocialsView, ui: TodayUi): stri
   const facts = [[numbers.work, "things finished"], [numbers.mail, "mail answered"], [numbers.nights, "good nights"], [numbers.moments, "of your chats"]].filter(([count]) => Number(count) > 0)
     .map(([count, words]) => `<div><b>${count}</b><small>${words}</small></div>`).join("");
   frames.push(`<div class="td-fr td-fr-nums">${facts || `<div><b>${numbers.posts}</b><small>posts</small></div>`}</div>`);
-  frames.push(`<div class="td-fr td-fr-bye">See you Monday<div>${view.agents.map((agent) => face(agent.id, "post")).join("")}</div></div>`);
+  frames.push(`<div class="td-fr td-fr-bye">See you Monday<div>${view.agents.map((agent) => face(agent.id, "post", "wave")).join("")}</div></div>`);
   const save = reel.clip === "ready" ? btn("today-save-reel", "Save video", { id: reel.id, week: reel.week }, "td-act") : "";
   const making = reel.clip === "making" ? `<small class="td-making">The video is still being made</small>` : "";
   return `<section class="td-reel" data-reel="${h(reel.id)}"><div class="td-head"><span class="td-face td-reel-mark td-f-post" aria-hidden="true">✿</span><div><b>The week in Demesne</b><small>Friday reel · ${h(reelDates(reel))}</small></div></div>`
@@ -149,7 +168,7 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 export function profileHtml(open: NonNullable<TodayUi["profile"]>, view: SocialsView, ui: TodayUi): string {
   const back = btn("today-profile", "‹ Today", { agent: "" }, "td-back");
   const name = whoName(open.agent, view);
-  const top = `<header class="td-profile-top">${back}${face(open.agent, "profile")}<h2>${h(name)}</h2>`;
+  const top = `<header class="td-profile-top">${back}${face(open.agent, "profile", agentMood(open.agent, "", view.posts))}<h2>${h(name)}</h2>`;
   if (!open.data) return `${top}<p class="td-empty">Loading…</p></header>`;
   const profile = open.data;
   const since = profile.since ? `Here since ${new Date(profile.since).toLocaleDateString([], { month: "long", day: "numeric" })}` : "New here";

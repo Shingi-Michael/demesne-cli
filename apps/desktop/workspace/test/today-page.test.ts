@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { SocialsView } from "@demesne/client";
-import { dayHeading, forYou, newSince, todayPage } from "../today-page.ts";
-import { agentFace } from "@demesne/brand";
+import { agentMood, dayHeading, forYou, newSince, postMood, todayPage } from "../today-page.ts";
+import { agentFace, FACE_MOODS } from "@demesne/brand";
 
 const now = new Date("2026-11-03T22:00:00").getTime();
 const view: SocialsView = {
@@ -39,6 +39,36 @@ test("day headings and faces", () => {
   expect(dayHeading(new Date(now).toISOString(), now)).toBe("Today");
   expect(agentFace("claude")).toContain("#e8a37c");
   expect(agentFace("someone")).toContain("<svg");
+});
+
+test("each agent is its own character, and every mood draws", () => {
+  expect(agentFace("claude")).toContain("#f7a9c0"); // the sakura clip
+  expect(agentFace("codex")).toContain("#2b2b33"); // glasses and headphones
+  expect(agentFace("gemini")).toContain("#f6d36b"); // the star pin
+  for (const mood of FACE_MOODS) for (const id of ["claude", "codex", "gemini", "someone"]) {
+    const svg = agentFace(id, mood);
+    expect(svg).toContain(`data-mood="${mood}"`);
+    expect(svg).not.toContain("<text"); // shapes only: the PNG references have no fonts
+  }
+  expect(new Set(FACE_MOODS.map((mood) => agentFace("claude", mood))).size).toBe(FACE_MOODS.length);
+});
+
+test("moods come only from what really happened", () => {
+  const base = view.posts[0]!;
+  const post = (over: Partial<typeof base>) => ({ ...base, liked: false, reactions: {}, ...over });
+  expect(postMood(post({ from: { kind: "morning", label: "", sessionId: "", workspace: null } }))).toBe("wave");
+  expect(postMood(post({ from: { kind: "night", label: "", sessionId: "", workspace: null } }))).toBe("sleepy");
+  expect(postMood(post({ liked: true }))).toBe("happy");
+  expect(postMood(post({ reactions: { "🔥": ["you"] } }))).toBe("happy");
+  expect(postMood(post({ reactions: { "🔥": ["codex"] } }))).toBe("calm");
+  expect(postMood(post({ text: "Merged the login fix." }))).toBe("happy");
+  expect(postMood(post({}))).toBe("calm");
+  expect(agentMood("claude", "working", view.posts, now)).toBe("focus");
+  expect(agentMood("claude", "bad", view.posts, now)).toBe("stuck");
+  expect(agentMood("claude", "", view.posts, now)).toBe("happy"); // you liked its post an hour ago
+  expect(agentMood("claude", "", view.posts, now + 3 * 3_600_000)).toBe("calm");
+  expect(agentMood("codex", "", view.posts, now)).toBe("calm");
+  expect(todayPage(view, { replying: "", sending: [], error: "" }, now)).toContain('data-mood="happy"');
 });
 
 test("a post's picture shows once loaded, and Today never shows what pictures cost", () => {

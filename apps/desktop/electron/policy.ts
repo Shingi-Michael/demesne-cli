@@ -125,9 +125,14 @@ export function assetPath(root: string, value: string) {
   if (!target.startsWith(resolve(root) + sep)) throw new Error("Invalid asset path");
   return target;
 }
+/// Requests that carry a picture (base64) get room for one; the page fits
+/// big pictures first (fit-image.ts), so this is a backstop.
+export const PICTURE_REQUESTS = new Set(["attach", "socials-share", "image-convert"]);
+export const PICTURE_REQUEST_BYTES = 32 * 1024 * 1024;
 export function validateRequest(method: unknown, args: unknown): asserts method is string {
   if (typeof method !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(method) || !args || typeof args !== "object" || Array.isArray(args)) throw new Error("Invalid desktop request");
-  if (Buffer.byteLength(JSON.stringify(args)) > 260_000) throw new Error("Desktop request is too large");
+  const limit = PICTURE_REQUESTS.has(method) ? PICTURE_REQUEST_BYTES : 260_000;
+  if (Buffer.byteLength(JSON.stringify(args)) > limit) throw new Error(PICTURE_REQUESTS.has(method) ? "That picture is too big to send" : "Desktop request is too large");
 }
 export function openTarget(value: unknown): "url" | "file" {
   if (typeof value !== "string" || !value || value.includes("\0")) throw new Error("Invalid item to open");

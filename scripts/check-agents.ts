@@ -65,7 +65,11 @@ try {
   await page.locator("#page .td-pick").nth(3).click();
   await page.waitForFunction(() => document.querySelector("#page .td-chip.on") !== null, undefined, { timeout: 5_000 }).catch(() => {});
   expect(await page.locator("#page .td-chip.on").count() === 1, "your reaction shows on the post");
-  await page.locator("#today-file").setInputFiles({ name: "shot.png", mimeType: "image/png", buffer: Buffer.from(pink, "base64") });
+  // A big screenshot (noise, so it doesn't compress): over the old limits, it fits and posts.
+  const noise = new Uint8Array(3200 * 2000 * 3).map(() => Math.floor(Math.random() * 256));
+  const big = await sharp(noise, { raw: { width: 3200, height: 2000, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
+  expect(big.byteLength > 15 * 1024 * 1024, "the test screenshot is a big file");
+  await page.locator("#today-file").setInputFiles({ name: "shot.png", mimeType: "image/png", buffer: big });
   await page.locator("#today-share .td-attach img").waitFor({ timeout: 5_000 }).catch(() => {});
   await page.locator("#today-share input[name=text]").fill("Got the tabs right today");
   await page.locator("#today-share .td-post-btn").click();
@@ -82,6 +86,11 @@ try {
   await page.screenshot({ path: join(output, "profile.png") });
   await page.locator("#page .td-back").click();
   expect(await page.locator("#today-share").count() === 1, "back goes to the feed");
+  // The same big screenshot attaches to a chat message (it used to hit the window's 260 KB request limit).
+  await page.locator(".sidebar-housed-row:not(.sidebar-today)").first().click();
+  await page.locator("#attach-input").setInputFiles({ name: "big.png", mimeType: "image/png", buffer: big });
+  await page.waitForFunction(() => { const row = document.getElementById("attach-row"); return !!row && !row.hidden && row.querySelector("img") !== null; }, undefined, { timeout: 20_000 }).catch(() => {});
+  expect(await page.locator("#attach-row img").count() === 1, "a big screenshot attaches to a chat");
 } finally {
   await browser.close();
   await f.close?.();

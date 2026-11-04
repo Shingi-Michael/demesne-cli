@@ -1845,7 +1845,7 @@ export class WorkspaceHost {
     // An image pasted, dropped or picked in the composer: uploaded now, sent
     // with the next message.
     // An iPhone photo (HEIC) the window can't draw: the Mac's own sips
-    // turns it into a JPEG, at most 4096px, as a data URL.
+    // turns it into a JPEG at its own size (fit-image.ts shrinks it after; sips -Z would also enlarge small ones).
     if (method === "image-convert") {
       if (typeof args.data !== "string" || !args.data) throw new Error("Invalid image");
       if (process.platform !== "darwin") throw new Error("HEIC photos can only be converted on a Mac. Export it as JPEG first.");
@@ -1853,7 +1853,7 @@ export class WorkspaceHost {
       try {
         const source = join(dir, "in.heic"), out = join(dir, "out.jpg");
         writeFileSync(source, Buffer.from(args.data.replace(/^data:[^,]*,/, ""), "base64"));
-        execFileSync("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "88", "-Z", "4096", source, "--out", out], { stdio: "ignore", timeout: 30_000 });
+        execFileSync("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "88", source, "--out", out], { stdio: "ignore", timeout: 30_000 });
         return `data:image/jpeg;base64,${readFileSync(out).toString("base64")}`;
       } catch (error) {
         throw new Error(error instanceof Error && /HEIC|Mac/.test(error.message) ? error.message : "This photo couldn't be converted");

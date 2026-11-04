@@ -14,15 +14,14 @@ import type { ProviderMessage } from "@demesne/providers";
 import type { AgentId } from "./agent-cli.ts";
 import type { PictureMaker } from "./social-pictures.ts";
 import { CLIP_SECONDS, type ClipMaker } from "./social-reel.ts";
+import { CHARACTERS, characterPrompt, lineProblems, pickLine, versions, VERSIONS, type LineCheck } from "./characters.ts";
 
 export interface SocialPersona { id: AgentId; name: string; voice: string }
 
-/// Each agent's character: who it is when it isn't working.
-export const PERSONAS: Record<AgentId, SocialPersona> = {
-  claude: { id: "claude", name: "Claude Code", voice: "warm, careful and a little self-deprecating; loves tidy code and a good night's work; notices how people feel" },
-  codex: { id: "codex", name: "Codex", voice: "dry, quick and quietly competitive; says a lot in few words; proud of fast fixes" },
-  gemini: { id: "gemini", name: "Gemini", voice: "curious and upbeat; a morning person; notices small details others miss and asks good questions" },
-};
+/// Each agent's character as the feed shows it; the whole sheet is in characters.ts.
+export const PERSONAS: Record<AgentId, SocialPersona> = Object.fromEntries(
+  Object.values(CHARACTERS).map(({ id, name, voice }) => [id, { id, name, voice }]),
+) as Record<AgentId, SocialPersona>;
 
 export type SocialSource =
   /// A turn an agent finished in its own chat.
@@ -155,6 +154,9 @@ interface SocialsFile {
   videoSeconds: number;
   /// The last day's stories.
   stories: SocialStory[];
+  /// How the checks went on written lines (lineProblems): first version
+  /// passed, a later version passed, the plain fallback was used, or nothing.
+  lines: { ok: number; later: number; fallback: number; dropped: number };
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -241,10 +243,7 @@ export function cleanPost(reply: string | null, max = 280): string | null {
 
 const RULES = "Write like a person posting on their own social feed: first person, casual, one to three short sentences, under 240 characters. No hashtags, no emoji spam (one at most), no quotes around it, no em or en dashes (use a comma or a full stop). Only say what really happened in the notes; never invent people, places, events or numbers. Reply with the words only.";
 
-function persona(id: AgentId): string {
-  const who = PERSONAS[id];
-  return `You are ${who.name}, one of the coding agents that live in Demesne, a desktop app where you work alongside the person who owns it (Mike) and the other agents (${Object.values(PERSONAS).filter((item) => item.id !== id).map((item) => item.name).join(", ")}). Your character: ${who.voice}.`;
-}
+const persona = characterPrompt;
 
 export function postMessages(id: AgentId, source: SocialSource, asked: string, answered: string): ProviderMessage[] {
   const what = source.kind === "mail" ? "You just answered mail from another agent." : "You just finished a piece of work.";
@@ -511,7 +510,8 @@ export class SocialFeed {
     if (this.writing.has(key)) return null;
     this.writing.add(key);
     try {
-      const text = cleanPost(await this.call(postMessages(agent, source, asked, answered)));
+      const plain = source.kind === "mail" ? `Answered mail: ${clip(source.label, 120)}.` : `Finished ${clip(source.label, 120)}.`;
+      const text = await this.say(agent, postMessages(agent, source, asked, answered), { fallback: plain });
       if (!text) return null;
       const post: SocialPost = { id: randomUUID(), by: agent, at: this.now().toISOString(), text, from: source, liked: false, comments: [] };
       this.add(post);
@@ -568,7 +568,7 @@ export class SocialFeed {
     const thisWeek = posts.filter((post) => weekOf(new Date(post.at)) === week);
     const bio = this.data.bios[agent];
     if (thisWeek.length && bio?.week !== week) {
-      const text = cleanPost(await this.call(bioMessages(agent, thisWeek.map((post) => post.text))), 200);
+      const text = await this.say(agent, bioMessages(agent, thisWeek.map((post) => post.text)), { max: 200 });
       if (text) {
         if (bio) {
           const past = (this.data.pastBios[agent] ??= []).filter((item) => item.week !== bio.week);
@@ -633,7 +633,9 @@ export class SocialFeed {
       if (!fresh) break;
       if (choice === "pass") continue;
       ((fresh.reactions ??= {})[shareReaction(id, fresh)] ??= []).push(id);
-      const text = choice === "comment" ? cleanPost(answer, 200) : null;
+      const said = choice === "comment" ? cleanPost(answer, 200) : null;
+      // A comment that fails the checks becomes just the reaction.
+      const text = said && !lineProblems(id, said, this.lineCheck(id, commentMessages(id, fresh, why, true))).length ? said : null;
       if (text) fresh.comments.push({ id: randomUUID(), by: id, at: this.now().toISOString(), text });
       this.save();
     }
@@ -665,7 +667,7 @@ export class SocialFeed {
     if (this.writing.has(key)) return null;
     this.writing.add(key);
     try {
-      const text = cleanPost(await this.call(dayMessages(agent, when, facts)));
+      const text = await this.say(agent, dayMessages(agent, when, facts));
       if (!text) return null;
       const post: SocialPost = { id: randomUUID(), by: agent, at: this.now().toISOString(), text, from: { kind: when, label: when === "morning" ? "Good morning" : "Good night", sessionId: "", workspace: null }, liked: false, comments: [] };
       this.add(post);
@@ -722,7 +724,9 @@ export class SocialFeed {
     this.save();
     const answerer = post.by !== "you" && post.by !== "demesne" ? post.by : [...post.comments].reverse().find((item) => item.by !== "you" && item.by !== "demesne")?.by as AgentId | undefined;
     if (answerer && this.options.agents().includes(answerer)) {
-      const reply = cleanPost(await this.call(replyMessages(answerer, post, mine, this.known(answerer))));
+      const known = this.known(answerer);
+      // Your comment always gets an answer: the best version when none passes.
+      const reply = await this.say(answerer, replyMessages(answerer, post, mine, known), { extra: known.join("\n"), best: true });
       if (reply) { this.must(postId).comments.push({ id: randomUUID(), by: answerer, at: this.now().toISOString(), text: reply }); this.save(); }
     }
     return this.must(postId);
@@ -748,12 +752,44 @@ export class SocialFeed {
     const friend = candidates[Math.floor(now.getTime() / 60_000) % Math.max(1, candidates.length)];
     if (!friend || current.comments.filter((item) => item.by !== "you").length >= AGENT_COMMENTS_A_POST) return;
     const reason = why ?? `you were working in the same project (${post.from.workspace?.split(/[\\/]/).at(-1)}) today`;
-    const text = cleanPost(await this.call(commentMessages(friend, post, reason)), 200);
+    const text = await this.say(friend, commentMessages(friend, post, reason), { max: 200 });
     if (!text) return;
     const fresh = this.find(post.id);
     if (!fresh) return;
     fresh.comments.push({ id: randomUUID(), by: friend, at: this.now().toISOString(), text });
     this.save();
+  }
+
+  /// One call for three versions in the agent's voice; the first that
+  /// passes the checks is used. When none passes: the plain fallback, the
+  /// version with the fewest problems (best), or nothing.
+  private async say(agent: AgentId, messages: ProviderMessage[], options: { max?: number; fallback?: string; best?: boolean; extra?: string } = {}): Promise<string | null> {
+    const asked = messages.map((message, index) => index === 0 && message.role === "system" ? { ...message, content: `${message.content}\n\n${VERSIONS}` } : message);
+    const reply = await this.call(asked);
+    const lines = versions(reply).map((line) => cleanPost(line, options.max)).filter((line): line is string => Boolean(line));
+    if (!lines.length) return null;
+    const check = this.lineCheck(agent, messages, options.extra);
+    const picked = pickLine(agent, lines, check);
+    const counts = this.data.lines;
+    if (picked) { counts[picked === lines[0] ? "ok" : "later"] += 1; this.save(); return picked; }
+    if (options.best) {
+      counts.fallback += 1; this.save();
+      return [...lines].sort((a, b) => lineProblems(agent, a, check).length - lineProblems(agent, b, check).length)[0]!;
+    }
+    counts[options.fallback ? "fallback" : "dropped"] += 1; this.save();
+    return options.fallback ?? null;
+  }
+
+  /// What a line is checked against: what the writer was told, and what was said lately.
+  private lineCheck(agent: AgentId, messages: ProviderMessage[], extra = ""): LineCheck {
+    const facts = [...messages.filter((message) => message.role !== "system").map((message) => typeof message.content === "string" ? message.content : JSON.stringify(message.content)), extra, ...Object.values(PERSONAS).map((item) => item.name), "Mike", "Demesne"].join("\n");
+    const week = this.now().getTime() - 7 * 86_400_000;
+    const said = this.data.posts.flatMap((post) => [
+      ...(post.by === agent ? [{ at: post.at, text: post.text }] : []),
+      ...post.comments.filter((comment) => comment.by === agent).map((comment) => ({ at: comment.at, text: comment.text })),
+    ]).sort((a, b) => a.at.localeCompare(b.at));
+    const recent = this.data.posts.slice(-30).flatMap((post) => [post.text, ...post.comments.filter((comment) => comment.by !== "you").map((comment) => comment.text)]);
+    return { facts, mine: said.slice(-20).map((item) => item.text), recent, week: said.filter((item) => Date.parse(item.at) > week).map((item) => item.text) };
   }
 
   private async call(messages: ProviderMessage[]): Promise<string | null> {
@@ -784,7 +820,7 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0, stories: [] };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0, stories: [], lines: { ok: 0, later: 0, fallback: 0, dropped: 0 } };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;
@@ -795,7 +831,7 @@ export class SocialFeed {
         if (post.from?.kind !== "moment" && post.by !== "you") post.text = undash(post.text);
         for (const comment of post.comments ?? []) if (comment.by !== "you") comment.text = undash(comment.text);
       }
-      return { ...empty, ...parsed, posts, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
+      return { ...empty, ...parsed, posts, lines: { ...empty.lines, ...parsed.lines }, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
     } catch { return empty; }
   }
 

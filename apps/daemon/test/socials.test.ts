@@ -245,7 +245,7 @@ describe("pass 138", () => {
     expect(weekOf(new Date("2026-11-03T10:00:00"))).toBe("2026-W45");
   });
 
-  test("you share a line, and agents who were around today comment", async () => {
+  test("you share a line: agents who were around today answer first, then the others, and all react", async () => {
     let at = new Date("2026-11-03T10:00:00");
     const { social } = feed(["Long day.", "Looks great, Mike!", "Ship it."], { now: () => at, agents: ["claude", "codex"] });
     await social.noteAgentTurn("claude", work("s1"), "a", "b");
@@ -253,8 +253,16 @@ describe("pass 138", () => {
     const post = await social.share("Finally got the tabs right", null);
     expect(post.by).toBe("you");
     expect(post.from.kind).toBe("share");
-    expect(post.comments.map((comment) => comment.by)).toEqual(["claude"]);
+    expect(post.comments.map((comment) => comment.by)).toEqual(["claude", "codex"]);
+    expect(post.reactions).toEqual({ "🌸": ["claude"], "🔥": ["codex"] });
     await expect(social.share("   ")).rejects.toThrow();
+  });
+
+  test("your post gets answered on a quiet day too, even past the agents' daily comment limit", async () => {
+    const at = new Date("2026-11-03T09:00:00");
+    const { social } = feed(["Nice!", "Love it."], { now: () => at, agents: ["claude", "gemini"] });
+    const post = await social.share("First post of the day", null);
+    expect(post.comments.map((comment) => comment.text)).toEqual(["Nice!", "Love it."]);
   });
 
   test("good morning and good night come once a day, from real chats", async () => {

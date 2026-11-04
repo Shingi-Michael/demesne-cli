@@ -2184,6 +2184,30 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 10px; color: var(--t3); font-size: 12.5px; }
 .td-friend { margin: 0 0 14px; color: var(--t3); font-size: 12.5px; }
 .td-friend-link { color: var(--t1); border-radius: 4px; }
+/* Pass 142 B: how it feels and why, who it's close to, what it remembers about you. */
+.td-inner .td-day:first-child { margin-top: 16px; }
+.td-why, .td-remembers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.td-why li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; color: var(--t1); font-size: 13px; }
+.td-why small { flex: none; color: var(--t3); font-size: 12px; }
+.td-why .up { color: #8fcf9f; font-weight: 500; } .td-why .down { color: #e79a9a; font-weight: 500; }
+.td-quiet { margin: 0; color: var(--t3); font-size: 12.5px; }
+.td-close { display: flex; gap: 10px; align-items: center; padding: 5px 0; }
+.td-close-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.td-close-main small { color: var(--t3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.td-close-main small b { color: var(--t1); font-weight: 500; }
+.td-bar { display: block; height: 4px; border-radius: 2px; background: var(--tone); overflow: hidden; }
+.td-bar b { display: block; height: 100%; border-radius: 2px; transition: width .4s ease; }
+.td-bar.warm b { background: var(--blossom, #f2b6c8); } .td-key .warm { color: var(--blossom, #f2b6c8); }
+.td-bar.bond b { background: var(--acc); } .td-key .bond { color: var(--acc); }
+.td-key { margin: 4px 0 0; color: var(--t4); font-size: 11.5px; }
+.td-remembers li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; background: var(--tone); color: var(--t1); font-size: 12.5px; }
+.td-remembers li span { flex: 1; min-width: 0; }
+.td-remembers small { color: var(--t4); font-size: 11.5px; }
+.td-forget { padding: 0 4px; border-radius: 4px; color: var(--t3); font-size: 14px; line-height: 18px; }
+.td-forget:hover { background: var(--tone); color: var(--t1); }
+.td-remember { margin: 4px 0 10px; }
+.td-remember input { width: 100%; box-sizing: border-box; height: 30px; padding: 0 9px; border: 0; border-radius: 7px; background: var(--tone); color: var(--t1); font: inherit; font-size: 12.5px; outline: none; }
+.td-remember input:focus { box-shadow: 0 0 0 1px var(--hair2, var(--hair)); }
 .td-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0 0 8px; }
 .td-grid > * { aspect-ratio: 1; width: 100%; border-radius: 6px; object-fit: cover; background: var(--tone); }
 .td-weeks { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; }

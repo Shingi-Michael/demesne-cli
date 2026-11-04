@@ -5,13 +5,16 @@ import type { ThemeLibrary } from "@demesne/brand";
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean }
 export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
-export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[] }
+export interface SocialMood { mood: "calm" | "happy" | "focus" | "stuck" | "sleepy"; strong: boolean; word: string; reasons: Array<{ why: string; p: number; e: number; left: number }> }
+export interface SocialCloseness { agent: string; warmth: number; bond: number; lines: Array<{ why: string; at: string }> }
+export interface SocialRemembered { id: string; text: string; from: "comment" | "you"; at: string }
+export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[]; feeling?: SocialMood; close?: SocialCloseness[]; remembers?: SocialRemembered[] }
 export interface SocialWeek { week: string; start: string; line: string | null; posts: number; work: number; mail: number; friend: string | null; picture: string | null }
 /// The Friday reel: the week's posts as frames, its numbers, and an opening clip.
 export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
 /// A story: a 24-hour moment from an agent's day, from a real event.
 export interface SocialStory { id: string; by: string; at: string; kind: string; text: string; label: string; mood: "calm" | "happy" | "focus" | "stuck" | "sleepy" | "wave"; sessionId: string }
-export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null; stories?: SocialStory[] }
+export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null; stories?: SocialStory[]; moods?: Record<string, SocialMood> }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
   type ImageArtifact,
@@ -349,6 +352,8 @@ export class DemesneClient {
   async socialPicture(id: string): Promise<{ mimeType: string; data: string }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/picture`); }
   async reactToPost(id: string, reaction: string | null): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/react`, { method: "POST", body: JSON.stringify({ reaction }) }); }
   async socialProfile(agent: string): Promise<{ profile: SocialProfile }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}`); }
+  async socialRemember(agent: string, text: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember`, { method: "POST", body: JSON.stringify({ text }) }); }
+  async socialForget(agent: string, id: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember/${encodeURIComponent(id)}`, { method: "DELETE" }); }
   /// Share a line on Today, with a picture (base64) if you like.
   async sharePost(text: string, image?: string | null): Promise<{ post: SocialPost }> { return this.request("/v1/socials/posts", { method: "POST", body: JSON.stringify({ text, image: image ?? null }) }); }
   async commentOnPost(id: string, text: string): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ text }) }); }

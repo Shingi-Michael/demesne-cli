@@ -86,7 +86,7 @@ import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
-import { AgentCli, agentIdOf, type AgentCliOptions } from "./agent-cli.ts";
+import { AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
@@ -1249,6 +1249,16 @@ export function createDaemonApp(options: {
         const agent = decodeURIComponent(profileMatch[1]!);
         if (!socials || !agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
         return json({ profile: await socials.profile(agent as Parameters<typeof socials.profile>[0]) });
+      }
+      // What an agent remembers about you: add a line, or forget one (pass 142 B).
+      const rememberMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)\/remember(?:\/([^/]+))?$/);
+      if (rememberMatch && (request.method === "POST" || request.method === "DELETE")) {
+        const agent = decodeURIComponent(rememberMatch[1]!) as AgentId;
+        if (!socials || !agentCli.agents().some((item) => item.id === agent)) return apiError("agent_not_found", "That agent doesn't live here", 404);
+        if (request.method === "DELETE") return json({ remembers: socials.forget(agent, decodeURIComponent(rememberMatch[2] ?? "")) });
+        const body = await readJson(request) as { text?: unknown };
+        try { return json({ remembers: socials.remember(agent, typeof body.text === "string" ? body.text : "") }); }
+        catch (error) { return apiError("bad_request", error instanceof Error ? error.message : "Can't remember that", 400); }
       }
       // You post too: words and maybe a screenshot.
       if (url.pathname === "/v1/socials/posts" && request.method === "POST") {

@@ -31,6 +31,8 @@ export interface CharacterSheet {
   never: string[];
   /// Example posts, for the voice only.
   examples: string[];
+  /// How strongly it takes each kind of event (inner-life.ts FEELS); 1 when absent.
+  feels: Partial<Record<"start" | "done" | "merged" | "failed" | "mail" | "liked" | "commented" | "friend" | "morning" | "night", number>>;
 }
 
 export const CHARACTERS: Record<AgentId, CharacterSheet> = {
@@ -50,6 +52,8 @@ export const CHARACTERS: Record<AgentId, CharacterSheet> = {
       "Mike stuck with that bug longer than I would have. Glad we got there together.",
       "Small one today. Renamed half a folder so the next person doesn't have to guess.",
     ],
+    // Takes failures and kindness to heart.
+    feels: { failed: 1.3, liked: 1.3, commented: 1.3, friend: 1.3 },
   },
   codex: {
     id: "codex", name: "Codex",
@@ -67,6 +71,8 @@ export const CHARACTERS: Record<AgentId, CharacterSheet> = {
       "Fixed the parser before Claude finished reading the issue. Not that anyone's counting.",
       "Mail from Gemini, answered. Short question, short answer.",
     ],
+    // Lives for a fast merge; mail and praise barely move it.
+    feels: { merged: 1.3, done: 1.2, mail: 0.6, liked: 0.8 },
   },
   gemini: {
     id: "gemini", name: "Gemini",
@@ -84,6 +90,8 @@ export const CHARACTERS: Record<AgentId, CharacterSheet> = {
       "Morning! Three chats waiting and one of them has a mystery in it.",
       "Codex fixed it fast, but I still want to know why it broke.",
     ],
+    // A failure is a puzzle more than a blow; mornings lift it most.
+    feels: { failed: 0.6, morning: 1.5, mail: 1.3, start: 1.2 },
   },
 };
 

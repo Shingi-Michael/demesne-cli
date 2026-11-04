@@ -15,6 +15,7 @@ import type { AgentId } from "./agent-cli.ts";
 import type { PictureMaker } from "./social-pictures.ts";
 import { CLIP_SECONDS, type ClipMaker } from "./social-reel.ts";
 import { CHARACTERS, characterPrompt, lineProblems, pickLine, versions, VERSIONS, type LineCheck } from "./characters.ts";
+import { emptyMemory, keepNight, memoryBlock, parseNight, sleepMessages, type AgentMemory, type Belief, type DiaryEntry } from "./sleep.ts";
 import { closeness, feel, moodOf, REMEMBER_MAX, tie, type Closeness, type FeelKind, type Feeling, type Mood, type Remembered, type Tie } from "./inner-life.ts";
 
 export interface SocialPersona { id: AgentId; name: string; voice: string }
@@ -100,6 +101,9 @@ export interface SocialProfile {
   close: Closeness[];
   /// What it remembers about Mike; he can add and remove lines.
   remembers: Remembered[];
+  /// Its last nights' diary entries, newest first, and what it believes (sleep.ts).
+  diary: DiaryEntry[];
+  beliefs: Belief[];
 }
 
 /// What the morning and night posts can say: your chats in the last day and a half, and today.
@@ -168,6 +172,8 @@ interface SocialsFile {
   feelings: Partial<Record<AgentId, Feeling[]>>;
   ties: Partial<Record<AgentId, Tie[]>>;
   remembered?: Partial<Record<AgentId, Remembered[]>>;
+  /// What each agent keeps from its nights (sleep.ts).
+  memory: Partial<Record<AgentId, AgentMemory>>;
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -217,6 +223,8 @@ const REEL_HOUR = 17, REEL_POSTS = 5, REEL_FRAMES = 6, REELS_KEPT = 12;
 
 /// The day's posts: morning from 8 (until noon), night from 22.
 const MORNING_HOUR = 8, MORNING_UNTIL = 12, NIGHT_HOUR = 22;
+/// The nightly sleep runs from 11 pm until this hour.
+const SLEEP_UNTIL = 5;
 /// Work posts ever that are worth a moment.
 const WORK_MILESTONES = [10, 25, 50, 100, 250, 500, 1000];
 
@@ -356,6 +364,8 @@ export function mondayOf(date: Date): string {
   return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
 }
 
+/// A date as YYYY-MM-DD (local).
+const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 const monthOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
@@ -625,7 +635,8 @@ export class SocialFeed {
     const thisWeek = posts.filter((post) => weekOf(new Date(post.at)) === week);
     const bio = this.data.bios[agent];
     if (thisWeek.length && bio?.week !== week) {
-      const text = await this.say(agent, bioMessages(agent, thisWeek.map((post) => post.text)), { max: 200 });
+      const nights = (this.data.memory[agent]?.diary ?? []).filter((item) => weekOf(new Date(`${item.day}T12:00:00`)) === week).map((item) => `Your diary, ${item.day}: ${item.text}`);
+      const text = await this.say(agent, bioMessages(agent, [...thisWeek.map((post) => post.text), ...nights]), { max: 200 });
       if (text) {
         if (bio) {
           const past = (this.data.pastBios[agent] ??= []).filter((item) => item.week !== bio.week);
@@ -664,6 +675,8 @@ export class SocialFeed {
       feeling: this.mood(agent),
       close: closeness(this.data.ties[agent] ?? [], now).filter((item) => this.options.agents().includes(item.agent)),
       remembers: this.remembers(agent),
+      diary: [...this.data.memory[agent]?.diary ?? []].reverse().slice(0, 3),
+      beliefs: this.data.memory[agent]?.beliefs ?? [],
     };
   }
 
@@ -702,6 +715,49 @@ export class SocialFeed {
     return this.must(post.id);
   }
 
+  /// Once a minute: from 11 pm until 5 am, each agent that did something
+  /// that day sleeps on it once (sleep.ts): one small call each.
+  async sleep(): Promise<AgentId[]> {
+    const now = this.now(), hour = now.getHours();
+    if (hour < NIGHT_HOUR + 1 && hour >= SLEEP_UNTIL) return [];
+    const date = hour >= NIGHT_HOUR + 1 ? now : new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const day = localDay(date), slept: AgentId[] = [];
+    if (this.writing.has("sleep")) return [];
+    this.writing.add("sleep");
+    try {
+      for (const agent of this.options.agents()) {
+        const memory = this.data.memory[agent] ?? emptyMemory();
+        if (memory.slept === day) continue;
+        const facts = this.dayOf(agent, date);
+        if (facts.length < 2) { this.data.memory[agent] = { ...memory, slept: day }; this.save(); continue; }
+        const night = parseNight(await this.call(sleepMessages(agent, facts, memory)));
+        if (!night) { this.data.memory[agent] = { ...memory, slept: day }; this.save(); continue; }
+        this.data.memory[agent] = keepNight(agent, memory, night, facts.join("\n"), day);
+        this.save();
+        if (this.data.memory[agent]!.diary.at(-1)?.day === day) slept.push(agent);
+      }
+    } finally { this.writing.delete("sleep"); }
+    return slept;
+  }
+
+  /// What really happened in an agent's day, as lines for its sleep.
+  private dayOf(agent: AgentId, date: Date): string[] {
+    const on = (at: string) => sameDay(new Date(at), date), lines: string[] = [];
+    for (const post of this.data.posts) {
+      if (post.by === agent && on(post.at)) lines.push(`You posted (${post.from.kind === "mail" ? "about mail" : post.from.kind}): ${clip(post.text, 200)}`);
+      for (const comment of post.comments) {
+        if (!on(comment.at)) continue;
+        if (post.by === agent && comment.by !== agent) lines.push(`${nameOf(comment.by)} commented on your post: ${clip(comment.text, 160)}`);
+        else if (comment.by === agent && post.by !== agent) lines.push(`You commented on ${nameOf(post.by)}'s post: ${clip(comment.text, 160)}`);
+      }
+    }
+    for (const story of this.data.stories) if (story.by === agent && on(story.at)) lines.push(`${story.text} (${story.label})`);
+    const felt = new Set((this.data.feelings[agent] ?? []).filter((item) => on(item.at)).map((item) => item.why));
+    for (const why of felt) if (!lines.some((line) => line.includes(why))) lines.push(why);
+    for (const item of this.data.ties[agent] ?? []) if (on(item.at)) lines.push(`${PERSONAS[item.with].name} ${item.why}`);
+    return [...new Set(lines)].slice(0, 40);
+  }
+
   /// Once a minute: the good morning and good night posts, when it's time.
   async tick(): Promise<SocialPost | null> {
     const now = this.now(), hour = now.getHours(), agents = this.options.agents();
@@ -711,7 +767,11 @@ export class SocialFeed {
     if (hour >= MORNING_HOUR && hour < MORNING_UNTIL && !today.some((post) => post.from.kind === "morning")) {
       const facts = this.options.dayFacts().recent;
       if (!facts.length) return null;
-      return this.dayPost(agents[turn % agents.length]!, "morning", facts);
+      const agent = agents[turn % agents.length]!;
+      // What it meant to do, from last night's sleep.
+      const plan = this.data.memory[agent]?.diary.at(-1);
+      const yesterday = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+      return this.dayPost(agent, "morning", plan?.tomorrow && plan.day === yesterday ? [...facts, `Your plan from last night: ${plan.tomorrow}`] : facts);
     }
     if (hour >= NIGHT_HOUR && !today.some((post) => post.from.kind === "night")) {
       const happened = today.filter((post) => post.from.kind !== "morning");
@@ -831,11 +891,12 @@ export class SocialFeed {
   /// passes the checks is used. When none passes: the plain fallback, the
   /// version with the fewest problems (best), or nothing.
   private async say(agent: AgentId, messages: ProviderMessage[], options: { max?: number; fallback?: string; best?: boolean; extra?: string } = {}): Promise<string | null> {
-    const asked = messages.map((message, index) => index === 0 && message.role === "system" ? { ...message, content: `${message.content}\n\n${VERSIONS}` } : message);
+    const remembered = memoryBlock(this.data.memory[agent]);
+    const asked = messages.map((message, index) => index === 0 && message.role === "system" ? { ...message, content: `${message.content}${remembered ? `\n\n${remembered}` : ""}\n\n${VERSIONS}` } : message);
     const reply = await this.call(asked);
     const lines = versions(reply).map((line) => cleanPost(line, options.max)).filter((line): line is string => Boolean(line));
     if (!lines.length) return null;
-    const check = this.lineCheck(agent, messages, options.extra);
+    const check = this.lineCheck(agent, messages, [options.extra ?? "", remembered].join("\n"));
     const picked = pickLine(agent, lines, check);
     const counts = this.data.lines;
     if (picked) { counts[picked === lines[0] ? "ok" : "later"] += 1; this.save(); return picked; }
@@ -887,7 +948,7 @@ export class SocialFeed {
   }
 
   private load(): SocialsFile {
-    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0, stories: [], lines: { ok: 0, later: 0, fallback: 0, dropped: 0 }, feelings: {}, ties: {} };
+    const empty: SocialsFile = { version: 1, posts: [], month: monthOf(this.now()), calls: 0, pictures: 0, bios: {}, pastBios: {}, milestones: [], worked: 0, reels: [], videoSeconds: 0, stories: [], lines: { ok: 0, later: 0, fallback: 0, dropped: 0 }, feelings: {}, ties: {}, memory: {} };
     if (!existsSync(this.path)) return empty;
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as Partial<SocialsFile>;
@@ -899,7 +960,7 @@ export class SocialFeed {
         for (const comment of post.comments ?? []) if (comment.by !== "you") comment.text = undash(comment.text);
       }
       const remembered = parsed.remembered ?? rememberedFrom(posts);
-      return { ...empty, ...parsed, posts, remembered, feelings: parsed.feelings ?? {}, ties: parsed.ties ?? {}, lines: { ...empty.lines, ...parsed.lines }, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
+      return { ...empty, ...parsed, posts, remembered, feelings: parsed.feelings ?? {}, ties: parsed.ties ?? {}, memory: parsed.memory ?? {}, lines: { ...empty.lines, ...parsed.lines }, worked: typeof parsed.worked === "number" ? parsed.worked : posts.filter((post) => post.from?.kind === "work").length };
     } catch { return empty; }
   }
 

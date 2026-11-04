@@ -39,6 +39,8 @@ const seed = (data: string) => {
     // Pass 142 B: Codex merged something an hour ago, Claude commented on its post, and it remembers Mike.
     feelings: { codex: [{ kind: "merged", p: 5.2, e: 2, at: new Date(now - 60 * 60_000).toISOString(), hours: 6, why: "Merged Fix the login redirect" }] },
     ties: { codex: [{ with: "claude", at: new Date(now - 2 * 3_600_000).toISOString(), why: "commented on my post", w: 0.3 }] },
+    // Stage 4: Codex slept on yesterday.
+    memory: { codex: { notes: "Fast, a bit proud.", diary: [{ day: new Date(now - 86_400_000).toISOString().slice(0, 10), text: "Two failures, then the redirect. Worth the wait.", tomorrow: "Look at the flaky login test" }], beliefs: [{ text: "Read the whole test first", since: "2026-11-03" }], lessons: [], slept: "" } },
     remembered: { codex: [{ id: "m-1", text: "Likes short answers", from: "comment", at: new Date(now - 86_400_000).toISOString() }] },
     stories: [
       { id: "st-1", by: "codex", at: new Date(now - 50 * 60_000).toISOString(), kind: "start", text: "Started on Fix the login redirect", label: "Chat · demesne-cli", mood: "focus", sessionId: "seed" },
@@ -144,6 +146,7 @@ try {
   expect(await page.locator("#page .td-week", { hasText: "A week of chasing flaky tests." }).count() === 1, "the profile looks back on a past week");
   expect(await page.locator("#page .td-inner .td-why", { hasText: "Merged Fix the login redirect" }).count() === 1, "the profile says how Codex feels and why");
   expect(await page.locator("#page .td-close", { hasText: "commented on my post" }).count() === 1, "the profile shows who Codex is close to and why");
+  expect(await page.locator("#page .td-diary", { hasText: "Two failures, then the redirect." }).count() === 1 && await page.locator("#page .td-plan", { hasText: "flaky login test" }).count() === 1, "the profile shows last night's diary and the plan");
   await page.screenshot({ path: join(output, "profile-inner.png") });
   await page.locator("#page .td-remember input").fill("Ships on Fridays");
   await page.locator("#page .td-remember input").press("Enter");

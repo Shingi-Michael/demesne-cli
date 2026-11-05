@@ -172,16 +172,16 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
   .sidebar-row-actions, .sidebar-session-age { transition: none; }
 }
 .sidebar-empty { padding: 6px 10px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }
-/* The rail (pass 129 A): the sidebar folded to a quiet 60px strip. One even
-   column of 36px buttons, your open chats as letter tiles with their state
+/* The rail (pass 129 A): the sidebar folded to a quiet 64px strip. One even
+   column of 40px buttons, your open chats as letter tiles with their state
    dot, Drive and Settings at the foot. Labels show beside an icon on hover;
    nothing slides out. */
 .sidebar-rail { display: none; }
-#desktop-shell.sidebar-collapsed { grid-template-columns: 60px minmax(0, 1fr); }
+#desktop-shell.sidebar-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
 #desktop-shell.sidebar-collapsed #desktop-sidebar { padding: 10px 10px 12px; align-items: center; overflow: visible; z-index: 85; }
 #desktop-shell.sidebar-collapsed #desktop-sidebar > :not(.sidebar-rail) { display: none; }
-#desktop-shell.sidebar-collapsed .sidebar-rail { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; gap: 4px; width: 40px; }
-.rail-button { position: relative; display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 9px; color: var(--t3); }
+#desktop-shell.sidebar-collapsed .sidebar-rail { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; gap: 4px; width: 44px; }
+.rail-button { position: relative; display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 9px; color: var(--t3); }
 .rail-button:hover { background: var(--surface2); color: var(--t1); }
 .rail-button.on { background: var(--surface2); color: var(--t1); }
 .rail-button[hidden] { display: none; }
@@ -190,7 +190,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .rail-chats { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; padding-top: 10px; margin-top: 6px; position: relative; }
 .rail-chats:empty { display: none; }
 .rail-chats::before { content: ""; position: absolute; top: 0; left: 8px; right: 8px; height: 1px; background: var(--hair, var(--line)); }
-.rail-chat { position: relative; display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface2); color: var(--t2); font-size: 12.5px; font-weight: 600; letter-spacing: 0; }
+.rail-chat { position: relative; display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--surface2); color: var(--t2); font-size: 12.5px; font-weight: 600; letter-spacing: 0; }
 .rail-chat:hover { background: var(--surface3); color: var(--t1); }
 .rail-chat.on { color: var(--t1); box-shadow: inset 0 0 0 1.5px var(--acc); }
 .rail-chat-dot { position: absolute; right: -2px; top: -2px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--side); display: none; }
@@ -199,7 +199,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .rail-chat-dot.bad { display: block; background: var(--bad, #e5484d); }
 .rail-foot { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: auto; }
 /* A label beside the icon, only on hover. */
-.sidebar-rail [data-tip]::after { content: attr(data-tip); position: absolute; left: 44px; top: 50%; transform: translate(-4px, -50%); padding: 4px 9px; border-radius: 7px; background: var(--panel, var(--surface2)); color: var(--t1); box-shadow: 0 0 0 1px var(--hair, var(--line)), 0 6px 20px rgb(0 0 0 / 0.22); font-size: 12px; font-weight: 500; line-height: 1.4; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease), transform 120ms var(--ease); z-index: 95; }
+.sidebar-rail [data-tip]::after { content: attr(data-tip); position: absolute; left: 48px; top: 50%; transform: translate(-4px, -50%); padding: 4px 9px; border-radius: 7px; background: var(--panel, var(--surface2)); color: var(--t1); box-shadow: 0 0 0 1px var(--hair, var(--line)), 0 6px 20px rgb(0 0 0 / 0.22); font-size: 12px; font-weight: 500; line-height: 1.4; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease), transform 120ms var(--ease); z-index: 95; }
 .sidebar-rail [data-tip]:hover::after, .sidebar-rail [data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); transition-delay: 250ms; }
 @media (prefers-reduced-motion: reduce) { .sidebar-rail [data-tip]::after { transition: none; } }
 /* The top bar: the sidebar toggle, your tabs, and ⋯. */
@@ -2427,3 +2427,9 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 #desktop-sidebar .sidebar-avatar { width: 24px; height: 24px; margin-left: -2.5px; font-size: 11px; }
 #desktop-sidebar .sidebar-foot { gap: 9.5px; }
 #desktop-sidebar .sidebar-you { font-size: 14px; }
+/* The folded strip wears the sidebar's duotone icons (pass 152 A): the same
+   19px soft-filled glyphs, and the page you're on takes the accent. */
+.sidebar-rail .rail-button .ico { width: 19px; height: 19px; fill: currentColor; fill-opacity: .2; stroke-width: 1.9; }
+:where(.sidebar-rail) .rail-button { color: var(--t2); }
+.sidebar-rail .rail-button.on { background: color-mix(in srgb, var(--acc) 16%, transparent); }
+.sidebar-rail .rail-button.on .ico { color: var(--acc); fill-opacity: .3; }

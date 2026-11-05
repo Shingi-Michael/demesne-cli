@@ -2433,3 +2433,15 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 :where(.sidebar-rail) .rail-button { color: var(--t2); }
 .sidebar-rail .rail-button.on { background: color-mix(in srgb, var(--acc) 16%, transparent); }
 .sidebar-rail .rail-button.on .ico { color: var(--acc); fill-opacity: .3; }
+
+/* Settings' list wears the sidebar's look, so the sidebar doesn't jump on
+   the way in and out: the same 34px rows and duotone icons, icons centred
+   27.5px in and labels starting 49px in, small-caps group labels. */
+#desktop-sidebar :is(.st-back, .st-nav) { height: 34px; gap: 12px; padding: 0 10px; font-size: 14px; }
+#desktop-sidebar .st-back { color: var(--t2); }
+#desktop-sidebar :is(.st-back, .st-nav) .ico { width: 19px; height: 19px; stroke-width: 1.9; }
+#desktop-sidebar .st-nav .ico { fill: currentColor; fill-opacity: .2; color: var(--t2); }
+#desktop-sidebar .st-nav.on { background: color-mix(in srgb, var(--acc) 16%, transparent); color: var(--t1); }
+#desktop-sidebar .st-nav.on .ico { color: var(--acc); fill-opacity: .3; }
+#desktop-sidebar .st-nav-n { font-size: 11.5px; }
+#desktop-sidebar .st-nav-group { margin: 14px 0 4px; padding-left: 9px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; }

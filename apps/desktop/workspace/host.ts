@@ -980,6 +980,8 @@ export class WorkspaceHost {
         selected.session.preferredModel = saved.preferredModel;
         selected.session.preferredReasoning = saved.preferredReasoning;
       }
+      // A saved agent chat (agent-cli.ts) runs its tool, not a model.
+      if (id.startsWith("agent:")) return;
       const models = await this.models().catch(() => []);
       if (stale()) return;
       let model = models.find(model => model.id === id) ?? (this.model.id === id ? this.model : { id, provider: "" });

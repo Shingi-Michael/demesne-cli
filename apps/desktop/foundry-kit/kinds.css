@@ -1,0 +1,187 @@
+/* Foundry's ready kinds (foundry-kinds.ts): how a Deck, a Doc and a
+   Dashboard look. Served as foundry://kit/kinds.css after the kit's
+   base.css, so the type and spacing scales and the light and dark inks are
+   the kit's. A page picks a look with data-look (paper ink forest ocean
+   sand plum) and the charts draw in --c1…--c4. */
+:root{
+  --c1:var(--accent);
+  --c2:color-mix(in srgb,var(--ink) 55%,transparent);
+  --c3:color-mix(in srgb,var(--accent) 45%,transparent);
+  --c4:color-mix(in srgb,var(--ink) 25%,transparent);
+  --surface:var(--paper);
+}
+html[data-look=paper]{color-scheme:light;--ink:#1f1c17;--paper:#f7f2e8;--accent:#c4542e;--on-accent:#fff;--ok:#2f7d4f;--warn:#a86a12;--bad:#b23b30}
+html[data-look=sand]{color-scheme:light;--ink:#2d2318;--paper:#eee3cd;--accent:#a8571a;--on-accent:#fff;--ok:#3d7a45;--warn:#9a6410;--bad:#a83a2c}
+html[data-look=ink]{color-scheme:dark;--ink:#ecebe7;--paper:#151517;--accent:#f2b6c8;--on-accent:#1a0f13;--ok:#7fd3a0;--warn:#e7c06e;--bad:#f08a8a}
+html[data-look=forest]{color-scheme:dark;--ink:#eef0e6;--paper:#1d3a2d;--accent:#8fd6a9;--on-accent:#0f2a1d;--ok:#a6e3b8;--warn:#efcf7a;--bad:#f3a08f}
+html[data-look=ocean]{color-scheme:dark;--ink:#e8f1fb;--paper:#0f2236;--accent:#6cb8ff;--on-accent:#04192c;--ok:#7fdcb0;--warn:#f1c76c;--bad:#ff9a8f}
+html[data-look=plum]{color-scheme:dark;--ink:#f5edf6;--paper:#2a1c2f;--accent:#e6a4c4;--on-accent:#2a1020;--ok:#9fdcb5;--warn:#f0c878;--bad:#ff9a9a}
+
+/* -------- shared blocks: charts, stats, callouts, tables -------- */
+.k-figure{margin:0 0 var(--space-5);min-width:0}
+.k-ctitle{margin:0 0 var(--space-3);font-weight:600;font-size:var(--text-sm)}
+.k-legend{display:flex;flex-wrap:wrap;gap:var(--space-2) var(--space-4);margin:0 0 var(--space-3);font-size:var(--text-xs);color:var(--secondary)}
+.k-legend i{display:inline-block;width:10px;height:10px;margin-right:6px;border-radius:3px;vertical-align:-1px}
+.k-plot svg{display:block;width:100%;height:auto;overflow:visible}
+.k-note{margin:var(--space-2) 0 0;font-size:var(--text-xs);color:var(--muted)}
+.k-chart text{font-family:var(--font)}
+.k-axis{fill:var(--muted);font-size:12px}
+.k-lab{fill:var(--secondary);font-size:14px}
+.k-val{fill:var(--ink);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.k-total{fill:var(--ink);font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.k-grid{stroke:var(--hair);stroke-width:1}
+.k-empty{color:var(--muted)}
+.k-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:var(--space-4);margin:0 0 var(--space-5)}
+.k-stat{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-4) var(--space-5);border-radius:var(--radius-lg);background:var(--tone)}
+.k-stat-l{font-size:var(--text-sm);color:var(--secondary)}
+.k-stat-v{font-size:var(--text-xl);line-height:1.15;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.k-stat-f{display:flex;flex-wrap:wrap;gap:var(--space-2);font-size:var(--text-xs);color:var(--muted)}
+.k-stat-f b{font-weight:600}.k-stat-f b.up{color:var(--ok)}.k-stat-f b.down{color:var(--bad)}
+.k-callout{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:color-mix(in srgb,var(--accent) 9%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
+.k-callout.warn{background:color-mix(in srgb,var(--warn) 10%,transparent);box-shadow:inset 3px 0 0 var(--warn)}
+.k-callout.tip{background:color-mix(in srgb,var(--ok) 10%,transparent);box-shadow:inset 3px 0 0 var(--ok)}
+.k-callout>b{display:block;margin-bottom:var(--space-1);font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase}
+.k-callout p:last-child{margin:0}
+.k-table{max-width:100%;overflow-x:auto;margin:0 0 var(--space-4)}
+.k-table table{margin:0}
+.k-table th.num,.k-table td.num{text-align:right;font-variant-numeric:tabular-nums}
+.k-table th.mid,.k-table td.mid{text-align:center}
+
+/* -------- Deck -------- */
+html[data-kind=deck] body{background:color-mix(in srgb,var(--ink) 9%,var(--paper))}
+.deck{display:flex;flex-direction:column;align-items:center;gap:var(--space-4);min-height:100vh;padding:var(--space-5) var(--space-4)}
+.deck-stage{display:flex;flex-direction:column;gap:var(--space-5);width:min(100%,1100px)}
+.js .deck-stage{position:relative;display:block;width:min(100%,calc((100vh - 160px) * 16 / 9));aspect-ratio:16/9}
+.slide{position:relative;display:flex;flex-direction:column;width:100%;aspect-ratio:16/9;overflow:hidden;container-type:inline-size;background:var(--paper);color:var(--ink);border-radius:var(--radius-lg);box-shadow:0 1px 2px rgba(0,0,0,.08),0 12px 40px rgba(0,0,0,.14)}
+.js .deck-stage>.slide{position:absolute;inset:0;visibility:hidden;opacity:0;transition:opacity .22s ease,visibility 0s .22s}
+.js .deck-stage>.slide.on{visibility:visible;opacity:1;transition:opacity .22s ease}
+.s-in{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:1.6cqw;padding:6.5cqw 8cqw 2cqw;font-size:calc(2.25cqw * var(--fit,1));line-height:1.4}
+.s-in>*{margin:0}
+.s-in h1{font-size:2.6em;line-height:1.05;letter-spacing:-.03em;font-weight:600}
+.s-in h2{font-size:1.9em;line-height:1.1;letter-spacing:-.02em;font-weight:600}
+.s-in h3{font-size:1.2em;font-weight:600}
+.s-in p,.s-in li{color:var(--secondary)}
+.s-in strong{color:var(--ink)}
+.s-in ul,.s-in ol{display:flex;flex-direction:column;gap:.55em;padding:0;list-style:none}
+.s-in ol{counter-reset:pt}
+.s-in li{position:relative;margin:0;padding-left:1.2em}
+.s-in ul>li::before{content:"";position:absolute;left:0;top:.55em;width:.42em;height:.42em;border-radius:2px;background:var(--accent)}
+.s-in ol>li{counter-increment:pt;padding-left:1.6em}
+.s-in ol>li::before{content:counter(pt);position:absolute;left:0;color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums}
+.s-in table{font-size:.8em}
+.s-in .k-table{margin:0}
+.s-in .k-stats{grid-template-columns:repeat(var(--n,3),minmax(0,1fr));gap:1.4cqw;margin:0}
+.s-in .k-stat{padding:1.6em 1.8em;gap:.3em;border-radius:1.2cqw;background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.s-in .k-stat-l{font-size:.8em}.s-in .k-stat-v{font-size:2.2em}.s-in .k-stat-f{font-size:.7em}
+.s-in .k-figure{margin:0}
+.s-in .k-ctitle{font-size:.8em;margin-bottom:.6em;color:var(--secondary);font-weight:500}
+.s-in .k-legend{font-size:.65em}
+.s-in .k-callout{font-size:.9em}
+.s-in code{font-size:.85em}
+.s-in pre{font-size:.7em;margin:0}
+.s-foot{display:flex;justify-content:space-between;gap:2cqw;padding:0 8cqw 3cqw;font-size:1.15cqw;color:var(--muted);letter-spacing:.02em}
+/* Layouts */
+.slide[data-layout=title] .s-in{justify-content:flex-end;padding-bottom:5cqw}
+.slide[data-layout=title] .s-in::before{content:"";display:block;width:7cqw;height:.7cqw;margin-bottom:1.4cqw;border-radius:1cqw;background:var(--accent)}
+.slide[data-layout=title] h1{font-size:3.4em;max-width:16ch}
+.slide[data-layout=title] p{font-size:1.25em;max-width:40ch}
+.slide[data-layout=statement] .s-in{gap:2.4cqw}
+.slide[data-layout=statement] :is(h1,h2){font-size:2.9em;line-height:1.08;max-width:18ch}
+.slide[data-layout=statement] p{font-size:1.2em;max-width:44ch}
+.slide[data-layout=number] :is(h1,h2):first-child{font-size:6.4em;line-height:.95;letter-spacing:-.04em;color:var(--accent);font-variant-numeric:tabular-nums}
+.slide[data-layout=number] p{font-size:1.4em;max-width:30ch;color:var(--ink)}
+.slide[data-layout=quote] blockquote{margin:0;padding:0;border:0;font-size:2em;line-height:1.25;color:var(--ink);font-weight:500;letter-spacing:-.01em;max-width:26ch}
+.slide[data-layout=quote] blockquote::before{content:"“";display:block;height:.55em;font-size:2.4em;line-height:1;color:var(--accent)}
+.slide[data-layout=quote] blockquote p{color:inherit}
+.slide[data-layout=quote] blockquote p+p{margin-top:1em;font-size:.5em;font-weight:400;color:var(--muted)}
+.slide[data-layout=chart] .s-in,.slide[data-layout=split] .s-in{justify-content:flex-start}
+.slide[data-layout=chart] .k-figure{flex:1;min-height:0;display:flex;flex-direction:column}
+.slide[data-layout=chart] .k-plot{flex:1;min-height:0}
+.slide[data-layout=chart] .k-plot svg{width:100%;height:100%}
+.slide[data-layout=chart] .k-figure.is-donut .k-plot svg{max-width:none}
+.slide[data-layout=chart] .s-in>.k-stats{margin-block:auto}
+.s-visual .k-figure.is-donut .k-plot svg{max-width:none}
+.s-cols{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:5cqw;align-items:center}
+.s-words{display:flex;flex-direction:column;gap:1.2cqw}.s-words>*{margin:0}
+.s-visual{min-width:0}
+.slide[data-layout=points] .s-in{justify-content:flex-start;padding-top:7cqw}
+.slide[data-layout=points] :is(h1,h2):first-child{margin-bottom:1.2cqw}
+/* The strip of slides under the stage, and the count. */
+.deck-strip{display:none}
+.js .deck-strip{display:flex;gap:var(--space-2);max-width:100%;overflow-x:auto;padding:var(--space-1);scrollbar-width:thin}
+.deck-thumb{display:block;text-align:left;flex:none;width:112px;padding:0;border-radius:6px;background:none;box-shadow:0 0 0 1px var(--hair);opacity:.7;overflow:hidden}
+.deck-thumb:hover{background:none;opacity:1}
+.deck-thumb[aria-current=true]{opacity:1;box-shadow:0 0 0 2px var(--accent)}
+.deck-thumb .slide{border-radius:0;box-shadow:none;pointer-events:none}
+.deck-bar{display:none}
+.js .deck-bar{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);color:var(--muted);font-variant-numeric:tabular-nums}
+.deck-bar button{width:28px;height:28px;padding:0;border-radius:50%;font-size:var(--text-md);background:transparent}
+.deck-bar button:hover{background:var(--tone-2)}
+/* Play: the slide alone, as big as the screen allows. */
+html.present[data-kind] body{background:#000}
+.present .deck{justify-content:center;padding:0;gap:0}
+.present .deck-strip,.present .deck-bar{display:none}
+.present .deck-stage{width:min(100vw,calc(100vh * 16 / 9))}
+.present .slide{border-radius:0;box-shadow:none}
+@media (max-width:640px){
+  .deck{padding:var(--space-3)}
+  .js .deck-stage{width:100%}
+}
+@media print{
+  @page{size:1280px 720px;margin:0}
+  html[data-kind=deck] body{background:none}
+  .deck{display:block;padding:0}
+  .deck-stage,.js .deck-stage{display:block;width:1280px;aspect-ratio:auto}
+  .js .deck-stage>.slide,.slide{position:relative;inset:auto;visibility:visible;opacity:1;width:1280px;height:720px;border-radius:0;box-shadow:none;break-after:page;transition:none}
+  .deck-strip,.deck-bar{display:none!important}
+}
+@media (prefers-reduced-motion:reduce){.js .deck-stage>.slide,.js .deck-stage>.slide.on{transition:none}}
+
+/* -------- Doc -------- */
+.doc{max-width:728px;margin:0 auto;padding:var(--space-8) var(--space-5) var(--space-8)}
+.doc.has-toc{max-width:1064px;display:grid;grid-template-columns:184px minmax(0,680px);gap:var(--space-7);justify-content:center}
+.doc-toc{position:sticky;top:var(--space-7);align-self:start;display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);font-size:var(--text-sm)}
+.doc-toc .eyebrow{margin-bottom:var(--space-1)}
+.doc-toc a{color:var(--muted);line-height:1.35}
+.doc-toc a:hover,.doc-toc a.on{color:var(--ink);text-decoration:none}
+.doc-body{min-width:0;font-size:16px;line-height:1.65}
+.doc-head{margin-bottom:var(--space-6);padding-bottom:var(--space-6);border-bottom:1px solid var(--hair)}
+.doc-head .eyebrow{margin:0 0 var(--space-3)}
+.doc-head h1{margin:0;font-size:var(--text-display);line-height:1.05;letter-spacing:-.03em}
+.doc-lede{margin:var(--space-4) 0 0;font-size:var(--text-md);line-height:1.5;color:var(--secondary)}
+.doc-body h2{margin:var(--space-7) 0 var(--space-3);font-size:var(--text-lg);letter-spacing:-.015em;scroll-margin-top:var(--space-5)}
+.doc-body h3{margin:var(--space-6) 0 var(--space-2);font-size:var(--text-md)}
+.doc-body p,.doc-body ul,.doc-body ol{margin-bottom:var(--space-4)}
+.doc-body li{margin:var(--space-2) 0}
+.doc-body li::marker{color:var(--accent)}
+.doc-body blockquote{margin:var(--space-5) 0;padding:0 0 0 var(--space-5);border-left:2px solid var(--accent);font-size:var(--text-md);color:var(--ink)}
+.doc-body .k-figure{margin:var(--space-6) 0}
+.doc-body .k-stats{margin:var(--space-5) 0}
+.doc-body table{font-size:var(--text-sm)}
+.doc-body hr{margin:var(--space-6) 0}
+.doc-body img{border-radius:var(--radius-lg)}
+@media (max-width:900px){.doc.has-toc{display:block;max-width:728px}.doc-toc{display:none}}
+@media (max-width:560px){.doc{padding:var(--space-6) var(--space-4)}.doc-head h1{font-size:var(--text-xl)}}
+@media print{.doc{padding:0;max-width:none}.doc.has-toc{display:block}.doc-toc{display:none}}
+
+/* -------- Dashboard -------- */
+html[data-kind=dashboard] body{background:color-mix(in srgb,var(--ink) 4%,var(--paper))}
+.dash{max-width:1200px;margin:0 auto;padding:var(--space-6) var(--space-5) var(--space-7);display:flex;flex-direction:column;gap:var(--space-6)}
+.dash-head{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--space-4);flex-wrap:wrap}
+.dash-head h1{margin:0;font-size:var(--text-xl);letter-spacing:-.02em}
+.dash-lede{margin:var(--space-2) 0 0;color:var(--secondary)}
+.dash-date{font-size:var(--text-xs);color:var(--muted);padding:var(--space-1) var(--space-3);border-radius:999px;box-shadow:inset 0 0 0 1px var(--hair)}
+.dash-sec>h2{margin:0 0 var(--space-3)}
+.dash-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-flow:row dense;gap:var(--space-4)}
+.span-all{grid-column:1/-1}.span-half,.span-note{grid-column:span 3}.span-third{grid-column:span 2}
+.dash .k-stats{margin:0}
+.dash .k-stat{background:var(--paper);box-shadow:0 0 0 1px var(--hair)}
+.k-card{min-width:0;padding:var(--space-5);border-radius:var(--radius-lg);background:var(--paper);box-shadow:0 0 0 1px var(--hair)}
+.k-card>.k-figure{margin:0}
+.k-card.is-table{padding:var(--space-2) var(--space-4)}
+.k-card.is-table .k-table{margin:0}
+.k-card.span-note>:last-child{margin-bottom:0}
+.k-card.span-note h3{font-size:var(--text-sm)}
+.k-figure.is-donut .k-plot svg{max-width:460px}
+@media (max-width:760px){.dash{padding:var(--space-5) var(--space-4)}.dash-grid{grid-template-columns:minmax(0,1fr)}.span-all,.span-half,.span-note,.span-third{grid-column:1/-1}}
+.dash .span-all .k-plot svg{max-height:300px}

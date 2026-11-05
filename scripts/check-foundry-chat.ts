@@ -49,10 +49,11 @@ const f = await fixture({
     }
     if (!current.length) {
       assert(tools.some(tool => tool.name === "foundry_save"));
-      const graphic = /graphic/i.test(request), document = /document/i.test(request);
-      const save = call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : "Idea garden",
-        kind: graphic ? "svg" : document ? "markdown" : "html",
-        source: graphic ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#285b48"/></svg>'
+      const graphic = /graphic/i.test(request), document = /document/i.test(request), deck = /slide deck/i.test(request);
+      const save = call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : deck ? "Q1 launch" : "Idea garden",
+        kind: graphic ? "svg" : document ? "markdown" : deck ? "deck" : "html",
+        source: deck ? "---\ntheme: forest\n---\n# Q1 launch\nWhat the free tier did.\n\n---\n\n# 3.1×\nSign-ups a week.\n\n---\n\n## Sign-ups\n```chart\nlabels: W1, W2, W3\nvalues: 1200, 2400, 3700\n```"
+          : graphic ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#285b48"/></svg>'
           : document ? "# Project brief\n\nA document created in chat.\n\n<script>window.injected=true</script>" : mockup() });
       if (first) {
         const cut = save.argumentsDelta.indexOf('"source"');
@@ -229,6 +230,23 @@ try {
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.some(turn => turn.content.startsWith(`Build this for real: the Foundry page "Idea garden" (id ${artifact.id}`)));
   assert.equal((await f.client.getSessionState(artifact.sessionId!)).session.workspace?.root, f.workspace, "the chat moved into the project it builds in");
   console.log("PASS: Build this asks a plain chat for its project, moves it there and starts building.");
+  // A deck is content Demesne draws: slides with a strip, and Play covers the window until Esc.
+  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status !== "running");
+  await editor.fill("Make a slide deck for the launch"); await editor.press("Enter");
+  await chips.filter({ hasText: "Deck · v1" }).first().waitFor();
+  await eventually(async () => await frame.locator(".deck-stage > .slide").count() === 3 && await frame.locator(".deck-thumb").count() === 3);
+  assert.equal(await frame.locator("html").getAttribute("data-look"), "forest");
+  assert.equal(await frame.locator(".slide.on").getAttribute("data-layout"), "title");
+  await pane.getByRole("button", { name: "Play the deck" }).click();
+  await eventually(async () => (await pane.getAttribute("class"))?.includes("playing") === true && (await frame.locator("html").getAttribute("class"))?.includes("present") === true);
+  await frame.locator("body").press("ArrowRight");
+  await eventually(async () => await frame.locator(".slide.on").getAttribute("data-layout") === "number");
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(output, "foundry-deck-play.png") });
+  await frame.locator("body").press("Escape");
+  await eventually(async () => !(await pane.getAttribute("class"))?.includes("playing"));
+  assert(await pane.isVisible(), "Esc ends play, and the pane stays open");
+  console.log("PASS: a deck is drawn from content, plays over the window and Esc ends it.");
   assert.deepEqual(errors, []);
   console.log("PASS: graphics and sanitized documents open in the pane; chips and the pane return when the chat is reopened; Esc closes it.");
 } catch (error) {

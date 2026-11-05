@@ -1,5 +1,5 @@
 /// Foundry: the agent makes things for the person — HTML prototypes, SVG
-/// graphics, Markdown documents — as text Demesne renders in a sandbox. Every
+/// graphics, decks, docs and dashboards — as text Demesne renders in a sandbox. Every
 /// save is a new version, so revisions never lose the earlier work. A revision
 /// names the version it was read from, so a version the agent has not seen is
 /// never overwritten; small changes go through foundry_edit as exact find and
@@ -69,7 +69,16 @@ export const DESIGN_BRIEF = "Design brief: make it look designed, never like a t
   + "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce. "
   + "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.";
 
-const GUIDE = FILE_RULES + " " + DESIGN_BRIEF;
+/// The ready kinds (apps/desktop/electron/foundry-kinds.ts): the model sends
+/// content and Demesne draws it, so a deck, a report or a dashboard looks
+/// designed every time and costs a fraction of a hand-made page.
+export const READY_KINDS_RULES = "Ready kinds: slides are kind deck, a report, brief, memo or article kind doc, numbers at a glance kind dashboard. Demesne designs these, so their source is content only, no HTML or CSS: "
+  + "Markdown with optional front matter at the top (---, title:, subtitle:, author:, date:, theme: paper|ink|forest|ocean|sand|plum, accent: #hex, ---); "
+  + "```chart blocks (type: bar|line|area|hbar|donut, title:, labels: a, b, c, then a line per series, Name: 1, 2, 3); ```stats blocks (a tile per line: label | value | delta | note); > [!NOTE] / [!TIP] / [!WARNING] callouts. "
+  + "A deck splits into slides on lines that are only ---: one idea per slide, few words; # 3.1× with a sentence becomes a big-number slide, a lone quote a quote slide, a heading and a chart a chart slide, a list with a chart a split "
+  + "(<!-- layout: title|statement|number|quote|split|chart|points --> overrides). A dashboard's ## headings group its stats, charts and tables. Anything interactive or custom is html.";
+
+const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + DESIGN_BRIEF;
 
 /// What stands in for a page's source once its turn is over.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";
@@ -148,7 +157,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
         properties: {
           id: { type: "string", description: "Omit to create." },
           title: { type: "string", maxLength: 200 },
-          kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating." },
+          kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating: deck, doc or dashboard (content Demesne designs), html (a page you design), svg, or markdown (plain notes)." },
           source: { type: "string", description: "The complete source." },
           base_version: { type: "integer", minimum: 1, description: "When revising: the version you read." },
           note: { type: "string", maxLength: 300, description: "What changed, in a few words." },
@@ -163,7 +172,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] Source is over 512 KB. Hint: simplify or split it");
       const id = typeof input.id === "string" && input.id ? input.id : undefined;
       const kind = typeof input.kind === "string" ? input.kind as FoundryKind : undefined;
-      if (!id && (!kind || !FOUNDRY_KINDS.includes(kind))) throw new Error("[invalid_input] kind must be html, svg or markdown when creating. Hint: pick the kind that fits");
+      if (!id && (!kind || !FOUNDRY_KINDS.includes(kind))) throw new Error(`[invalid_input] kind must be one of ${FOUNDRY_KINDS.join(", ")} when creating. Hint: deck, doc or dashboard for slides, a report or numbers; html for anything else`);
       if (!id && (typeof input.title !== "string" || !input.title.trim())) throw new Error("[invalid_input] A new artifact needs a title. Hint: name it in a few words");
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
@@ -283,12 +292,15 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
   };
 }
 
-/// After an HTML page is saved: render it, and hand the model the faults
+/// The kinds that render as a page, so the look can see them.
+const LOOKED_KINDS = new Set(["html", "deck", "doc", "dashboard"]);
+
+/// After a page is saved: render it, and hand the model the faults
 /// found and a picture at each width. Twice per artifact per turn at most.
 async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<string, number>, text: string, context: { turnId?: string; signal: AbortSignal }): Promise<string | StructuredToolResult> {
   let saved: Record<string, unknown>;
   try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return text; }
-  if (saved.kind !== "html" || typeof saved.id !== "string") return text;
+  if (typeof saved.kind !== "string" || !LOOKED_KINDS.has(saved.kind) || typeof saved.id !== "string") return text;
   const key = `${context.turnId ?? ""}:${saved.id}`, seen = looks.get(key) ?? 0;
   if (seen >= LOOKS_PER_TURN) return text;
   const artifact = store.getFoundryArtifact(saved.id);

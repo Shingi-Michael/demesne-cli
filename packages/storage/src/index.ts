@@ -311,7 +311,7 @@ export class DemesneStore {
           .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source);
         return input.id;
       }
-      if (!input.kind || !FOUNDRY_KINDS.includes(input.kind)) throw new InvalidStateError("Foundry kind must be html, svg or markdown");
+      if (!input.kind || !FOUNDRY_KINDS.includes(input.kind)) throw new InvalidStateError(`Foundry kind must be one of ${FOUNDRY_KINDS.join(", ")}`);
       const title = input.title?.trim();
       if (!title) throw new InvalidStateError("A Foundry artifact needs a title");
       const created = crypto.randomUUID();

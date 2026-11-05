@@ -2123,7 +2123,9 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .sidebar-today small { color: var(--blossom, #f2b6c8); }
 /* Pass 144 A: Today on a desktop. A readable feed (about 600px) and the
    room beside it as cards; a narrow window puts the cards above the feed. */
-.desktop #page[data-kind="today"] { max-width: 900px; }
+/* Today sits in the same 720px column as Scheduled and Customize; its
+   cards ride above the feed, as they do in a narrow window. */
+.desktop #page[data-kind="today"] { max-width: 720px; }
 .td-solo { max-width: 600px; }
 .td-wrap { container-type: inline-size; }
 .td-layout { display: grid; grid-template-columns: minmax(0, 600px) 236px; gap: 32px; align-items: start; }

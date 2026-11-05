@@ -3,12 +3,12 @@ import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
-export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean }
+export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean; callback?: string }
 export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
 export interface SocialMood { mood: "calm" | "happy" | "focus" | "stuck" | "sleepy"; strong: boolean; word: string; reasons: Array<{ why: string; p: number; e: number; left: number }> }
 export interface SocialCloseness { agent: string; warmth: number; bond: number; lines: Array<{ why: string; at: string }> }
 export interface SocialRemembered { id: string; text: string; from: "comment" | "you"; at: string }
-export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[]; feeling?: SocialMood; close?: SocialCloseness[]; remembers?: SocialRemembered[]; diary?: Array<{ day: string; text: string; tomorrow: string | null }>; beliefs?: Array<{ text: string; since: string }>; chapters?: SocialChapter[]; runs?: AgentRunsOn }
+export interface SocialProfile { agent: { id: string; name: string; voice: string }; bio: string; since: string | null; week: { work: number; mail: number; pictures: number; comments: number }; friend: string | null; pictures: string[]; weeks?: SocialWeek[]; feeling?: SocialMood; close?: SocialCloseness[]; remembers?: SocialRemembered[]; diary?: Array<{ day: string; text: string; tomorrow: string | null }>; beliefs?: Array<{ text: string; since: string }>; chapters?: SocialChapter[]; wear?: { level: number; word: string; why: string; fails: number } | null; runs?: AgentRunsOn }
 /// An agent's week as a short chapter it wrote on Friday (story arcs, stage 5).
 export interface SocialChapter { week: string; title: string; text: string; shapes: string[]; at: string }
 /// What an agent runs on (pass 143 B): your pick (null: the tool's default), the tool's own default, the line to show, and the choices.

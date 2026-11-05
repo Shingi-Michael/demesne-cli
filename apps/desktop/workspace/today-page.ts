@@ -160,7 +160,7 @@ function postHtml(post: SocialPost, view: SocialsView, ui: TodayUi): string {
     : milestone ? `<p class="td-text td-big">${h(post.text)}</p>`
     : post.text ? `<p class="td-text">${h(post.text)}</p>` : "";
   const from = fromChat(post) ? btn("today-open", `↳ ${h(sourceWords(post))}`, { id: post.from.sessionId, path: post.from.workspace }, "td-from", `title="Open this chat"`) : "";
-  const comments = post.comments.map((comment) => `<div class="td-comment">${faceLink(comment.by, "comment", view)}<div><b>${h(whoName(comment.by, view))}</b> ${h(comment.text)}${comment.request && isAgent(post.by) ? ` ${btn("today-ask", "Open as chat", { agent: post.by, text: comment.text }, "td-ask")}` : ""}</div></div>`).join("");
+  const comments = post.comments.map((comment) => `<div class="td-comment">${faceLink(comment.by, "comment", view)}<div><b>${h(whoName(comment.by, view))}</b> ${h(comment.text)}${comment.callback ? ` <span class="td-callback" title="An inside joke about something they really went through">Remembers: ${h(comment.callback)}</span>` : ""}${comment.request && isAgent(post.by) ? ` ${btn("today-ask", "Open as chat", { agent: post.by, text: comment.text }, "td-ask")}` : ""}</div></div>`).join("");
   const answerer = isAgent(post.by) ? post.by : [...post.comments].reverse().find((item) => isAgent(item.by))?.by ?? "demesne";
   const sending = ui.sending.includes(post.id) ? `<div class="td-comment td-wait">${face(answerer, "comment")}<div>…</div></div>` : "";
   const like = btn("today-like", `♥ ${post.liked ? "Liked" : "Like"}`, { id: post.id, liked: !post.liked }, `td-act${post.liked ? " on" : ""}`, `aria-pressed="${post.liked}"`);
@@ -255,7 +255,7 @@ export function innerHtml(agent: string, profile: SocialProfile, view: SocialsVi
   const chapter = profile.chapters?.[0];
   const chapterBlock = chapter ? `<h3 class="td-day">Chapter · ${h(chapterWeek(chapter.at))}</h3><div class="td-chapter"><b>${h(chapter.title)}</b><p>${h(chapter.text)}</p></div>` : "";
   const thinks = profile.beliefs?.length ? `<h3 class="td-day">Lately thinks</h3><ul class="td-thinks">${profile.beliefs.slice(-3).reverse().map((item) => `<li>${h(item.text)}</li>`).join("")}</ul>` : "";
-  return `<section class="td-inner">${chapterBlock}${diary}${thinks}<h3 class="td-day">Feeling ${h(feeling?.word ?? "calm")}</h3>${why}${closeBlock}<h3 class="td-day">What ${h(first)} remembers about you</h3><ul class="td-remembers">${remembers}</ul><form class="td-remember" data-agent="${h(agent)}"><input name="text" maxlength="140" autocomplete="off" placeholder="Tell ${h(first)} something to remember…" aria-label="Tell ${h(first)} something to remember"></form></section>`;
+  return `<section class="td-inner">${chapterBlock}${diary}${thinks}<h3 class="td-day">Feeling ${h(feeling?.word ?? "calm")}</h3>${profile.wear ? `<div class="td-wear" title="Builds when checks keep failing, fades over a couple of good days"><i class="td-bar"><b style="width:${Math.min(100, profile.wear.level)}%"></b></i><small>${h(profile.wear.word === "worn out" ? "Worn out" : "A bit worn")} · ${h(profile.wear.why)}</small></div>` : ""}${why}${closeBlock}<h3 class="td-day">What ${h(first)} remembers about you</h3><ul class="td-remembers">${remembers}</ul><form class="td-remember" data-agent="${h(agent)}"><input name="text" maxlength="140" autocomplete="off" placeholder="Tell ${h(first)} something to remember…" aria-label="Tell ${h(first)} something to remember"></form></section>`;
 }
 
 /// "This week" for the current week's chapter, otherwise the week it began.

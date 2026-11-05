@@ -163,9 +163,13 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    made long chats slow to open and to stream into.) */
 .sidebar-item:hover .sidebar-row-actions, .sidebar-row-actions:focus-within, .sidebar-session:focus-visible ~ .sidebar-row-actions { opacity: 1; pointer-events: auto; }
 .sidebar-item:hover .sidebar-session-age, .sidebar-session:focus-visible .sidebar-session-age { visibility: hidden; }
+/* The age comes back only once the buttons have faded out, so the two never
+   draw over each other while the pointer leaves the row. */
+.sidebar-session-age { transition: visibility 0s linear 140ms; }
+.sidebar-item:hover .sidebar-session-age, .sidebar-session:focus-visible .sidebar-session-age { transition-delay: 0s; }
 .sidebar-item:hover .sidebar-session-name, .sidebar-session:focus-visible .sidebar-session-name { padding-right: 64px; }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-row-actions { transition: none; }
+  .sidebar-row-actions, .sidebar-session-age { transition: none; }
 }
 .sidebar-empty { padding: 6px 10px; color: var(--t4); font-size: 12.5px; line-height: 1.5; }
 /* The rail (pass 129 A): the sidebar folded to a quiet 60px strip. One even

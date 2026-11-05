@@ -2437,6 +2437,7 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 /* Settings' list wears the sidebar's look, so the sidebar doesn't jump on
    the way in and out: the same 34px rows and duotone icons, icons centred
    27.5px in and labels starting 49px in, small-caps group labels. */
+#desktop-sidebar :is(.st-back, .st-nav, .st-search) { flex: none; }
 #desktop-sidebar :is(.st-back, .st-nav) { height: 34px; gap: 12px; padding: 0 10px; font-size: 14px; }
 #desktop-sidebar .st-back { color: var(--t2); }
 #desktop-sidebar :is(.st-back, .st-nav) .ico { width: 19px; height: 19px; stroke-width: 1.9; }

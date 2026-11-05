@@ -10,7 +10,7 @@ body.desktop kbd { font-family: "JetBrains Mono", monospace; }
 #desktop-sidebar { grid-column: 1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--side); padding: 14px 12px 10px; }
 .ico { flex: none; display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 /* New chat and Search sit above the groups; who you are and Settings stay below. */
-.sidebar-nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 8px; }
 .sidebar-nav button, #sidebar-open-project { display: flex; width: 100%; align-items: center; gap: 11px; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--t2); font-size: 13.5px; text-align: left; }
 .sidebar-nav button:hover, #sidebar-open-project:hover { background: var(--surface2); color: var(--t1); }
 #sidebar-open-project { margin-bottom: 8px; flex: none; }
@@ -203,7 +203,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-rail [data-tip]:hover::after, .sidebar-rail [data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); transition-delay: 250ms; }
 @media (prefers-reduced-motion: reduce) { .sidebar-rail [data-tip]::after { transition: none; } }
 /* The top bar: the sidebar toggle, your tabs, and ⋯. */
-#desktop-toolbar { grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 18px 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
+#desktop-toolbar { grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
 #desktop-toggle-sidebar { color: var(--t3); display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; }
 #desktop-toggle-sidebar:hover { background: var(--surface2); color: var(--t1); }
 #desktop-toolbar header { flex: none; min-width: 0; margin: 0 0 0 auto; gap: 8px; }
@@ -215,7 +215,9 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .live-app:not(.start) .stage { padding: 28px 32px 16px; }
 .desktop #conversation, .desktop #drive-turn { max-width: 780px; margin-left: auto; margin-right: auto; }
 .desktop .live-app.start .stage { padding: 40px 32px 80px; }
-.desktop .hero { max-width: 680px; gap: 18px; }
+/* Symmetry (pass 151 B): the start screen's column is as wide as a chat's
+   message box, so the box keeps its size when you send. */
+.desktop .hero { width: 748px; max-width: 100%; gap: 18px; }
 .desktop .live-app.start .intro { gap: 6px; }
 .hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t2); font-size: 12.5px; line-height: 18px; }
 .hero-eyebrow .ico { color: var(--t3); }
@@ -247,6 +249,10 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .live-app.start .composer textarea::placeholder { color: var(--t4); }
 .desktop .live-app.start .hints button { font-size: 12.5px; color: var(--t3); }
 .desktop #input-area { position: relative; padding: 12px 32px 22px; }
+/* In a chat the message box shares the answers' edges: it starts where the
+   answer text starts (the d. sits in the 32px margin) and ends where your
+   messages end. */
+.desktop .live-app:not(.start) #input-area { padding-left: 32px; padding-right: 0; }
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
 .desktop .composer { border-radius: 12px; padding: 12px 14px 8px; gap: 8px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }
 .desktop .composer:focus-within { border-color: color-mix(in srgb, var(--electric) 60%, var(--borderBright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--electric) 7%, transparent); }
@@ -1048,6 +1054,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .live-app.start #stage { position: relative; z-index: 1; }
 .live-app.start .intro h1, .live-app.start .hero-eyebrow { text-shadow: 0 1px 16px var(--ink), 0 0 3px var(--ink); }
 .live-app.start #composer { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }
+.desktop .live-app:not(.start) #composer { background: var(--surface); }
 
 /* Where a chat lives: one word under Home's composer, unfolding its choices
    in place; a plain chat ends with one quiet line that can move it. */
@@ -1405,10 +1412,8 @@ html.glass body.desktop .answer .markdown::before { --back: color-mix(in srgb, v
 #desktop-sidebar, #desktop-toolbar { background: transparent; border: 0; box-shadow: none; }
 /* The panel: the deepest plane, with a hairline edge. Inside it --ink is the
    panel, so everything that paints "the background" paints the panel. */
-#desktop-shell > .live-app { --ink: var(--panel, var(--ink)); width: auto; height: auto; margin: 0 10px 10px 0; border-radius: 12px; overflow: hidden; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)), var(--panel-inset); }
-#desktop-shell:has(#desktop-sidebar[hidden]) > .live-app { margin-left: 10px; }
-#desktop-home, #desktop-error { --ink: var(--panel, var(--ink)); margin: 10px 10px 10px 0; border-radius: 12px; overflow: auto; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)), var(--panel-inset); }
-#desktop-shell:has(#desktop-sidebar[hidden]) > :is(#desktop-home, #desktop-error) { margin-left: 10px; }
+#desktop-shell > .live-app { --ink: var(--panel, var(--ink)); width: auto; height: auto; margin: 0 10px 10px; border-radius: 12px; overflow: hidden; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)), var(--panel-inset); }
+#desktop-home, #desktop-error { --ink: var(--panel, var(--ink)); margin: 10px; border-radius: 12px; overflow: auto; background: var(--panel, var(--ink)); box-shadow: 0 0 0 1px var(--panel-edge, var(--hair)), var(--panel-inset); }
 /* No scrollbars: everything still scrolls by wheel and trackpad. Code,
    diffs and tool output keep a thin bar of their own. */
 body.desktop *, .desktop .live-app:not(.start) .stage { scrollbar-width: none; }
@@ -1419,9 +1424,9 @@ body.desktop :is(pre, .diff, .rv-diff, .step-fold, .pv-view) { scrollbar-width: 
 /* Match Home's glass and controls to the textbox's painted outer edge.
    Its existing ring extends 1px beyond its layout box on each side. Keep the
    textbox at its original width and widen the borderless lower surface to it. */
-.desktop .live-app.start #composer { --composer-radius: 12px; width: calc(100% + 2px); margin-inline: -1px; border-radius: var(--composer-radius); }
-.desktop .live-app.start #composer .composer-box { margin-inline: 1px; }
-.desktop .live-app.start #composer .composer-bar { box-sizing: border-box; width: 100%; min-width: 0; align-self: stretch; border-radius: 0 0 var(--composer-radius) var(--composer-radius); }
+.desktop .live-app #composer { --composer-radius: 12px; width: calc(100% + 2px); margin-inline: -1px; border-radius: var(--composer-radius); }
+.desktop .live-app #composer .composer-box { margin-inline: 1px; }
+.desktop .live-app #composer .composer-bar { box-sizing: border-box; width: 100%; min-width: 0; align-self: stretch; border-radius: 0 0 var(--composer-radius) var(--composer-radius); }
 .desktop #composer .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair2)); }
 .desktop #composer.queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder); }
 .desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder); }

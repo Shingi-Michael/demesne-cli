@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DemesneClient } from "../../../packages/client/src/index.ts";
 import type { ModelMessage, PermissionMode, SessionStateResponse } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
-import { applyFoundryEdits, DESIGN_BRIEF, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { applyFoundryEdits, DESIGN_BRIEF, PARTS_GUIDE, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
@@ -159,6 +159,12 @@ test("foundry_save creates an artifact and keeps every version", async () => {
   expect(read.source).toBe("<h1>One</h1>");
   expect(read.version).toBe(1);
   expect(JSON.parse(await foundryReadTool(store).execute({}, context))[0].title).toBe("Landing");
+  // The parts catalogue is read on demand, and names every icon parts.js draws.
+  const parts = await foundryReadTool(store).execute({ id: "kit:parts" }, context);
+  expect(parts).toBe(PARTS_GUIDE);
+  const drawn = Object.keys(Function(`${readFileSync(join(import.meta.dir, "../../desktop/foundry-kit/parts.js"), "utf8").match(/var ICONS = (\{[\s\S]*?\n  \});/)![1].replace(/\n/g, " ")}; return ICONS;`.replace(/^/, "const ICONS = "))());
+  expect(drawn.length).toBeGreaterThan(50);
+  for (const name of drawn) expect(PARTS_GUIDE).toContain(` ${name}`);
 
   expect(store.deleteFoundryArtifact(created.id)).toBe(true);
   expect(store.getFoundryArtifact(created.id)).toBeNull();
@@ -210,6 +216,9 @@ test("the tools carry the design brief, the kit and the library rules", () => {
     expect(DESIGN_BRIEF).toContain("phone width");
     expect(DESIGN_BRIEF).toContain("the kit is the floor");
     expect(DESIGN_BRIEF).not.toContain("little CSS");
+    // Sizes, spaces and colours come from the kit's scales (the quality eval found 8-16 sizes and 12-25 colours without them).
+    expect(DESIGN_BRIEF).toContain("var(--text-xs|sm|md|lg|xl|display)");
+    expect(DESIGN_BRIEF).toContain("var(--space-1…8)");
     expect(JSON.stringify(foundryReadTool(store).definition)).toContain("base_version");
   } finally { store.close(); }
 });

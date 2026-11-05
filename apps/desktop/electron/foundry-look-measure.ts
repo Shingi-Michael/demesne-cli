@@ -128,7 +128,8 @@ export const DESIGN_MEASURE = String.raw`(() => {
     const box = el.getBoundingClientRect();
     return box.width > 0 && box.height > 0;
   };
-  const all = [...document.body.querySelectorAll("*")].filter((el) => !skip.has(el.tagName) && !el.closest("svg *")).slice(0, 4000).filter(shown);
+  // Frame chrome from the parts (data-chrome: window bars, Demesne's sidebar and tabs) is the frame, not the design.
+  const all = [...document.body.querySelectorAll("*")].filter((el) => !skip.has(el.tagName) && !el.closest("svg *") && !el.closest("[data-chrome]")).slice(0, 4000).filter(shown);
   const ownText = (el) => [...el.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent.trim()).join("");
   const texts = all.map((el) => [el, ownText(el)]).filter(([, text]) => text.length > 0);
 

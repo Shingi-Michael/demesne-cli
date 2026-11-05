@@ -156,6 +156,11 @@ test("the kit is served at foundry://kit/<file>, only the files it has, and inli
   expect(out).toContain("<script>window.anime={};if(1<2){}//<\\/script></script>");
   expect(out).toContain("fonts.googleapis.com/css2?family=Fraunces");
   expect(out).toContain("<h1>Garden</h1>");
+  // Parts are inlined too; without their text the tag stays as it was.
+  const withParts = '<link rel="stylesheet" href="foundry://kit/base.css"><d-icon name="x"></d-icon><script src="foundry://kit/parts.js"></script>';
+  expect(exportedSource(withParts, { ...kit, parts: "customElements.define('d-x',class{})" })).toContain("<script>customElements.define('d-x',class{})</script>");
+  expect(exportedSource(withParts, kit)).toContain('<script src="foundry://kit/parts.js"></script>');
+  expect(foundryKitFile("foundry://kit/parts.js")).toBe("parts.js");
   // A page without the kit is exported as it is.
   expect(exportedSource("<p>plain</p>", kit)).toBe("<p>plain</p>");
 });

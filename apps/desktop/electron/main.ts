@@ -377,7 +377,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       const name = `${found.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim().slice(0, 80) || "artifact"}.${extension}`;
       const selected = await dialog.showSaveDialog(window!, { title: "Export from Foundry", defaultPath: join(app.getPath("downloads"), name) });
       if (selected.canceled || !selected.filePath) return null;
-      await writeFile(selected.filePath, found.kind === "html" ? exportedSource(found.source, { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8") }) : found.source, "utf8");
+      await writeFile(selected.filePath, found.kind === "html" ? exportedSource(found.source, { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8") }) : found.source, "utf8");
       return { path: selected.filePath };
     }
     // Today › Save video: the Friday reel's clip, saved where you choose.

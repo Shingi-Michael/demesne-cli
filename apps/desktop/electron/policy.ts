@@ -71,10 +71,12 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "anime.js": { path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8", then: "kit/motion.js" },
   // Pick an option: pages that mark options with data-option get a Pick button on hover.
   "pick.js": { path: "kit/pick.js", type: "application/javascript; charset=utf-8" },
+  // Parts: frames, Demesne's own shell and pieces, icons, avatars, charts.
+  "parts.js": { path: "kit/parts.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
 export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
-export const FOUNDRY_PICK_SCRIPT = "foundry://kit/pick.js";
+export const FOUNDRY_PICK_SCRIPT = "foundry://kit/pick.js", FOUNDRY_PARTS_SCRIPT = "foundry://kit/parts.js";
 /** A page that marks options (data-option) gets the Pick runtime after it. */
 export const withPick = (html: string) => /\bdata-option\b/.test(html) ? `${html}\n<script src="${FOUNDRY_PICK_SCRIPT}"></script>` : html;
 /** The kit file a foundry://kit/<file> address names, or null. */
@@ -88,12 +90,13 @@ export function foundryKitFile(value: string): string | null {
 }
 /** A page as it leaves Demesne (Export): the kit it leaned on is inlined,
  * so the file stands on its own. The fonts fall back to the system's. */
-export function exportedSource(source: string, kit: { style: string; script: string }) {
+export function exportedSource(source: string, kit: { style: string; script: string; parts?: string }) {
   const tag = (name: string, address: string) => new RegExp(`<${name}\\b[^>]*\\b(?:href|src)=["']?${address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']?[^>]*>(?:\\s*</${name}>)?`, "gi");
   const style = kit.style.replace(/@font-face\{[^}]*foundry:\/\/kit\/[^}]*\}\n?/g, "");
   return source
     .replace(tag("link", FOUNDRY_KIT_STYLE), () => `<style>\n${style}</style>`)
-    .replace(tag("script", FOUNDRY_KIT_SCRIPT), () => `<script>${kit.script.replace(/<\//g, "<\\/")}</script>`);
+    .replace(tag("script", FOUNDRY_KIT_SCRIPT), () => `<script>${kit.script.replace(/<\//g, "<\\/")}</script>`)
+    .replace(tag("script", FOUNDRY_PARTS_SCRIPT), (found) => kit.parts === undefined ? found : `<script>${kit.parts.replace(/<\//g, "<\\/")}</script>`);
 }
 /** Where an artifact may load libraries and fonts from: the same short list
  * Claude's artifacts allow, so a chart, React or a real typeface works. */

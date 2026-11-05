@@ -39,5 +39,17 @@ const design = desktop!.design!;
 assert(design, "design numbers come with the look");
 for (const key of ["sizes", "body", "lead", "rhythm", "aligned", "colours", "surface"]) assert(typeof design[key] === "number", `design.${key}`);
 assert(design.sizes >= 2 && design.lead > 1 && design.colours >= 2, JSON.stringify(design));
+// The parts draw a real frame: a Demesne mock and a phone render with no faults, and paint the screen.
+const parts = `<html data-theme="dark"><link rel="stylesheet" href="foundry://kit/base.css"><main class="container" style="max-width:1180px"><h1>Calmer settings</h1>
+<d-demesne page="Customize" tabs="Settings"><h2>General</h2><div><d-row title="Keep this computer awake" note="While a chat or Drive runs"><d-toggle on></d-toggle></d-row>
+<d-row title="Open on"><d-seg options="Home|Last chat"></d-seg></d-row></div><d-card slot="cards" title="What changed" icon="sparkles">Three pages fold into one.</d-card></d-demesne>
+<d-compare recommended="A"><section data-option="A · Phone"><d-phone><div style="padding:16px"><d-stat label="This week" value="32 km" delta="+12%"></d-stat><d-chart type="bar" values="3,5,4,7" labels="M,T,W,T"></d-chart><d-avatar name="Amara Okafor"></d-avatar> <d-icon name="calendar"></d-icon></div></d-phone></section>
+<section data-option="B · Window"><d-window title="Splits" width="700"><d-chart type="donut" values="40,30,30" labels="Easy,Tempo,Long"></d-chart></d-window></section></d-compare></main>
+<script src="foundry://kit/parts.js"></script>`;
+const partsLook = await electronLook(command)({ kind: "html", title: "Parts", source: parts }, new AbortController().signal);
+assert(partsLook, "the app rendered the parts page");
+for (const shot of partsLook.pages) assert.deepEqual(shot.issues, [], `parts at ${shot.width}px`);
+assert.deepEqual(partsLook.errors, [], "parts log no console errors");
+assert(partsLook.pages[0]!.design!.surface > 0.2, `parts paint the screen: ${JSON.stringify(partsLook.pages[0]!.design)}`);
 for (const shot of look.pages) assert(Buffer.from(shot.png, "base64").subarray(1, 4).toString() === "PNG", "a picture of each width");
 console.log(`Foundry look passed in ${Date.now() - started} ms:`, JSON.stringify(look.pages.map(({ width, issues }) => ({ width, issues }))));

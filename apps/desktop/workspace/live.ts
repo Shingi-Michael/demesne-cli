@@ -37,7 +37,7 @@ import { fitImage } from "./fit-image.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
-import { FoundryPane, buildRequest } from "./foundry-pane.ts";
+import { FoundryPane, PANE_FRAME, buildRequest } from "./foundry-pane.ts";
 import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
@@ -3067,6 +3067,8 @@ const pane = new FoundryPane(el("pane"), {
     runNodes.forEach((item) => item.artifacts.mark());
   },
   assembleDocument,
+  // Point at a part: it lands as a chip in the composer, and the words you type say what to change.
+  point: () => { void pointAt("foundry"); },
   // A pick on the page goes to the chat as a message; while a turn works it waits for that turn.
   pick: (option) => {
     if (!state?.session) return;
@@ -3850,7 +3852,7 @@ function renderComposer() {
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
-  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, "chip point-chip").replace("<button ", `<button title="${h(point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
+  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
   el("mention-chips").innerHTML = points + notes + [...new Set(mentions)]
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
     .join("");
@@ -5178,6 +5180,7 @@ async function chooseCompletion(index = completionIndex) {
 /// element, the host finds the code behind it, and it lands as a chip.
 /// The Point button changes in place, so the page in the frame keeps its state.
 function pointButton(key: string) {
+  if (key === "foundry") return pane.setPointing(pointing === key);
   const button = document.querySelector<HTMLElement>(`[data-preview="${CSS.escape(key)}"] .pv-btn[data-action="preview-point"]`);
   if (!button) return;
   button.classList.toggle("on", pointing === key);
@@ -5190,12 +5193,15 @@ async function pointAt(key: string) {
   pointing = key;
   pointButton(key);
   let pick: PointPick | null = null;
-  try { pick = await api<PointPick | null>("desktop-point", { frame: `pv-${key}` }); }
+  // The pane's Foundry page: the artifact and version shown when it was picked.
+  const foundry = key === "foundry" && pane.state && pane.detail ? { id: pane.detail.id, title: pane.detail.title, version: pane.state.version, kind: pane.detail.kind } : undefined;
+  try { pick = await api<PointPick | null>("desktop-point", { frame: foundry ? PANE_FRAME : `pv-${key}` }); }
   catch (error) { notice(error instanceof Error ? error.message : String(error)); }
   finally { if (pointing === key) pointing = null; pointButton(key); }
   if (!pick) return;
   let source: PointSource | null = null;
-  try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
+  if (foundry) pick = { ...pick, foundry };
+  else try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
   pointed.push({ ...pick, id: `${Date.now()}:${pointed.length}`, source });
   renderComposer();
   editor.focus();

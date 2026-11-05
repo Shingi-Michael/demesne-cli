@@ -12,6 +12,8 @@ export interface PointPick {
   component?: string;
   /// A file (and line) the page itself names, from dev-build metadata.
   hint?: { file: string; line?: number };
+  /// Picked on a Foundry page in the pane: which artifact and version.
+  foundry?: { id: string; title: string; version: number; kind: string };
 }
 export interface PointSource { path: string; line: number }
 export interface Pointed extends PointPick { id: string; source: PointSource | null }
@@ -28,15 +30,22 @@ export function pointLabel(pick: Pick<PointPick, "tag" | "label">): string {
   return word === "text" || word === "paragraph" ? `“${short}”` : `${short} ${word}`;
 }
 
-/// The picks as the start of the next message, one block per element.
+/// The picks as the start of the next message, one block per element. A
+/// part of a Foundry page names the artifact and version, so the model
+/// changes only that part with foundry_edit.
 export function pointMessage(points: readonly Pointed[]): string {
   if (!points.length) return "";
   const lines = points.map((point) => {
+    const markup = `  selector \`${point.selector}\`\n  \`\`\`html\n  ${point.html}\n  \`\`\``;
+    if (point.foundry) return `- ${pointLabel(point)} on the Foundry ${point.foundry.kind === "html" ? "page" : point.foundry.kind} "${point.foundry.title}" (id ${point.foundry.id}, v${point.foundry.version})\n${markup}`;
     const where = point.source ? `\`${point.source.path}:${point.source.line}\`` : "source not found";
     const component = point.component ? ` · component ${point.component}` : "";
-    return `- ${pointLabel(point)} on ${point.page} · ${where}${component}\n  selector \`${point.selector}\`\n  \`\`\`html\n  ${point.html}\n  \`\`\``;
+    return `- ${pointLabel(point)} on ${point.page} · ${where}${component}\n${markup}`;
   });
-  return `${points.length === 1 ? "The element I pointed at" : "The elements I pointed at"} in the live preview:\n${lines.join("\n")}`;
+  const many = points.length > 1, foundry = points.every((point) => point.foundry);
+  const head = foundry ? `${many ? "The parts" : "The part"} I pointed at on the Foundry page (change only ${many ? "these" : "this"}: foundry_read it, then foundry_edit):`
+    : `${many ? "The elements I pointed at" : "The element I pointed at"} in the live preview:`;
+  return `${head}\n${lines.join("\n")}`;
 }
 
 /// Files a page's markup can live in.

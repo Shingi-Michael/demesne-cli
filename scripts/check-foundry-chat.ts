@@ -105,14 +105,14 @@ try {
   // Its first show asks for the assembly, but a page that moves by itself
   // (the kit's anime.js) is served plain: its own Arrive motion is the
   // arrival, and the assembly would cancel it and leave the page faded.
-  const assembled = async () => {
+  const assembled = async (inline = 1) => {
     assert.match((await pane.locator("iframe.pane-frame").getAttribute("src"))!, /[?&]assemble=1$/, "a version's first show asks for the assembly");
     const inner = page!.frames().find(item => item.url().includes("assemble=1"));
     assert(inner, "the first-show frame is reachable");
     await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined && document.documentElement.style.visibility === ""));
     // The kit reached the page: its stylesheet and its anime.js, and no assembly beside it.
     assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
-    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), 1, "a page that moves by itself is not served the assembly");
+    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "a page that moves by itself is not served the assembly (a revision carries only the what-changed outline)");
     assert.equal(await inner.evaluate(() => "__demesnePrevious" in window), false, "no assembly, no previous version to diff");
   };
   await assembled();
@@ -178,8 +178,9 @@ try {
   // The pane follows the chat onto the new version; the arrows walk back.
   await pane.locator(".pane-v").filter({ hasText: "v2" }).waitFor();
   await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
-  // A revision's first show is the page's own motion again, with no assembly diff.
-  await assembled();
+  // A revision's first show is the page's own motion again, with no assembly
+  // diff; the previous version rides along only to outline what changed.
+  await assembled(3);
   assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
   await pane.getByRole("button", { name: "Earlier version" }).click();
@@ -189,6 +190,19 @@ try {
   await eventually(async () => (await pane.locator(".pane-v").getAttribute("title"))?.startsWith("Blue") ?? false);
   assert.equal(await pane.getByRole("button", { name: "Make this the latest" }).count(), 0, "the latest needs no Make this the latest");
   console.log("PASS: a follow-up edits the artifact in place (foundry_edit); the pane moves to v2 and walks the versions.");
+  // Point at a part: the crosshair runs the picker in the pane's page; the
+  // part clicked lands as a pink chip and goes with the next message.
+  await pane.getByRole("button", { name: "Point at a part to change it" }).click();
+  await pane.getByRole("button", { name: "Stop pointing (Esc)" }).waitFor();
+  await frame.getByRole("heading", { name: "A little room to grow" }).hover();
+  await frame.getByRole("heading", { name: "A little room to grow" }).click();
+  const part = page.locator("#mention-chips .point-chip.foundry");
+  await part.filter({ hasText: "A little room to grow" }).waitFor();
+  await pane.getByRole("button", { name: "Point at a part to change it" }).waitFor();
+  assert.match((await part.getAttribute("title"))!, /On Idea garden v2/);
+  await part.click();
+  await eventually(async () => await part.count() === 0);
+  console.log("PASS: pointing at a part of a Foundry page puts it in the composer.");
 
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await editor.fill("Make an SVG badge graphic"); await editor.press("Enter");
@@ -231,7 +245,11 @@ try {
   assert.equal((await f.client.getSessionState(artifact.sessionId!)).session.workspace?.root, f.workspace, "the chat moved into the project it builds in");
   console.log("PASS: Build this asks a plain chat for its project, moves it there and starts building.");
   // A deck is content Demesne draws: slides with a strip, and Play covers the window until Esc.
-  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status !== "running");
+  // The move into the project reloads the window and then sends the build;
+  // wait for its answer in the reloaded window, so Enter isn't lost to the reload.
+  await page.locator("#conversation").getByText("Building it in the project.").waitFor();
+  // Wait until the window too knows the turn is over, or Enter would steer the finished turn.
+  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status !== "running" && !(await page!.locator("#composer.stopping").count()));
   await editor.fill("Make a slide deck for the launch"); await editor.press("Enter");
   await chips.filter({ hasText: "Deck · v1" }).first().waitFor();
   await eventually(async () => await frame.locator(".deck-stage > .slide").count() === 3 && await frame.locator(".deck-thumb").count() === 3);

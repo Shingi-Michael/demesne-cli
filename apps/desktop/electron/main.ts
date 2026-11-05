@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { isReadyKind } from "./foundry-kinds.ts";
+import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
@@ -197,16 +198,21 @@ if (!lookJob) void app.whenReady().then(async () => {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
       const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
       const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number };
-      let assembly: FoundryAssembly | undefined;
-      if (url.searchParams.get("assemble") === "1" && !(found.kind === "html" && found.source.includes(FOUNDRY_KIT_SCRIPT))) {
-        assembleLibrary ??= readFileSync(join(base, "ui", "vendor", "anime.umd.min.js"), "utf8");
-        let previous: string | null = null;
-        if (found.kind === "html" && found.version > 1) {
-          try { const before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string }; if (before.kind === "html") previous = before.source; } catch {}
-        }
-        assembly = { library: assembleLibrary, previous };
+      // A new version's first show: the previous version rides along, for the
+      // assembly (a page that doesn't move by itself) and for outlining what changed.
+      const first = url.searchParams.get("assemble") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
+      let before: { kind: string; source: string; title: string } | null = null;
+      if (first && drawn && found.version > 1) {
+        try { before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string; title: string }; } catch {}
       }
-      return new Response(foundryDocument(found.kind, found.source, found.title, assembly), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
+      let assembly: FoundryAssembly | undefined;
+      if (first && !(found.kind === "html" && found.source.includes(FOUNDRY_KIT_SCRIPT)) && !isReadyKind(found.kind)) {
+        assembleLibrary ??= readFileSync(join(base, "ui", "vendor", "anime.umd.min.js"), "utf8");
+        assembly = { library: assembleLibrary, previous: found.kind === "html" && before?.kind === "html" ? before.source : null };
+      }
+      let page = foundryDocument(found.kind, found.source, found.title, assembly);
+      if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
+      return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -341,7 +347,7 @@ if (!lookJob) void app.whenReady().then(async () => {
     // answers with the element clicked there, or null on Esc.
     if (method === "desktop-point") {
       const { frame: name, cancel } = args as Record<string, unknown>;
-      const frames = contents.mainFrame.framesInSubtree.filter(frame => frame !== contents.mainFrame && previewURL(frame.url) && (cancel || frame.name === name));
+      const frames = contents.mainFrame.framesInSubtree.filter(frame => frame !== contents.mainFrame && (previewURL(frame.url) || foundryURL(frame.url)) && (cancel || frame.name === name));
       if (cancel) { await Promise.all(frames.map(frame => frame.executeJavaScript(POINT_CANCEL).catch(() => null))); return null; }
       if (typeof name !== "string" || !frames[0]) throw new Error("The preview is not showing");
       return frames[0].executeJavaScript(POINT_SCRIPT, true);

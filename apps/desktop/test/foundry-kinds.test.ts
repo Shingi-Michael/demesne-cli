@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { chartSVG, compact, fillRows, frontMatter, parseChart, renderDashboard, renderDeck, renderDoc, slideLayout, splitSlides, statsHTML } from "../electron/foundry-kinds.ts";
 import { exportedSource, FOUNDRY_KIT, foundryDocument } from "../electron/policy.ts";
+import { CHANGED_SCRIPT, withChanges } from "../electron/foundry-changed.ts";
 
 test("front matter is read from the top only, and the rest is the body", () => {
   const { meta, body } = frontMatter("---\ntitle: Q1 launch\ntheme: forest\naccent: \"#8fd6a9\"\n---\n# Hello\n");
@@ -90,4 +91,14 @@ test("the frame draws the ready kinds, and Export inlines their kit files", () =
   expect(out).toContain("<script>deck()<\\/script></script>");
   expect(out).not.toContain("foundry://kit/kinds");
   expect(out).not.toContain("foundry://kit/base.css");
+});
+
+test("a new version's first show carries the previous one, for outlining what changed", () => {
+  const page = withChanges("<!doctype html><body><h1>New</h1></body></html>", "<body><h1>Old</h1><script>x</script></body>");
+  expect(page.indexOf("__demesneChangedFrom")).toBeLessThan(page.lastIndexOf("</body>"));
+  expect(page).toContain(CHANGED_SCRIPT);
+  // The previous page can't close the script that carries it.
+  expect(page).not.toContain("<script>x</script>");
+  expect(page).toContain("\\u003cscript>x\\u003c/script>");
+  expect(withChanges("<p>no body</p>", "<p>old</p>")).toStartWith("<p>no body</p>\n<script>");
 });

@@ -1429,6 +1429,9 @@ try {
   // One line, one choice (pass 159 A): no fold, no notes or steps at the foot.
   assert(await page.evaluate(() => document.getElementById("briefing")!.getBoundingClientRect().height <= 96), "a working mission is three short rows at most at the sidebar's foot");
   assert.equal(await page.locator("#drive-reply .drive-told, #drive-reply .drive-mission, #drive-tell-form").count(), 0, "no notes, steps or Tell box at the foot");
+  // Drive's own mark (pass 161 A): a ring in the lead, no cube and no empty box.
+  assert.equal(await page.locator("#briefing .bf-lead.has-ring .bf-ring.work").count(), 1, "a working mission leads with Drive's ring");
+  assert.equal(await page.locator("#briefing .cube-mark").count(), 0, "no cube on Drive's line");
   // You tell Drive from the composer.
   await page.locator("textarea").fill("/drive tell Keep the tests green");
   await page.locator("textarea").press("Enter");
@@ -1451,6 +1454,7 @@ try {
   assert.equal(await page.locator(".header-drive").count(), 0, "and no Drive tab takes its place");
   await control("pause").click();
   await control("resume").waitFor();
+  await until(() => page.locator("#briefing .bf-ring.pause").count().then(count => count === 1), "a paused mission's ring holds still");
   // Drive never waits on you: its coder trying to publish is declined
   // without asking, and nothing lands in your chat.
   const missionId = (await f.client.listSessions()).find(session => session.title.startsWith("Drive mission:"))!.id;

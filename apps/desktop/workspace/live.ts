@@ -4176,7 +4176,6 @@ function renderBriefing() {
     parts.push(`${mark("ok")}${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review`, {}, "bf-word")}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
   }
   const label = (drive: NonNullable<Snapshot["drive"]>) => drive.status === "blocked" ? "Drive stopped" : drive.status === "paused" ? "Drive is paused" : "Drive is working";
-  const driveMark = (drive: NonNullable<Snapshot["drive"]>) => mark(drive.status === "blocked" ? "amber" : drive.status === "paused" ? "idea" : "spin");
   if (broke) {
     const first = signals[0]!, ci = /CI failure on (\S+)/.exec(first.title);
     const word = signals.length > 1 ? `${signals.length} things broke` : ci ? `CI failed on ${ci[1]}` : first.source === "checks" ? "A check is failing" : first.title;
@@ -4195,9 +4194,9 @@ function renderBriefing() {
     // One line, one choice (pass 159 A): what Drive is doing and what you
     // can do about it. Its notes and steps live in the mission's own chat.
     const working = pinned.status === "running" || pinned.status === "waiting", stopped = pinned.status === "blocked";
-    const about = [missionTitle(pinned), activeMinutes(pinned)].filter(Boolean).join(" · ");
+    const about = [missionTitle(pinned), driveProgress(pinned)].filter(Boolean).join(" · ");
     const word = working ? shine("Drive is working") : label(pinned);
-    parts.push(`${driveMark(pinned)}<span class="bf-word${stopped ? " amber" : ""}"${stopped ? ` title="${h(stoppedReason(pinned))}"` : ""}>${word}</span><span class="bf-about" title="${h(missionTitle(pinned))}">${h(about)}</span>`);
+    parts.push(`${driveRing(pinned)}<span class="bf-word${stopped ? " amber" : ""}"${stopped ? ` title="${h(stoppedReason(pinned))}"` : ""}>${word}</span><span class="bf-about" title="${h(missionTitle(pinned))}">${h(about)}</span>`);
     const watch = pinned.homeSessionId !== state.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "bf-pill") : "";
     const acts = stopped
       ? [btn("drive-control", "Resume", { control: "resume" }, "bf-pill primary"), btn("drive-control", "Drop", { control: "stop" }, "bf-pill"), watch]
@@ -4254,10 +4253,12 @@ function renderBriefing() {
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").innerHTML = ""; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
   // The first part's mark sits in the conversation's mark column, like an answer's d.
-  const lead = /^<span class="bf-(?:spin|dot)[^>]*><\/span>/.exec(parts[0]!)?.[0] ?? "";
+  const lead = /^(?:<span class="bf-(?:spin|dot)[^>]*><\/span>|<span class="bf-ring[\s\S]*?<\/svg><\/span>)/.exec(parts[0]!)?.[0] ?? "";
+  const ringFrom = node.querySelector<HTMLElement>(".bf-ring")?.dataset.fill;
   parts[0] = parts[0]!.slice(lead.length);
   const chip = `${parts.map((part) => `<span class="bf-part">${part}</span>`).join('<span class="bf-sep">·</span>')}${chevron}`;
-  node.innerHTML = `<span class="bf-lead${fold ? " open" : ""}${broke ? " bad" : ""}">${fold && !broke ? ICON_SPARK : lead}</span><div class="bf-chip">${chip}</div>${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
+  node.innerHTML = `<span class="bf-lead${fold ? " open" : ""}${broke ? " bad" : ""}${lead.includes("bf-ring") && !fold ? " has-ring" : ""}">${fold && !broke ? ICON_SPARK : lead}</span><div class="bf-chip">${chip}</div>${progress !== null ? `<span class="bf-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : ""}`;
+  easeRing(node, ringFrom);
   node.classList.toggle("open", Boolean(fold));
   // Opening unfolds Drive's rows under its line at the sidebar's foot: its rows
   // unfold under it and scroll with everything else, so nothing is covered.
@@ -4328,6 +4329,28 @@ function scoreLine(score: ModelScore) {
 /// Why a stopped mission stopped, in its own words: the line's tooltip.
 function stoppedReason(drive: NonNullable<Snapshot["drive"]>) {
   return drive.protection?.trip?.reason ?? (drive.activity?.trim() || drive.steps.at(-1)?.note || "Drive stopped without recording a reason.");
+}
+/// Drive's own mark (pass 161 A): a ring that fills one slice per step of the
+/// mission. It breathes while Drive works, holds still when paused, turns
+/// amber when it stopped and needs you, and closes with a tick when done.
+/// Nothing else in the app draws it, so it always means Drive.
+function driveRing(drive: NonNullable<Snapshot["drive"]>) {
+  const tasks = driveTaskList(drive), done = tasks.filter((task) => task.mark === "✓").length;
+  const status = drive.status === "completed" ? "done" : drive.status === "blocked" ? "amber" : drive.status === "paused" ? "pause" : "work";
+  // A sliver shows before the first step lands, so the ring never reads as empty.
+  const fill = status === "done" ? 1 : Math.max(0.06, tasks.length ? done / tasks.length : 0);
+  const offset = (100 - fill * 100).toFixed(1);
+  const steps = tasks.length > 1 ? `, ${done} of ${tasks.length} steps done` : "";
+  return `<span class="bf-ring ${status}" data-fill="${offset}" role="img" aria-label="Drive${steps}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle class="tr" cx="10" cy="10" r="8"/><circle class="fl" cx="10" cy="10" r="8" transform="rotate(-90 10 10)" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${offset}"/><path class="ck" pathLength="10" d="M6.3 10.3l2.4 2.4 5-5"/></svg></span>`;
+}
+/// A redraw replaces the ring, so ease its fill from where the last one was.
+function easeRing(node: HTMLElement, from: string | undefined) {
+  const fill = node.querySelector<SVGCircleElement>(".bf-ring .fl"), to = fill?.getAttribute("stroke-dashoffset");
+  if (!fill || from === undefined || from === to || reducedMotion()) return;
+  fill.style.transition = "none";
+  fill.style.strokeDashoffset = from;
+  void fill.getBoundingClientRect();
+  requestAnimationFrame(() => { fill.style.transition = ""; fill.style.strokeDashoffset = to!; });
 }
 /// The mission homed in this session, which reads as its newest turn.
 /// How far the mission has got, for the briefing line: "step 2 of 3 · 1 min".

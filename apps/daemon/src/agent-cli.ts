@@ -132,7 +132,7 @@ export function agentArgs(id: AgentId, prompt: string, resume: { id: string; fre
     // Config overrides (-c) hold for `exec resume` too.
     const effort = choice.effort && AGENT_EFFORTS.includes(choice.effort) ? choice.effort : null;
     const overrides = [...(model ? ["-c", `model="${model}"`] : []), ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : [])];
-    return ["exec", "--json", "--full-auto", "--skip-git-repo-check", ...overrides, ...(resume ? ["resume", resume.id] : []), prompt];
+    return ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", ...overrides, ...(resume ? ["resume", resume.id] : []), prompt];
   }
   return ["-p", prompt, "--output-format", "stream-json", "--mode", "accept-edits", ...(allow.length ? ["--settings", JSON.stringify({ permissions: { allow } })] : []),
     ...(model ? ["--model", model] : []), ...(resume ? ["--conversation", resume.id] : [])];

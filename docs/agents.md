@@ -13,7 +13,7 @@ You never start them in a terminal.
   from turn to turn (`--resume`, `codex exec resume`); the ids are kept in
   `<data dir>/agent-sessions.json`. Gemini gets the chat so far each time.
 - **Its own rules.** The tool runs its tools under its own permission settings:
-  Claude Code in `acceptEdits`, Codex `--full-auto` (its workspace sandbox),
+  Claude Code in `acceptEdits`, Codex `--sandbox workspace-write` (its workspace sandbox; `--full-auto` is gone since Codex CLI 0.166),
   Gemini `--approval-mode auto_edit`. Commands those modes don't allow are
   refused by the tool, not asked about in Demesne.
 - **Reachable over Heartbeat.** An agent's chat claims its Heartbeat address when

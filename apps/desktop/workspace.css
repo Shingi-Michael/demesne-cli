@@ -213,7 +213,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 #desktop-home, #desktop-error { grid-column: 2; grid-row: 1 / -1; }
 .desktop .workspace > main { padding: 0; gap: 0; }
 .desktop .live-app:not(.start) .stage { padding: 28px 32px 16px; }
-.desktop #conversation, .desktop #drive-turn { max-width: 780px; margin-left: auto; margin-right: auto; }
+.desktop #conversation { max-width: 780px; margin-left: auto; margin-right: auto; }
 .desktop .live-app.start .stage { padding: 40px 32px 80px; }
 /* Symmetry (pass 151 B): the start screen's column is as wide as a chat's
    message box, so the box keeps its size when you send. */
@@ -1554,12 +1554,6 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 .bar-tab-new { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm, 8px); background: none; font-size: 17px; line-height: 1; color: var(--t3); cursor: pointer; }
 .bar-tab-new:hover { background: var(--tone2); color: var(--t1); }
 /* Drive's work, while it makes a branch elsewhere: a small pinned tab. */
-#desktop-toolbar .bar-tab-pin { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 8px; border: 0; border-radius: var(--r-sm, 8px); background: none; color: var(--t3); cursor: pointer; }
-#desktop-toolbar .bar-tab-pin:hover { background: var(--tone2); color: var(--t1); }
-#desktop-toolbar .bar-tab-pin .ico { width: 15px; height: 15px; }
-#desktop-toolbar .bar-tab-pin i { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
-#desktop-toolbar .bar-tab-pin.ready i { background: var(--ok); }
-@media (prefers-reduced-motion: no-preference) { #desktop-toolbar .bar-tab-pin.work i { animation: live-breathe 1.6s ease-in-out infinite; } }
 /* A chat elsewhere needs you: one amber line that takes you there. */
 #workspace-call { min-width: 0; max-width: min(260px, 28%); }
 #workspace-call .bar-call { max-width: 100%; }

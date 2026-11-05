@@ -19,10 +19,10 @@ const editor = document.querySelector('textarea'), el = id => document.getElemen
 const sessions = ['a', 'b', 'c'].map(id => ({id, title:'Chat '+id, updatedAt:'2026-01-01', workspace:'/project'}));
 let state = { sessions, session:sessions[0], workspace:'/project', breakage:{inbox:[]}, approvals:[] };
 let pageOpen = '', foundryOpen = null, pointing = null, contextCardOpen = false, overlay = null;
-let sessionVisible = true, peek = null, revision = 0;
+let sessionVisible = true, revision = 0;
 const deletedSessions = new Set(), pendingDeletes = new Map(), calls = [];
 const inSession = () => sessionVisible, inAssistant = () => false;
-const drivePeek = () => peek, chatTone = item => item.waiting ? 'wait' : 'ready';
+const chatTone = item => item.waiting ? 'wait' : 'ready';
 const STATE_WORDS = {ready:'', wait:'Needs you'}, fullTime = x => x, shortcut = x => x;
 const act = fn => fn(), pendingQuestion = () => null;
 const openPage = value => { pageOpen = value; renderTabs(); };
@@ -48,7 +48,6 @@ window.fixture = {
   update() { state.sessions[1].updatedAt = String(++revision); state.sessions[1].waiting = true; renderTabs(); },
   page(value) { pageOpen = value; renderTabs(); },
   single() { tabs.ids = ['a']; state.session = state.sessions[0]; renderTabs(); },
-  drive() { peek = { sessionId:'drive', kind:'work', words:'Drive branch' }; renderTabs(); },
   close:closeTab,
   snapshot:() => ({pageOpen, current:state.session?.id, ids:tabs.ids, calls})
 };
@@ -155,11 +154,11 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("tab strip accessibility 
     expect(await tab("a").getAttribute("aria-selected")).toBe("true");
   });
 
-  test("transient page and Drive tabs participate without extra tab stops", async () => {
-    await page.evaluate(() => { (window as any).fixture.drive(); (window as any).fixture.page("settings"); });
+  test("a transient page tab participates without an extra tab stop", async () => {
+    await page.evaluate(() => { (window as any).fixture.page("settings"); });
     await tab("page").focus();
     await page.keyboard.press("Home");
-    expect(await focused()).toBe("workspace-tab-drive");
+    expect(await focused()).not.toBe("workspace-tab-page");
     await page.keyboard.press("End");
     expect(await focused()).toBe("workspace-tab-page");
     expect(await page.locator('[role="tab"][tabindex="0"]').count()).toBe(1);

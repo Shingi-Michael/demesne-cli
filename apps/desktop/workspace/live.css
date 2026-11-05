@@ -1546,7 +1546,6 @@ button:disabled {
    answer, a receipt line under it, then one briefing line and the composer.
    Nothing floats over the conversation. */
 .live-app:not(.start) #conversation,
-.live-app:not(.start) #drive-turn,
 .live-app:not(.start) #input-area {
   width: 100%;
   max-width: 780px;
@@ -1941,88 +1940,6 @@ button:disabled {
   background: color-mix(in srgb, var(--citron) 10%, transparent);
 }
 
-/* A mission homed in this session is the conversation's newest turn: the
-   ask, a trail of its steps, and quiet links. */
-#drive-turn {
-  padding-bottom: 14px;
-}
-#conversation:not(:empty) + #drive-turn {
-  border-top: 1px solid var(--rule);
-  padding-top: 14px;
-  margin-top: -4px;
-}
-.live-app:not(.start) #conversation.driving:empty {
-  padding-bottom: 0;
-}
-#drive-turn .request {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.drive-turn-where {
-  flex: none;
-  font-size: 12px;
-  color: var(--muted);
-}
-.drive-trail {
-  list-style: none;
-  margin: 0 0 12px;
-  padding: 0 0 0 12px;
-  border-left: 1px solid var(--rule);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12.5px;
-  line-height: 20px;
-}
-.drive-trail li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-.drive-trail-mark {
-  flex: none;
-  width: 12px;
-}
-.drive-trail-what {
-  flex: none;
-}
-.drive-trail li.now .drive-trail-what {
-  color: var(--strong);
-}
-.drive-trail-detail {
-  margin-left: 4px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-}
-.drive-turn-foot {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--muted);
-}
-.drive-turn-meta {
-  flex: 1;
-  min-width: 0;
-}
-.drive-turn-actions {
-  display: flex;
-  gap: 12px;
-  flex: none;
-}
-.drive-turn-actions .link {
-  font-size: 12px;
-  color: var(--electric);
-}
-.drive-turn-actions .link.danger {
-  color: var(--signal);
-}
 .menu-footer .completion-more {
   font-size: 12px;
   color: var(--electric);

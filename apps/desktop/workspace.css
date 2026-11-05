@@ -2471,3 +2471,7 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
    card's line keeps its last words together instead of leaving one alone. */
 .ov-tiles + .st-head { margin-inline: 0; }
 .ov-tile small { text-wrap: pretty; }
+
+/* Pages (Today, Scheduled, Customize, Foundry) have no chat underneath,
+   so the model and context strip goes, as it already did on Settings. */
+.live-app.paging > .status { display: none !important; }

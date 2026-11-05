@@ -27,7 +27,7 @@ if (process.platform === "darwin") {
 const version = resolveBuildVersion();
 // One build id for the host and the daemon built below (build-daemon reads it from the environment).
 process.env.DEMESNE_BUILD_ID = resolveBuildId();
-writeFileSync(join(application, "package.json"), JSON.stringify({ name: "demesne", productName: "Demesne", version, description: "A coding workspace with durable sessions and Agent Drive", author: "Demesne contributors", main: "main.cjs" }, null, 2));
+writeFileSync(join(application, "package.json"), JSON.stringify({ name: "demesne", productName: "Demesne", version, description: "A coding workspace with durable sessions and Agent Drive", author: "Demesne contributors", main: "main.cjs", ...(process.env.DEMESNE_BUILD_VERSION ? { updates: "github" } : {}) }, null, 2));
 const suffix = process.platform === "win32" ? ".exe" : "";
 await run([process.execPath, "build", join(desktop, "host.ts"), "--compile", ...buildVersionArgs(version), "--outfile", join(backend, `demesne-host${suffix}`)]);
 // Compatibility for an already-running Electron main process upgraded in place:

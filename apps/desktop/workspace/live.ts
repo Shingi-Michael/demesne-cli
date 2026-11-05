@@ -58,6 +58,7 @@ import { whereCard } from "./where-card.ts";
 import { OpenTabs } from "./tabs.ts";
 import { GoogleAIForm } from "./google-ai-form.ts";
 import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
+import type { AppUpdate } from "./release-line.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -3172,6 +3173,20 @@ let settingsInfo: SettingsInfo | null = null, usageScores: ModelScore[] | null =
   zoomLevel: number | null = null;
 /// Settings › General, kept on this device.
 let openOn: "home" | "last" = "home", keepAwake = true;
+/// Where the app's own update stands (desktop release builds), for Settings.
+let appUpdate: AppUpdate | null = null;
+document.addEventListener("demesne:app-update", (event) => {
+  appUpdate = (event as CustomEvent<AppUpdate>).detail;
+  if (pageOpen === "settings") renderPage();
+});
+/// The Updates row: only on a release build, with the version and where it stands.
+function updatesSetting(): { on: boolean; line: string } | undefined {
+  const update = appUpdate;
+  if (!update || update.state === "off") return undefined;
+  const on = update.state !== "idle" || update.enabled;
+  const where = update.state === "downloading" ? `downloading ${update.to}` : update.state === "ready" ? `${update.to} is ready, it goes in when you restart` : update.state === "failed" ? update.error : on ? "up to date" : "off";
+  return { on, line: `Demesne ${update.version}, ${where}. It never restarts while something works.` };
+}
 try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
 /// Settings › Appearance › Glass and Ink, kept on this device.
 let glassLevel = (window as { demesneDesktop?: { glassSharp?: boolean } }).demesneDesktop?.glassSharp ? GLASS_SHARP_DEFAULT : GLASS_DEFAULT, inkName: Ink = "neutral";
@@ -3223,7 +3238,7 @@ function settingsView(): SettingsView {
     section: settingsUi.section, query: settingsUi.query, fold: settingsUi.fold, error: settingsUi.error,
     mac: /Mac/i.test(navigator.platform), glass: document.documentElement.classList.contains("glass"), desktop: window.demesne.mode === "desktop", home: settingsInfo?.home ?? "",
     info: settingsInfo,
-    general: { openOn, awake: keepAwake },
+    general: { openOn, awake: keepAwake, updates: updatesSetting() },
     notify: notifyOn,
     appearance: { theme: s.theme, themes: s.themes.map((name) => {
       const option = s.themeOptions.find((item) => item.name === name);
@@ -5671,6 +5686,7 @@ async function dispatch(
   if (action === "settings-local") {
     if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
     if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }
+    if (args.key === "updates") { const next = await api<AppUpdate>("desktop-update", { action: args.value === true ? "on" : "off" }).catch(() => null); if (next) appUpdate = next; }
     if (args.key === "awake") { keepAwake = args.value === true; try { localStorage.setItem("demesne-awake", keepAwake ? "on" : "off"); } catch {} renderAwake(); }
     return renderPage();
   }

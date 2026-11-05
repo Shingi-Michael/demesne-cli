@@ -1,5 +1,6 @@
 import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
 import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
+import { releaseLine, type AppUpdate } from "./workspace/release-line.ts";
 
 interface DesktopBootstrap {
   workspace: string | null;
@@ -188,13 +189,29 @@ async function start() {
         else if (event.payload.action === "settings" && mounted && !fatal && !busy)
           document.dispatchEvent(new Event("demesne:open-settings"));
       }),
+      native.event.listen<AppUpdate>("demesne:app-update", (event) => showAppUpdate(event.payload)),
     ]));
+    void request<AppUpdate>("desktop-update", {}).then(showAppUpdate, () => {});
     const initial=await request<{dark:boolean} | null>("desktop-theme",{system:true});
     await updateAppearance(initial?.dark ?? appearance.matches);
     if (fatal) return;
     await applyBootstrap(await request<DesktopBootstrap>("desktop-bootstrap"));
   } catch (error) { showError(error); }
 }
+/// The release line says where an update stands (pass 153 A), and Settings hears it too.
+const releaseEl = document.querySelector<HTMLElement>(".sidebar-release");
+function showAppUpdate(update: AppUpdate) {
+  document.dispatchEvent(new CustomEvent("demesne:app-update", { detail: update }));
+  if (!releaseEl) return;
+  const line = releaseLine(update);
+  if (releaseEl.dataset.html !== line.html) { releaseEl.innerHTML = line.html; releaseEl.dataset.html = line.html; }
+  releaseEl.title = line.title;
+  releaseEl.dataset.state = line.state;
+}
+releaseEl?.addEventListener("click", (event) => {
+  if (!(event.target as HTMLElement).closest("[data-update-restart]")) return;
+  void request<AppUpdate>("desktop-update", { action: "restart" }).then(showAppUpdate, showActionError);
+});
 setBusy(true);
 void start();
 

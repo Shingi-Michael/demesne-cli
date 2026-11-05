@@ -251,9 +251,11 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop #input-area { position: relative; padding: 12px 32px 22px; }
 /* In a chat the message box shares the answers' edges: it starts where the
    answer text starts (the d. sits in the 32px margin) and ends where your
-   messages end. */
-.desktop .live-app:not(.start) #input-area { padding-left: 32px; padding-right: 0; }
+   messages end. The area keeps the stage's own side padding, so the two
+   columns are the same box at any width, with the info cards open or not. */
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
+.desktop .live-app:not(.start) #input-area { max-width: none; }
+.desktop .live-app:not(.start) #input-area > * { box-sizing: border-box; padding-left: 32px; }
 .desktop .composer { border-radius: 12px; padding: 12px 14px 8px; gap: 8px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }
 .desktop .composer:focus-within { border-color: color-mix(in srgb, var(--electric) 60%, var(--borderBright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--electric) 7%, transparent); }
 .desktop .composer textarea { font-family: inherit; font-size: 14px; line-height: 22px; min-height: 44px; }

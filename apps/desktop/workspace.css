@@ -2448,3 +2448,8 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 #desktop-sidebar .st-nav.on .ico { color: var(--acc); fill-opacity: .3; }
 #desktop-sidebar .st-nav-n { font-size: 11.5px; }
 #desktop-sidebar .st-nav-group { margin: 14px 0 4px; padding-left: 9px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; }
+
+/* The overview's "Worth a look" heading starts on the cards' edge, and a
+   card's line keeps its last words together instead of leaving one alone. */
+.ov-tiles ~ .st-head { margin-inline: 0; }
+.ov-tile small { text-wrap: pretty; }

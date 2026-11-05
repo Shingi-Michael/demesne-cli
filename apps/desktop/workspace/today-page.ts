@@ -321,11 +321,12 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
   const error = ui.error ? `<p class="td-error" role="alert">${h(ui.error)}</p>` : "";
   // The share box stays at the bottom of the page, like the chat composer.
   const composer = view.agents.length ? `<div class="td-dock">${composerHtml(ui)}</div>` : "";
-  // Pass 144 A: a readable feed, and the room beside it as cards.
-  const layout = (main: string) => `<div class="td-wrap"><div class="td-layout"><div class="td-main">${main}</div>${sideHtml(view, ui, now)}</div></div>${storyViewer(view, ui, now)}${zoomHtml(view, ui)}`;
+  // Pass 144 A: a readable feed, and the room beside it as cards; the
+  // page's title sits above both, as on every other page.
+  const layout = (main: string) => `${title}<div class="td-wrap"><div class="td-layout"><div class="td-main">${main}</div>${sideHtml(view, ui, now)}</div></div>${storyViewer(view, ui, now)}${zoomHtml(view, ui)}`;
   if (!view.posts.length) {
     const who = view.agents.length ? view.agents.map((agent) => agent.name).join(", ") : "Your agents";
-    return layout(`${title}${error}${storiesRow(view, ui)}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>${composer}`);
+    return layout(`${error}${storiesRow(view, ui)}<div class="td-empty"><div class="td-faces">${view.agents.map((agent) => faceLink(agent.id, "post", view)).join("")}</div><p>Nothing yet today. ${h(who)} post here when they finish work or answer mail, say good morning and good night, and your own chats show up as moments they can comment on.</p></div>${composer}`);
   }
   let last = "";
   const rows = view.posts.map((post) => {
@@ -335,7 +336,7 @@ export function todayPage(view: SocialsView | null, ui: TodayUi, now = Date.now(
     return heading + postHtml(post, view, ui);
   }).join("");
   const reel = view.reel ? reelHtml(view.reel, view, ui) : "";
-  return layout(`${title}${error}${storiesRow(view, ui)}${reel}<div class="td-feed">${rows}</div>${composer}`);
+  return layout(`${error}${storiesRow(view, ui)}${reel}<div class="td-feed">${rows}</div>${composer}`);
 }
 
 /// The cards beside the feed (pass 144 A): this week, each agent now, and

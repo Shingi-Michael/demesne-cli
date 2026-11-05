@@ -2123,7 +2123,9 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .sidebar-today small { color: var(--blossom, #f2b6c8); }
 /* Pass 144 A: Today on a desktop. A readable feed (about 600px) and the
    room beside it as cards; a narrow window puts the cards above the feed. */
-.desktop #page[data-kind="today"] { max-width: 900px; }
+/* Today sits in the same 720px column as Scheduled and Customize; its
+   cards ride above the feed, as they do in a narrow window. */
+.desktop #page[data-kind="today"] { max-width: 720px; }
 .td-solo { max-width: 600px; }
 .td-wrap { container-type: inline-size; }
 .td-layout { display: grid; grid-template-columns: minmax(0, 600px) 236px; gap: 32px; align-items: start; }
@@ -2221,7 +2223,9 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 @keyframes td-fall { to { transform: translate(-40px, 260px) rotate(320deg) scale(var(--s)); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .td-petals i { animation: none; top: auto; bottom: 10px; } }
 /* You post too. */
-.td-dock { position: sticky; bottom: 0; z-index: 4; margin: 8px 0 -32px; padding: 16px 0 14px; background: linear-gradient(to bottom, transparent, var(--surface) 16px); box-shadow: 0 48px 0 0 var(--surface); }
+/* The dock fades from the page's own colour, over enough height that a
+   post scrolling under it is gone before it reaches the box. */
+.td-dock { position: sticky; bottom: 0; z-index: 4; margin: 8px 0 -32px; padding: 28px 0 14px; background: linear-gradient(to bottom, transparent, var(--ink) 26px); box-shadow: 0 48px 0 0 var(--ink); }
 .td-share { display: flex; gap: 10px; padding: 12px; border-radius: 14px; background: var(--surface2); box-shadow: 0 0 0 1px var(--hair), 0 10px 30px -18px rgba(0, 0, 0, .6); }
 .td-share-main { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; }
 .td-share input[name=text] { width: 100%; height: 32px; padding: 0; border: 0; background: transparent; color: var(--t1); font: inherit; font-size: 14px; outline: none; }
@@ -2467,3 +2471,19 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
    card's line keeps its last words together instead of leaving one alone. */
 .ov-tiles + .st-head { margin-inline: 0; }
 .ov-tile small { text-wrap: pretty; }
+
+/* Pages (Today, Scheduled, Customize, Foundry) have no chat underneath,
+   so the model and context strip goes, as it already did on Settings. */
+.live-app.paging > .status { display: none !important; }
+
+/* Customize: every section's list is one box, filled or empty, like a
+   Settings group; its rows divide it with hairlines. */
+#page[data-kind="customize"] .cp-list { overflow: hidden; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair); }
+#page[data-kind="customize"] .cp-list .sp-row { border-radius: 0; }
+#page[data-kind="customize"] .cp-list > :last-child { box-shadow: none; }
+
+/* Light theme: an agent's face keeps a ring, so it doesn't float on the
+   pale sidebar beside Today's filled tile. */
+html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 0 1px rgb(0 0 0 / .14); }
+/* A row's last action ends on the same edge as the section's count above. */
+#page[data-kind="customize"] .cp-list .sp-row > :last-child:is(button, .cz-state) { margin-right: -9px; }

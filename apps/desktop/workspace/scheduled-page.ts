@@ -51,5 +51,5 @@ export function scheduledPage(view: ScheduledView, now = Date.now()) {
     + `<div class="cp-head"><span>Routines</span><span>${count}</span></div><div class="cp-list">${rows}</div>`
     + (runRows ? `<div class="cp-head"><span>Last runs</span><span>this week</span></div><div class="cp-list">${runRows}</div>` : "")
     + `<form class="sp-new" id="routine-new"><input name="routine" value="${h(view.draft)}" placeholder="Every Monday at 9, list the PRs waiting on me" aria-label="A new routine: when, then what" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">↵</kbd></form>`
-    + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : `<p class="sp-hint">When first, then what. ${view.assistant ? "At its time the assistant answers it in its chat" : `At its time it opens a chat in ${h(view.here ? projectWords(view.here) : "Just a chat")}`}, whether or not this window is open.</p>`);
+    + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : `<p class="sp-hint">Say when, then what to do. ${view.assistant ? "At its time the assistant answers it in its chat" : `At its time it opens a chat in ${h(view.here ? projectWords(view.here) : "Just a chat")}`}, whether or not this window is open.</p>`);
 }

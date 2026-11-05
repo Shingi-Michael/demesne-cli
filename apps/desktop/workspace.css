@@ -2484,4 +2484,4 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 
 /* Light theme: an agent's face keeps a ring, so it doesn't float on the
    pale sidebar beside Today's filled tile. */
-html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: inset 0 0 0 1px rgb(0 0 0 / .1); }
+html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 0 1px rgb(0 0 0 / .14); }

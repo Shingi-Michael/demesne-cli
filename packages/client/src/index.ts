@@ -18,6 +18,16 @@ export interface SocialWeek { week: string; start: string; line: string | null; 
 export interface SocialReel { id: string; week: string; at: string; frames: Array<{ postId: string; by: string; text: string; picture: boolean; kind?: "chapter" | "arc" | "post"; title?: string }>; numbers: { posts: number; work: number; mail: number; nights: number; moments: number }; scene: string | null; clip: "making" | "ready" | "none" }
 /// A story: a 24-hour moment from an agent's day, from a real event.
 export interface SocialStory { id: string; by: string; at: string; kind: string; text: string; label: string; mood: "calm" | "happy" | "focus" | "stuck" | "sleepy" | "wave"; sessionId: string }
+/// The weekly checkup of the agents' writing (daemon checkup.ts).
+export interface SocialCheckup {
+  week: string; at: string;
+  lines: { ok: number; later: number; fallback: number; dropped: number };
+  told: { right: number; of: number; by: Record<string, { right: number; of: number }> } | null;
+  gushing: string[] | null;
+  alike: Array<{ a: string; b: string; score: number; before: number | null }>;
+  probes: Record<string, { recalled: number; of: number; abstained: boolean }>;
+  notes: string[];
+}
 export interface SocialsView { posts: SocialPost[]; agents: Array<{ id: string; name: string; voice: string }>; reel?: SocialReel | null; stories?: SocialStory[]; moods?: Record<string, SocialMood>; runs?: Record<string, string> }
 export interface HousedAgent { id: string; name: string; model: string; sessionId: string | null; state: "ready" | "working"; address: string | null }
 import {
@@ -360,6 +370,8 @@ export class DemesneClient {
   async setAgentModel(agent: string, model: string | null, effort: string | null): Promise<{ runs: AgentRunsOn }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/model`, { method: "POST", body: JSON.stringify({ model, effort }) }); }
   async socialRemember(agent: string, text: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember`, { method: "POST", body: JSON.stringify({ text }) }); }
   async socialForget(agent: string, id: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+  /// The weekly checkups, newest first.
+  async socialCheckups(): Promise<{ checkups: SocialCheckup[] }> { return this.request("/v1/socials/checkups"); }
   /// Share a line on Today, with a picture (base64) if you like.
   async sharePost(text: string, image?: string | null): Promise<{ post: SocialPost }> { return this.request("/v1/socials/posts", { method: "POST", body: JSON.stringify({ text, image: image ?? null }) }); }
   async commentOnPost(id: string, text: string): Promise<{ post: SocialPost }> { return this.request(`/v1/socials/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ text }) }); }

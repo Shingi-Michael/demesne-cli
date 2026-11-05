@@ -27,9 +27,9 @@ const f = await fixture({
       const { signals } = JSON.parse(String(messages.at(-1)?.content)) as { signals: { id: string }[] };
       const ids = signals.map(signal => signal.id);
       const proposals = [
-        { kind: "fix", title: "Handle an empty name in greet()", why: "greet('') returns 'Hello, !' and the TODO next to it says so.", evidence: ids.slice(0, 1), minutes: 15, coders: 1, confidence: "high", value: 4 },
-        { kind: "tidy", title: "Move the greeting text into config", why: "The string is duplicated in two files.", evidence: ids.slice(0, 2), minutes: 25, coders: 1, confidence: "medium", value: 3 },
-        { kind: "investigate", title: "Find why the check is slow on CI", why: "The last runs took over a minute for one file.", evidence: ids.slice(-1), minutes: 40, coders: 1, confidence: "low", value: 3 },
+        { kind: "fix", title: "Handle an empty name in greet()", why: "greet('') returns 'Hello, !' and the TODO next to it says so.", evidence: ids.slice(0, 1), check: "bun test greet.test.ts", minutes: 15, coders: 1, confidence: "high", value: 4 },
+        { kind: "tidy", title: "Move the greeting text into config", why: "The string is duplicated in two files.", evidence: ids.slice(0, 2), check: "bun run typecheck", minutes: 25, coders: 1, confidence: "medium", value: 3 },
+        { kind: "investigate", title: "Why is the check slow on CI?", why: "The last runs took over a minute for one file.", evidence: ids.slice(-1), check: "", minutes: 40, coders: 1, confidence: "low", value: 3 },
       ];
       yield { type: "tool_call_delta", index: 0, idDelta: "next-1", nameDelta: "propose_next", argumentsDelta: JSON.stringify({ proposals }) };
       yield { type: "finish", reason: "tool_calls" };

@@ -1611,15 +1611,20 @@ export class WorkspaceHost {
         return this.hideNext(item.id, "never");
       }
       // Plan writes its read-only plan in a chat of its own: yours, your
-      // draft and its context stay as they are, and Drive keeps going.
-      if (method === "next-plan") {
+      // draft and its context stay as they are, and Drive keeps going. A
+      // question is answered the same way and never makes a branch.
+      const question = item.kind === "investigate";
+      if (method === "next-plan" || question) {
         if (this.connection !== "online") throw new Error("Connect to the daemon first.");
         const { session } = await this.client.createSession({
           workspacePath: this.workspace,
           title: titleFromRequest(item.title),
           ...(this.trustWorkspace ? { trustWorkspace: true } : {}),
         });
-        const { turn } = await this.client.submitTurn(session.id, { content: `${item.title}. ${item.why}`, permissionMode: "ask", planOnly: true });
+        const content = question
+          ? `Find out and answer this question about the project: ${item.title}\n\nWhy it matters: ${item.why}\n\nRead the code and any evidence you need, but don't change files. Answer plainly, cite the files you checked, and end with the one change you'd suggest, if any.`
+          : `${item.title}. ${item.why}`;
+        const { turn } = await this.client.submitTurn(session.id, { content, permissionMode: "ask", planOnly: true });
         this.hideNext(item.id, Date.now() + 6 * 3_600_000);
         void this.refreshSessions();
         return { sessionId: session.id, turnId: turn.id };
@@ -1630,7 +1635,7 @@ export class WorkspaceHost {
       if (this.breakage.supported) {
         const cited = this.nextQueue.signals.filter((signal) => item.evidence.includes(signal.id));
         try {
-          const result = await this.breakage.runProposal({ id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence }, cited);
+          const result = await this.breakage.runProposal({ id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence, ...(item.check ? { check: item.check } : {}) }, cited);
           this.hideNext(item.id, Date.now() + 6 * 3_600_000);
           return result;
         }

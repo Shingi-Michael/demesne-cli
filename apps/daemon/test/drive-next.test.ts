@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { DriveNextResponse, DriveSignal } from "@demesne/protocol";
 import { DemesneStore } from "../../../packages/storage/src/index.ts";
 import { collectDriveSignals } from "../src/drive-signals.ts";
-import { rankProposals } from "../src/drive-next.ts";
+import { provable, rankProposals } from "../src/drive-next.ts";
 import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 
@@ -26,6 +26,25 @@ test("ranking: value × confidence ÷ cost, urgent evidence doubles it, uncited 
   ], signals);
   expect(ranked.map((item) => [item.title, item.score, item.urgent])).toEqual([["Commit the drafts", 6, false], ["Fix the failing check", 5.6, true]]);
   expect(ranked[0]!.id).toMatch(/^[0-9a-f]{10}$/);
+});
+
+test("picks that land: questions come after changes (two at most), and a change needs a check unless it answers something urgent", () => {
+  const signals: DriveSignal[] = [
+    { id: "check:1", source: "checks", title: "Check failing", detail: "", urgent: true },
+    { id: "git:uncommitted", source: "git", title: "3 uncommitted", detail: "" },
+  ];
+  const base = { why: "w", evidence: ["git:uncommitted"], minutes: 10, coders: 1, confidence: "high" as const, value: 5 };
+  const ranked = rankProposals([
+    { ...base, kind: "investigate", title: "Why does the build flip models?" },
+    { ...base, kind: "investigate", title: "Is the cache ever read?" },
+    { ...base, kind: "investigate", title: "Who calls the old route?" },
+    { ...base, kind: "tidy", title: "Commit the drafts", check: "bun test", value: 1 },
+  ], signals);
+  expect(ranked.map((item) => item.kind)).toEqual(["tidy", "investigate", "investigate"]);
+  expect(provable({ kind: "tidy", evidence: ["git:uncommitted"] }, signals)).toBe(false);
+  expect(provable({ kind: "tidy", check: "bun test", evidence: ["git:uncommitted"] }, signals)).toBe(true);
+  expect(provable({ kind: "fix", evidence: ["check:1"] }, signals)).toBe(true);
+  expect(provable({ kind: "investigate", evidence: ["git:uncommitted"] }, signals)).toBe(true);
 });
 
 test("signals: a failing check, an unfinished ask, uncommitted work and TODOs, with a stable fingerprint", async () => {
@@ -70,8 +89,10 @@ test("/v1/drive/next: known workspaces only, cached until signals change, vetoes
       if (!tools.some((tool) => tool.name === "propose_next")) { yield { type: "finish" as const, reason: "stop" }; return; }
       calls++;
       yield { type: "tool_call_delta" as const, index: 0, idDelta: "p", nameDelta: "propose_next", argumentsDelta: JSON.stringify({ proposals: [
-        { kind: "tidy", title: "Commit the draft", why: "draft.ts is uncommitted", evidence: ["git:uncommitted"], minutes: 10, coders: 1, confidence: "high", value: 3 },
-        { kind: "tidy", title: "Delete the draft", why: "draft.ts looks abandoned", evidence: ["git:uncommitted"], minutes: 5, coders: 1, confidence: "low", value: 1 },
+        { kind: "tidy", title: "Commit the draft", why: "draft.ts is uncommitted", evidence: ["git:uncommitted"], check: "bun test", minutes: 10, coders: 1, confidence: "high", value: 3 },
+        { kind: "tidy", title: "Delete the draft", why: "draft.ts looks abandoned", evidence: ["git:uncommitted"], check: "bun test", minutes: 5, coders: 1, confidence: "low", value: 1 },
+        // A change nothing can prove never reaches the queue.
+        { kind: "tidy", title: "Tidy everything", why: "it could be nicer", evidence: ["git:uncommitted"], check: "", minutes: 5, coders: 1, confidence: "high", value: 5 },
       ] }) };
       yield { type: "finish" as const, reason: "tool_calls" };
     } };
@@ -91,6 +112,7 @@ test("/v1/drive/next: known workspaces only, cached until signals change, vetoes
     expect(first.status).toBe(200);
     expect(first.body.cached).toBe(false);
     expect(first.body.proposals.map((item) => item.title)).toEqual(["Commit the draft"]);
+    expect(first.body.proposals[0]!.check).toBe("bun test");
     expect(first.body.signals.map((item) => item.id)).toContain("git:uncommitted");
     expect(first.body.calibration).toBeNull();
     const plain = first.body.proposals[0]!.score;
@@ -102,7 +124,7 @@ test("/v1/drive/next: known workspaces only, cached until signals change, vetoes
     const second = await post({ workspace, memory });
     expect(second.body.cached).toBe(true);
     expect(calls).toBe(1);
-    expect(second.body.calibration).toMatchObject({ landed: 0, total: 3, timeRatio: 2, levels: { high: { landed: 0, total: 3, weight: 0.5 } } });
+    expect(second.body.calibration).toMatchObject({ landed: 0, total: 3, timeRatio: 2, levels: { high: { landed: 0, total: 3, weight: 0.5 } }, kinds: { tidy: { landed: 0, total: 3, weight: 0.35 }, fix: { total: 0, weight: 0.7 } } });
     expect(second.body.proposals[0]!.expectedMinutes).toBe(20);
     expect(second.body.proposals[0]!.score).toBeLessThan(plain);
     // Force asks again.

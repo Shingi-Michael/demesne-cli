@@ -25,6 +25,9 @@ export interface CalibrationRecord {
 
 /// The model's own confidence, and the prior each level starts from.
 export const CONFIDENCE = { high: 1, medium: 0.7, low: 0.4 } as const;
+/// Each kind of job starts from this landing rate; a kind that lands more
+/// often here than that ranks higher, one that doesn't ranks lower.
+const KIND_PRIOR = 0.7;
 /// How many outcomes the prior counts as: a few real ones move it, one doesn't.
 const PRIOR_WEIGHT = 3;
 /// Time estimates are scaled once there are this many timed runs.
@@ -51,19 +54,27 @@ export function calibrate(records: CalibrationRecord[]): DriveCalibration {
     const hits = mine.filter((record) => record.outcome === "landed").length;
     levels[level] = { landed: hits, total: mine.length, weight: Math.round(((hits + CONFIDENCE[level] * PRIOR_WEIGHT) / (mine.length + PRIOR_WEIGHT)) * 100) / 100 };
   }
+  const kinds = {} as NonNullable<DriveCalibration["kinds"]>;
+  for (const kind of ["fix", "tidy", "investigate"] as const) {
+    const mine = recent.filter((record) => record.kind === kind);
+    const hits = mine.filter((record) => record.outcome === "landed").length;
+    kinds[kind] = { landed: hits, total: mine.length, weight: Math.round(((hits + KIND_PRIOR * PRIOR_WEIGHT) / (mine.length + PRIOR_WEIGHT)) * 100) / 100 };
+  }
   const ratios = recent.filter((record) => record.minutes && record.actualMinutes !== null && record.actualMinutes > 0)
     .map((record) => record.actualMinutes! / record.minutes!).sort((a, b) => a - b);
   const median = ratios.length ? ratios[Math.floor(ratios.length / 2)]! : 1;
   const timeRatio = ratios.length >= MIN_TIMED ? Math.round(Math.min(4, Math.max(0.25, median)) * 100) / 100 : 1;
-  return { landed, total: recent.length, levels, timeRatio, timed: ratios.length };
+  return { landed, total: recent.length, levels, kinds, timeRatio, timed: ratios.length };
 }
 
 /// value × confidence ÷ cost, where cost grows with time and coders; an
 /// urgent cited signal (failing check, red CI) doubles the score. With a
 /// calibration, confidence is this project's observed landing rate for that
-/// level and time is scaled by how long runs really took.
-export function scoreProposal(item: Pick<DriveProposal, "value" | "confidence" | "minutes" | "coders">, urgent: boolean, calibration?: DriveCalibration | null) {
-  const confidence = calibration ? calibration.levels[item.confidence].weight : CONFIDENCE[item.confidence];
+/// level, scaled by how this kind of job has landed here, and time is scaled
+/// by how long runs really took.
+export function scoreProposal(item: Pick<DriveProposal, "value" | "confidence" | "minutes" | "coders"> & Partial<Pick<DriveProposal, "kind">>, urgent: boolean, calibration?: DriveCalibration | null) {
+  const kind = item.kind && calibration?.kinds?.[item.kind];
+  const confidence = (calibration ? calibration.levels[item.confidence].weight : CONFIDENCE[item.confidence]) * (kind ? kind.weight / KIND_PRIOR : 1);
   const minutes = item.minutes * (calibration?.timeRatio ?? 1);
   const cost = Math.max(0.5, (minutes / 30) * item.coders);
   return Math.round((100 * item.value * confidence * (urgent ? 2 : 1)) / cost) / 100;
@@ -77,7 +88,12 @@ export function applyCalibration(proposals: DriveProposal[], calibration: DriveC
   return proposals.map((item) => {
     const expectedMinutes = Math.max(5, Math.round(item.minutes * calibration.timeRatio));
     return { ...item, score: scoreProposal(item, item.urgent, calibration), ...(calibration.timeRatio !== 1 ? { expectedMinutes } : {}) };
-  }).sort((a, b) => b.score - a.score);
+  }).sort(byQueueOrder);
+}
+
+/// Changes before questions, then by score.
+export function byQueueOrder(a: Pick<DriveProposal, "kind" | "score">, b: Pick<DriveProposal, "kind" | "score">) {
+  return Number(a.kind === "investigate") - Number(b.kind === "investigate") || b.score - a.score;
 }
 
 /// The append-only outcome log, one JSON record per line.

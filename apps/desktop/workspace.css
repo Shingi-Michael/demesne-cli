@@ -2487,3 +2487,15 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 0 1px rgb(0 0 0 / .14); }
 /* A row's last action ends on the same edge as the section's count above. */
 #page[data-kind="customize"] .cp-list .sp-row > :last-child:is(button, .cz-state) { margin-right: -9px; }
+/* Drive's ideas: two lines, the title and what proves it; questions after a small label. */
+.desktop :is(#briefing, #drive-reply, #hero) .bf-row.bf-idea { height: auto; min-height: 34px; padding-top: 5px; padding-bottom: 5px; align-items: flex-start; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-idea .bf-dot { margin-top: 6px; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-two { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--t4); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-meta code { font: 11px var(--mono, ui-monospace, monospace); color: var(--t3); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-lands { flex: none; margin-top: 1px; font-size: 11px; color: var(--ok); }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-idea .bf-act { top: auto; bottom: 3px; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-row:hover .bf-lands, .desktop :is(#briefing, #drive-reply, #hero) .bf-row:focus-within .bf-lands { opacity: 0; }
+.desktop :is(#briefing, #drive-reply, #hero) .bf-group { margin: 6px 0 2px; padding: 0 10px; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--t4); }
+.desktop #sidebar-drive .bf-row.bf-idea { height: auto; min-height: 30px; padding: 4px 6px; }
+.desktop #sidebar-drive .bf-group { padding: 0 6px; }

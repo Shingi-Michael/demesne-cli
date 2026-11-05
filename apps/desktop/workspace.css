@@ -322,14 +322,14 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .modal { border-radius: 12px; box-shadow: 0 20px 70px #0006; }
 .desktop #notice { font-family: inherit; border-radius: 8px; }
 @media (max-width: 1150px) {
-  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 244px minmax(0, 1fr); }
+  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 260px minmax(0, 1fr); }
   #desktop-toolbar { padding: 0 14px; gap: 8px; }
   .desktop .live-app:not(.start) .stage { padding: 22px 20px 12px; }
   .desktop #input-area { padding: 10px 20px 18px; }
   
 }
 @media (max-width: 980px) {
-  #desktop-shell:not(.sidebar-collapsed):has(#desktop-sidebar:not([hidden])) { grid-template-columns: 226px minmax(0, 1fr); }
+  #desktop-shell:not(.sidebar-collapsed):has(#desktop-sidebar:not([hidden])) { grid-template-columns: 252px minmax(0, 1fr); }
   .desktop .composer-bar { flex-wrap: wrap; }
   .desktop .composer .hints { margin-left: auto; }
   .desktop .hero { gap: 24px; }

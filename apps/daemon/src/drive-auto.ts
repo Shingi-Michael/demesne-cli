@@ -91,10 +91,11 @@ export class DriveAutoRuns {
     const ideas = this.host.ideas(workspace);
     if (!ideas || this.now() - Date.parse(ideas.generatedAt) > AUTO_FRESH_HOURS * 3_600_000) return null;
     const ran = new Set(this.saved.runs.filter((run) => run.workspace === workspace).map((run) => run.idea));
-    const item = ideas.proposals.find((proposal) => !ran.has(proposal.title));
+    // Questions are answered in a chat you open; Drive only runs changes on its own.
+    const item = ideas.proposals.find((proposal) => proposal.kind !== "investigate" && !ran.has(proposal.title));
     if (!item) return null;
     return {
-      proposal: { id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence },
+      proposal: { id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence, ...(item.check ? { check: item.check } : {}) },
       signals: ideas.signals.filter((signal) => item.evidence.includes(signal.id)).slice(0, 5),
     };
   }

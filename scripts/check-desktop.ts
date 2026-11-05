@@ -160,7 +160,7 @@ const f = await fixture({
       // Late in the run Drive offers ideas, citing whatever signal it was given.
       const cited = offerIdeas ? (JSON.parse(String(messages.findLast(message => message.role === "user")?.content ?? "{}")).signals ?? [])[0]?.id : undefined;
       const proposals = cited ? ["Add tests for fuzzy search ranking", "Drop the unused sidebar sort helper", "Cache the file list between turns"].map((title, index) => ({
-        kind: "tidy", title, why: "Fixture idea for the composer strip.", evidence: [cited], minutes: 5 + index * 3, coders: 1, confidence: "high", value: 4 - index })) : [];
+        kind: "tidy", title, why: "Fixture idea for the composer strip.", evidence: [cited], check: "bun test", minutes: 5 + index * 3, coders: 1, confidence: "high", value: 4 - index })) : [];
       yield { type: "tool_call_delta", index: 0, idDelta: "suggestions", nameDelta: "propose_next", argumentsDelta: JSON.stringify({ proposals }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
@@ -1504,6 +1504,7 @@ try {
   await page.locator("#briefing .bf-chev").click();
   await until(() => page.locator("#briefing .bf-word").innerText().then(text => text.includes("Three things I could do next")), "the line becomes Drive's reply");
   await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas unfold under its line");
+  assert(await page.locator("#drive-reply .bf-row .bf-meta").first().innerText().then(text => text.includes("check bun test")), "each idea names the check that proves it");
   await page.waitForTimeout(400);
   assert(await page.evaluate(() => { const reply = document.getElementById("drive-reply")!.getBoundingClientRect(), foot = document.querySelector(".sidebar-foot")!.getBoundingClientRect(); return reply.top >= 0 && reply.bottom <= foot.top + 1; }), "the reply unfolds in the sidebar, above you and Settings");
   await page.locator("#drive-reply .bf-row").first().hover();

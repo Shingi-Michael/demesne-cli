@@ -61,3 +61,13 @@ test("the log keeps each workspace's outcomes and skips runs that aren't proposa
   expect(log.records("/w")).toEqual([expect.objectContaining({ outcome: "landed", confidence: "high", minutes: 10, actualMinutes: 12 })]);
   expect(log.calibration("/other")).toMatchObject({ landed: 0, total: 1 });
 });
+
+test("a kind of job that keeps landing here outranks one that keeps getting discarded", () => {
+  const record = (kind: CalibrationRecord["kind"], outcome: CalibrationRecord["outcome"]): CalibrationRecord => ({ at: "now", workspace: "/w", proposalId: "x", kind, confidence: "high", minutes: null, actualMinutes: null, outcome });
+  const calibration = calibrate([...Array(4)].map(() => record("fix", "landed")).concat([...Array(6)].map(() => record("tidy", "discarded"))));
+  expect(calibration.kinds).toMatchObject({ fix: { landed: 4, total: 4 }, tidy: { landed: 0, total: 6 }, investigate: { total: 0, weight: 0.7 } });
+  const item = { value: 3, confidence: "high" as const, minutes: 10, coders: 1 };
+  expect(scoreProposal({ ...item, kind: "fix" }, false, calibration)).toBeGreaterThan(scoreProposal({ ...item, kind: "tidy" }, false, calibration));
+  // A kind with no history scores as it would without one.
+  expect(scoreProposal({ ...item, kind: "investigate" }, false, calibration)).toBe(scoreProposal(item, false, calibration));
+});

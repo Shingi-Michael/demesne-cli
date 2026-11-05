@@ -71,8 +71,8 @@ Task: ${proposal.title}
 Why: ${proposal.why}
 ${fix.signals.length ? `\nEvidence:\n${fix.signals.map((signal) => `- ${signal.title}: ${signal.detail}`).join("\n")}\n` : ""}
 1. Read the relevant code and confirm the task is real before changing anything. If it isn't, change nothing and say why.
-2. Make the smallest change that completes the task. Stay inside its scope: don't refactor or touch unrelated code.
-3. Run the checks that cover what you changed (tests, typecheck, lint) and confirm they pass.
+2. Make the smallest change that completes the task. Stay inside its scope: don't refactor, rename or touch unrelated code. A small change the user keeps is worth more than a big one they throw away.
+3. ${proposal.check ? `Prove it: run \`${proposal.check}\` and confirm it passes, plus any other check that covers what you changed.` : "Run the checks that cover what you changed (tests, typecheck, lint) and confirm they pass."}
 4. Don't install or upgrade dependencies (node_modules is shared with the user's checkout), and don't commit or push: demesne commits the result for the user to review.
 
 End with two or three plain sentences: what you changed and how you checked it.`;

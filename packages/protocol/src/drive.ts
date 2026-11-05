@@ -68,10 +68,13 @@ export interface DriveMemoryEntry { id: string; kind: "preference" | "decision" 
 /// A fact about the workspace that Drive's Next queue is built from. Proposals
 /// must cite signals by id.
 export interface DriveSignal { id: string; source: "checks" | "git" | "github" | "sessions" | "telemetry" | "code"; title: string; detail: string; urgent?: boolean }
-/// One ranked item in the Next queue.
+/// One ranked item in the Next queue. A fix or tidy is a small change, and
+/// `check` names the command that proves it. An investigate item is a
+/// question: it is answered in a chat of its own and never makes a branch.
 export interface DriveProposal {
   id: string; kind: "fix" | "investigate" | "tidy";
   title: string; why: string; evidence: string[];
+  check?: string;
   minutes: number; coders: number; confidence: "high" | "medium" | "low"; value: number;
   /// value × confidence ÷ cost, boosted when it cites an urgent signal.
   score: number; urgent: boolean;
@@ -86,6 +89,8 @@ export interface DriveProposal {
 export interface DriveCalibration {
   landed: number; total: number;
   levels: Record<DriveProposal["confidence"], { landed: number; total: number; weight: number }>;
+  /// The same per kind of job; the ranking scales by how this kind lands here.
+  kinds?: Record<DriveProposal["kind"], { landed: number; total: number; weight: number }>;
   timeRatio: number; timed: number;
 }
 export interface DriveNextRequest { workspace: string; memory?: DriveMemoryEntry[]; force?: boolean }
@@ -138,7 +143,7 @@ export interface DriveFix {
 export interface DriveThread { brief: string; files: string[] }
 /// What a proposal run carries; the estimate and confidence let its outcome
 /// calibrate later rankings.
-export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why"> & Partial<Pick<DriveProposal, "minutes" | "confidence">>;
+export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why"> & Partial<Pick<DriveProposal, "minutes" | "confidence" | "check">>;
 /// A breakage fix sends 1-5 signals; a proposal sends the signals it cites
 /// (0-5); a mission sends none.
 export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal; mission?: string; from?: string }
@@ -545,7 +550,8 @@ export function parseDriveFixRequest(value: unknown): DriveFixRequest {
     if (!isRecord(item) || !["fix", "investigate", "tidy"].includes(String(item.kind))) invalid("proposal", "expected a proposal");
     proposal = { id: text(item.id, 200, "proposal.id"), kind: item.kind as DriveProposal["kind"], title: text(item.title, 300, "proposal.title"), why: text(item.why, 2000, "proposal.why"),
       ...(typeof item.minutes === "number" && Number.isFinite(item.minutes) && item.minutes > 0 ? { minutes: Math.min(10_000, item.minutes) } : {}),
-      ...(["high", "medium", "low"].includes(String(item.confidence)) ? { confidence: item.confidence as DriveProposal["confidence"] } : {}) };
+      ...(["high", "medium", "low"].includes(String(item.confidence)) ? { confidence: item.confidence as DriveProposal["confidence"] } : {}),
+      ...(typeof item.check === "string" && item.check.trim() ? { check: text(item.check.trim(), 300, "proposal.check") } : {}) };
   }
   const mission = value.mission === undefined ? undefined : text(value.mission, 8000, "mission");
   if (mission !== undefined && proposal) invalid("mission", "expected a mission or a proposal, not both");

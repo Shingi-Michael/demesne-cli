@@ -3550,7 +3550,8 @@ function proposalRows(items: Snapshot["driveNext"]["proposals"]) {
     .map((item) => {
       const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
       const why = [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n");
-      return `<div class="proposal-row" title="${h(why)}"><span class="next-kind kind-${item.kind}">${item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>~${minutes(item.expectedMinutes ?? item.minutes)}</small>${btn("next-run", "Run", { id: item.id }, "primary", Boolean(driveActionPending))}${btn("next-plan", "Plan", { id: item.id }, "", Boolean(driveActionPending))}${btn("next-snooze", "Not now", { id: item.id }, "quiet proposal-snooze", Boolean(driveActionPending))}</div>`;
+      const question = item.kind === "investigate", why2 = item.check ? `${why}\nCheck: ${item.check}` : why;
+      return `<div class="proposal-row" title="${h(why2)}"><span class="next-kind kind-${item.kind}">${question ? "QUESTION" : item.kind.toUpperCase()}</span><b>${h(item.title)}</b><small>${question ? "answers in a chat" : `~${minutes(item.expectedMinutes ?? item.minutes)}${item.check ? ` · check <code>${h(item.check)}</code>` : ""}`}</small>${btn("next-run", question ? "Ask" : "Run", { id: item.id }, "primary", Boolean(driveActionPending))}${question ? "" : btn("next-plan", "Plan", { id: item.id }, "", Boolean(driveActionPending))}${btn("next-snooze", "Not now", { id: item.id }, "quiet proposal-snooze", Boolean(driveActionPending))}</div>`;
     })
     .join("")}</div>`;
 }
@@ -4235,8 +4236,9 @@ function renderBriefing() {
     }
     toggle = { action: "ideas-show", open: ideasShown };
     if (ideasShown) {
+      const first = next.proposals.find((item) => item.kind !== "investigate");
       fold = `${ideaRows(next.proposals)}<p class="bf-foot">${[
-        btn("next-run", "Run the first now", { id: next.proposals[0]!.id }, "link"),
+        first ? btn("next-run", "Run the first now", { id: first.id }, "link") : "",
         btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading),
         next.generatedAt ? `<span>looked ${age(next.generatedAt)}</span>` : "",
       ].filter(Boolean).join('<span class="bf-sep">·</span>')}</p>`;
@@ -4296,17 +4298,26 @@ function closeBriefingCard() {
   renderBriefing();
   return true;
 }
-/// Drive's ideas as one line each: a hollow mark, the title, its time on the
-/// right, which gives way to Run, Plan and Not now when you point at it.
+/// Drive's ideas: changes first, each with the check that proves it, its
+/// time and how that kind of job has landed here; then questions, which are
+/// answered in a chat (Ask) and never make a branch. Run, Plan and Not now
+/// show when you point at a row.
 function ideaRows(items: Snapshot["driveNext"]["proposals"]) {
   const signal = new Map(state!.driveNext.signals.map((item) => [item.id, item]));
   const minutes = (value: number) => (value < 60 ? `${value} min` : `${Math.round(value / 6) / 10} h`);
-  return `<div class="bf-rows">${items.map((item) => {
-    const evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
+  const kinds = state!.driveNext.calibration?.kinds, pending = Boolean(driveActionPending);
+  const row = (item: Snapshot["driveNext"]["proposals"][number]) => {
+    const question = item.kind === "investigate", evidence = item.evidence.map((id) => signal.get(id)?.title).find(Boolean);
     const why = [item.why, evidence && `Evidence: ${evidence}`].filter(Boolean).join("\n");
-    const pending = Boolean(driveActionPending);
-    return `<div class="bf-row" title="${h(why)}"><span class="bf-dot hollow" aria-hidden="true"></span><span class="bf-title">${h(item.title)}</span><span class="bf-r">~${minutes(item.expectedMinutes ?? item.minutes)}</span><span class="bf-act">${btn("next-run", "Run", { id: item.id }, "primary", pending)}${btn("next-plan", "Plan", { id: item.id }, "", pending)}${btn("next-snooze", "Not now", { id: item.id }, "", pending)}</span></div>`;
-  }).join("")}</div>`;
+    const kind = kinds?.[item.kind], lands = !question && kind?.total ? `<span class="bf-lands" title="${h(`${kind.landed} of the last ${kind.total} ${item.kind} runs here were kept`)}">${kind.landed} of ${kind.total}</span>` : "";
+    const meta = question ? "answers in a chat · no branch" : [item.check ? `check <code>${h(item.check)}</code>` : "", `~${minutes(item.expectedMinutes ?? item.minutes)}`].filter(Boolean).join(" · ");
+    const acts = question
+      ? `${btn("next-run", "Ask", { id: item.id }, "primary", pending)}${btn("next-snooze", "Not now", { id: item.id }, "", pending)}`
+      : `${btn("next-run", "Run", { id: item.id }, "primary", pending)}${btn("next-plan", "Plan", { id: item.id }, "", pending)}${btn("next-snooze", "Not now", { id: item.id }, "", pending)}`;
+    return `<div class="bf-row bf-idea" title="${h(why)}"><span class="bf-dot ${question ? "hollow" : "idea"}" aria-hidden="true"></span><span class="bf-two"><span class="bf-title">${h(item.title)}</span><small class="bf-meta">${meta}</small></span>${lands}<span class="bf-act">${acts}</span></div>`;
+  };
+  const changes = items.filter((item) => item.kind !== "investigate"), questions = items.filter((item) => item.kind === "investigate");
+  return `<div class="bf-rows">${changes.map(row).join("")}${questions.length ? `<p class="bf-group">Questions</p>${questions.map(row).join("")}` : ""}</div>`;
 }
 /// One model's scoreboard line in the model picker: how it has done on your
 /// own recorded work over the last 30 days.

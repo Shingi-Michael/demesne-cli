@@ -5,7 +5,8 @@
  * Every change to Foundry (the kit, the brief, the tools) gets a before and
  * after: run it on main, then on the change, with --compare.
  *
- *   bun scripts/prepare-desktop.ts            (once, so the app can render)
+ *   bun scripts/prepare-desktop.ts            (once, so the app can render; a fresh
+ *                                             clone also needs node node_modules/electron/install.js)
  *   bun scripts/eval-foundry-quality.ts [--only id,id] [--label name] [--out dir] [--compare dir/report.json] [--no-look]
  *   bun scripts/eval-foundry-quality.ts --pages dir    (score .html files, no model)
  *   bun scripts/eval-foundry-quality.ts --fake         (a stand-in model, to check the harness)
@@ -16,7 +17,7 @@
  * unrun. Everything lives in a temporary data directory: the person's chats,
  * gallery and daemon are untouched. Linux needs a display (xvfb-run -a).
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { DemesneClient } from "../packages/client/src/index.ts";
@@ -39,6 +40,11 @@ mkdirSync(join(out, "pages"), { recursive: true });
 
 const electron = process.env.DEMESNE_ELECTRON ?? join(repo, "node_modules/electron/dist", process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron");
 const lookCommand = [electron, ...(process.env.DEMESNE_ELECTRON ? [] : [join(repo, "apps/desktop/build/app")]), ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])];
+// Without the app every page would score 0 for "could not render": stop and say why instead.
+if (!existsSync(lookCommand[0]!) || (!process.env.DEMESNE_ELECTRON && !existsSync(lookCommand[1]!))) {
+  console.error(`Can't render pages: ${!existsSync(lookCommand[0]!) ? `no Electron at ${lookCommand[0]} (a fresh clone with bun needs: node node_modules/electron/install.js)` : "no app build (run: bun scripts/prepare-desktop.ts)"}`);
+  process.exit(1);
+}
 const render = electronLook(lookCommand);
 
 /// Render one page and turn it into a result's numbers and pictures.

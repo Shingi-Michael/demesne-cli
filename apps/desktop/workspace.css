@@ -255,7 +255,11 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    columns are the same box at any width, with the info cards open or not. */
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
 .desktop .live-app:not(.start) #input-area { max-width: none; }
-.desktop .live-app:not(.start) #input-area > * { box-sizing: border-box; padding-left: 32px; }
+.desktop .live-app:not(.start) #input-area > #composer-slot { box-sizing: border-box; padding-left: 32px; }
+/* An approval above the box keeps its command in full: a habit note beside
+   it gives up its room first. */
+.desktop .approval-row code { flex-shrink: 0; max-width: 65%; }
+.desktop .approval-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .desktop .composer { border-radius: 12px; padding: 12px 14px 8px; gap: 8px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }
 .desktop .composer:focus-within { border-color: color-mix(in srgb, var(--electric) 60%, var(--borderBright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--electric) 7%, transparent); }
 .desktop .composer textarea { font-family: inherit; font-size: 14px; line-height: 22px; min-height: 44px; }

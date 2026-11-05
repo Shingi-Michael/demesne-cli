@@ -9,11 +9,11 @@ import { app, BrowserWindow, session as sessions } from "electron";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOOK_MEASURE, type LookMeasure } from "./foundry-look-measure.ts";
+import { DESIGN_MEASURE, LOOK_MEASURE, type DesignMeasure, type LookMeasure } from "./foundry-look-measure.ts";
 import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile } from "./policy.ts";
 
 export interface LookJob { kind: string; source: string; title: string }
-export interface LookPage extends LookMeasure { png: string }
+export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
 export interface LookResult { pages: LookPage[]; errors: string[] }
 
 /// The job file a `--foundry-look=` argument names, or null.
@@ -67,11 +67,12 @@ export function runFoundryLook(path: string) {
         await Promise.race([contents.executeJavaScript("document.fonts.ready.then(() => true)"), settle(3000)]);
         await settle(400);
         const measured = await contents.executeJavaScript(LOOK_MEASURE) as LookMeasure;
+        const design = await contents.executeJavaScript(DESIGN_MEASURE).catch(() => undefined) as DesignMeasure | undefined;
         const height = Math.min(Math.max(view.height, measured.height), view.maxHeight);
         if (height !== view.height) { win.setContentSize(view.width, height); await settle(350); }
         let image = await contents.capturePage({ x: 0, y: 0, width: view.width, height });
         if (image.getSize().width > view.scaleTo) image = image.resize({ width: view.scaleTo, quality: "good" });
-        pages.push({ ...measured, png: image.toPNG().toString("base64") });
+        pages.push({ ...measured, ...(design ? { design } : {}), png: image.toPNG().toString("base64") });
       } catch (error) {
         errors.push(`Could not render at ${view.width}px: ${error instanceof Error ? error.message : String(error)}`);
       } finally { win.destroy(); }

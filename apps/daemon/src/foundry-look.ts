@@ -14,7 +14,8 @@ import type { ImageOutput } from "./artifacts.ts";
 /// The look's pictures are named this way, so a model that sees gets them (engine.ts).
 export const FOUNDRY_LOOK_PREFIX = "foundry-look-";
 
-export interface LookedPage { width: number; height: number; issues: string[]; png: string }
+/// design: the page's design numbers (apps/desktop/electron/foundry-look-measure.ts DesignMeasure), for eval-foundry-quality.
+export interface LookedPage { width: number; height: number; issues: string[]; png: string; design?: Record<string, number> }
 export interface LookResult { pages: LookedPage[]; errors: string[] }
 export type FoundryLook = (page: { kind: string; source: string; title: string }, signal: AbortSignal) => Promise<LookResult | null>;
 

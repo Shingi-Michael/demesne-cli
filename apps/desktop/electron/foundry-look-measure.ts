@@ -98,3 +98,103 @@ export const LOOK_MEASURE = String.raw`(() => {
   for (const img of document.images) if (img.complete && !img.naturalWidth) say("Image did not load: " + label(img));
   return { width: W, height: document.documentElement.scrollHeight, issues };
 })()`;
+
+/// How designed a rendered page is, as numbers (eval-foundry-quality.ts
+/// scores them; the model is not shown them yet). Measured on what shows:
+/// how many type sizes, how big the lead is against the body, how much of
+/// the spacing comes from a few steps, how many text blocks share a left edge
+/// with another, and how many colours the page paints with.
+export interface DesignMeasure {
+  /// Distinct font sizes (px) of visible text, and the body size (most characters).
+  sizes: number; body: number;
+  /// The largest text size over the body size.
+  lead: number;
+  /// Share of margins, paddings and gaps drawn from the page's six most used spacings.
+  rhythm: number;
+  /// Share of text blocks whose left edge lines up with another block's.
+  aligned: number;
+  /// Distinct colours painted (text, fills, borders), near shades merged.
+  colours: number;
+  /// Share of the first screen painted with something other than the paper
+  /// (its most common fill): other fills, gradients, pictures, SVG, canvas.
+  surface: number;
+}
+
+export const DESIGN_MEASURE = String.raw`(() => {
+  const skip = new Set(["SCRIPT", "STYLE", "LINK", "META", "TITLE", "BR", "TEMPLATE", "NOSCRIPT"]);
+  const shown = (el) => {
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+    const box = el.getBoundingClientRect();
+    return box.width > 0 && box.height > 0;
+  };
+  const all = [...document.body.querySelectorAll("*")].filter((el) => !skip.has(el.tagName) && !el.closest("svg *")).slice(0, 4000).filter(shown);
+  const ownText = (el) => [...el.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent.trim()).join("");
+  const texts = all.map((el) => [el, ownText(el)]).filter(([, text]) => text.length > 0);
+
+  const chars = new Map();
+  for (const [el, text] of texts) { const size = Math.round(parseFloat(getComputedStyle(el).fontSize)); chars.set(size, (chars.get(size) || 0) + text.length); }
+  const sizes = [...chars.keys()];
+  const body = sizes.length ? [...chars.entries()].sort((a, b) => b[1] - a[1])[0][0] : 16;
+  const lead = sizes.length ? Math.max(...sizes) / body : 1;
+
+  const spacing = new Map();
+  const sides = ["Top", "Right", "Bottom", "Left"];
+  for (const el of all) {
+    const style = getComputedStyle(el);
+    const values = sides.flatMap((side) => [style["margin" + side], style["padding" + side]]).concat(style.display.includes("flex") || style.display.includes("grid") ? [style.rowGap, style.columnGap] : []);
+    for (const value of values) {
+      const px = Math.round(Math.abs(parseFloat(value)));
+      if (!px || !Number.isFinite(px)) continue;
+      spacing.set(px, (spacing.get(px) || 0) + 1);
+    }
+  }
+  const counts = [...spacing.values()].sort((a, b) => b - a), spaced = counts.reduce((a, b) => a + b, 0);
+  const onScale = counts.slice(0, 6).reduce((a, b) => a + b, 0);
+
+  const blocks = texts.map(([el]) => el).filter((el) => { const display = getComputedStyle(el).display; return !display.startsWith("inline") || display === "inline-block" || display === "inline-flex"; });
+  const edges = blocks.map((el) => Math.round(el.getBoundingClientRect().left));
+  const aligned = edges.filter((x, i) => edges.some((y, j) => j !== i && Math.abs(x - y) <= 2)).length;
+
+  const paint = new Set();
+  const add = (value) => {
+    const m = value && value.match(/-?[\d.]+(?:e-?\d+)?/g);
+    if (!m || !value.startsWith("rgb") && !value.startsWith("color(srgb ")) return;
+    let n = m.map(Number);
+    if (value.startsWith("color(srgb ")) n = n.slice(0, 3).map((v) => v * 255).concat(n.slice(3));
+    if (n.length > 3 && n[3] < 0.06) return;
+    paint.add(n.slice(0, 3).map((v) => Math.round(v / 24)).join(","));
+  };
+  for (const el of all) {
+    const style = getComputedStyle(el);
+    if (ownText(el)) add(style.color);
+    add(style.backgroundColor);
+    if (parseFloat(style.borderTopWidth) > 0 || parseFloat(style.borderLeftWidth) > 0) add(style.borderTopColor);
+  }
+  add(getComputedStyle(document.documentElement).backgroundColor);
+
+  // What paints each point: a picture, or the nearest fill. The most common fill is the paper.
+  const rootBg = getComputedStyle(document.documentElement).backgroundColor;
+  const fill = (el) => {
+    for (let at = el; at; at = at.parentElement) {
+      if (/^(IMG|CANVAS|VIDEO|svg)$/.test(at.tagName)) return "picture";
+      const style = getComputedStyle(at);
+      if (style.backgroundImage !== "none") return "picture";
+      const bg = style.backgroundColor;
+      if (bg !== "rgba(0, 0, 0, 0)" && !/, 0\)$/.test(bg)) return bg;
+    }
+    return rootBg;
+  };
+  const fills = [], H = Math.min(innerHeight, document.documentElement.scrollHeight);
+  for (let y = 10; y < H; y += H / 24) for (let x = 10; x < innerWidth; x += innerWidth / 32) {
+    const el = document.elementFromPoint(x, y);
+    fills.push(el ? fill(el) : rootBg);
+  }
+  const tally = new Map();
+  for (const value of fills) if (value !== "picture") tally.set(value, (tally.get(value) || 0) + 1);
+  const paper = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const surface = fills.length ? fills.filter((value) => value !== paper).length / fills.length : 0;
+
+  const round = (value) => Math.round(value * 100) / 100;
+  return { surface: round(surface), sizes: sizes.length, body, lead: round(lead), rhythm: spaced ? round(onScale / spaced) : 1, aligned: blocks.length > 1 ? round(aligned / blocks.length) : 1, colours: paint.size };
+})()`;

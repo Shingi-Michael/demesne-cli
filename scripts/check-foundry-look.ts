@@ -34,5 +34,10 @@ for (const scheme of ["light", "dark"]) {
   assert(quiet);
   for (const shot of quiet.pages) assert.deepEqual(shot.issues, [], `kit text in ${scheme} at ${shot.width}px`);
 }
+// The design numbers the quality eval scores (foundry-look-measure.ts DESIGN_MEASURE).
+const design = desktop!.design!;
+assert(design, "design numbers come with the look");
+for (const key of ["sizes", "body", "lead", "rhythm", "aligned", "colours", "surface"]) assert(typeof design[key] === "number", `design.${key}`);
+assert(design.sizes >= 2 && design.lead > 1 && design.colours >= 2, JSON.stringify(design));
 for (const shot of look.pages) assert(Buffer.from(shot.png, "base64").subarray(1, 4).toString() === "PNG", "a picture of each width");
 console.log(`Foundry look passed in ${Date.now() - started} ms:`, JSON.stringify(look.pages.map(({ width, issues }) => ({ width, issues }))));

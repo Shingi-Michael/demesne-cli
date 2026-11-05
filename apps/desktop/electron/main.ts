@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
+import { installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true } }]);
@@ -18,7 +19,7 @@ if (lookJob) runFoundryLook(lookJob);
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
-let window: BrowserWindow | undefined, backend: Backend | undefined, quitting = false, exited = false;
+let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
 // Keep native notifications alive until the OS closes them or they are clicked.
@@ -37,6 +38,7 @@ async function quit() {
   quitting = true;
   log("exit requested");
   try { unlinkSync(join(homedir(), ".demesne", "desktop.pid")); } catch {}
+  updater?.stop();
   await backend?.close();
   exited = true;
   app.quit();
@@ -60,6 +62,19 @@ if (!lookJob) void app.whenReady().then(async () => {
   const resources = app.isPackaged ? process.resourcesPath : join(base, "..");
   const runtime = join(resources, "backend");
   const suffix = process.platform === "win32" ? ".exe" : "";
+  // Updates without a rebuild: only a release build (from GitHub) updates
+  // itself; one built from source is left alone.
+  let releaseBuild = false;
+  try { releaseBuild = app.isPackaged && JSON.parse(readFileSync(join(base, "package.json"), "utf8")).updates === "github"; } catch {}
+  updater = new Updater({
+    install: installFor(process.platform, process.arch, process.execPath), current: app.getVersion(), release: releaseBuild,
+    dir: join(app.getPath("userData"), "updates"), pid: process.pid,
+    relaunch: [process.execPath, ...(app.commandLine.hasSwitch("no-sandbox") ? ["--no-sandbox"] : []), ...(userData && isAbsolute(userData) ? [`--user-data-dir=${userData}`] : [])],
+    fetch: (url, init) => net.fetch(url, init), emit: status => emit("demesne:app-update", status), log, quit: () => void quit(),
+  });
+  if (updater.status.state === "off") log(`Updates off: ${updater.status.why}.`);
+  // A download finished last time: it goes in before the window opens.
+  if (updater.applyPending()) return;
   backend = new Backend({
     executable: join(runtime, `demesne-host${suffix}`), args,
     env: { ...process.env, DEMESNE_DAEMON_BIN: join(runtime, `demesned${suffix}`), DEMESNE_NATIVE_RUNTIME_DIR: runtime },
@@ -242,11 +257,21 @@ if (!lookJob) void app.whenReady().then(async () => {
     window.on("maximize", () => simpleFullScreen(true, "green button"));
   }
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
+  let readied = false;
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
-    if (method === "desktop-ready") { window?.show(); window?.focus(); launchToFront(); return null; }
+    if (method === "desktop-ready") { window?.show(); window?.focus(); launchToFront(); if (updater && !readied) { readied = true; updater.started(); updater.schedule(); } return null; }
+    // The release line and Settings: where an update stands, Restart, and the switch.
+    if (method === "desktop-update") {
+      const action = (args as Record<string, unknown>).action;
+      if (!updater) return { state: "off", why: "starting" };
+      if (action === "restart") return updater.restart();
+      if (action === "on" || action === "off") return updater.setEnabled(action === "on");
+      if (action === "check") return updater.check();
+      return updater.status;
+    }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }
     // Hot reload the renderer when the installed app has been updated, so the
     // running window loads the new UI without the user relaunching. The host
@@ -280,6 +305,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       return null;
     }
     if (method === "desktop-working") {
+      updater?.setBusy((args as Record<string, unknown>).on === true);
       window?.setProgressBar((args as Record<string, unknown>).on === true ? 2 : -1, { mode: "indeterminate" });
       return null;
     }

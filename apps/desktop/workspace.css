@@ -1815,6 +1815,13 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .sidebar-release { margin-top: auto; padding: 0 10px 8px; font-size: 11px; color: var(--blossom); white-space: nowrap; }
 .sidebar-release + .sidebar-foot { margin-top: 0; }
 #desktop-shell.sidebar-collapsed .sidebar-release { display: none; }
+.sidebar-release[data-state="downloading"], .sidebar-release[data-state="ready"] { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.sidebar-release .rl-text { overflow: hidden; text-overflow: ellipsis; }
+.sidebar-release .rl-bar { flex: 1; min-width: 40px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--blossom) 22%, transparent); overflow: hidden; }
+.sidebar-release .rl-bar b { display: block; height: 100%; background: var(--blossom); transition: width .3s; }
+.sidebar-release .rl-restart { flex: none; padding: 2px 9px; border: 0; border-radius: 99px; background: color-mix(in srgb, var(--blossom) 26%, transparent); color: var(--t1); font: 600 11px/1.5 Inter, system-ui, sans-serif; cursor: pointer; }
+.sidebar-release .rl-restart:hover { background: color-mix(in srgb, var(--blossom) 40%, transparent); }
+.sidebar-release .rl-restart:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
 /* Menus and small dialogs (#overlay: the ⋯ menu, Chats, Theme, Providers,
    Clean up, Rename, Archive, Commands) in the look of the model picker and

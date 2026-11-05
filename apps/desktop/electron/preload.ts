@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-const events = new Set(["demesne:update", "demesne:desktop-error", "demesne:desktop-action"]);
+const events = new Set(["demesne:update", "demesne:desktop-error", "demesne:desktop-action", "demesne:app-update"]);
 contextBridge.exposeInMainWorld("demesneDesktop", {
   // The shell is glass; "sharp" where the desktop shows through unblurred.
   glass: process.argv.some((arg) => arg === "--demesne-glass" || arg === "--demesne-glass=sharp"),

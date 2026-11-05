@@ -165,7 +165,7 @@ export interface SettingsView {
   error: string;
   /// The row whose words are unfolded, like "theme" or "subagent".
   fold: string;
-  general: { openOn: "home" | "last"; awake: boolean };
+  general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string } };
   notify: Record<NotifyKind, boolean>;
   appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
@@ -250,6 +250,9 @@ function pages(view: SettingsView): Page[] {
       ...(view.desktop ? [{ title: "Keep this computer awake while something runs", line: "A chat's turn or a Drive run; the display may still sleep", control: toggle(view.general.awake, "settings-local", { key: "awake", value: !view.general.awake }, "Keep this computer awake"), keywords: "sleep awake power battery" }] : []),
       { title: "Closing the window", line: "The daemon keeps running, so Drive, routines and mail carry on", keywords: "quit close background daemon" },
     ] },
+    ...(view.general.updates ? [{ name: "Updates", rows: [
+      { title: "Update Demesne by itself", line: view.general.updates.line, control: toggle(view.general.updates.on, "settings-local", { key: "updates", value: !view.general.updates.on }, "Update Demesne by itself"), keywords: "update upgrade version release download restart" },
+    ] }] : []),
   ] });
   out.push({ id: "notifications", title: "Notifications", sub: view.desktop ? "System notifications on Linux, macOS and Windows while the app is out of focus. Each kind has its own switch." : "Banners come from the desktop app.", groups: [
     { name: "Tell me when", rows: NOTIFY_KINDS.map(([kind, title, line]) => ({ title, line, control: view.desktop ? toggle(view.notify[kind], "notify-kind", { kind, on: !view.notify[kind] }, title) : "", keywords: "notifications banners alerts notify" })) },

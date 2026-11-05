@@ -71,7 +71,9 @@ export function driveRunTool(host: DriveRunHost): AgentTool {
       const words = asked.toLowerCase();
       const item = number ? ideas.proposals[number - 1] : ideas.proposals.find((proposal) => proposal.title.toLowerCase().includes(words) || words.includes(proposal.title.toLowerCase()));
       if (!item) throw new Error(`No idea matches "${asked}". Drive's ideas: ${ideas.proposals.slice(0, IDEAS).map((idea, index) => `${index + 1}. ${idea.title}`).join(" ")}`);
-      const fix = await host.run(context.workspaceRoot, { id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence },
+      // A question is answered by reading, not by a branch: answer it in this chat.
+      if (item.kind === "investigate") return `"${item.title}" is a question, not a change: Drive doesn't run it in a worktree. Answer it here by reading the code (${item.why})`;
+      const fix = await host.run(context.workspaceRoot, { id: item.id, kind: item.kind, title: item.title, why: item.why, minutes: item.minutes, confidence: item.confidence, ...(item.check ? { check: item.check } : {}) },
         ideas.signals.filter((signal) => item.evidence.includes(signal.id)).slice(0, 5));
       return `Drive started "${fix.title}" on branch ${fix.branch}. It shows on Drive's line while it works, and waits there for review when done.`;
     },

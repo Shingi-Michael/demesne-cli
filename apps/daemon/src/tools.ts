@@ -283,7 +283,8 @@ function readFileTool(): AgentTool {
       const path = requiredString(value.path, "path");
       const offset = boundedInteger(value.offset, "offset", 1, Number.MAX_SAFE_INTEGER, 1);
       const limit = boundedInteger(value.limit, "limit", 1, 500, 400);
-      return JSON.stringify(await readSingleFile(context.workspaceRoot, path, offset, limit));
+      const result = await readSingleFile(context.workspaceRoot, path, offset, limit) as Record<string, unknown>;
+      return JSON.stringify(givenBefore(context, "read", result) ?? result);
     },
   };
 }
@@ -332,6 +333,8 @@ function readFilesTool(): AgentTool {
         try {
           const result = await readSingleFile(context.workspaceRoot, path, offset, limit);
           const record = result as Record<string, unknown>;
+          const again = givenBefore(context, "read", record, false);
+          if (again) { results.push(again); continue; }
           const content = typeof record.content === "string" ? record.content : "";
           if (Buffer.byteLength(content) > remaining) {
             record.content = content.slice(0, Math.max(0, remaining)).replace(/\n[^\n]*$/, "");
@@ -339,6 +342,7 @@ function readFilesTool(): AgentTool {
             record.note = "content truncated by batch budget";
           }
           remaining -= Buffer.byteLength(record.content as string);
+          givenBefore(context, "read", record);
           results.push(record);
         } catch (error) {
           const message = error instanceof Error ? error.message : "read failed";
@@ -352,6 +356,37 @@ function readFilesTool(): AgentTool {
 }
 
 const READ_BATCH_LIMIT_BYTES = 256 * 1024;
+
+/// What this turn has already been given, by turn: a read (path and lines)
+/// or a diff, with a hash of its text. Asking again for the same unchanged
+/// text answers with a short note instead: the text is still above in the
+/// same turn (old reads only leave once a turn is over, forget-reads.ts),
+/// and every later round would resend a second copy. Re-reading files was
+/// 15% of reads on Mike's chats. Turns without an id (subagents, which have
+/// their own context) always get the text.
+const givenThisTurn = new Map<string, Map<string, string>>();
+const GIVEN_TURNS_KEPT = 16, KEEP_SHORT = 1500;
+export function givenBefore(context: ToolContext, kind: "read" | "diff", result: Record<string, unknown>, remember = true): Record<string, unknown> | null {
+  if (!context.turnId || typeof result.content !== "string" && typeof result.diff !== "string") return null;
+  const range = isRecord(result.range) ? `${result.range.from}-${result.range.to}` : "";
+  const key = `${kind}\0${String(result.path ?? "")}\0${range}\0${String(result.staged ?? "")}`;
+  const text = String(result.content ?? result.diff);
+  const hash = createHash("sha256").update(text).digest("base64");
+  let given = givenThisTurn.get(context.turnId);
+  // Short text is cheaper to give again than to point back at.
+  if (given?.get(key) === hash && text.length > KEEP_SHORT) {
+    const note = kind === "read" ? "Unchanged since you read it earlier in this turn: the same text is above, use that." : "Same diff as earlier in this turn: nothing changed since, it is above.";
+    return kind === "read" ? { path: result.path, totalLines: result.totalLines, range: result.range, unchanged: true, note } : { unchanged: true, note };
+  }
+  if (!remember) return null;
+  if (!given) {
+    given = new Map();
+    givenThisTurn.set(context.turnId, given);
+    for (const old of givenThisTurn.keys()) { if (givenThisTurn.size <= GIVEN_TURNS_KEPT) break; givenThisTurn.delete(old); }
+  }
+  given.set(key, hash);
+  return null;
+}
 
 /// Files the viewer shows in full; larger ones are summarized instead.
 export const VIEWER_BYTE_LIMIT = 2 * 1024 * 1024;
@@ -924,7 +959,8 @@ function gitDiffTool(): AgentTool {
       if (path) args.push("--", path);
       const diff = await runGit(context.workspaceRoot, args, context.signal);
       const truncated = Buffer.byteLength(diff.stdout) >= GIT_OUTPUT_LIMIT_BYTES;
-      return JSON.stringify({ empty: diff.stdout.length === 0, truncated, diff: diff.stdout });
+      const result = { empty: diff.stdout.length === 0, truncated, diff: diff.stdout };
+      return JSON.stringify(givenBefore(context, "diff", { ...result, path: path ?? "", staged: value.staged === true, range: { from: contextLines, to: contextLines } }) ?? result);
     },
   };
 }

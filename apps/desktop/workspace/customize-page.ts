@@ -1,6 +1,6 @@
 /// The Customize page: the project's instructions, commands, workflows and
 /// connectors, each a row with Edit (unfolding the file in place) or Run.
-import type { CustomizeFile, CustomizeView } from "./customize.ts";
+import type { CustomizeFile, CustomizeSkill, CustomizeView } from "./customize.ts";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -15,6 +15,13 @@ export interface CustomizeUi {
 }
 export interface Connectors { servers: { name: string; state: "starting" | "ready" | "failed"; tools: number }[]; heartbeat: boolean }
 
+/// When a skill was last used: today, yesterday, or the date.
+export function lastUsed(at: string, now = new Date()): string {
+  const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((day(now) - day(new Date(at))) / 86_400_000);
+  return days <= 0 ? "today" : days === 1 ? "yesterday" : new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export function customizePage(view: CustomizeView | null, ui: CustomizeUi, connectors: Connectors, mac: boolean) {
   if (!view) return '<h1 class="cp-title">Customize</h1><p class="cp-empty">Reading the project…</p>';
   // Where the file is, said short: from the project's folder, or from your home.
@@ -25,8 +32,8 @@ export function customizePage(view: CustomizeView | null, ui: CustomizeUi, conne
   const head = (label: string, right: string) => `<div class="cp-head"><span>${h(label)}</span><span>${right}</span></div>`;
   const fileRow = (file: CustomizeFile, about: string) =>
     `<div class="sp-row cz-row${ui.editing?.path === file.path ? " on" : ""}"><span class="cz-name">/${h(file.name)}</span><span class="sp-what"><span class="cz-about">${h(about)}</span></span>${btn("cz-edit", "Edit", { path: file.path }, "sp-open cz-edit-button")}${btn("cz-run", "Run", { name: file.name }, "sp-open")}</div>${editor(file.path)}`;
-  const newRow = (kind: "command" | "workflow") =>
-    `<form class="cz-new" data-kind="${kind}"><input name="name" placeholder="${kind === "command" ? "New command, like ship-it" : "New workflow, like release"}" aria-label="${h(`Name a new ${kind}`)}" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">↵</kbd></form>`;
+  const newRow = (kind: "command" | "workflow" | "skill") =>
+    `<form class="cz-new" data-kind="${kind}"><input name="name" placeholder="${kind === "command" ? "New command, like ship-it" : kind === "skill" ? "New skill, like rebuild-the-app" : "New workflow, like release"}" aria-label="${h(`Name a new ${kind}`)}" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">↵</kbd></form>`;
   const where = view.root ? `<b>${h(projectWords(view.root))}</b>` : "your plain chats";
   const out = [`<h1 class="cp-title">Customize</h1><p class="cp-lede">Everything that shapes how Demesne works in ${where}, in one place. The files stay where they are; this page reads and edits them.</p>`];
   if (ui.error) out.push(`<p class="sp-error" role="alert">${h(ui.error)}</p>`);
@@ -35,6 +42,15 @@ export function customizePage(view: CustomizeView | null, ui: CustomizeUi, conne
     out.push(head("Instructions", h(instructions.name)));
     out.push(`<div class="cp-list"><div class="sp-row cz-row${ui.editing?.path === instructions.path ? " on" : ""}"><span class="cz-name">${h(instructions.name)}</span><span class="sp-what"><span class="cz-about">${instructions.exists ? `${h(instructions.first || "Empty")}${instructions.lines ? ` · ${instructions.lines} lines` : ""}` : "None yet. The model reads it at the start of every chat here."}</span></span>${btn("cz-edit", instructions.exists ? "Edit" : "Write it", { path: instructions.path }, "sp-open cz-edit-button")}</div>${editor(instructions.path)}</div>`);
   }
+  // Skills: the line the model reads, then whose it is and how it has gone.
+  const skillRow = (skill: CustomizeSkill) => {
+    const meta = [skill.mine ? "yours, every project" : "this project",
+      skill.uses ? `used ${skill.uses} ${skill.uses === 1 ? "time" : "times"}${skill.last ? ` · last ${lastUsed(skill.last)}` : ""}` : "not used yet"];
+    const stale = skill.missing.length ? `<span class="cz-stale">names ${h(skill.missing.join(", "))}, which ${skill.missing.length === 1 ? "is" : "are"} gone</span>` : "";
+    return `<div class="sp-row cz-row cz-skill${ui.editing?.path === skill.path ? " on" : ""}"><span class="cz-name">${h(skill.name)}</span><span class="sp-what"><span class="cz-about">${h(skill.description)}</span><span class="cz-meta">${h(meta.join(" · "))}${stale ? " · " : ""}${stale}</span></span>${btn("cz-edit", skill.missing.length ? "Update" : "Edit", { path: skill.path }, "sp-open cz-edit-button")}</div>${editor(skill.path)}`;
+  };
+  out.push(head("Skills", `${view.root ? ".demesne/skills" : "~/.demesne/skills"} · ${view.skills.length}`));
+  out.push(`<div class="cp-list">${view.skills.map(skillRow).join("")}${view.skills.length ? "" : '<p class="cz-hint">Saved steps the model picks up by itself when a task matches. It offers to save one when the same steps work twice.</p>'}${newRow("skill")}</div>`);
   const mine = (file: CustomizeFile) => file.mine ? " · yours, every project" : "";
   out.push(head("Commands", `${view.root ? ".demesne/commands" : "~/.demesne/commands"} · ${view.commands.length}`));
   out.push(`<div class="cp-list">${view.commands.map((file) => fileRow(file, `${file.description || "No description"}${mine(file)}`)).join("")}${newRow("command")}</div>`);

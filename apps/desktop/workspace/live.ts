@@ -275,6 +275,7 @@ const verb = (tool: ToolEntry) =>
     foundry_save: "Made",
     foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
+    use_skill: "Using skill",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
@@ -1752,6 +1753,7 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
   if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
+  if (tool.name === "use_skill") return `<span class="step-skill">${h(String(tool.input.name ?? ""))}</span>`;
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
   if (tool.name === "run_command") return h(base.replace(/^\S*\//, ""));

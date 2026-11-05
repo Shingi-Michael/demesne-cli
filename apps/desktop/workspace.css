@@ -251,9 +251,15 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop #input-area { position: relative; padding: 12px 32px 22px; }
 /* In a chat the message box shares the answers' edges: it starts where the
    answer text starts (the d. sits in the 32px margin) and ends where your
-   messages end. */
-.desktop .live-app:not(.start) #input-area { padding-left: 32px; padding-right: 0; }
+   messages end. The area keeps the stage's own side padding, so the two
+   columns are the same box at any width, with the info cards open or not. */
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
+.desktop .live-app:not(.start) #input-area { max-width: none; }
+.desktop .live-app:not(.start) #input-area > #composer-slot { box-sizing: border-box; padding-left: 32px; }
+/* An approval above the box keeps its command in full: a habit note beside
+   it gives up its room first. */
+.desktop .approval-row code { flex-shrink: 0; max-width: 65%; }
+.desktop .approval-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .desktop .composer { border-radius: 12px; padding: 12px 14px 8px; gap: 8px; background: var(--surface); border-color: var(--line2); box-shadow: 0 5px 24px #00000012; }
 .desktop .composer:focus-within { border-color: color-mix(in srgb, var(--electric) 60%, var(--borderBright)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--electric) 7%, transparent); }
 .desktop .composer textarea { font-family: inherit; font-size: 14px; line-height: 22px; min-height: 44px; }
@@ -322,14 +328,14 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .modal { border-radius: 12px; box-shadow: 0 20px 70px #0006; }
 .desktop #notice { font-family: inherit; border-radius: 8px; }
 @media (max-width: 1150px) {
-  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 244px minmax(0, 1fr); }
+  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 260px minmax(0, 1fr); }
   #desktop-toolbar { padding: 0 14px; gap: 8px; }
   .desktop .live-app:not(.start) .stage { padding: 22px 20px 12px; }
   .desktop #input-area { padding: 10px 20px 18px; }
   
 }
 @media (max-width: 980px) {
-  #desktop-shell:not(.sidebar-collapsed):has(#desktop-sidebar:not([hidden])) { grid-template-columns: 226px minmax(0, 1fr); }
+  #desktop-shell:not(.sidebar-collapsed):has(#desktop-sidebar:not([hidden])) { grid-template-columns: 240px minmax(0, 1fr); }
   .desktop .composer-bar { flex-wrap: wrap; }
   .desktop .composer .hints { margin-left: auto; }
   .desktop .hero { gap: 24px; }
@@ -2440,3 +2446,21 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 :where(.sidebar-rail) .rail-button { color: var(--t2); }
 .sidebar-rail .rail-button.on { background: color-mix(in srgb, var(--acc) 16%, transparent); }
 .sidebar-rail .rail-button.on .ico { color: var(--acc); fill-opacity: .3; }
+
+/* Settings' list wears the sidebar's look, so the sidebar doesn't jump on
+   the way in and out: the same 34px rows and duotone icons, icons centred
+   27.5px in and labels starting 49px in, small-caps group labels. */
+#desktop-sidebar :is(.st-back, .st-nav, .st-search) { flex: none; }
+#desktop-sidebar :is(.st-back, .st-nav) { height: 34px; gap: 12px; padding: 0 10px; font-size: 14px; }
+#desktop-sidebar .st-back { color: var(--t2); }
+#desktop-sidebar :is(.st-back, .st-nav) .ico { width: 19px; height: 19px; stroke-width: 1.9; }
+#desktop-sidebar .st-nav .ico { fill: currentColor; fill-opacity: .2; color: var(--t2); }
+#desktop-sidebar .st-nav.on { background: color-mix(in srgb, var(--acc) 16%, transparent); color: var(--t1); }
+#desktop-sidebar .st-nav.on .ico { color: var(--acc); fill-opacity: .3; }
+#desktop-sidebar .st-nav-n { font-size: 11.5px; }
+#desktop-sidebar .st-nav-group { margin: 14px 0 4px; padding-left: 9px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; }
+
+/* The overview's "Worth a look" heading starts on the cards' edge, and a
+   card's line keeps its last words together instead of leaving one alone. */
+.ov-tiles ~ .st-head { margin-inline: 0; }
+.ov-tile small { text-wrap: pretty; }

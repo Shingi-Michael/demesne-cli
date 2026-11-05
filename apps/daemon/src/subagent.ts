@@ -30,6 +30,7 @@ export const subagentDefinition: ProviderToolDefinition = {
     properties: {
       description: { type: "string", minLength: 1, maxLength: 80, description: "A 3–6 word label for the user, e.g. \"Find session restore code\"." },
       prompt: { type: "string", minLength: 1, maxLength: 16_000, description: "The complete task: what to find out, where to look, and what the report must contain." },
+      kind: { type: "string", enum: ["find", "trace", "review", "read"], description: "What kind of job this is: find (where something lives), trace (follow a flow across files), review (judge changes or a diff), read (take in a lot of files at once). Picks which of the user's agent tools runs it." },
     },
   },
 };
@@ -47,14 +48,19 @@ export function subagentDefinitionFor(models: readonly SubagentModel[], defaultM
       description: `Optional: the model this sub-agent runs on. When the user names a model or provider for sub-agents, pass the matching id; otherwise omit it to use the default, ${defaultModel}. Available: ${models.map((model) => `${model.id} (${model.provider})`).join(", ")}.` } } } };
 }
 
-export function parseSubagentInput(input: unknown): { description: string; prompt: string; model?: string } {
+export const SUBAGENT_KINDS = ["find", "trace", "review", "read"] as const;
+export type SubagentKind = typeof SUBAGENT_KINDS[number];
+
+export function parseSubagentInput(input: unknown): { description: string; prompt: string; model?: string; kind?: SubagentKind } {
   if (!isRecord(input) || typeof input.description !== "string" || typeof input.prompt !== "string")
     throw new Error("subagent needs a description and a prompt");
   const description = input.description.trim(), prompt = input.prompt.trim();
   if (!description || description.length > 80) throw new Error("description must be 1–80 characters");
   if (!prompt || prompt.length > 16_000) throw new Error("prompt must be 1–16,000 characters");
   if (input.model !== undefined && (typeof input.model !== "string" || !input.model.trim() || input.model.length > 200)) throw new Error("model must be a configured model id");
-  return { description, prompt, ...(typeof input.model === "string" ? { model: input.model.trim() } : {}) };
+  // A kind the tool doesn't know is ignored: the label and brief decide then.
+  const kind = SUBAGENT_KINDS.find((known) => known === input.kind);
+  return { description, prompt, ...(typeof input.model === "string" ? { model: input.model.trim() } : {}), ...(kind ? { kind } : {}) };
 }
 
 const instructions = (workspaceRoot: string) => `You are a Demesne sub-agent: a focused, read-only researcher working for the main coding agent in ${workspaceRoot}.

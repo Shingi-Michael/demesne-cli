@@ -9,7 +9,8 @@ import type { ProviderMessage, ProviderStreamEvent } from "@demesne/providers";
 import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 import { subagentArgs, subagentStep } from "../src/agent-cli.ts";
-import { jobKind, pickAgent, RouteBook } from "../src/subagent-route.ts";
+import { grounded, jobKind, pickAgent, RouteBook } from "../src/subagent-route.ts";
+import { parseSubagentInput } from "../src/subagent.ts";
 import { claudeRun, fakeProcess } from "./agent-cli-fakes.ts";
 
 test("a job's kind comes from its label and brief", () => {
@@ -29,7 +30,7 @@ test("Auto picks by kind, skips tools that aren't here or are resting, then lear
   const record = { jobs: { claude: { find: { ok: 2, failed: 4 } }, codex: { find: { ok: 9, failed: 1 } } }, restUntil: {} };
   const pick = pickAgent("find", ["claude", "codex"], record)!;
   expect(pick.agent).toBe("codex");
-  expect(pick.why).toContain("9 of 10 finished on this machine");
+  expect(pick.why).toContain("9 of 10 good reports on this machine");
 });
 
 test("the record notes jobs and rests a tool that ran out of room", () => {
@@ -64,6 +65,7 @@ async function turn(options: { agent?: AgentConfig; spawn: (argv: string[]) => R
   const workspace = join(root, "workspace");
   mkdirSync(workspace); mkdirSync(join(root, "data"));
   writeFileSync(join(workspace, "notes.txt"), "The pane lives in pane.ts.\n");
+  writeFileSync(join(workspace, "pane.ts"), "export const pane = 1;\n");
   const spawned: string[][] = [], parent: ProviderMessage[][] = [];
   let modelSubagents = 0;
   const processor: TurnProcessor = { providerId: "test", modelId: "test", contextCapacity: 262144, maxOutputTokens: 1024,
@@ -122,4 +124,29 @@ test("subagent_model \"same\" keeps sub-agents on the chat's model", async () =>
   const { spawned, modelSubagents } = await turn({ agent: { subagentModel: "same" } as AgentConfig, spawn: () => fakeProcess(claudeRun("s1", "x")) });
   expect(spawned).toEqual([]);
   expect(modelSubagents).toBe(1);
+});
+
+test("the main model can name the job's kind; anything else is ignored", () => {
+  expect(parseSubagentInput({ description: "Look at the pane", prompt: "x", kind: "trace" }).kind).toBe("trace");
+  expect(parseSubagentInput({ description: "Look at the pane", prompt: "x", kind: "dance" }).kind).toBeUndefined();
+  expect(parseSubagentInput({ description: "Look at the pane", prompt: "x" }).kind).toBeUndefined();
+});
+
+test("a report is good only when it points at files that are really in the project", () => {
+  const root = mkdtempSync(join(tmpdir(), "demesne-grounded-"));
+  try {
+    mkdirSync(join(root, "src", "deep"), { recursive: true });
+    writeFileSync(join(root, "src", "deep", "live.ts"), "x");
+    expect(grounded("It is in src/deep/live.ts:12.", root)).toBe(true);
+    expect(grounded("See `live.ts` line 4", root)).toBe(true);
+    expect(grounded(`Found it at ${join(root, "src/deep/live.ts")}`, root)).toBe(true);
+    expect(grounded("It is in src/missing.ts:3 and app.config.json", root)).toBe(false);
+    expect(grounded("I could not find where the pane is drawn.", root)).toBe(false);
+    expect(grounded("Outside: /etc/hosts.txt", root)).toBe(false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a report with no real files counts against the tool Auto picked", async () => {
+  const { route } = await turn({ spawn: () => fakeProcess(claudeRun("s1", "I looked around but could not find it.")) });
+  expect(JSON.parse(route).jobs.claude.find).toEqual({ ok: 0, failed: 1 });
 });

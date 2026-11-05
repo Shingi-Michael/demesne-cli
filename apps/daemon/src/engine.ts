@@ -25,7 +25,7 @@ import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
 import { agentIdOf, subagentStep, type AgentId } from "./agent-cli.ts";
-import { jobKind, pickAgent, type RouteBook } from "./subagent-route.ts";
+import { grounded, jobKind, pickAgent, type JobKind, type RouteBook } from "./subagent-route.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
 import { loadSkills, skillsGuidance } from "./skills.ts";
@@ -692,9 +692,9 @@ export class AgentEngine {
   /// report is the tool result and its steps stream as progress on the card.
   private async executeSubagent(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string,
     inference: TurnInference, signal: AbortSignal): Promise<string> {
-    let prompt: string, requested: string | undefined, description: string;
+    let prompt: string, requested: string | undefined, description: string, givenKind: JobKind | undefined;
     try {
-      ({ prompt, model: requested, description } = parseSubagentInput(input));
+      ({ prompt, model: requested, description, kind: givenKind } = parseSubagentInput(input));
       const models = this.options.subagentModels?.() ?? [];
       if (requested && !models.some((model) => model.id === requested))
         throw new Error(`unknown sub-agent model ${requested}. Available: ${models.map((model) => model.id).join(", ") || "none"}`);
@@ -712,7 +712,8 @@ export class AgentEngine {
     let started = false;
     const named = agentIdOf(requested ?? (setting === "auto" || setting === "same" ? undefined : setting));
     if (cli && (named || (!requested && (setting === undefined || setting === "auto")))) {
-      const kind = jobKind(description, prompt);
+      // The kind the main model named, else a guess from the label and brief.
+      const kind = givenKind ?? jobKind(description, prompt);
       const available = cli.available();
       const pick = named ? (available.includes(named) ? { agent: named, why: "" } : null) : pickAgent(kind, available, cli.book?.read() ?? { jobs: {}, restUntil: {} });
       if (named && !pick) {
@@ -727,7 +728,8 @@ export class AgentEngine {
         this.store.appendToolProgress(turnId, toolCallId, { text: `${label}starting`, ...(pick.why ? { why: pick.why } : {}) });
         try {
           const report = await cli.run(pick.agent, prompt, workspaceRoot, signal, (line) => this.store.appendToolProgress(turnId, toolCallId, { text: label + subagentStep(line) }));
-          if (!named) cli.book?.note(pick.agent, kind, true);
+          // Only a report that points at real files counts as a job done well.
+          if (!named) cli.book?.note(pick.agent, kind, grounded(report, workspaceRoot));
           this.store.appendToolProgress(turnId, toolCallId, { report: report.slice(0, 16 * 1024) });
           const result = `${report.slice(0, 16 * 1024)}\n\n(Sub-agent ran on ${pick.agent === "claude" ? "Claude Code" : pick.agent === "codex" ? "Codex" : "Gemini"}.)`;
           this.store.settleToolCall(toolCallId, "completed", result);

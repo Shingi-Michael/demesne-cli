@@ -88,7 +88,8 @@ if (pagesDir) {
 }
 
 const READS = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history", "session_tools", "foundry_read", "foundry_save", "foundry_edit"]);
-const MAX_ROUNDS = 10;
+// Generous, like a real chat: a model that reads first still gets to make its page.
+const MAX_ROUNDS = 20;
 interface Watch { rounds: number; calls: string[]; outputTokens: number; error: string | null }
 let current: Watch = { rounds: 0, calls: [], outputTokens: 0, error: null };
 

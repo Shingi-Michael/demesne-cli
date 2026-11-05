@@ -216,6 +216,9 @@ test("the tools carry the design brief, the kit and the library rules", () => {
     expect(DESIGN_BRIEF).toContain("phone width");
     expect(DESIGN_BRIEF).toContain("the kit is the floor");
     expect(DESIGN_BRIEF).not.toContain("little CSS");
+    // Sizes, spaces and colours come from the kit's scales (the quality eval found 8-16 sizes and 12-25 colours without them).
+    expect(DESIGN_BRIEF).toContain("var(--text-xs|sm|md|lg|xl|display)");
+    expect(DESIGN_BRIEF).toContain("var(--space-1…8)");
     expect(JSON.stringify(foundryReadTool(store).definition)).toContain("base_version");
   } finally { store.close(); }
 });

@@ -858,6 +858,12 @@ export class DemesneStore {
   }
 
   /// One chat turn's model messages, compacted or not: what recall_turn brings back.
+  /// A turn's reasoning text, all of it (an agent tool's steps arrive this way).
+  turnReasoning(turnId: string): string {
+    return (this.database.query("SELECT payload FROM events WHERE turn_id = ? AND type = 'reasoning.delta' ORDER BY id").all(turnId) as Array<{ payload: string }>)
+      .map((row) => { try { const delta = (JSON.parse(row.payload) as { delta?: unknown }).delta; return typeof delta === "string" ? delta : ""; } catch { return ""; } }).join("");
+  }
+
   getTurnModelMessages(sessionId: string, turnId: string): ModelMessage[] {
     const rows = this.database.query(`
       SELECT model_messages.id, model_messages.turn_id, model_messages.role, model_messages.content,

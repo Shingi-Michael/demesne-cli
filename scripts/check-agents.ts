@@ -117,12 +117,10 @@ try {
   const noise = new Uint8Array(3200 * 2000 * 3).map(() => Math.floor(Math.random() * 256));
   const big = await sharp(noise, { raw: { width: 3200, height: 2000, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
   expect(big.byteLength > 15 * 1024 * 1024, "the test screenshot is a big file");
-  // Handing 19 MB to the page takes the test seconds; a live redraw in that
-  // time (a mood changing in the side cards) replaces the input, so try twice.
-  for (let attempt = 0; attempt < 2 && await page.locator("#today-share .td-attach img").count() === 0; attempt++) {
-    await page.locator("#today-file").setInputFiles({ name: "shot.png", mimeType: "image/png", buffer: big });
-    await page.locator("#today-share .td-attach img").waitFor({ timeout: 5_000 }).catch(() => {});
-  }
+  // The picker lives outside the page, so a redraw can't lose the pick.
+  await page.locator("#today-file").setInputFiles({ name: "shot.png", mimeType: "image/png", buffer: big });
+  await page.locator("#today-share .td-attach img").waitFor({ timeout: 20_000 }).catch(() => {});
+  expect(await page.locator("#today-share .td-attach img").count() === 1, "the big screenshot is attached, shrunk to fit");
   await page.locator("#today-share input[name=text]").fill("Got the tabs right today");
   await page.locator("#today-share .td-post-btn").click();
   await page.waitForFunction(() => [...document.querySelectorAll("#page .td-post")].some((item) => item.textContent?.includes("Got the tabs right today")), undefined, { timeout: 15_000 }).catch(() => {});

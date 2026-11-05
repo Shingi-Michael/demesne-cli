@@ -14,6 +14,7 @@ import type { ProviderMessage } from "@demesne/providers";
 import type { AgentId } from "./agent-cli.ts";
 import type { PictureMaker } from "./social-pictures.ts";
 import { CLIP_SECONDS, type ClipMaker } from "./social-reel.ts";
+import { ARC_NAMES, EVENTS_KEPT_DAYS, arcScene, arcToTell, chapterMessages, findArcs, parseChapter, type ArcEvent, type Chapter, type ToldArc } from "./story-arcs.ts";
 import { CHARACTERS, characterPrompt, lineProblems, pickLine, versions, VERSIONS, type LineCheck } from "./characters.ts";
 import { emptyMemory, keepNight, memoryBlock, parseNight, sleepMessages, type AgentMemory, type Belief, type DiaryEntry } from "./sleep.ts";
 import { closeness, feel, moodOf, REMEMBER_MAX, tie, type Closeness, type FeelKind, type Feeling, type Mood, type Remembered, type Tie } from "./inner-life.ts";
@@ -104,6 +105,8 @@ export interface SocialProfile {
   /// Its last nights' diary entries, newest first, and what it believes (sleep.ts).
   diary: DiaryEntry[];
   beliefs: Belief[];
+  /// Its weekly chapters (story-arcs.ts), newest first.
+  chapters: Chapter[];
 }
 
 /// What the morning and night posts can say: your chats in the last day and a half, and today.
@@ -127,7 +130,9 @@ export interface SocialReel {
   /// The ISO week it sums up, and when it was made.
   week: string;
   at: string;
-  frames: Array<{ postId: string; by: SocialWho; text: string; picture: boolean }>;
+  /// A chapter (an agent's week, in its words), an arc (something that
+  /// really happened, story-arcs.ts) or a post.
+  frames: Array<{ postId: string; by: SocialWho; text: string; picture: boolean; kind?: "chapter" | "arc" | "post"; title?: string }>;
   numbers: { posts: number; work: number; mail: number; nights: number; moments: number };
   /// What the clip shows, and whether it's being made, ready, or not coming.
   scene: string | null;
@@ -137,7 +142,7 @@ export interface SocialReel {
 /// A story (pass 141 B): a small moment from an agent's day that lasts 24
 /// hours. Each comes from a real event, in words taken from the event
 /// itself (no model call), with the mood its face shows.
-export type StoryKind = "start" | "done" | "failed" | "mail" | "morning" | "night";
+export type StoryKind = "start" | "done" | "failed" | "mail" | "morning" | "night" | "arc";
 export interface SocialStory {
   id: string; by: AgentId; at: string; kind: StoryKind;
   text: string;
@@ -174,6 +179,13 @@ interface SocialsFile {
   remembered?: Partial<Record<AgentId, Remembered[]>>;
   /// What each agent keeps from its nights (sleep.ts).
   memory: Partial<Record<AgentId, AgentMemory>>;
+  /// What really happened, for finding arcs (story-arcs.ts): two weeks of it.
+  arcEvents?: ArcEvent[];
+  /// Arcs that became stories, and each agent's weekly chapters.
+  arcsTold?: ToldArc[];
+  chapters?: Partial<Record<AgentId, Chapter[]>>;
+  /// The week each agent last tried its chapter (a chapter that fails the checks isn't retried).
+  chapterTried?: Partial<Record<AgentId, string>>;
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -220,6 +232,8 @@ const PICTURE_DOLLARS = 0.04;
 const VIDEO_DOLLARS_PER_SECOND = 0.1;
 /// The reel: from Friday 5 pm, when the week had at least this many posts; reels kept.
 const REEL_HOUR = 17, REEL_POSTS = 5, REEL_FRAMES = 6, REELS_KEPT = 12;
+/// Arcs in the reel, and arcs remembered (for chapters and reels).
+const REEL_ARCS = 3, ARCS_KEPT = 60;
 
 /// The day's posts: morning from 8 (until noon), night from 22.
 const MORNING_HOUR = 8, MORNING_UNTIL = 12, NIGHT_HOUR = 22;
@@ -298,13 +312,6 @@ export function dayMessages(id: AgentId, when: "morning" | "night", facts: strin
   return [
     { role: "system", content: `${persona(id)} ${ask} ${RULES}` },
     { role: "user", content: facts.length ? facts.map((line) => `- ${clip(line, 160)}`).join("\n") : "(a quiet day)" },
-  ];
-}
-
-export function sceneMessages(week: string[]): ProviderMessage[] {
-  return [
-    { role: "system", content: "You describe one short, calm animated scene of three friends (they build software together) that sums up their week below. One sentence, under 30 words, something they could really do together: a walk, a late night, a small celebration. Never mention screens, code, words or real people. Reply with the sentence only." },
-    { role: "user", content: week.slice(-30).map((line) => `- ${clip(line, 160)}`).join("\n") },
   ];
 }
 
@@ -435,18 +442,20 @@ export class SocialFeed {
   /// Something happened in an agent's day: a story, in the event's own
   /// words. The same thing twice in ten minutes counts once, and an agent
   /// gets at most eight a day.
-  noteStory(agent: AgentId, kind: StoryKind, detail: { text?: string; title?: string; sessionId?: string; workspace?: string | null; happy?: boolean }): SocialStory | null {
+  noteStory(agent: AgentId, kind: StoryKind, detail: { text?: string; title?: string; sessionId?: string; workspace?: string | null; happy?: boolean; from?: AgentId | null; files?: string[] }): SocialStory | null {
     if (!this.options.agents().includes(agent)) return null;
     const now = this.now(), title = clip((detail.title ?? "").trim() || "a chat", 70);
+    this.logEvent(agent, kind, detail);
     const live = this.liveStories();
     if (live.some((story) => story.by === agent && story.kind === kind && story.sessionId === (detail.sessionId ?? "") && now.getTime() - Date.parse(story.at) < 10 * 60_000)) return null;
-    const feeling: Record<StoryKind, FeelKind> = { start: "start", done: detail.happy ? "merged" : "done", failed: "failed", mail: "mail", morning: "morning", night: "night" };
-    const felt: Record<StoryKind, string> = { start: `Started on ${title}`, done: `${detail.happy ? "Merged" : "Finished"} ${title}`, failed: `Stuck on ${title}`, mail: `Answered mail: ${title}`, morning: "Morning", night: "Late night" };
+    if (kind === "arc") return null;
+    const feeling: Record<Exclude<StoryKind, "arc">, FeelKind> = { start: "start", done: detail.happy ? "merged" : "done", failed: "failed", mail: "mail", morning: "morning", night: "night" };
+    const felt: Record<Exclude<StoryKind, "arc">, string> = { start: `Started on ${title}`, done: `${detail.happy ? "Merged" : "Finished"} ${title}`, failed: `Stuck on ${title}`, mail: `Answered mail: ${title}`, morning: "Morning", night: "Late night" };
     this.feel(agent, feeling[kind], felt[kind]);
     this.save();
     if (live.filter((story) => story.by === agent).length >= STORIES_A_DAY) return null;
     const place = detail.workspace ? ` · ${detail.workspace.split(/[\\/]/).filter(Boolean).at(-1)}` : "";
-    const shape: Record<StoryKind, { text: string; label: string; mood: SocialStory["mood"] }> = {
+    const shape: Record<Exclude<StoryKind, "arc">, { text: string; label: string; mood: SocialStory["mood"] }> = {
       start: { text: `Started on ${title}`, label: `Chat${place}`, mood: "focus" },
       done: { text: detail.happy ? `Merged it: ${title}` : `Finished ${title}`, label: `Chat${place}`, mood: detail.happy ? "happy" : "calm" },
       failed: { text: `Stuck on ${title}`, label: `Chat${place}`, mood: "stuck" },
@@ -459,6 +468,70 @@ export class SocialFeed {
     this.data.stories = [...this.data.stories.filter((item) => Date.parse(item.at) > since), story];
     this.save();
     return story;
+  }
+
+  /// Keeps what really happened for finding arcs: two weeks of chats
+  /// started, finished, merged, stuck, mail answered and files changed.
+  private logEvent(agent: AgentId, kind: StoryKind, detail: { title?: string; sessionId?: string; happy?: boolean; from?: AgentId | null; files?: string[] }) {
+    if (kind === "morning" || kind === "night" || kind === "arc") return;
+    const at = this.now().toISOString(), sessionId = detail.sessionId ?? "", title = clip((detail.title ?? "").trim(), 120);
+    const since = this.now().getTime() - EVENTS_KEPT_DAYS * 86_400_000;
+    const events = (this.data.arcEvents ?? []).filter((event) => Date.parse(event.at) > since);
+    events.push({ at, by: agent, kind: kind === "done" && detail.happy ? "merged" : kind, sessionId, title, ...(detail.from && detail.from !== agent ? { with: detail.from } : {}) });
+    for (const file of new Set(detail.files ?? [])) if (file) events.push({ at, by: agent, kind: "file", sessionId, title: clip(file, 200) });
+    this.data.arcEvents = events;
+  }
+
+  /// The best arc the day has found, told as two or three beats of stories
+  /// (at most two arcs a day). Run once a minute; no model call.
+  tellArc(): SocialStory[] {
+    const now = this.now(), agents = this.options.agents();
+    const arcs = findArcs(this.data.arcEvents ?? [], now, nameOf).filter((arc) => agents.includes(arc.by));
+    const arc = arcToTell(arcs, this.data.arcsTold ?? [], now);
+    if (!arc) return [];
+    const time = (at: string) => { const date = new Date(at); return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`; };
+    const stories: SocialStory[] = arc.beats.map((beat, index) => ({
+      id: randomUUID(), by: arc.by, at: new Date(now.getTime() + index).toISOString(), kind: "arc" as const,
+      text: beat.text, label: `${ARC_NAMES[arc.shape]} · ${time(beat.at)}`, mood: beat.mood, sessionId: beat.sessionId,
+    }));
+    const since = now.getTime() - STORY_HOURS * 3_600_000;
+    this.data.stories = [...this.data.stories.filter((item) => Date.parse(item.at) > since), ...stories];
+    const told: ToldArc = { key: arc.key, shape: arc.shape, by: arc.by, ...(arc.with ? { with: arc.with } : {}), at: arc.at, told: now.toISOString(), text: arc.text, beats: arc.beats, score: arc.score };
+    this.data.arcsTold = [...this.data.arcsTold ?? [], told].slice(-ARCS_KEPT);
+    this.save();
+    return stories;
+  }
+
+  /// From Friday 5 pm: each agent writes its week as a short chapter from
+  /// its diary and the week's arcs (one call each). It's checked like any
+  /// line it writes; one that fails keeps nothing and isn't tried again.
+  async chapters(): Promise<AgentId[]> {
+    const now = this.now(), day = now.getDay(), week = weekOf(now), written: AgentId[] = [];
+    if (!(day === 5 && now.getHours() >= REEL_HOUR) && day !== 6 && day !== 0) return written;
+    if (this.writing.has("chapters")) return written;
+    this.writing.add("chapters");
+    try {
+      for (const agent of this.options.agents()) {
+        const tried = (this.data.chapterTried ??= {});
+        if (tried[agent] === week) continue;
+        const arcs = (this.data.arcsTold ?? []).filter((arc) => weekOf(new Date(arc.told)) === week && (arc.by === agent || arc.with === agent));
+        const diary = (this.data.memory[agent]?.diary ?? []).filter((item) => weekOf(new Date(`${item.day}T12:00:00`)) === week).map((item) => `${item.day}: ${item.text}`);
+        const posts = this.data.posts.filter((post) => post.by === agent && weekOf(new Date(post.at)) === week).map((post) => post.text);
+        if (!arcs.length && diary.length < 2) continue;
+        tried[agent] = week;
+        this.save();
+        const chapter = parseChapter(await this.call(chapterMessages(agent, diary, arcs, posts)));
+        if (!chapter) continue;
+        const facts = [...arcs.flatMap((arc) => [arc.text, ...arc.beats.map((beat) => beat.text)]), ...diary, ...posts, this.data.memory[agent]?.notes ?? ""].join("\n");
+        const check: LineCheck = { facts, mine: [], recent: [], week: [] };
+        if (lineProblems(agent, chapter.title, check).length || lineProblems(agent, chapter.text, check).length) continue;
+        const list = ((this.data.chapters ??= {})[agent] ?? []).filter((item) => item.week !== week);
+        this.data.chapters[agent] = [...list, { week, title: chapter.title, text: chapter.text, shapes: [...new Set(arcs.map((arc) => arc.shape))], at: now.toISOString() }].slice(-WEEKS_KEPT);
+        this.save();
+        written.push(agent);
+      }
+    } finally { this.writing.delete("chapters"); }
+    return written;
   }
 
   /// The reel's opening clip (MP4), or null.
@@ -480,15 +553,24 @@ export class SocialFeed {
     if (this.data.reels.some((item) => item.week === week) || this.writing.has("reel")) return null;
     const posts = this.data.posts.filter((post) => weekOf(new Date(post.at)) === week);
     if (posts.length < REEL_POSTS) return null;
+    // The chapters open the reel, so they're written first.
+    await this.chapters();
+    if (this.data.reels.some((item) => item.week === week) || this.writing.has("reel")) return null;
     this.writing.add("reel");
     try {
       const told = posts.filter((post) => post.by !== "demesne" && post.from.kind !== "moment" && post.text);
       const chosen = [...told.filter((post) => post.picture), ...told.filter((post) => !post.picture)].slice(0, REEL_FRAMES)
         .sort((a, b) => a.at.localeCompare(b.at));
+      const chapters = this.options.agents().flatMap((agent) => (this.data.chapters?.[agent] ?? []).filter((item) => item.week === week).map((item) => ({ agent, item })));
+      const arcs = (this.data.arcsTold ?? []).filter((arc) => weekOf(new Date(arc.told)) === week).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
       const count = (kind: SocialSource["kind"]) => posts.filter((post) => post.from.kind === kind).length;
       const reel: SocialReel = {
         id: randomUUID(), week, at: now.toISOString(),
-        frames: chosen.map((post) => ({ postId: post.id, by: post.by, text: post.text, picture: Boolean(post.picture) })),
+        frames: [
+          ...chapters.map(({ agent, item }) => ({ postId: "", by: agent, text: item.text, picture: false, kind: "chapter" as const, title: item.title })),
+          ...arcs.slice(0, REEL_ARCS).sort((a, b) => a.at.localeCompare(b.at)).map((arc) => ({ postId: "", by: arc.by, text: arc.text, picture: false, kind: "arc" as const, title: ARC_NAMES[arc.shape] })),
+          ...chosen.map((post) => ({ postId: post.id, by: post.by, text: post.text, picture: Boolean(post.picture), kind: "post" as const })),
+        ],
         numbers: { posts: posts.length, work: count("work"), mail: count("mail"), nights: count("night"), moments: count("moment") },
         scene: null, clip: "none",
       };
@@ -504,8 +586,8 @@ export class SocialFeed {
       this.data.reels = [...this.data.reels, reel].slice(-REELS_KEPT);
       this.save();
       if (reel.clip === "making") {
-        reel.scene = cleanPost(await this.call(sceneMessages(posts.map((post) => `${nameOf(post.by)}: ${post.text}`))), 240)
-          ?? "the three friends walk home together under the cherry blossom at dusk after a good week of work";
+        // The video shows the week's best arc, something that really happened.
+        reel.scene = arcs[0] ? arcScene(arcs[0], nameOf) : "three adult friends who build software together share a quiet cup of tea in a cosy studio under cherry blossom at the end of the week";
         const bytes = await clip!(agents, reel.scene).catch(() => null);
         if (bytes) {
           mkdirSync(this.pictureDir, { recursive: true });
@@ -677,6 +759,7 @@ export class SocialFeed {
       remembers: this.remembers(agent),
       diary: [...this.data.memory[agent]?.diary ?? []].reverse().slice(0, 3),
       beliefs: this.data.memory[agent]?.beliefs ?? [],
+      chapters: [...this.data.chapters?.[agent] ?? []].reverse().slice(0, 4),
     };
   }
 

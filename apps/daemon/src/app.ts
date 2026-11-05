@@ -2,6 +2,7 @@ import { collectDriveReview } from "./drive-review.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
+import { parseMailTurn } from "@demesne/protocol";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
@@ -369,7 +370,7 @@ export function createDaemonApp(options: {
   };
   const isAgentChat = (sessionId: string) => agentIdOf(store.getSession(sessionId)?.preferredModel) !== null;
   /// Turns that answer Heartbeat mail, so the agent's post says so.
-  const mailTurns = new Set<string>();
+  const mailTurns = new Map<string, AgentId | null>();
   const heartbeatClient = new HeartbeatClient(options.heartbeat?.socket ?? heartbeatSocketPath());
   const heartbeat = heartbeatEnabled(options.heartbeat, heartbeatClient) ? new HeartbeatBridge({
     client: heartbeatClient,
@@ -377,7 +378,9 @@ export function createDaemonApp(options: {
       // Mail runs on Auto, like a Drive mission: nobody is at the window to
       // approve, and a turn that waits never answers the sender.
       const { turn } = store.createTurn(sessionId, content, "allow");
-      mailTurns.add(turn.id);
+      // Who sent it, when it came from another agent (for "a helping hand").
+      const senders = (parseMailTurn(content)?.messages ?? []).map((message) => heartbeat?.sessionOf(message.from) ?? null);
+      mailTurns.set(turn.id, senders.map((id) => id ? agentIdOf(store.getSession(id)?.preferredModel) : null).find(Boolean) ?? null);
       return { turnId: turn.id, done: queueTurn(turn, inferenceIn(sessionId, undefined)) };
     },
     // An agent tool's chat answers its mail by itself: the answer goes back.
@@ -472,7 +475,8 @@ export function createDaemonApp(options: {
   function noteSocial(turnId: string) {
     const turn = store.getTurn(turnId);
     const session = turn && store.getSession(turn.sessionId);
-    const mail = mailTurns.delete(turnId);
+    const mail = mailTurns.has(turnId), from = mailTurns.get(turnId) ?? null;
+    mailTurns.delete(turnId);
     if (!socials || !turn || !session || turn.status !== "completed" || turn.kind || turn.fromDrive || turn.fromRoutine) return;
     if (session.id === assistantChat.existing() || driveFixes.isThread(session.id)) return;
     const workspace = session.workspace?.root ?? null;
@@ -480,13 +484,17 @@ export function createDaemonApp(options: {
     if (agent) {
       const answered = store.getTurnModelMessages(session.id, turnId).filter((message) => message.role === "assistant")
         .map((message) => typeof message.content === "string" ? message.content : "").filter(Boolean).at(-1) ?? "";
-      socials.noteStory(agent, mail ? "mail" : "done", { title: askedOf(turn.content), sessionId: session.id, workspace, happy: /\bmerged\b/i.test(answered) });
+      socials.noteStory(agent, mail ? "mail" : "done", { title: mail ? mailWords(turn.content) : askedOf(turn.content), sessionId: session.id, workspace, happy: /\bmerged\b/i.test(answered), from, files: editedFiles(store.turnReasoning(turnId)) });
       void socials.noteAgentTurn(agent, { kind: mail ? "mail" : "work", label: session.title, sessionId: session.id, workspace }, turn.content, answered).catch(() => {});
     } else if (turn.permissionMode === "ask" && workspace && !inDriveWorktree(workspace)) {
       // Named a beat later (chat-name.ts), so the moment reads the chat's name.
       setTimeout(() => { const title = store.getSession(session.id)?.title ?? session.title; void socials.noteMoment(session.id, title, workspace).catch(() => {}); }, 25_000).unref?.();
     }
   }
+  /// What mail asked, in its own words.
+  const mailWords = (content: string) => parseMailTurn(content)?.messages[0]?.text ?? askedOf(content);
+  /// The files an agent tool changed in a turn: its "Edited <path>" steps (agent-cli.ts).
+  const editedFiles = (steps: string) => [...new Set([...steps.matchAll(/^Edited (\S.*)$/gm)].map((match) => match[1]!.trim()).filter((path) => path !== "a file"))];
   /// What a turn asked, as a story's few words: its first line.
   const askedOf = (content: string) => content.split("\n").map((line) => line.trim()).find(Boolean)?.replace(/[.!?]+$/, "") ?? "";
   /// An agent's chat started or got stuck: a story (pass 141), no model call.
@@ -557,7 +565,7 @@ export function createDaemonApp(options: {
   const routinesTimer = setInterval(() => { try { routines.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   // The feed's good morning and good night posts, checked once a minute.
   // And from Friday 5 pm, the week's reel.
-  const socialsTimer = socials ? setInterval(() => { void socials.tick().catch(() => {}); void socials.weekReel().catch(() => {}); void socials.sleep().catch(() => {}); }, 60_000) : undefined;
+  const socialsTimer = socials ? setInterval(() => { socials.tellArc(); void socials.tick().catch(() => {}); void socials.weekReel().catch(() => {}); void socials.sleep().catch(() => {}); }, 60_000) : undefined;
   socialsTimer?.unref?.();
   routinesTimer.unref?.();
   // Every chat in a project is told what Drive has and is doing; Drive's

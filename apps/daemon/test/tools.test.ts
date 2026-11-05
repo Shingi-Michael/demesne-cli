@@ -244,6 +244,26 @@ describe("built-in tools", () => {
     }
   });
 
+  test("reading the same unchanged text twice in one turn points back at it", async () => {
+    const root = workspace();
+    writeFileSync(join(root, "a.txt"), Array.from({ length: 300 }, (_, index) => `line ${index + 1}`).join("\n") + "\n");
+    writeFileSync(join(root, "small.txt"), "tiny\n");
+    const tools = new ToolRegistry();
+    const turn = { workspaceRoot: root, signal: new AbortController().signal, turnId: "t1" };
+    const first = JSON.parse(await tools.get("read_file")!.execute({ path: "a.txt" }, turn));
+    expect(first.content).toContain("line 300");
+    const again = JSON.parse(await tools.get("read_files")!.execute({ files: [{ path: "a.txt" }, { path: "small.txt" }] }, turn));
+    expect(again.results[0]).toMatchObject({ path: "a.txt", unchanged: true, range: { from: 1, to: 300 } });
+    expect(again.results[0]).not.toHaveProperty("content");
+    expect(again.results[1].content).toContain("tiny");
+    expect(JSON.parse(await tools.get("read_file")!.execute({ path: "small.txt" }, turn)).content).toContain("tiny");
+    // Another turn, a subagent (no turn id), or a changed file gets the text.
+    expect(JSON.parse(await tools.get("read_file")!.execute({ path: "a.txt" }, { ...turn, turnId: "t2" })).content).toContain("line 1");
+    expect(JSON.parse(await tools.get("read_file")!.execute({ path: "a.txt" }, { workspaceRoot: root, signal: turn.signal })).content).toContain("line 1");
+    writeFileSync(join(root, "a.txt"), "changed\n".repeat(300));
+    expect(JSON.parse(await tools.get("read_file")!.execute({ path: "a.txt" }, turn)).content).toContain("changed");
+  });
+
   test("long files read in large windows: at least 200 lines, default 400 (read_files 200)", async () => {
     const root = workspace();
     writeFileSync(join(root, "long.txt"), Array.from({ length: 1000 }, (_, index) => `line ${index + 1}`).join("\n") + "\n");

@@ -5,7 +5,7 @@ body.desktop input, body.desktop select { font: inherit; }
 body.desktop code,
 body.desktop pre,
 body.desktop kbd { font-family: "JetBrains Mono", monospace; }
-#desktop-shell { display: grid; grid-template-columns: 256px minmax(0, 1fr); grid-template-rows: 48px minmax(0, 1fr); background: var(--ink); }
+#desktop-shell { display: grid; grid-template-columns: 288px minmax(0, 1fr); grid-template-rows: 48px minmax(0, 1fr); background: var(--ink); }
 #desktop-shell:has(#desktop-sidebar[hidden]) { grid-template-columns: 0 minmax(0, 1fr); }
 #desktop-sidebar { grid-column: 1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--side); padding: 14px 12px 10px; }
 .ico { flex: none; display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
@@ -312,14 +312,14 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .modal { border-radius: 12px; box-shadow: 0 20px 70px #0006; }
 .desktop #notice { font-family: inherit; border-radius: 8px; }
 @media (max-width: 1150px) {
-  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 228px minmax(0, 1fr); }
+  #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 256px minmax(0, 1fr); }
   #desktop-toolbar { padding: 0 14px; gap: 8px; }
   .desktop .live-app:not(.start) .stage { padding: 22px 20px 12px; }
   .desktop #input-area { padding: 10px 20px 18px; }
   
 }
 @media (max-width: 980px) {
-  #desktop-shell:not(.sidebar-collapsed):has(#desktop-sidebar:not([hidden])) { grid-template-columns: 212px minmax(0, 1fr); }
+  #desktop-shell:not(.sidebar-collapsed):has(#desktop-sidebar:not([hidden])) { grid-template-columns: 236px minmax(0, 1fr); }
   .desktop .composer-bar { flex-wrap: wrap; }
   .desktop .composer .hints { margin-left: auto; }
   .desktop .hero { gap: 24px; }
@@ -2371,3 +2371,48 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-pic { width: min(360px, 100%); aspect-ratio: 16 / 10; max-height: 240px; }
 .td-pic.td-shot { width: auto; max-width: min(440px, 100%); max-height: 300px; aspect-ratio: auto; }
 .td-pic.td-shot.td-pic-wait { width: min(360px, 100%); aspect-ratio: 16 / 10; }
+
+/* Sidebar icon tiles: each row's icon sits in a small colored tile with a
+   white glyph, like macOS settings, and the sidebar reads a step larger.
+   The tile is the icon's own box (an svg takes padding and a background). */
+body.desktop {
+  --tile-assist: #d4588c; --tile-search: #7d7d84; --tile-new: #3f9a5c; --tile-folder: #3a92ad;
+  --tile-claude: #c9714a; --tile-codex: #3f7fe0; --tile-gemini: #7a68e0;
+  --tile-chat: #3f7fe0; --tile-scheduled: #d08a22; --tile-foundry: #7a68e0; --tile-customize: #5c6b80;
+}
+html[data-theme="demesne-light"] body.desktop {
+  --tile-assist: #c2477a; --tile-search: #6e6e74; --tile-new: #2f8a4c; --tile-folder: #2f8aa6;
+  --tile-claude: #c0663c; --tile-codex: #2f6fdb; --tile-gemini: #6b58d6;
+  --tile-chat: #2f6fdb; --tile-scheduled: #b8771c; --tile-foundry: #6b58d6; --tile-customize: #55637a;
+}
+#desktop-sidebar :is(.sidebar-nav button, .sidebar-search, #sidebar-open-project) { height: 38px; gap: 11px; padding: 0 8px; font-size: 14.5px; }
+#desktop-sidebar .sidebar-search input { font-size: 14.5px !important; }
+#desktop-sidebar :where(.sidebar-nav button, .sidebar-search, #sidebar-open-project) .ico { box-sizing: border-box; width: 26px; height: 26px; padding: 5.5px; border-radius: 7px; background: var(--tile-search); color: #fff; stroke-width: 1.9; }
+#desktop-sidebar #sidebar-assistant .ico { background: var(--tile-assist); }
+#desktop-sidebar [data-action="new-session"] .ico { background: var(--tile-chat); }
+#desktop-sidebar [data-args*='"scheduled"'] .ico { background: var(--tile-scheduled); }
+#desktop-sidebar [data-args*='"foundry"'] .ico { background: var(--tile-foundry); }
+#desktop-sidebar [data-args*='"customize"'] .ico { background: var(--tile-customize); }
+#desktop-sidebar #sidebar-open-project .ico { background: var(--tile-new); }
+/* A project's folder is a smaller tile, so its chats still read as its own. */
+#desktop-sidebar :is(.sidebar-project-header, .sidebar-group-row) { height: 36px; }
+#desktop-sidebar :is(.sidebar-project-name, .sidebar-group-toggle) { height: 36px; font-size: 14.5px; }
+#desktop-sidebar .sidebar-group-icon { box-sizing: border-box; width: 22px; height: 22px; padding: 4px; border-radius: 6px; background: var(--tile-folder); color: #fff; stroke-width: 1.9; }
+#desktop-sidebar [aria-expanded="false"] > .sidebar-group-icon { color: #fff; opacity: .78; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats, .sidebar-agent-rows) { margin-left: 19px; }
+#desktop-sidebar .sidebar-session { height: 36px; font-size: 14.5px; }
+#desktop-sidebar .sidebar-session-age { font-size: 11.5px; }
+/* Agents: Today and each agent's face sit in the same tile size. */
+#desktop-sidebar .sidebar-housed-label { font-size: 11.5px; }
+#desktop-sidebar .sidebar-housed-row { height: 38px; gap: 11px; padding: 0 10px 0 8px; border-radius: var(--r); font-size: 14.5px; }
+#desktop-sidebar .sidebar-housed-row small { font-size: 12px; }
+#desktop-sidebar .sidebar-housed-row .agent-mark { width: 26px; height: 26px; border-radius: 7px; font-size: 14px; }
+#desktop-sidebar .sidebar-housed-row .agent-mark.today-mark { background: var(--blossom, #f2b6c8); }
+#desktop-sidebar .sidebar-housed-row .agent-face[data-provider="claude"] { background: var(--tile-claude); }
+#desktop-sidebar .sidebar-housed-row .agent-face[data-provider="codex"] { background: var(--tile-codex); }
+#desktop-sidebar .sidebar-housed-row .agent-face[data-provider="gemini"] { background: var(--tile-gemini); }
+#desktop-sidebar .sidebar-housed-row .agent-face .agent-face-svg { width: 100%; height: 100%; }
+#desktop-sidebar .sidebar-housed-row.on { background: color-mix(in srgb, var(--acc) 14%, var(--tone2)); }
+/* The foot keeps its buttons plain; only you grow to match. */
+#desktop-sidebar .sidebar-avatar { width: 26px; height: 26px; font-size: 12px; }
+#desktop-sidebar .sidebar-you { font-size: 14px; }

@@ -171,7 +171,7 @@ if (!readme) {
     new MutationObserver(() => { if (!notice.hidden) notes.push(notice.textContent ?? ""); }).observe(notice, { attributes: true, childList: true, characterData: true, subtree: true });
   });
   await page.fill("textarea", "/fix-bug Handle an empty name in greet()"); await page.keyboard.press("Enter");
-  for (let i = 0; i < 20 && !(await page.locator("#drive-turn:not([hidden])").count()); i++) await page.waitForTimeout(500);
+  for (let i = 0; i < 20 && !(await page.locator("#briefing:not([hidden])").count()); i++) await page.waitForTimeout(500);
   await page.waitForTimeout(1500);
   await shot("04-drive-live");
   const stray = [...(await page.evaluate(() => (window as unknown as { notices: string[] }).notices)), ...pageErrors.slice(before)].filter((text) => text.includes("session changed"));

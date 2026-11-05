@@ -1455,11 +1455,11 @@ function renderStatus() {
     pageOpen,
   ]);
   renderCards();
-  const rim = rimState(phase), peek = drivePeek();
+  const rim = rimState(phase);
   applyRim(rim);
   renderPlanLimit();
-  if (signature + JSON.stringify([rim, peek]) === statusSignature) return;
-  statusSignature = signature + JSON.stringify([rim, peek]);
+  if (signature + JSON.stringify(rim) === statusSignature) return;
+  statusSignature = signature + JSON.stringify(rim);
   // A quiet footer: a spinner while working, a word only when the state
   // needs attention (failed, approval, offline…). "ready" says nothing.
   const working = Boolean(state.activeTurnId) && !["approval", "waiting", "failed"].includes(phase);
@@ -1577,41 +1577,12 @@ for (const type of ["pointerdown", "keydown"] as const)
       queueMicrotask(() => { statusSignature = ""; renderStatus(); });
     }
   }, true);
-/// Drive's panel waits behind yours (pass 74 D): while Drive works in its
-/// own worktree chat, that chat sits behind the open one with one edge
-/// showing, its title along it. Click the edge and the two swap. A finished
-/// branch turns the edge green until you open it; inside Drive's chat the
-/// edge is the chat it came from.
-const peekSeen = new Set<string>();
-/// Drive's word at the right end of the title bar (pass 79 A): a breathing
-/// dot and the mission while a branch is being made elsewhere, green "Ready"
-/// once it is, until you open it. Inside the mission's own chat the title
-/// bar already says where it came from, so it carries nothing there.
-type Peek = { sessionId: string; kind: "work" | "ready"; words: string };
-function drivePeek(): Peek | null {
-  // The assistant's chat isn't a coding chat: Drive says nothing there.
-  if (!state || !inSession() || pageOpen || inAssistant()) return null;
-  const current = state.session?.id;
-  const jobs = [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId));
-  const name = (job: (typeof jobs)[number]) => (job.mission ? job.mission.split("\n")[0]!.replace(/^--(bounded|continuous)\s+/, "") : job.title) || "Drive's branch";
-  const mine = jobs.find((job) => job.sessionId === current);
-  if (mine) {
-    if (mine.status === "ready") peekSeen.add(mine.id);
-    return null;
-  }
-  const running = jobs.find((job) => job.status === "starting" || job.status === "running");
-  if (running) return { sessionId: running.sessionId!, kind: "work", words: `Drive · ${name(running)}` };
-  const ready = jobs.find((job) => job.status === "ready" && !peekSeen.has(job.id));
-  return ready ? { sessionId: ready.sessionId!, kind: "ready", words: `Ready · ${name(ready)}` } : null;
-}
 /// The top bar's tabs (pass 101): the chats you keep open, each with the
 /// same dot as its sidebar row. Pointing at one shows its glance, a chat
-/// that needs you elsewhere calls you over, and Drive's work sits as a small
-/// pinned tab at the start. Pages, Home and the assistant show as the one
-/// tab you are on, until you leave them.
+/// that needs you elsewhere calls you over. Pages, Home and the assistant
+/// show as the one tab you are on, until you leave them.
 const tabs = new OpenTabs((() => { try { return localStorage; } catch { return null; } })());
 let tabOn: string | null = null, tabClosed: string | null = null, tabRenaming: string | null = null, tabsSignature = "", rimNow: Rim = null;
-const ICON_DRIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg>';
 /// Where a chat opens from the bar: in place, or by switching to its project.
 function chatTarget(id: string): [string, Record<string, unknown>] {
   const item = state?.sessions.find((chat) => chat.id === id), project = item?.workspace;
@@ -1648,11 +1619,11 @@ function renderTabs() {
   if (current?.id !== tabClosed) tabClosed = null;
   if (chatOpen && current!.id !== tabClosed && tabs.open(current!.id, tabOn)) tabsSignature = "";
   if (chatOpen) tabOn = current!.id;
-  const peek = drivePeek(), call = waitingElsewhere();
+  const call = waitingElsewhere();
   const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen === "today" ? "Today" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
   const shown = tabs.ids.filter((id) => byId.has(id));
   const tones = shown.map((id) => chatTone(byId.get(id)!));
-  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, peek, call?.id, call?.title, rimNow?.words]);
+  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
   if (signature === tabsSignature) return;
   renderRailChats(shown.map((id, index) => ({ item: byId.get(id)!, tone: tones[index]!, on: chatOpen && id === current!.id })));
   tabsSignature = signature;
@@ -1662,13 +1633,10 @@ function renderTabs() {
     const tip = on && rimNow ? `${title} · ${rimNow.words}` : about ? `${title}, ${about}` : title;
     return `<div class="bar-tab${on ? " on" : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"><span class="sidebar-session-mark ${tone}" aria-hidden="true"></span><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span></button>${btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `)}</div>`;
   };
-  // Drive's work, while it makes a branch elsewhere: a pinned tab with its
-  // icon and dot; green once it's ready. Opened, its chat becomes a tab.
-  const drive = peek && !shown.includes(peek.sessionId) ? `<button type="button" class="bar-tab-pin header-drive ${peek.kind}" data-tab-key="drive:${h(peek.sessionId)}" role="tab" id="workspace-tab-drive" aria-controls="workspace" aria-selected="false" tabindex="-1" data-action="select-session" data-args="${h(JSON.stringify({ id: peek.sessionId }))}" title="${h(`${peek.words} · open Drive's chat`)}" aria-label="${h(`${peek.words} · open Drive's chat`)}">${ICON_DRIVE}<i aria-hidden="true"></i></button>` : "";
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
   const newTab = document.getElementById("workspace-new-tab");
-  updateTabStrip(strip, `${drive}${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}`, newTab);
+  updateTabStrip(strip, `${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}`, newTab);
   const selected = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
   const panel = document.getElementById("workspace");
   if (selected) panel?.setAttribute("aria-labelledby", selected.id);
@@ -1717,10 +1685,6 @@ function totals(run: WorkspaceRun, tool: ToolEntry) {
 }
 const counts = (value: { added: number; removed: number }) =>
   `<span class="counts"><span class="plus">+${value.added}</span><span class="minus">−${value.removed}</span></span>`;
-/// Drive's best idea, as the start screen's ghost text; Alt+Right takes it.
-function driveSuggestion(): string | null {
-  return !inSession() && state && !isPlain() ? state.driveNext.proposals[0]?.title ?? null : null;
-}
 /// The next prompt the model suggested at the end of the last finished turn.
 function nextSuggestion(): string | null {
   if (pendingQuestion()) return null;
@@ -3783,7 +3747,6 @@ function renderComposer() {
     state.session?.acceptEdits,
     state.planOnly,
     answeringQuestion,
-    driveSuggestion(),
     isPlain(),
     whereOpen,
     state.workspace,
@@ -3844,7 +3807,7 @@ function renderComposer() {
       : state.activeTurnId
       ? "Steer it while it works…"
       : suggestion ? `${suggestion}   Alt+→` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
-    : driveSuggestion() ? `Drive suggests: ${driveSuggestion()}   Alt+→` : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
+    : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -4198,11 +4161,8 @@ function renderBriefing() {
   if (!review.length) reviewShown = false;
   const signature = JSON.stringify([
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
-    pinned && (driveShown && !driveTurnMission() ? [pinned, detailsOpen.has("drive-details"), [...detailsOpen].filter((key) => key.startsWith("drive-step:")), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, driveTurnMission() ? driveProgress(pinned) : activeMinutes(pinned)]),
+    pinned && (driveShown ? [pinned, detailsOpen.has("drive-details"), [...detailsOpen].filter((key) => key.startsWith("drive-step:")), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, activeMinutes(pinned)]),
     run.fix && [run.fix.title, run.fix.status], run.away && [run.away.auto, run.away.items.map((item) => item.state)], state.breakage.auto,
-    // Whether the mission is this chat's own turn: switching between it and
-    // the chat it came from changes the line even when nothing else does.
-    Boolean(driveTurnMission()),
     state.breakage.signals, state.breakage.busy, state.breakage.message, inSession(), run.fix?.activity, [...detailsOpen].filter((key) => key.startsWith("branch:")), brokeShown, driveShown, ideasShown, tellOpen, tellSent, pinned?.told?.length, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
   ]);
   if (signature === briefingSignature) return;
@@ -4237,12 +4197,6 @@ function renderBriefing() {
         btn("breakage-never", "Never for this", {}, "link"),
       ].join('<span class="bf-sep">·</span>')}</p>`;
     }
-  } else if (pinned && driveTurnMission()) {
-    // The mission is the conversation's newest turn; the strip only says how far it has got.
-    const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
-    if (tasks.length > 1) progress = done / tasks.length;
-    const about = driveProgress(pinned);
-    parts.push(`${driveMark(pinned)}<b class="bf-word${pinned.status === "blocked" ? " amber" : ""}">${label(pinned)}</b>${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
   } else if (pinned) {
     const time = activeMinutes(pinned);
     // Working in its own chat: the line says what on, with the shine.
@@ -4460,74 +4414,10 @@ function pinnedCard(pinned: NonNullable<Snapshot["drive"]>) {
   return `<section class="drive-mission${stopped ? " stopped" : ""}" aria-label="${stopped ? "Stopped mission" : "Live mission"}">${now}${stopped ? `<p class="dm-why">${h(stopped.hint)}</p>` : ""}${steps.length ? `<ol class="dm-steps">${steps.join("")}</ol>` : ""}${toldNotes(pinned)}<p class="dm-foot">${[...facts, ...words].join('<span class="bf-sep">·</span>')}</p>${open ? `${driveSteps(pinned)}${evidence}` : ""}</section>`;
 }
 /// The mission homed in this session, which reads as its newest turn.
-const driveTurnMission = () => {
-  const pinned = pinnedMission();
-  return pinned && pinned.homeSessionId === state?.session?.id ? pinned : null;
-};
 /// How far the mission has got, for the briefing line: "step 2 of 3 · 1 min".
 function driveProgress(drive: NonNullable<Snapshot["drive"]>) {
   const tasks = driveTaskList(drive), done = tasks.filter((task) => task.mark === "✓").length, time = activeMinutes(drive);
   return [tasks.length > 1 ? `step ${Math.min(done + 1, tasks.length)} of ${tasks.length}` : "", time].filter(Boolean).join(" · ");
-}
-/// A mission homed in this session is a turn at the end of the conversation:
-/// what it was asked, its steps (a workflow's, or its tasks) with the one
-/// running now, and quiet pause, stop and details links.
-let driveTurnSignature = "";
-function renderDriveTurn() {
-  if (!state) return;
-  const node = document.getElementById("drive-turn");
-  if (!node) return;
-  // Before the signature: opening the assistant's chat changes nothing Drive has.
-  el("conversation").classList.toggle("assistant", inAssistant());
-  const drive = inSession() && !inAssistant() ? driveTurnMission() : null, now = Date.now();
-  const fix = state.breakage.fix, worktree = Boolean(drive && fix?.mission && ["starting", "running"].includes(fix.status));
-  const retry = drive?.recovery && drive.recovery.retryAt > now ? Math.ceil((drive.recovery.retryAt - now) / 1000) : 0;
-  const signature = JSON.stringify([drive, worktree, retry, detailsOpen.has("drive-details"), [...detailsOpen].filter((key) => key.startsWith("drive-step:")), drive ? Math.floor(now / 10_000) : 0]);
-  if (signature === driveTurnSignature) return;
-  driveTurnSignature = signature;
-  el("conversation").classList.toggle("driving", Boolean(drive));
-  node.hidden = !drive;
-  if (!drive) {
-    node.innerHTML = "";
-    return;
-  }
-  const parts = missionParts(drive), live = drive.status === "running" || drive.status === "waiting";
-  // A workflow's mission reads as you typed it: "/fix-bug Handle an empty name".
-  const name = drive.workflow ? `<span class="tone-electric">/${h(drive.workflow.name)}</span> ` : "";
-  const prefix = drive.workflow ? `${drive.workflow.name} · ` : "", title = prefix && parts.title.startsWith(prefix) ? parts.title.slice(prefix.length) : parts.title;
-  const ask = `<div class="request"><span class="text">${name}${h(title)}</span><span class="drive-turn-where">Drive${worktree ? " · in a worktree" : ""}</span></div>`;
-  if (drive.status === "blocked") {
-    node.innerHTML = `${ask}<div class="response">${pinnedCard(drive)}</div>`;
-    if (follow) el("stage").scrollTop = el("stage").scrollHeight;
-    return;
-  }
-  const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
-  const tasks = driveTaskList(drive);
-  const doing = clip((drive.activity ?? "").split("\n")[0]!.trim(), 64);
-  const rows = tasks.length
-    ? tasks.map((task) => {
-        const [what, ...rest] = task.text.split(" · "), current = task.mark === "◌";
-        const detail = current && live && !drive.workflow && doing ? doing : rest.join(" · ");
-        const sign = current && live ? spinner() : h(task.mark === "·" ? "○" : task.mark);
-        return `<li class="tone-${task.tone}${current ? " now" : ""}"><span class="drive-trail-mark">${sign}</span><span class="drive-trail-what">${h(what!)}</span>${detail ? `<span class="drive-trail-detail">${h(detail)}</span>` : ""}</li>`;
-      }).join("")
-    : `<li class="now"><span class="drive-trail-mark">${live ? spinner() : "○"}</span><span class="drive-trail-what">${live ? "Choosing the first step" : "Not started"}</span></li>`;
-  const used = drive.protection?.used;
-  const meta = [
-    drive.status === "paused" ? '<span class="tone-secondary">paused</span>' : "",
-    retry ? `<span class="tone-thinking">retrying in ${retry}s</span>` : "",
-    used ? `<span title="${h(driveBudget(drive))}">${num(used.planningTokens + used.workerTokens)} tokens</span>` : "",
-    drive.recovery?.attempt && !retry ? `retried ${drive.recovery.attempt === 1 ? "once" : `${drive.recovery.attempt} times`}` : "",
-  ].filter(Boolean).join('<span class="sep"> · </span>');
-  const open = detailsOpen.has("drive-details");
-  const actions = [
-    btn("drive-control", live ? "pause" : "resume", { control: live ? "pause" : "resume" }, "link"),
-    btn("drive-control", "stop", { control: "stop" }, "link danger"),
-    drive.steps.length ? btn("drive-details", open ? "hide steps" : `${stepCount(drive)} ›`, {}, "link") : "",
-  ].join("");
-  const stage = el("stage"), bottom = follow;
-  node.innerHTML = `${ask}<div class="response${live ? " running" : ""}"><ol class="drive-trail">${rows}</ol>${toldNotes(drive)}<div class="drive-turn-foot"><span class="drive-turn-meta">${meta}</span><span class="drive-turn-actions">${actions}</span></div>${open ? driveSteps(drive) : ""}</div>`;
-  if (bottom) stage.scrollTop = stage.scrollHeight;
 }
 async function openOverlay(name: OverlayName, query = "", forThread = false) {
   modelFor = name === "models" && forThread ? "thread" : "chat";
@@ -6003,7 +5893,6 @@ async function dispatch(
   if (action === "drive-step") {
     const key = String(args.key ?? "");
     if (detailsOpen.has(key)) detailsOpen.delete(key); else detailsOpen.add(key);
-    renderDriveTurn();
     briefingSignature = "";
     renderBriefing();
     return;
@@ -6011,7 +5900,6 @@ async function dispatch(
   if (action === "drive-details") {
     if (detailsOpen.has("drive-details")) detailsOpen.delete("drive-details");
     else detailsOpen.add("drive-details");
-    renderDriveTurn();
     briefingSignature = "";
     renderBriefing();
     return;
@@ -6648,7 +6536,8 @@ function renderState(next: Snapshot) {
   renderStatus();
   renderConversation();
   renderThreads();
-  renderDriveTurn();
+  // The assistant's chat has its own empty look.
+  el("conversation").classList.toggle("assistant", inAssistant());
   renderComposer();
   renderPlainLine();
   renderApproval();
@@ -7292,7 +7181,7 @@ document.addEventListener("keydown", (event) => {
     !editor.value && !pendingQuestion() && !state.approvals.length
   ) {
     // Accept a visible suggestion explicitly; Tab remains focus navigation.
-    const suggestion = nextSuggestion() ?? driveSuggestion();
+    const suggestion = nextSuggestion();
     if (suggestion) run(() => setDraft(suggestion));
     return;
   }
@@ -7471,7 +7360,6 @@ setInterval(() => {
 }, 300);
 setInterval(() => {
   if (state?.activeTurnId) renderStatus();
-  renderDriveTurn();
   for (const span of document.querySelectorAll<HTMLElement>("[data-since]")) {
     const next = elapsed(span.dataset.since!);
     if (span.textContent !== next) span.textContent = next;

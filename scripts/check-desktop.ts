@@ -1432,28 +1432,21 @@ try {
   await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
   await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
   await capture("08-drive-tell");
-  // Drive is a small pinned tab at the start of the bar while it works elsewhere.
-  await until(() => page.locator("#desktop-toolbar .header-drive.work").isVisible(), "a pinned tab says Drive is working elsewhere");
-  assert((await page.locator(".header-drive").getAttribute("aria-label"))!.includes("Verify the Drive controls"), "the pinned tab names the mission");
-  // Its own chat opens as a tab and shows the note; your chat's tab goes back.
+  // Drive has no tab of its own on the bar (it lives at the sidebar's foot).
+  assert.equal(await page.locator(".header-drive").count(), 0, "no pinned Drive tab");
+  // Its own chat opens as a tab; your chat's tab goes back.
   const chatTab = (name: string) => page.locator("#workspace-tabs .bar-tab[data-tab]", { hasText: name });
   await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text.startsWith("Drive mission")), "the mission's chat opens as a tab");
-  await until(() => page.locator("#drive-turn .drive-told li").innerText().then(text => text.includes("Keep the tests green")), "the mission's chat shows your note");
-  assert.equal(await page.locator("#drive-turn .drive-heading").count(), 0, "the mission turn has no boxed details");
-  assert.equal(await page.locator("#drive-turn").evaluate(node => getComputedStyle(node).borderTopWidth + getComputedStyle(node).backgroundColor), "0pxrgba(0, 0, 0, 0)", "the mission turn sits unboxed in the chat");
-  assert.equal(await page.locator(".header-drive").count(), 0, "with Drive's chat open as a tab there is no pinned Drive tab");
+  assert.equal(await page.locator("#drive-turn").count(), 0, "Drive's mission is never a turn inside a chat");
   await capture("08-drive-chat");
   await chatTab(home).locator("[role=tab]").click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "your chat's tab takes you back");
-  // Closing the mission's tab leaves Drive pinned again, and the pin opens it.
+  // Closing the mission's tab doesn't bring back a Drive tab.
   await chatTab("Drive mission").hover();
   await chatTab("Drive mission").locator(".bar-tab-close").click();
-  await until(() => page.locator("#desktop-toolbar .header-drive.work").isVisible(), "a closed mission tab hands back to the pinned Drive tab");
-  await page.locator(".header-drive.work").click();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text.startsWith("Drive mission")), "the pinned tab opens Drive's chat");
-  await chatTab(home).locator("[role=tab]").click();
-  await until(() => page.locator("#workspace-title").innerText().then(text => text === home), "and your tab brings you back again");
+  await until(() => chatTab("Drive mission").count().then(count => count === 0), "the mission's tab closes");
+  assert.equal(await page.locator(".header-drive").count(), 0, "and no Drive tab takes its place");
   await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();

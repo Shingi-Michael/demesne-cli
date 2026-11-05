@@ -16,6 +16,7 @@ import type { PictureMaker } from "./social-pictures.ts";
 import { CLIP_SECONDS, type ClipMaker } from "./social-reel.ts";
 import { ARC_NAMES, EVENTS_KEPT_DAYS, arcScene, arcToTell, chapterMessages, findArcs, parseChapter, type ArcEvent, type Chapter, type ToldArc } from "./story-arcs.ts";
 import { CHARACTERS, characterPrompt, lineProblems, pickLine, versions, VERSIONS, type LineCheck } from "./characters.ts";
+import { alikeness, checkupNotes, CHECKUPS_KEPT, FEWEST, judgeMessages, parseJudge, probeMessages, probeQuestions, sample, scoreProbe, type CheckLine, type Checkup, type LineCounts } from "./checkup.ts";
 import { emptyMemory, keepNight, memoryBlock, parseNight, sleepMessages, type AgentMemory, type Belief, type DiaryEntry } from "./sleep.ts";
 import { closeness, feel, moodOf, REMEMBER_MAX, tie, type Closeness, type FeelKind, type Feeling, type Mood, type Remembered, type Tie } from "./inner-life.ts";
 
@@ -186,6 +187,10 @@ interface SocialsFile {
   chapters?: Partial<Record<AgentId, Chapter[]>>;
   /// The week each agent last tried its chapter (a chapter that fails the checks isn't retried).
   chapterTried?: Partial<Record<AgentId, string>>;
+  /// The weekly checkups (checkup.ts), the week last checked, and the line counts when this week began.
+  checkups?: Checkup[];
+  checkupTried?: string;
+  linesMark?: { week: string; counts: LineCounts };
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -533,6 +538,60 @@ export class SocialFeed {
     } finally { this.writing.delete("chapters"); }
     return written;
   }
+
+  /// From Saturday noon, once a week: are the agents still grounded and
+  /// still three different people? About four small calls (checkup.ts).
+  async checkup(): Promise<Checkup | null> {
+    const now = this.now(), week = weekOf(now), counts = this.data.lines;
+    if (this.data.linesMark?.week !== week) { this.data.linesMark = { week, counts: { ...counts } }; this.save(); }
+    const day = now.getDay();
+    if (!((day === 6 && now.getHours() >= 12) || day === 0)) return null;
+    if (this.data.checkupTried === week || this.writing.has("checkup")) return null;
+    const agents = this.options.agents();
+    const inWeek = (at: string) => weekOf(new Date(at)) === week;
+    const lines: CheckLine[] = [];
+    for (const post of this.data.posts) {
+      if (agents.includes(post.by as AgentId) && inWeek(post.at)) lines.push({ by: post.by as AgentId, text: post.text, about: post.from.kind === "work" || post.from.kind === "mail" ? post.from.label : post.from.kind });
+      for (const comment of post.comments) if (agents.includes(comment.by as AgentId) && inWeek(comment.at)) lines.push({ by: comment.by as AgentId, text: comment.text, about: `a comment on ${nameOf(post.by)}'s post: ${clip(post.text, 80)}` });
+    }
+    if (lines.length < FEWEST) return null;
+    this.data.checkupTried = week;
+    this.save();
+    this.writing.add("checkup");
+    try {
+      const mark = this.data.linesMark.counts;
+      const delta: LineCounts = { ok: counts.ok - mark.ok, later: counts.later - mark.later, fallback: counts.fallback - mark.fallback, dropped: counts.dropped - mark.dropped };
+      const seen = sample(lines);
+      const voices = [...new Set(seen.map((line) => line.by))];
+      const judged = voices.length > 1 ? parseJudge(await this.call(judgeMessages(seen, agents.filter((id) => voices.includes(id)))), seen.length) : null;
+      let told: Checkup["told"] = null, gushing: string[] | null = null;
+      if (judged) {
+        const by: Partial<Record<AgentId, { right: number; of: number }>> = {};
+        seen.forEach((line, index) => { const item = (by[line.by] ??= { right: 0, of: 0 }); item.of += 1; if (judged[index]!.who === line.by) item.right += 1; });
+        told = { right: Object.values(by).reduce((sum, item) => sum + item!.right, 0), of: seen.length, by };
+        gushing = seen.filter((_, index) => judged[index]!.gush).map((line) => line.text);
+      }
+      const last = this.data.checkups?.at(-1);
+      const alike = alikeness(lines, agents).map((pair) => ({ ...pair, before: last?.alike.find((item) => item.a === pair.a && item.b === pair.b)?.score ?? null }));
+      const probes: Checkup["probes"] = {};
+      for (const agent of agents) {
+        const real = (this.data.arcEvents ?? []).filter((event) => event.by === agent && inWeek(event.at) && event.kind !== "file" && event.kind !== "mail").map((event) => event.title).reverse();
+        if (!real.length) continue;
+        const remembered = [memoryBlock(this.data.memory[agent]), ...(this.data.chapters?.[agent] ?? []).filter((item) => item.week === week).map((item) => `Your week: ${item.title}. ${item.text}`), ...lines.filter((line) => line.by === agent).slice(-6).map((line) => `You wrote: ${line.text}`)].filter(Boolean).join("\n");
+        const { asks, fake } = probeQuestions(real, (this.data.arcEvents ?? []).map((event) => event.title).join("\n"));
+        const probe = scoreProbe(await this.call(probeMessages(agent, remembered, asks)), asks, fake);
+        if (probe) probes[agent] = probe;
+      }
+      const found = { week, at: now.toISOString(), lines: delta, told, gushing, alike, probes };
+      const checkup: Checkup = { ...found, notes: checkupNotes(found, nameOf) };
+      this.data.checkups = [...(this.data.checkups ?? []).filter((item) => item.week !== week), checkup].slice(-CHECKUPS_KEPT);
+      this.save();
+      return checkup;
+    } finally { this.writing.delete("checkup"); }
+  }
+
+  /// The weekly checkups, newest first.
+  checkups(): Checkup[] { return [...this.data.checkups ?? []].reverse(); }
 
   /// The reel's opening clip (MP4), or null.
   clipPath(reelId: string): string | null {

@@ -30,9 +30,15 @@ export interface PaneOptions {
   assembleDocument?(root: HTMLElement, previousHTML: string | null): void;
   /// The page's Pick button chose one of its options ("B · Joined").
   pick?(option: string): void;
+  /// Point at a part: the picker runs in the pane's frame (named
+  /// "pane-foundry"); what's clicked rides with the next message.
+  point?(): void;
   /// Build this: the chat makes the page real code.
   build?(detail: FoundryArtifactDetail, version: number): void;
 }
+
+/** The pane's frame, by name, so Point at it can find it. */
+export const PANE_FRAME = "pane-foundry";
 
 /** The frame's address; the first show of a version asks for the assembly. */
 export const frameSource = (id: string, version: number, assemble: boolean) => `${frameURL(id, version)}${assemble ? "&assemble=1" : ""}`;
@@ -58,7 +64,7 @@ export function paneMakingHead(title: string) {
 
 /// The one line above the page: the title, the version and its arrows (the
 /// version's note on hover), and the icons. An error takes the middle.
-export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState, error = "", build = false) {
+export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState, error = "", build = false, pointing: boolean | null = null) {
   const title = detail?.title ?? (error ? "Couldn't open it" : "Loading…");
   const near = detail ? neighbours(detail.versions, state.version) : { earlier: null, later: null, latest: state.version };
   const version = detail?.versions.find((item) => item.version === state.version);
@@ -74,6 +80,7 @@ export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState,
     + (detail && state.version !== near.latest ? button("restore", "Make this the latest", ' class="pane-word"') : "")
     + (detail?.kind === "html" && build ? button("build", "Build this", ' class="pane-word pane-build" title="Turn this page into real code in the chat\'s project"') : "")
     + (detail && code ? tool("copy", "Copy the source", '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/>') : "")
+    + (detail && pointing !== null && !code && (detail.kind === "html" || READY_KIND.has(detail.kind)) ? tool("point", pointing ? "Stop pointing (Esc)" : "Point at a part to change it", '<circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.5"/>', ` aria-pressed="${pointing}"`) : "")
     + (detail?.kind === "deck" && !code ? tool("play", "Play the deck", '<path d="M8 5v14l11-7z"/>') : "")
     + (detail ? tool("code", "Code", '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', ` aria-pressed="${code}"`) : "")
     + (detail && (detail.kind === "html" || READY_KIND.has(detail.kind)) ? tool("phone", "Phone width", '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', ` aria-pressed="${state.phone}"`) : "")
@@ -199,6 +206,7 @@ export class FoundryPane {
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !this.state || event.defaultPrevented || event.isComposing) return;
       if (this.playing) { event.preventDefault(); this.play(false); return; }
+      if (this.pointing) { event.preventDefault(); this.options.point?.(); return; }
       // A page covers the chat, so its pane is hidden: Esc belongs to the page.
       if (this.root.closest(".paging")) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -309,6 +317,7 @@ export class FoundryPane {
     if (action === "mo-pick" && name) { this.motionCurrent = name; return this.tell({ action: "restart", name }); }
     if (action === "mo-speed") { this.slow = !this.slow; this.renderMotion(); return this.tell({ action: "speed", value: this.slow ? 0.5 : 1 }); }
     if (action === "play") return this.play(true);
+    if (action === "point") return this.options.point?.();
     if (action === "code") { state.view = state.view === "code" ? "preview" : "code"; this.remember(); return this.render(); }
     if (action === "phone") { state.phone = !state.phone; this.remember(); return this.render(); }
     if (!detail) return;
@@ -325,6 +334,14 @@ export class FoundryPane {
       this.error = reason instanceof Error ? reason.message : String(reason);
       this.render();
     }
+  }
+
+  /// The picker is running in the frame: the crosshair shows pressed.
+  private pointing = false;
+  setPointing(on: boolean) {
+    if (on === this.pointing) return;
+    this.pointing = on;
+    if (this.state) this.head.innerHTML = paneHead(this.detail, this.state, this.error, Boolean(this.options.build), this.options.point ? on : null);
   }
 
   /// Play a deck: the pane covers the whole window and the deck shows one
@@ -378,7 +395,7 @@ export class FoundryPane {
       }
       return;
     }
-    this.head.innerHTML = paneHead(detail, state, this.error, Boolean(this.options.build));
+    this.head.innerHTML = paneHead(detail, state, this.error, Boolean(this.options.build), this.options.point ? this.pointing : null);
     const code = state.view === "code";
     this.code.hidden = !code;
     this.stage.hidden = code;
@@ -406,6 +423,7 @@ export class FoundryPane {
     // The frame is made once per version: remaking it would reset the page.
     const frame = document.createElement("iframe");
     frame.className = "pane-frame";
+    frame.name = PANE_FRAME;
     frame.src = frameSource(detail.id, state.version, assemble);
     frame.title = `${detail.title} ${KIND_WORD[detail.kind].toLowerCase()}`;
     frame.setAttribute("sandbox", "allow-scripts allow-forms allow-modals");

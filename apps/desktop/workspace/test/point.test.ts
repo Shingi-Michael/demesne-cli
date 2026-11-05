@@ -22,6 +22,17 @@ describe("point at it", () => {
     expect(pointMessage([{ ...pick(), id: "1", source: null }, { ...pick({ tag: "a", label: "Home" }), id: "2", source: null }])).toContain("The elements I pointed at");
   });
 
+  test("a part of a Foundry page names the artifact and version, and asks for that part only", () => {
+    const foundry = { id: "a1", title: "Idea garden", version: 2, kind: "html" };
+    const message = pointMessage([{ ...pick({ tag: "h1", label: "A little room to grow", page: "/a1?v=2", foundry }), id: "1", source: null }]);
+    expect(message).toStartWith("The part I pointed at on the Foundry page (change only this: foundry_read it, then foundry_edit):");
+    expect(message).toContain('A little room to grow heading on the Foundry page "Idea garden" (id a1, v2)');
+    expect(message).not.toContain("source not found");
+    const deck = pointMessage([{ ...pick({ foundry: { ...foundry, kind: "deck" } }), id: "1", source: null }, { ...pick({ foundry: { ...foundry, kind: "deck" } }), id: "2", source: null }]);
+    expect(deck).toStartWith("The parts I pointed at on the Foundry page (change only these");
+    expect(deck).toContain('on the Foundry deck "Idea garden"');
+  });
+
   test("a file the page names wins, relative to the project", () => {
     const files = [{ path: "src/Settings.tsx", text: "x" }, { path: "src/other.tsx", text: "<button>Save</button>" }];
     expect(findSource(files, pick({ hint: { file: "/home/me/app/src/Settings.tsx", line: 42 } }), "/home/me/app")).toEqual({ path: "src/Settings.tsx", line: 42 });

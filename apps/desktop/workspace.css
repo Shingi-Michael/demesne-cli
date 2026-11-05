@@ -650,6 +650,8 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .rv-note input::placeholder { color: var(--t4); }
 .desktop #mention-chips .notes-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
 .desktop #mention-chips .point-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
+/* A part of a Foundry page: pink, the colour Foundry marks what you point at and what changed. */
+.desktop #mention-chips .point-chip.foundry { color: #f2b6c8; background: rgba(242, 182, 200, 0.14); }
 /* Composer mode: one word under the box, coloured by mode; ⇧⇥ steps it. */
 .desktop #composer .composer-bar #composer-mode kbd { font: 11px Inter, system-ui, sans-serif; color: var(--t4); background: none; border: 0; padding: 0; margin-left: 2px; }
 .desktop #composer .composer-bar #composer-mode.mode-edits { color: var(--ok); }

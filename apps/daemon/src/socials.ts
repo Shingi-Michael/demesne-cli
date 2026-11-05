@@ -18,7 +18,7 @@ import { ARC_NAMES, EVENTS_KEPT_DAYS, arcScene, arcToTell, chapterMessages, find
 import { CHARACTERS, characterPrompt, lineProblems, pickLine, versions, VERSIONS, type LineCheck } from "./characters.ts";
 import { alikeness, checkupNotes, CHECKUPS_KEPT, FEWEST, judgeMessages, parseJudge, probeMessages, probeQuestions, sample, scoreProbe, type CheckLine, type Checkup, type LineCounts } from "./checkup.ts";
 import { emptyMemory, keepNight, memoryBlock, parseNight, sleepMessages, type AgentMemory, type Belief, type DiaryEntry } from "./sleep.ts";
-import { closeness, feel, moodOf, REMEMBER_MAX, tie, type Closeness, type FeelKind, type Feeling, type Mood, type Remembered, type Tie } from "./inner-life.ts";
+import { BIT_WORN, closeness, feel, JOKE_BOND, JOKE_DAYS, moodOf, REMEMBER_MAX, tie, wearDaysLeft, wearOf, WORN, type Closeness, type FeelKind, type Feeling, type Mood, type Remembered, type Tie, type Wear } from "./inner-life.ts";
 
 export interface SocialPersona { id: AgentId; name: string; voice: string }
 
@@ -52,6 +52,8 @@ export interface SocialComment {
   text: string;
   /// Your comment asked for work: the feed offers to open the agent's chat.
   request?: boolean;
+  /// An inside joke (pass 160 A): the real shared thing it calls back to, as "Wed · A streak".
+  callback?: string;
 }
 
 export interface SocialPost {
@@ -108,6 +110,8 @@ export interface SocialProfile {
   beliefs: Belief[];
   /// Its weekly chapters (story-arcs.ts), newest first.
   chapters: Chapter[];
+  /// Worn out from failed checks (pass 160 B), or null when it's fine.
+  wear: Wear | null;
 }
 
 /// What the morning and night posts can say: your chats in the last day and a half, and today.
@@ -191,6 +195,8 @@ interface SocialsFile {
   checkups?: Checkup[];
   checkupTried?: string;
   linesMark?: { week: string; counts: LineCounts };
+  /// Inside jokes made (pass 160 A): one a week for each pair.
+  callbacks?: Array<{ a: AgentId; b: AgentId; week: string; arc: string; at: string }>;
 }
 
 /// One call to the writer model: messages in, words out (null when it
@@ -293,11 +299,11 @@ export function postMessages(id: AgentId, source: SocialSource, asked: string, a
 
 const nameOf = (by: SocialWho) => by === "you" ? "Mike" : by === "demesne" ? "Demesne" : PERSONAS[by].name;
 
-export function commentMessages(id: AgentId, post: SocialPost, about: string, free = false): ProviderMessage[] {
+export function commentMessages(id: AgentId, post: SocialPost, about: string, free = false, extra = ""): ProviderMessage[] {
   const author = nameOf(post.by);
   const choice = free ? ` You don't have to answer: be like a friend scrolling past. Comment only if you really have something to say about it. If you'd just tap a reaction, answer only REACT. If you'd scroll past, answer only PASS.` : "";
   return [
-    { role: "system", content: `${persona(id)} Comment on ${author}'s post. You know about it because ${about}. Be kind or playful, never mean. One sentence.${choice} ${RULES}` },
+    { role: "system", content: `${persona(id)} Comment on ${author}'s post. You know about it because ${about}. Be kind or playful, never mean. One sentence.${extra}${choice} ${RULES}` },
     { role: "user", content: `${author}'s post:\n${post.text}${post.comments.length ? `\n\nComments so far:\n${post.comments.map((item) => `${nameOf(item.by)}: ${item.text}`).join("\n")}` : ""}` },
   ];
 }
@@ -378,6 +384,15 @@ export function mondayOf(date: Date): string {
 
 /// A date as YYYY-MM-DD (local).
 const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const dayName = (at: string) => DAY_NAMES[new Date(at).getDay()]!;
+
+/// A comment calls back to a shared thing when it uses a word from it that the post itself doesn't.
+export function callsBack(comment: string, shared: string, post: string): boolean {
+  const words = (text: string) => new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 3) ?? []);
+  const said = words(comment), there = words(post);
+  return [...words(shared)].some((word) => said.has(word) && !there.has(word));
+}
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 const monthOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
@@ -403,7 +418,32 @@ export class SocialFeed {
   }
 
   /// How an agent feels right now, and why.
-  mood(agent: AgentId): Mood { return moodOf(this.data.feelings[agent] ?? [], this.now()); }
+  /// How it feels: its live feelings, and worn out when checks keep failing.
+  mood(agent: AgentId): Mood {
+    const mood = moodOf(this.data.feelings[agent] ?? [], this.now()), wear = this.wear(agent);
+    if (wear.level < BIT_WORN) return mood;
+    const reason = { why: `${wear.word === "worn out" ? "Worn out" : "A bit worn"}: ${wear.why}`, p: -Math.round(wear.level / 10), e: -2, left: Math.max(1, Math.round(wearDaysLeft(wear.level, BIT_WORN) * 24)) };
+    const reasons = [reason, ...mood.reasons].slice(0, 4);
+    if (wear.level < WORN || (mood.mood === "happy" && mood.strong)) return { ...mood, reasons };
+    return { mood: "sleepy", strong: wear.level >= 80, word: wear.level >= 80 ? "very worn out" : "worn out", reasons };
+  }
+
+  /// Worn out from failed checks (pass 160 B), from the event log; no call.
+  wear(agent: AgentId): Wear { return wearOf((this.data.arcEvents ?? []).filter((event) => event.by === agent), agent, this.now()); }
+
+  /// A real thing two close agents went through (pass 160 A), for an inside
+  /// joke: an arc of either that involved the other, or the author's own,
+  /// from the last month. One a week for each pair.
+  private jokeFor(friend: AgentId, author: AgentId): ToldArc | null {
+    const now = this.now(), week = weekOf(now);
+    const bond = closeness(this.data.ties[friend] ?? [], now).find((item) => item.agent === author)?.bond ?? 0;
+    if (bond < JOKE_BOND) return null;
+    if ((this.data.callbacks ?? []).some((item) => item.week === week && ((item.a === friend && item.b === author) || (item.a === author && item.b === friend)))) return null;
+    const since = now.getTime() - JOKE_DAYS * 86_400_000, settled = now.getTime() - 12 * 3_600_000;
+    const both = (arc: ToldArc) => (arc.by === author && arc.with === friend) || (arc.by === friend && arc.with === author);
+    return (this.data.arcsTold ?? []).filter((arc) => Date.parse(arc.told) > since && Date.parse(arc.told) < settled && (both(arc) || arc.by === author))
+      .sort((a, b) => Number(both(b)) - Number(both(a)) || (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
+  }
 
   /// Something real happened to an agent: a feeling that lasts a while.
   private feel(agent: AgentId, kind: FeelKind, why: string) {
@@ -819,6 +859,7 @@ export class SocialFeed {
       diary: [...this.data.memory[agent]?.diary ?? []].reverse().slice(0, 3),
       beliefs: this.data.memory[agent]?.beliefs ?? [],
       chapters: [...this.data.chapters?.[agent] ?? []].reverse().slice(0, 4),
+      wear: (() => { const wear = this.wear(agent); return wear.level >= BIT_WORN ? wear : null; })(),
     };
   }
 
@@ -1016,11 +1057,19 @@ export class SocialFeed {
     const friend = candidates[Math.floor(now.getTime() / 60_000) % Math.max(1, candidates.length)];
     if (!friend || current.comments.filter((item) => item.by !== "you").length >= AGENT_COMMENTS_A_POST) return;
     const reason = why ?? `you were working in the same project (${post.from.workspace?.split(/[\\/]/).at(-1)}) today`;
-    const text = await this.say(friend, commentMessages(friend, post, reason), { max: 200 });
+    // Close friends are brief, and may call back to something real they shared.
+    const author = post.by !== "you" && post.by !== "demesne" ? post.by : null;
+    const close = author ? (closeness(this.data.ties[friend] ?? [], now).find((item) => item.agent === author)?.bond ?? 0) >= JOKE_BOND : false;
+    const joke = author ? this.jokeFor(friend, author) : null;
+    const jokeText = joke ? [joke.text, ...joke.beats.map((beat) => beat.text)].join("\n") : "";
+    const extra = `${close ? " You two are close: be brief and skip explaining." : ""}${joke ? ` Something you both remember, from ${dayName(joke.at)}: ${joke.text} If it fits, make a short callback to it, like an inside joke. If it doesn't fit, leave it out.` : ""}`;
+    const text = await this.say(friend, commentMessages(friend, post, reason, false, extra), { max: 200, extra: jokeText });
     if (!text) return;
     const fresh = this.find(post.id);
     if (!fresh) return;
-    fresh.comments.push({ id: randomUUID(), by: friend, at: this.now().toISOString(), text });
+    const called = joke && callsBack(text, jokeText, post.text);
+    fresh.comments.push({ id: randomUUID(), by: friend, at: this.now().toISOString(), text, ...(called ? { callback: `${dayName(joke.at)} · ${ARC_NAMES[joke.shape]}` } : {}) });
+    if (called && author) this.data.callbacks = [...(this.data.callbacks ?? []), { a: friend, b: author, week: weekOf(now), arc: joke.key, at: now.toISOString() }].slice(-20);
     if (post.by !== "you" && post.by !== "demesne") {
       this.tie(post.by, friend, "commented on my post", 0.15);
       this.tie(friend, post.by, "I commented on their post", 0.08);
@@ -1033,7 +1082,9 @@ export class SocialFeed {
   /// passes the checks is used. When none passes: the plain fallback, the
   /// version with the fewest problems (best), or nothing.
   private async say(agent: AgentId, messages: ProviderMessage[], options: { max?: number; fallback?: string; best?: boolean; extra?: string } = {}): Promise<string | null> {
-    const remembered = memoryBlock(this.data.memory[agent]);
+    const wear = this.wear(agent);
+    const worn = wear.level >= WORN ? `Lately you're worn out (${wear.why}). Write shorter and drier than usual, with no exclamation marks.` : wear.level >= BIT_WORN ? `You're a bit worn lately (${wear.why}).` : "";
+    const remembered = [memoryBlock(this.data.memory[agent]), worn].filter(Boolean).join("\n\n");
     const asked = messages.map((message, index) => index === 0 && message.role === "system" ? { ...message, content: `${message.content}${remembered ? `\n\n${remembered}` : ""}\n\n${VERSIONS}` } : message);
     const reply = await this.call(asked);
     const lines = versions(reply).map((line) => cleanPost(line, options.max)).filter((line): line is string => Boolean(line));

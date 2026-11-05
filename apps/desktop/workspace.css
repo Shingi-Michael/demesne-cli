@@ -2238,6 +2238,11 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-bar b { display: block; height: 100%; border-radius: 2px; transition: width .4s ease; }
 .td-bar.warm b { background: var(--blossom, #f2b6c8); } .td-key .warm { color: var(--blossom, #f2b6c8); }
 .td-bar.bond b { background: var(--acc); } .td-key .bond { color: var(--acc); }
+/* Pass 160: worn out on the profile, and an inside joke on a comment. */
+.td-wear { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px; }
+.td-wear .td-bar b { background: #e0a43a; }
+.td-wear small { color: var(--t2); font-size: 12px; }
+.td-callback { display: inline-flex; align-items: center; margin-left: 4px; padding: 1px 7px; border-radius: 99px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blossom, #f2b6c8) 30%, transparent); color: var(--blossom, #f2b6c8); font-size: 11px; white-space: nowrap; }
 .td-key { margin: 4px 0 0; color: var(--t4); font-size: 11.5px; }
 .td-remembers li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; background: var(--tone); color: var(--t1); font-size: 12.5px; }
 .td-remembers li span { flex: 1; min-width: 0; }

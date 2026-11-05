@@ -105,3 +105,37 @@ export function closeness(list: Tie[], now: Date): Closeness[] {
 /// Something an agent remembers about Mike: from his comments, or told directly.
 export interface Remembered { id: string; text: string; from: "comment" | "you"; at: string }
 export const REMEMBER_MAX = 12;
+
+/// Worn out (pass 160 B): a slow level fed only by failed checks, eased by
+/// finishing and merging, fading about a third a day. Each character takes
+/// failures its own way (CharacterSheet.feels.failed). No model calls: it's
+/// worked out from the event log every time.
+export interface Wear { level: number; word: "fine" | "a bit worn" | "worn out"; why: string; fails: number }
+export const WEAR_FAIL = 14, WEAR_MERGE = 20, WEAR_DONE = 6, WEAR_KEEP = 2 / 3, BIT_WORN = 30, WORN = 60;
+
+export function wearOf(events: Array<{ at: string; kind: string }>, agent: AgentId, now: Date): Wear {
+  const bias = CHARACTERS[agent].feels.failed ?? 1, at = now.getTime();
+  const fade = (from: number, to: number) => WEAR_KEEP ** Math.max(0, (to - from) / DAY);
+  let level = 0, last = 0;
+  for (const event of [...events].sort((a, b) => a.at.localeCompare(b.at))) {
+    const when = Date.parse(event.at);
+    if (when > at) continue;
+    level *= last ? fade(last, when) : 1;
+    last = when;
+    if (event.kind === "failed") level = Math.min(100, level + WEAR_FAIL * bias);
+    else if (event.kind === "merged") level = Math.max(0, level - WEAR_MERGE);
+    else if (event.kind === "done") level = Math.max(0, level - WEAR_DONE);
+  }
+  level = Math.round(level * (last ? fade(last, at) : 1));
+  const fails = events.filter((event) => event.kind === "failed" && at - Date.parse(event.at) < 7 * DAY && Date.parse(event.at) <= at).length;
+  return { level, word: level >= WORN ? "worn out" : level >= BIT_WORN ? "a bit worn" : "fine", why: fails ? `${fails === 1 ? "a failed check" : `${fails} failed checks`} in the last 7 days` : "a quiet week", fails };
+}
+
+/// Days until a wear level fades below a line, with nothing new happening.
+export function wearDaysLeft(level: number, below = WORN): number {
+  return level < below ? 0 : Math.log(below / level) / Math.log(WEAR_KEEP);
+}
+
+/// Close friends share inside jokes (pass 160 A): the bond it takes, and how
+/// recent the shared thing must be.
+export const JOKE_BOND = 0.2, JOKE_DAYS = 30;

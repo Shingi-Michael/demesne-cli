@@ -276,3 +276,14 @@ test("stage 5: a chapter on the profile, and chapters and arcs in the reel", () 
   expect(html).toContain("td-fr-chapter");
   expect(html).toContain('<span class="td-fr-title">Stuck, then the breakthrough</span>');
 });
+
+test("pass 160: an inside joke shows what it remembers, and the profile shows worn out", () => {
+  const joked: SocialsView = { ...view, posts: [{ ...view.posts[0]!, comments: [{ id: "c9", by: "codex", at: new Date("2026-11-03T21:05:00").toISOString(), text: "no cookie drama this time?", callback: "Wed · Stuck, then the breakthrough" }] }] };
+  expect(todayPage(joked, { replying: "", sending: [], error: "" }, now)).toContain('<span class="td-callback" title="An inside joke about something they really went through">Remembers: Wed · Stuck, then the breakthrough</span>');
+  const profile = { agent: { id: "claude", name: "Claude Code", voice: "" }, bio: "", since: null, week: { work: 0, mail: 0, pictures: 0, comments: 0 }, friend: null, pictures: [],
+    wear: { level: 72, word: "worn out", why: "5 failed checks in the last 7 days", fails: 5 } };
+  const inner = innerHtml("claude", profile, view);
+  expect(inner).toContain('<b style="width:72%"></b>');
+  expect(inner).toContain("Worn out · 5 failed checks in the last 7 days");
+  expect(innerHtml("claude", { ...profile, wear: null }, view)).not.toContain("td-wear");
+});

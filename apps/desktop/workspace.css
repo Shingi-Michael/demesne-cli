@@ -2382,7 +2382,9 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 
 /* Sidebar duotone: bolder outline icons with a soft fill of their own color,
    a step larger; the open item takes the accent and folders are teal.
-   Agents keep their faces, as round avatars at the same size. */
+   Agents keep their faces, as round avatars at the same size.
+   Every icon and avatar centres on one line (27.5px in) and every label
+   starts on one line (49px in); a project's chats hang from its folder. */
 body.desktop { --side-folder: #5fb0c8; }
 html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 #desktop-sidebar :where(.sidebar-nav button, .sidebar-search, #sidebar-open-project) { height: 34px; gap: 12px; font-size: 14px; }
@@ -2392,18 +2394,19 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 #desktop-sidebar :where(.sidebar-nav button.on) { background: color-mix(in srgb, var(--acc) 16%, transparent); color: var(--t1); }
 #desktop-sidebar :where(.sidebar-nav button.on) .ico { color: var(--acc); fill-opacity: .3; }
 #desktop-sidebar :is(.sidebar-project-header, .sidebar-group-row) { height: 34px; }
-#desktop-sidebar :is(.sidebar-project-name, .sidebar-group-toggle) { height: 34px; gap: 10px; font-size: 14px; }
+#desktop-sidebar :is(.sidebar-project-name, .sidebar-group-toggle) { height: 34px; gap: 12px; padding-left: 10px; font-size: 14px; }
 #desktop-sidebar .sidebar-group-icon { color: var(--side-folder); }
 #desktop-sidebar [aria-expanded="false"] > .sidebar-group-icon { color: var(--side-folder); opacity: .7; }
-#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats, .sidebar-agent-rows) { margin-left: 18px; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats, .sidebar-agent-rows) { margin-left: 20px; }
 #desktop-sidebar .sidebar-session { height: 34px; font-size: 14px; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { box-shadow: inset 0 0 0 1px var(--hair), -2px 0 0 var(--acc); }
 #desktop-sidebar .sidebar-session-age { font-size: 11.5px; }
 #desktop-sidebar .sidebar-housed-label { font-size: 10.5px; letter-spacing: .09em; }
-#desktop-sidebar .sidebar-housed-row { height: 34px; gap: 12px; padding: 0 10px 0 9px; border-radius: var(--r); font-size: 14px; }
+#desktop-sidebar .sidebar-housed-row { height: 34px; gap: 10.5px; padding: 0 10px 0 8.5px; border-radius: var(--r); font-size: 14px; }
 #desktop-sidebar .sidebar-housed-row small { font-size: 11.5px; }
 #desktop-sidebar .sidebar-housed-row .agent-mark { width: 22px; height: 22px; font-size: 12px; }
 #desktop-sidebar .sidebar-housed-row.on { background: color-mix(in srgb, var(--acc) 16%, transparent); color: var(--t1); }
 #desktop-sidebar .sidebar-housed-row.on .agent-mark { box-shadow: 0 0 0 1.5px var(--side, var(--surface)), 0 0 0 3px var(--acc); }
-#desktop-sidebar .sidebar-avatar { width: 24px; height: 24px; font-size: 11px; }
+#desktop-sidebar .sidebar-avatar { width: 24px; height: 24px; margin-left: -2.5px; font-size: 11px; }
+#desktop-sidebar .sidebar-foot { gap: 9.5px; }
 #desktop-sidebar .sidebar-you { font-size: 14px; }

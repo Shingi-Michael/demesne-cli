@@ -22,12 +22,33 @@ export const FOUNDRY_LIBRARY_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net"
 /// The kit every page starts from, served to its frame from inside the app
 /// (apps/desktop/foundry-kit, policy.ts FOUNDRY_KIT): Demesne's type,
 /// colours, light and dark, buttons, inputs, tables, cards, and anime.js.
-export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
+export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js", FOUNDRY_PARTS_SCRIPT = "foundry://kit/parts.js";
+
+/// The parts catalogue (apps/desktop/foundry-kit/parts.js), read on demand
+/// with foundry_read id "kit:parts" so it doesn't ride along in every chat.
+export const PARTS_GUIDE = `Foundry parts: <script src="${FOUNDRY_PARTS_SCRIPT}"></script> after the kit stylesheet. Custom elements, drawn into the page's own DOM (style them with your CSS). Attributes only, lists split with |.
+Frames (the idea goes inside):
+- <d-window title="Splits" width="900" height="400">…</d-window> a Mac window; width = its design width, it scales down whole on a phone.
+- <d-browser url="shop.example/orders" width="1100" height="520">…</d-browser> a browser.
+- <d-phone time="9:41">…</d-phone> a phone, 390 wide; its inside scrolls.
+Demesne itself (its real look: glass sidebar, tabs, dark card, pink release line):
+- <d-demesne page="Customize|Foundry|Search|…" tabs="Settings|Fix sidebar" chats="Tidy the sidebar|Drive picks" chat="Tidy the sidebar" project="demesne-cli" theme="dark|light" height="620">main content</d-demesne>; give a child slot="cards" to put it in the right column. Designed at 1100 wide, scales down whole.
+- <d-message from="you">text</d-message>, <d-message meta="gpt-6.1 · 4s · 2 steps">answer</d-message> (the d. mark), <d-composer placeholder="Ask anything" mode="Ask" model="GPT-6.1">.
+- <d-card title="Changes" icon="git-branch">…</d-card>, <d-row title="Keep awake" note="While it works"><d-toggle on></d-toggle></d-row> (a settings row; group rows in a box), <d-seg options="Home|Last chat" value="Home">, <d-tabs items="Week|Month">.
+Anywhere:
+- <d-icon name="search" size="18">: plus x check chevron-right chevron-left chevron-down arrow-right arrow-up search menu home settings sliders user users bell mail chat calendar clock star heart bolt folder file code terminal git-branch image camera play pause trash edit copy download upload link lock eye sun moon cart tag chart trending-up pin globe sparkles drive foundry archive filter more info alert check-circle send mic sidebar phone laptop coffee leaf.
+- <d-avatar name="Amara Okafor" size="28"> initials on a steady colour. demesne.sample.people(n) gives 12 names; demesne.sample.series(n, start, drift, seed) a believable number series.
+- <d-chart type="line|area|bar|donut" values="4,6,5,8" labels="Mon,Tue,Wed,Thu" height="200"> in --accent.
+- <d-stat label="This week" value="32.4 km" delta="+12%">.
+- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options side by side, each headed by its name (and a Pick button).
+- <d-mark>1</d-mark> a pink numbered call-out dot.
+Compose the idea large around these: they are the frame, not the design.`;
 
 const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet" href="${FOUNDRY_KIT_STYLE}"> (the kit: light and dark from the system, Inter at 14px, `
   + "one ink with --secondary/--muted/--hair/--tone tints, --accent, radii 8 and 12; plain elements styled; classes .container(.narrow) .card(.outlined/.raised) .row(.between) .stack .grid(.two/.three) "
   + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime; name each motion with demesne.motion("Arrive", timeline) so the person can play and scrub it under the page). `
   + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
+  + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>); foundry_read id "kit:parts" lists them. `
   + "When a page shows options to choose between, mark each option's element with data-option=\"B · Joined\" (its letter and name): the person gets a Pick button on it that sends their choice to the chat. "
   + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
@@ -42,7 +63,7 @@ export const DESIGN_BRIEF = "Design brief: make it look designed, never like a t
   + "Write as much CSS of your own as the design needs, on the kit's variables: set --accent (and --ink/--paper for a tinted page) on :root, and a display face from Google Fonts when it fits. "
   + "Depth and detail where they earn it: layered surfaces, soft shadows only on things that float, real data, hover/selected/empty states, small SVG icons. "
   + "Asked for options or ideas: two or three genuinely different directions side by side, each named, and say which you would pick. "
-  + "A mockup of an existing app (Demesne included: no menus or side panels) matches that app's look but is composed as a presentation: the idea shown large, the key detail called out, before and after or options next to each other. "
+  + "A mockup of an existing app matches that app's look (Demesne: build on <d-demesne>; no menus or side panels) but is composed as a presentation: the idea shown large, the key detail called out, before and after or options next to each other. "
   + "Works at phone width with no horizontal scroll. Real content, never lorem ipsum; interactive mockups have working controls. "
   + "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce. "
   + "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.";
@@ -239,7 +260,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_read",
-      description: "List Foundry artifacts (no id), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save.",
+      description: "List Foundry artifacts (no id), the parts catalogue (id \"kit:parts\"), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "string" }, version: { type: "integer", minimum: 1 } },
@@ -249,6 +270,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
     permission: () => null,
     async execute(input) {
       const args = isRecord(input) ? input : {};
+      if (args.id === "kit:parts") return PARTS_GUIDE;
       if (typeof args.id !== "string" || !args.id) {
         return JSON.stringify(store.listFoundryArtifacts().slice(0, 50).map(({ id, title, kind, version, updatedAt, workspace }) => ({ id, title, kind, version, updatedAt, workspace })));
       }

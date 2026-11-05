@@ -8,6 +8,7 @@ These guides describe the current implementation. They were last audited on **20
 | --- | --- |
 | [Getting started](../README.md) | Build, connect a provider, launch, approvals, recovery |
 | [Commands and keyboard](commands.md) | Slash commands, shortcuts, custom commands and workflows |
+| [Skills](skills.md) | Saved steps the model picks up by itself when a task matches |
 | [Configuration](configuration.md) | File precedence, providers, limits, environment variables |
 | [Authentication](authentication.md) | Codex plan, ChatGPT accounts, OpenRouter, API keys, credential ownership |
 | [Desktop app](desktop.md) | The Electron window: layout, development, bundles, lifecycle |

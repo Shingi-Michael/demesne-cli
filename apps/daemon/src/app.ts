@@ -5,6 +5,7 @@ import { workspaceReview } from "./workspace-review.ts";
 import { parseMailTurn } from "@demesne/protocol";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
+import { useSkillTool } from "./skills.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import { electronLook, lookCommand, type FoundryLook } from "./foundry-look.ts";
 import {
@@ -322,6 +323,7 @@ export function createDaemonApp(options: {
   // Pages are looked at after each save when the desktop app is there to render them.
   const lookWith = options.foundryLook === undefined ? lookCommand() : null;
   const look = options.foundryLook ?? (lookWith ? electronLook(lookWith) : undefined), looks = new Map<string, number>();
+  tools.register(useSkillTool());
   tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store, look, looks));

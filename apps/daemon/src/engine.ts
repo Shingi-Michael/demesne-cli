@@ -26,6 +26,7 @@ import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SES
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
+import { loadSkills, skillsGuidance } from "./skills.ts";
 import {
   planCacheAwareContextRequest,
   planContextRequest,
@@ -1152,6 +1153,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; definitions
       ? "\nImage tools can save images to the session, but this provider has visual inputs disabled. Do not claim to have inspected image pixels; use browser text/DOM results for inspection." : "");
   const guidance = [ANSWER_FORMAT_GUIDANCE, turnToolGuidance(options.content ?? ""), planModeGuidance(options.planOnly === true),
     options.orchestrate ? ORCHESTRATE_GUIDANCE : null,
+    options.workspaceRoot && options.definitions.some((tool) => tool.name === "use_skill") ? skillsGuidance(loadSkills(options.workspaceRoot), options.attended !== false) : null,
     options.definitions.some((tool) => tool.name === "foundry_save")
       ? options.attended === false ? FOUNDRY_UNATTENDED_GUIDANCE : FOUNDRY_GUIDANCE
       : null,

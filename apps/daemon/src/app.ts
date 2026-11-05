@@ -236,6 +236,12 @@ export function createDaemonApp(options: {
       const { turn } = store.createTurn(sessionId, prompt, "allow", true, false);
       return { turnId: turn.id, done: queueTurn(turn, inference) };
     },
+    archive: (sessionId) => {
+      const session = store.getSession(sessionId);
+      if (!session || session.archivedAt || session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) return;
+      store.archiveSession(sessionId);
+      heartbeat?.detach(sessionId);
+    },
     report: (sessionId, content) => {
       // A short turn in the person's own chat: no thinking, and no tool runs
       // without asking. It waits for a turn already running there.

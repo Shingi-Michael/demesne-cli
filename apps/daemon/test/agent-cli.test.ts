@@ -56,7 +56,7 @@ describe("agent tools", () => {
     expect(claude.slice(claude.indexOf("--model"), claude.indexOf("--model") + 2)).toEqual(["--model", "opus"]);
     expect(claude.at(-1)).toBe("hi");
     const codex = agentArgs("codex", "hi", { id: "t9", fresh: false }, { model: "gpt-6.1-sol", effort: "high" });
-    expect(codex).toEqual(["exec", "--json", "--full-auto", "--skip-git-repo-check", "-c", 'model="gpt-6.1-sol"', "-c", 'model_reasoning_effort="high"', "resume", "t9", "hi"]);
+    expect(codex).toEqual(["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-c", 'model="gpt-6.1-sol"', "-c", 'model_reasoning_effort="high"', "resume", "t9", "hi"]);
     expect(agentArgs("gemini", "hi", { id: "g1", fresh: false }, { model: "gemini-4-argon-high" }).slice(-4)).toEqual(["--model", "gemini-4-argon-high", "--conversation", "g1"]);
     const allowed = agentArgs("gemini", "hi", null, {}, ["write_file(/w)"]);
     expect(allowed.slice(allowed.indexOf("--mode"), allowed.indexOf("--mode") + 4)).toEqual(["--mode", "accept-edits", "--settings", '{"permissions":{"allow":["write_file(/w)"]}}']);

@@ -88,6 +88,7 @@ import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
+import { RouteBook } from "./subagent-route.ts";
 import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
@@ -298,7 +299,13 @@ export function createDaemonApp(options: {
     store.close();
     throw new Error(`The ${runtimeProfile} runtime profile requires one inference slot`);
   }
-  const subagentModels = () => processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }];
+  // Models a sub-agent can run on, and your agent tools (agent-cli.ts) as
+  // `agent:<id>`, read-only.
+  const subagentModels = () => [...processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }],
+    ...(cliSubagentsOn ? agentCli.agents() : []).map((agent) => ({ id: agent.model, provider: `${agent.name} on this machine` }))];
+  // Under `bun test`, only a test that brings its own agent tools gets them,
+  // so a Claude Code installed on the machine never runs in a test.
+  const cliSubagentsOn = Boolean(options.agentCli) || process.env.NODE_ENV !== "test";
   const scheduler = new InferenceSchedulers(new InferenceScheduler(primarySlots), processor.providerId, options.providerInferenceSlots, inferenceSlots);
   const tools = new ToolRegistry();
   const pendingCompactions = new Map<string, { instructions: string; inference: TurnInference }>();
@@ -439,6 +446,11 @@ export function createDaemonApp(options: {
       inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
       fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
+      cliSubagents: cliSubagentsOn ? {
+        available: () => agentCli.agents().map((agent) => agent.id),
+        run: (id, prompt, cwd, signal, step) => agentCli.subagent(id, prompt, cwd, signal, step),
+        book: new RouteBook(join(dirname(options.databasePath), "subagent-route.json")),
+      } : undefined,
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       keepEdits,
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
@@ -1402,15 +1414,16 @@ export function createDaemonApp(options: {
         return json(response);
       }
 
-      // The model sub-agents run on when the agent doesn't name one; null means
-      // the conversation's own model. Applies to the next sub-agent and is saved.
+      // The model sub-agents run on when the agent doesn't name one: null or
+      // "auto" means one of your agent tools picked per job (subagent-route.ts),
+      // "same" the conversation's own model. Applies to the next sub-agent and is saved.
       if (url.pathname === "/v1/subagent-model" && (request.method === "GET" || request.method === "POST")) {
         if (request.method === "POST") {
           const body = await readJson(request);
           if (!isRecord(body) || !(body.model === null || typeof body.model === "string" && body.model.trim()))
             return apiError("invalid_request", "model must be a model id or null", 400);
           const model = typeof body.model === "string" ? body.model.trim() : null;
-          if (model && !subagentModels().some((available) => available.id === model))
+          if (model && model !== "auto" && model !== "same" && !subagentModels().some((available) => available.id === model))
             return apiError("invalid_request", `Unknown model: ${model}. Available: ${subagentModels().map((available) => available.id).join(", ")}`, 400);
           engine.setSubagentModel(model ?? undefined);
           let saved = true;

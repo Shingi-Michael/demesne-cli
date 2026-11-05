@@ -138,6 +138,38 @@ export function agentArgs(id: AgentId, prompt: string, resume: { id: string; fre
     ...(model ? ["--model", model] : []), ...(resume ? ["--conversation", resume.id] : [])];
 }
 
+/// A read-only run, for a sub-agent of another chat's turn: Claude Code in
+/// plan mode, Codex in its read-only sandbox, Antigravity allowed to read
+/// the project and nothing else. No session: each sub-agent starts fresh.
+export function subagentArgs(id: AgentId, prompt: string, choice: AgentChoice = {}, root = ""): string[] {
+  const model = choice.model && MODEL_NAME.test(choice.model) ? choice.model : null;
+  if (id === "claude") return ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", ...(model ? ["--model", model] : []), prompt];
+  if (id === "codex") {
+    const effort = choice.effort && AGENT_EFFORTS.includes(choice.effort) ? choice.effort : null;
+    const overrides = [...(model ? ["-c", `model="${model}"`] : []), ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : [])];
+    return ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", ...overrides, prompt];
+  }
+  return ["-p", prompt, "--output-format", "stream-json", ...(root ? ["--settings", JSON.stringify({ permissions: { allow: [`read_file(${root})`] } })] : []), ...(model ? ["--model", model] : [])];
+}
+
+/// The brief a CLI sub-agent is given around the main agent's own prompt.
+export function subagentBrief(prompt: string, root: string): string {
+  return `You are a read-only sub-agent working for another coding agent in ${root}. Do not change any files or run anything that changes state.
+Investigate the task below with your read and search tools, and stop as soon as the evidence answers it.
+Your final message is returned verbatim to the other agent, which cannot see your steps. Make it a self-contained report: the answer first, then the supporting facts with workspace-relative file paths and line numbers, and anything you could not determine.
+
+Task:
+${prompt}`;
+}
+
+/// A CLI step as a sub-agent's guide line: "read x", "search x", "list x"
+/// (the window's own verbs), anything else as the tool said it.
+export function subagentStep(line: string): string {
+  const match = /^(Read|Searched|Listed) (.*)$/.exec(line);
+  if (!match) return line;
+  return `${match[1] === "Read" ? "read" : match[1] === "Searched" ? "search" : "list"} ${match[2]}`;
+}
+
 /// What Antigravity may do in a headless run, where it can't ask: like
 /// Claude Code's accept-edits, read and change files in the project, and
 /// run only the commands your own Antigravity settings already allow.
@@ -418,6 +450,42 @@ export class AgentCli {
     const temporary = `${this.sessionsPath}.${process.pid}.tmp`;
     writeFileSync(temporary, JSON.stringify(all, null, 2));
     renameSync(temporary, this.sessionsPath);
+  }
+
+  /// One read-only sub-agent run for another chat's turn: its steps go to
+  /// `step` as they happen, its last message is the report. Throws when the
+  /// tool isn't here, fails, or says nothing.
+  async subagent(id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void): Promise<string> {
+    const kind = AGENT_KINDS.find((item) => item.id === id)!;
+    const path = this.find(kind.command);
+    if (!path) throw new Error(`${kind.name} isn't installed on this machine`);
+    let root = cwd;
+    try { root = realpathSync(cwd); } catch { /* as given */ }
+    const child = this.spawn([path, ...subagentArgs(id, subagentBrief(prompt, cwd), this.choice(id), root)], cwd);
+    const stop = () => child.kill();
+    signal.addEventListener("abort", stop, { once: true });
+    const stderr = tail(child.stderr);
+    let said = "", answer: string | null = null, error: string | null = null;
+    const state: AgyState = { words: {} };
+    try {
+      for await (const line of lines(child.stdout)) {
+        if (signal.aborted) throw signal.reason;
+        for (const item of parseAgentLine(id, line, cwd, state)) {
+          if (item.step) step(item.step);
+          if (item.said) said = item.said;
+          if (item.answer !== undefined) answer = item.answer;
+          if (item.error) error = item.error;
+        }
+      }
+      const code = await child.exited;
+      if (signal.aborted) throw signal.reason;
+      const final = (answer ?? said).trim();
+      if (error || !final) throw new Error(`${kind.name} stopped${code ? ` (exit ${code})` : ""}: ${error ?? (await stderr || "no report")}`);
+      return final;
+    } finally {
+      signal.removeEventListener("abort", stop);
+      child.kill();
+    }
   }
 
   /// A turn's call to the agent: the engine streams it like a model, and it

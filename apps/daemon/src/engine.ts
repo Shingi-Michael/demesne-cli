@@ -24,6 +24,8 @@ import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./ass
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
+import { agentIdOf, subagentStep, type AgentId } from "./agent-cli.ts";
+import { jobKind, pickAgent, type RouteBook } from "./subagent-route.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
 import { loadSkills, skillsGuidance } from "./skills.ts";
@@ -73,6 +75,9 @@ interface AgentEngineOptions extends AgentConfig {
   nameChats?: boolean;
   /// Models a sub-agent may be asked to run on, offered to the agent by name.
   subagentModels?: () => SubagentModel[];
+  /// Your agent tools as sub-agents (agent-cli.ts): which are installed, a
+  /// read-only run of one, and the record Auto picks from.
+  cliSubagents?: { available: () => AgentId[]; run: (id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void) => Promise<string>; book?: RouteBook };
   /// The model's own presets and compositions, per session.
   sessionTools?: SessionToolStore;
   /// What you added to or took off each chat's Keep list.
@@ -687,9 +692,9 @@ export class AgentEngine {
   /// report is the tool result and its steps stream as progress on the card.
   private async executeSubagent(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string,
     inference: TurnInference, signal: AbortSignal): Promise<string> {
-    let prompt: string, requested: string | undefined;
+    let prompt: string, requested: string | undefined, description: string;
     try {
-      ({ prompt, model: requested } = parseSubagentInput(input));
+      ({ prompt, model: requested, description } = parseSubagentInput(input));
       const models = this.options.subagentModels?.() ?? [];
       if (requested && !models.some((model) => model.id === requested))
         throw new Error(`unknown sub-agent model ${requested}. Available: ${models.map((model) => model.id).join(", ") || "none"}`);
@@ -700,8 +705,49 @@ export class AgentEngine {
       return result;
     }
     // The model the agent named (the user asked for it), else the default
-    // from /subagent or `[agent] subagent_model`, else the turn's own.
-    const model = requested ?? this.options.subagentModel;
+    // from /subagent or `[agent] subagent_model`. Unset or "auto": one of
+    // your agent tools, picked for the job; "same": the turn's own model.
+    const setting = this.options.subagentModel;
+    const cli = this.options.cliSubagents;
+    let started = false;
+    const named = agentIdOf(requested ?? (setting === "auto" || setting === "same" ? undefined : setting));
+    if (cli && (named || (!requested && (setting === undefined || setting === "auto")))) {
+      const kind = jobKind(description, prompt);
+      const available = cli.available();
+      const pick = named ? (available.includes(named) ? { agent: named, why: "" } : null) : pickAgent(kind, available, cli.book?.read() ?? { jobs: {}, restUntil: {} });
+      if (named && !pick) {
+        const result = `Error: ${named} isn't installed on this machine. Available sub-agents: ${(this.options.subagentModels?.() ?? []).map((model) => model.id).join(", ")}`;
+        this.store.settleToolCall(toolCallId, "failed", result);
+        return result;
+      }
+      if (pick) {
+        const label = `agent:${pick.agent} · `;
+        this.store.startToolCall(toolCallId);
+        started = true;
+        this.store.appendToolProgress(turnId, toolCallId, { text: `${label}starting`, ...(pick.why ? { why: pick.why } : {}) });
+        try {
+          const report = await cli.run(pick.agent, prompt, workspaceRoot, signal, (line) => this.store.appendToolProgress(turnId, toolCallId, { text: label + subagentStep(line) }));
+          if (!named) cli.book?.note(pick.agent, kind, true);
+          this.store.appendToolProgress(turnId, toolCallId, { report: report.slice(0, 16 * 1024) });
+          const result = `${report.slice(0, 16 * 1024)}\n\n(Sub-agent ran on ${pick.agent === "claude" ? "Claude Code" : pick.agent === "codex" ? "Codex" : "Gemini"}.)`;
+          this.store.settleToolCall(toolCallId, "completed", result);
+          return result;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          const message = error instanceof Error ? error.message : "unknown error";
+          if (!named) cli.book?.note(pick.agent, kind, false, message);
+          // One you named reports its failure; one Auto picked hands the job
+          // to the chat's own model, as a sub-agent ran before.
+          if (named) {
+            const result = `Error: sub-agent failed: ${message}`;
+            this.store.settleToolCall(toolCallId, "failed", result);
+            return result;
+          }
+          this.store.appendToolProgress(turnId, toolCallId, { text: `${label}${message.split("\n")[0]!.slice(0, 160)} · trying the chat's model` });
+        }
+      }
+    }
+    const model = requested ?? (setting === "auto" || setting === "same" || agentIdOf(setting) ? undefined : setting);
     // Sub-agents run with thinking off, whatever the chat chose: their work
     // shows as steps, never as a trace.
     let delegate = inference;
@@ -717,8 +763,9 @@ export class AgentEngine {
     }
     if (delegate === inference && inference.thinkingEnabled !== false && this.options.inferenceFor)
       try { delegate = this.options.inferenceFor(inference.modelId, false); } catch { /* the turn's own call, thinking and all, still answers */ }
-    const label = delegate.modelId === inference.modelId ? "" : `${delegate.modelId} · `;
-    this.store.startToolCall(toolCallId);
+    // After an agent tool gave up, name the model so the row stops showing it.
+    const label = delegate.modelId === inference.modelId && !started ? "" : `${delegate.modelId} · `;
+    if (!started) this.store.startToolCall(toolCallId);
     try {
       const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate, cacheKey: `${sessionId}:${toolCallId}`,
         scheduler: this.scheduler.for(delegate.providerId), signal, limits: this.options,

@@ -2463,3 +2463,46 @@ button:disabled {
 .steps .tool-row .target .dir {
   color: var(--muted);
 }
+
+/* A sub-agent running on one of your agent tools (pass 162 A): the tool's
+   face in place of the step icon, a pink "auto" when Demesne picked it, and
+   under a running row the one thing it is on right now. */
+.tool-row .step-face {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.tool-row .auto-chip {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 99px;
+  font-size: 11px;
+  line-height: 17px;
+  background: color-mix(in srgb, var(--blossom, #f2b6c8) 14%, transparent);
+  color: var(--blossom, #f2b6c8);
+}
+.agent-now {
+  margin: -2px 0 2px 37px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.steps .agent-why {
+  margin: 2px 0 4px;
+  padding: 4px 10px;
+  border-left: 1px solid var(--blossom, #f2b6c8);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--secondary);
+  max-width: 64ch;
+  white-space: normal;
+}
+.steps .agent-why b {
+  font-weight: 500;
+  color: var(--text, inherit);
+}

@@ -14,7 +14,15 @@ Use three Qwen subagents in parallel: trace session restore, inspect permission 
 and map the test entry points. Have each return file references and a short report.
 ```
 
-Use a model ID that appears in your installation. `/subagent same` clears the independent default. The setting is saved under `[agent] subagent_model`; the tool's explicit model argument overrides it for that invocation. Main-model selection remains separate.
+## On your agent tools
+
+When Claude Code, Codex or Gemini (Antigravity's `agy`) is installed, a sub-agent can run on it instead of on a model. By default (`subagent_model` unset or `"auto"`) Demesne picks the tool for each sub-agent: it sorts the job into a kind (finding code, tracing a flow, reviewing changes, reading a lot), tries the usual tool for that kind (Claude Code, Codex, Claude Code, Gemini), and once each tool has done four jobs of a kind, prefers the one that finishes them most often. The record is `<data>/subagent-route.json`. A tool that says it's out of room (rate or usage limit) sits out for an hour. If the picked tool fails, the job runs on the chat's own model as before. The agent can also name one (`agent:claude`, `agent:codex`, `agent:gemini`) when you ask for it.
+
+Your agent tools run read-only as sub-agents: Claude Code in plan mode, Codex in its `read-only` sandbox, Antigravity allowed to read the project and nothing else. Each run is fresh, with no session kept. The row on the turn shows the tool's face and name, a pink "auto" when Demesne picked it, and under a running row what it's on now; unfolding it says why that tool was picked. The sidebar shows the tool as "helping" while it works for the chat. [Routing](../apps/daemon/src/subagent-route.ts) · [the run](../apps/daemon/src/agent-cli.ts) · [tests](../apps/daemon/test/cli-subagent.test.ts) · `bun scripts/check-cli-subagents.ts` in the app.
+
+## Choosing the default
+
+Use a model ID that appears in your installation, or an agent tool's `agent:<id>`. `/subagent same` keeps sub-agents on the chat's own model; `/subagent auto` (or no setting) lets Demesne pick one of your agent tools. The setting is saved under `[agent] subagent_model`; the tool's explicit model argument overrides it for that invocation. Main-model selection remains separate.
 
 ## Scheduling
 

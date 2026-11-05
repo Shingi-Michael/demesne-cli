@@ -1,5 +1,6 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import { assembledDocument } from "./foundry-assemble.ts";
+import { isReadyKind, KINDS_SCRIPT, KINDS_STYLE, renderReadyKind } from "./foundry-kinds.ts";
 export const APP_URL = "demesne://app/index.html";
 /** Whether the window is glass, with the Glass slider in Settings: on the
  *  Mac, Windows and Linux alike. DEMESNE_GLASS=0 keeps Linux or Windows
@@ -73,6 +74,9 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "pick.js": { path: "kit/pick.js", type: "application/javascript; charset=utf-8" },
   // Parts: frames, Demesne's own shell and pieces, icons, avatars, charts.
   "parts.js": { path: "kit/parts.js", type: "application/javascript; charset=utf-8" },
+  // The ready kinds (foundry-kinds.ts): how a Deck, a Doc and a Dashboard look and move.
+  "kinds.css": { path: "kit/kinds.css", type: "text/css; charset=utf-8" },
+  "kinds.js": { path: "kit/kinds.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
 export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
@@ -90,13 +94,15 @@ export function foundryKitFile(value: string): string | null {
 }
 /** A page as it leaves Demesne (Export): the kit it leaned on is inlined,
  * so the file stands on its own. The fonts fall back to the system's. */
-export function exportedSource(source: string, kit: { style: string; script: string; parts?: string }) {
+export function exportedSource(source: string, kit: { style: string; script: string; parts?: string; kinds?: { style: string; script: string } }) {
   const tag = (name: string, address: string) => new RegExp(`<${name}\\b[^>]*\\b(?:href|src)=["']?${address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']?[^>]*>(?:\\s*</${name}>)?`, "gi");
   const style = kit.style.replace(/@font-face\{[^}]*foundry:\/\/kit\/[^}]*\}\n?/g, "");
   return source
     .replace(tag("link", FOUNDRY_KIT_STYLE), () => `<style>\n${style}</style>`)
     .replace(tag("script", FOUNDRY_KIT_SCRIPT), () => `<script>${kit.script.replace(/<\//g, "<\\/")}</script>`)
-    .replace(tag("script", FOUNDRY_PARTS_SCRIPT), (found) => kit.parts === undefined ? found : `<script>${kit.parts.replace(/<\//g, "<\\/")}</script>`);
+    .replace(tag("script", FOUNDRY_PARTS_SCRIPT), (found) => kit.parts === undefined ? found : `<script>${kit.parts.replace(/<\//g, "<\\/")}</script>`)
+    .replace(tag("link", KINDS_STYLE), (found) => kit.kinds === undefined ? found : `<style>\n${kit.kinds.style}</style>`)
+    .replace(tag("script", KINDS_SCRIPT), (found) => kit.kinds === undefined ? found : `<script>${kit.kinds.script.replace(/<\//g, "<\\/")}</script>`);
 }
 /** Where an artifact may load libraries and fonts from: the same short list
  * Claude's artifacts allow, so a chart, React or a real typeface works. */
@@ -112,6 +118,8 @@ export interface FoundryAssembly { library: string; previous: string | null }
 /** The page an artifact frame shows: HTML as written, SVG as an image (so it runs no script). */
 export function foundryDocument(kind: string, source: string, title: string, assembly?: FoundryAssembly) {
   const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);
+  // A Deck, a Doc or a Dashboard: the content drawn by the app's own renderer.
+  if (isReadyKind(kind)) return renderReadyKind(kind, source, title);
   if (kind === "html") return withPick(assembly ? assembledDocument(source, assembly.library, assembly.previous) : source);
   if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}${assembly ? "@media(prefers-reduced-motion:no-preference){img{animation:in 600ms cubic-bezier(.2,.8,.2,1)}@keyframes in{from{opacity:0;transform:scale(.6) rotate(-6deg)}}}" : ""}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
   return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><pre style="white-space:pre-wrap;font:14px/1.6 system-ui;padding:24px">${esc(source)}</pre>`;

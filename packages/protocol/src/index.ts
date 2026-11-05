@@ -1117,9 +1117,10 @@ function parseRuleArguments(value: unknown): Record<string, unknown> {
 
 /// Foundry: things the agent makes for the person (prototypes, graphics,
 /// documents). Each save is a new version; the source is text the person can
-/// read, revise and export.
-export type FoundryKind = "html" | "svg" | "markdown";
-export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown"];
+/// read, revise and export. A deck, doc or dashboard is content (Markdown
+/// with chart and stats blocks) that Demesne draws with a fixed renderer.
+export type FoundryKind = "html" | "svg" | "markdown" | "deck" | "doc" | "dashboard";
+export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown", "deck", "doc", "dashboard"];
 export const FOUNDRY_MAX_SOURCE_BYTES = 512 * 1024;
 
 export interface FoundryVersion {

@@ -9,7 +9,7 @@
 /// under the page: play or pause, a scrubber, the motions by name, half
 /// speed and Replay; the frame and the pane talk by postMessage.
 import type { FoundryArtifactDetail } from "@demesne/protocol";
-import { frameURL, KIND_WORD } from "./foundry-page.ts";
+import { frameURL, KIND_WORD, READY_KIND } from "./foundry-page.ts";
 import { dayWord } from "./chats-page.ts";
 
 export interface PaneState { id: string; version: number; view: "preview" | "code"; phone: boolean }
@@ -74,8 +74,9 @@ export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState,
     + (detail && state.version !== near.latest ? button("restore", "Make this the latest", ' class="pane-word"') : "")
     + (detail?.kind === "html" && build ? button("build", "Build this", ' class="pane-word pane-build" title="Turn this page into real code in the chat\'s project"') : "")
     + (detail && code ? tool("copy", "Copy the source", '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/>') : "")
+    + (detail?.kind === "deck" && !code ? tool("play", "Play the deck", '<path d="M8 5v14l11-7z"/>') : "")
     + (detail ? tool("code", "Code", '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', ` aria-pressed="${code}"`) : "")
-    + (detail?.kind === "html" ? tool("phone", "Phone width", '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', ` aria-pressed="${state.phone}"`) : "")
+    + (detail && (detail.kind === "html" || READY_KIND.has(detail.kind)) ? tool("phone", "Phone width", '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', ` aria-pressed="${state.phone}"`) : "")
     + (detail ? tool("export", "Export the file", '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>') : "")
     + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)" class="pane-ico"');
 }
@@ -94,6 +95,9 @@ export function pickMessage(data: unknown): string | null {
   const words = option.replace(/\s+/g, " ").trim();
   return words && words.length <= 120 ? words : null;
 }
+
+/// The deck ended its own play (Esc inside the frame).
+export const deckStopped = (data: unknown) => !!data && typeof data === "object" && (data as Record<string, unknown>).demesne === "deck" && (data as Record<string, unknown>).state === "stopped";
 
 /// A motion the page named with demesne.motion(name, timeline) (the kit's
 /// runtime), and where it is.
@@ -182,6 +186,7 @@ export class FoundryPane {
     window.addEventListener("message", (event) => {
       const frame = this.stage.querySelector<HTMLIFrameElement>("iframe.pane-frame");
       if (!frame || event.source !== frame.contentWindow) return;
+      if (deckStopped(event.data)) { this.play(false); return; }
       const picked = pickMessage(event.data);
       if (picked) { this.options.pick?.(picked); return; }
       const message = motionMessage(event.data);
@@ -193,6 +198,7 @@ export class FoundryPane {
     // Esc closes the pane, unless something that handles its own Esc has focus.
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !this.state || event.defaultPrevented || event.isComposing) return;
+      if (this.playing) { event.preventDefault(); this.play(false); return; }
       // A page covers the chat, so its pane is hidden: Esc belongs to the page.
       if (this.root.closest(".paging")) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -254,6 +260,7 @@ export class FoundryPane {
   }
 
   close() {
+    this.play(false);
     if (!this.state && this.makingTitle === null) return;
     this.state = null; this.detail = null; this.error = ""; this.frameKey = ""; this.assembleKey = ""; this.makingTitle = null;
     this.remember();
@@ -301,6 +308,7 @@ export class FoundryPane {
     if (action === "mo-replay") return this.tell({ action: "restart" });
     if (action === "mo-pick" && name) { this.motionCurrent = name; return this.tell({ action: "restart", name }); }
     if (action === "mo-speed") { this.slow = !this.slow; this.renderMotion(); return this.tell({ action: "speed", value: this.slow ? 0.5 : 1 }); }
+    if (action === "play") return this.play(true);
     if (action === "code") { state.view = state.view === "code" ? "preview" : "code"; this.remember(); return this.render(); }
     if (action === "phone") { state.phone = !state.phone; this.remember(); return this.render(); }
     if (!detail) return;
@@ -317,6 +325,20 @@ export class FoundryPane {
       this.error = reason instanceof Error ? reason.message : String(reason);
       this.render();
     }
+  }
+
+  /// Play a deck: the pane covers the whole window and the deck shows one
+  /// slide as big as it fits; Esc, or the deck's own Esc, ends it. It stays
+  /// inside the window rather than taking the screen, so the Mac's own full
+  /// screen handling is never involved.
+  private playing = false;
+  play(on: boolean) {
+    if (on === this.playing) return;
+    this.playing = on;
+    this.root.classList.toggle("playing", on);
+    const frame = this.stage.querySelector<HTMLIFrameElement>("iframe.pane-frame");
+    frame?.contentWindow?.postMessage({ demesne: "deck", action: on ? "play" : "stop" }, "*");
+    if (on) frame?.focus();
   }
 
   /// The motion line as last built, with its time and scrubber at zero.
@@ -360,13 +382,14 @@ export class FoundryPane {
     const code = state.view === "code";
     this.code.hidden = !code;
     this.stage.hidden = code;
-    this.stage.className = `pane-stage${detail?.kind === "svg" ? " graphic" : ""}${detail?.kind === "html" && state.phone ? " phone" : ""}`;
+    this.stage.className = `pane-stage${detail?.kind === "svg" ? " graphic" : ""}${detail && (detail.kind === "html" || READY_KIND.has(detail.kind)) && state.phone ? " phone" : ""}`;
     if (code) this.code.textContent = detail?.source ?? "";
     this.renderMotion();
     if (!detail) { this.stage.replaceChildren(); this.frameKey = ""; this.forgetMotions(); return; }
     const key = `${detail.kind}:${detail.id}:${state.version}`;
     if (key === this.frameKey) return;
     this.frameKey = key;
+    this.play(false);
     this.forgetMotions();
     const assemble = this.assembleKey === `${detail.id}:${state.version}`;
     this.assembleKey = "";

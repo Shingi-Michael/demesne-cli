@@ -6,7 +6,7 @@ import { DemesneClient } from "../../../packages/client/src/index.ts";
 import type { ModelMessage, PermissionMode, SessionStateResponse } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
-import { applyFoundryEdits, DESIGN_BRIEF, PARTS_GUIDE, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { applyFoundryEdits, DESIGN_BRIEF, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
@@ -317,4 +317,20 @@ test("the next turn's request carries a stub where the earlier turn's page was, 
   // Turn 2, second round: what foundry_read gave back this turn is there in full.
   expect(JSON.stringify(requests[3])).toContain(page);
   expect(requests[3]!.filter((message) => JSON.stringify(message).includes("a paragraph of the page"))).toHaveLength(1);
+});
+
+test("a deck, doc or dashboard is saved as content, and the tool says how to write it", async () => {
+  const store = new DemesneStore(":memory:");
+  const context = { signal: new AbortController().signal, workspaceRoot: "" } as never;
+  const tool = foundrySaveTool(store);
+  for (const kind of ["deck", "doc", "dashboard"] as const) {
+    const saved = JSON.parse(await tool.execute({ title: `A ${kind}`, kind, source: "# Q1 launch\n\n---\n\n# 3.1×\nSign-ups tripled." }, context));
+    expect(saved.kind).toBe(kind);
+    expect(store.getFoundryArtifact(saved.id)!.kind).toBe(kind);
+  }
+  await expect(tool.execute({ title: "Nope", kind: "slides", source: "x" }, context)).rejects.toThrow(/deck, doc or dashboard/);
+  const words = tool.definition.description;
+  for (const piece of ["kind deck", "```chart", "```stats", "label | value | delta | note", "theme: paper|ink|forest|ocean|sand|plum", "<!-- layout:"]) expect(words).toContain(piece);
+  expect(READY_KINDS_RULES.length).toBeLessThan(1400);
+  store.close();
 });

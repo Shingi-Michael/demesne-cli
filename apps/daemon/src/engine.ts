@@ -1134,6 +1134,7 @@ export const ANSWER_FORMAT_GUIDANCE = "Answers are shown as Markdown in the Deme
 /// "show me" and "what would it look like", rarely "mockup".
 const FOUNDRY_WHEN = "Decide by what the best answer is, not by the words used: when it is something to look at, click or compare "
   + "(a screen or layout, a flow or state, a chart or diagram, a small game or tool, a logo or palette, a page or one-pager, two designs side by side), the answer is a Foundry page. "
+  + "Slides, a written report or brief, and a dashboard of numbers are Foundry's ready kinds (deck, doc, dashboard): you write the content and Demesne designs it. "
   + "\"Show me\", \"what would it look like\", \"make me a page\", \"help me pick\" and \"compare them visually\" all mean this. Show options side by side on one page. "
   + "No page for code changes, fixes, explanations, git, or a question answered in a few words; changing the project's own UI is code work, and a mockup is never a file in the project unless they ask for one there.";
 const FOUNDRY_HOW = "The preview opens beside the chat by itself, so describe it in a sentence and never paste the source or a code block instead. To change one, foundry_read it, then foundry_edit "

@@ -1559,6 +1559,44 @@ describe("Demesne daemon", () => {
     expect(postHealth.model).toBe("qwen3:14b-fast");
   });
 
+  test("a model not routed yet is looked up once; an unknown one or an agent gets a clear 400", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
+    temporaryDirectories.push(directory);
+    // Like the multi-provider processor before discovery: only the starting
+    // model is routed until listModels runs.
+    let currentModel = "initial-model", routes = ["initial-model"], lists = 0;
+    const processor: TurnProcessor = {
+      providerId: "test-provider",
+      get modelId() { return currentModel; },
+      availableModels() { return routes.map((id) => ({ id, provider: "test-provider" })); },
+      setModel(modelId: string) { if (!routes.includes(modelId)) throw new Error(`Unknown model: ${modelId}`); currentModel = modelId; },
+      async listModels() { lists++; routes = ["initial-model", "codex/gpt-6-astra"]; return this.availableModels!(); },
+      async *stream() { yield { type: "text_delta" as const, delta: "ok" }; },
+    };
+    const running = startApp(join(directory, "demesne.sqlite"), processor);
+    const errors: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args); };
+    try {
+      const post = (model: string) => fetch(new URL("/v1/model", running.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) });
+
+      const found = await post("codex/gpt-6-astra");
+      expect(found.status).toBe(200);
+      expect(lists).toBe(1);
+      expect(currentModel).toBe("codex/gpt-6-astra");
+
+      const unknown = await post("no-such-model");
+      expect(unknown.status).toBe(400);
+      expect((await unknown.json() as { error: { message: string } }).error.message).toBe("Unknown model: no-such-model. Available: initial-model, codex/gpt-6-astra");
+
+      const agent = await post("agent:claude");
+      expect(agent.status).toBe(400);
+      expect((await agent.json() as { error: { message: string } }).error.message).toContain("agent:claude is an agent, not a model");
+      expect(currentModel).toBe("codex/gpt-6-astra");
+    } finally { console.error = original; }
+    expect(errors).toEqual([]);
+  });
+
   test("a thinking level travels with the model choice and is reported", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);

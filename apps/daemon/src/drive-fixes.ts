@@ -28,6 +28,10 @@ export interface FixHost {
   settled?(fix: DriveFix, before: DriveFixStatus): void;
   /// A finished mission's report, as a turn in the chat it started from.
   report?(sessionId: string, content: string): void;
+  /// Archives a job's chat once nothing in it is left to review, so its
+  /// worktree doesn't linger as a project in the sidebar. Its history (and
+  /// the model scoreboard's count of it) stays. Skipped while a turn runs.
+  archive?(sessionId: string): void;
 }
 
 type Run = (argv: string[], cwd: string, timeoutMs?: number) => Promise<{ ok: boolean; out: string; err: string }>;
@@ -399,7 +403,15 @@ export class DriveFixes {
     }
     const numstat = await this.git(["git", "diff", "--numstat", `${fix.base}..HEAD`], fix.path);
     const rows = numstat.out.split("\n").filter(Boolean).map((line) => line.split("\t"));
-    if (!rows.length) { fix.unchanged = true; return this.fail(fix, new Error("The agent made no changes.")); }
+    if (!rows.length) {
+      fix.unchanged = true;
+      this.fail(fix, new Error("The agent made no changes."));
+      // A fix or proposal that changed nothing has nothing to apply: its
+      // findings stay in its summary on Drive's list, and its worktree,
+      // branch and chat go. A mission or thread can be resumed, so it keeps them.
+      if (!fix.mission && !fix.thread) await this.release(fix);
+      return;
+    }
     fix.diff = { files: rows.length, additions: rows.reduce((n, [a]) => n + (Number(a) || 0), 0), deletions: rows.reduce((n, [, d]) => n + (Number(d) || 0), 0), paths: rows.slice(0, 8).map((row) => row[2]!) };
     Object.assign(fix, { status: "ready", finishedAt: new Date().toISOString() });
     this.save();
@@ -411,6 +423,7 @@ export class DriveFixes {
     // only takes it off the orchestrator's list.
     if (fix?.thread && fix.status === "applied" && action === "discard") {
       fix.status = "discarded";
+      this.archive(fix);
       this.save();
       return fix;
     }
@@ -420,6 +433,7 @@ export class DriveFixes {
       if (fix.status === "running" && fix.turnId) { this.host.cancel(fix.turnId); await this.done.get(id); }
       await this.cleanup(fix, true);
       Object.assign(fix, { status: "discarded", finishedAt: fix.finishedAt ?? new Date().toISOString() });
+      this.archive(fix);
       this.save();
       this.settle(fix, before);
       return fix;
@@ -444,9 +458,25 @@ export class DriveFixes {
       await this.cleanup(fix, false);
       fix.status = "pr";
     }
+    // A merged thread's conversation stays on the orchestrator's list until
+    // it's deleted there.
+    if (!fix.thread) this.archive(fix);
     this.save();
     this.settle(fix, before);
     return fix;
+  }
+
+  /// Takes the worktree and its branch off the machine, and the chat out of
+  /// the sidebar, once a job has nothing left to review there.
+  private async release(fix: DriveFix) {
+    await this.cleanup(fix, true);
+    this.archive(fix);
+    this.save();
+  }
+
+  private archive(fix: DriveFix) {
+    if (!fix.sessionId) return;
+    try { this.host.archive?.(fix.sessionId); } catch { /* a chat already gone is fine */ }
   }
 
   private settle(fix: DriveFix, before: DriveFixStatus) {

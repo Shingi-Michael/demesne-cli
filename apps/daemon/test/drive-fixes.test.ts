@@ -83,12 +83,17 @@ test("a breakage is fixed in its own worktree, then applied to the user's branch
     expect(existsSync(ready.path)).toBe(false);
     expect(out(workspace, "branch", "--list", "drive/*")).toBe("");
     expect(existsSync(join(workspace, "node_modules", "dep", "index.js"))).toBe(true);
+    // Its chat leaves the sidebar's list once applied, kept in Archived.
+    const listed = async (archived: boolean) => ((await call(`/v1/sessions${archived ? "?archived=1" : ""}`)).body.sessions as { id: string }[]).map((session) => session.id);
+    expect(await listed(false)).not.toContain(ready.sessionId!);
+    expect(await listed(true)).toContain(ready.sessionId!);
 
     // A second fix, discarded: nothing reaches the checkout.
     git(workspace, "reset", "-q", "--hard", "HEAD~1");
     const second = (await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals }) })).body.fix as DriveFix;
     await until(second.id, (fix) => fix.status === "ready");
     expect((await call(`/v1/drive/fixes/${second.id}/discard`, { method: "POST" })).body.fix.status).toBe("discarded");
+    expect(await listed(false)).not.toContain(second.sessionId!);
     expect(readFileSync(join(workspace, "src", "count.ts"), "utf8")).toBe("export const count = 1;\n");
     expect(out(workspace, "branch", "--list", "drive/*")).toBe("");
     expect(out(workspace, "worktree", "list").split("\n")).toHaveLength(1);
@@ -156,6 +161,46 @@ test("a Next proposal runs in its own worktree and branch, with no breakage need
     expect(all.models).toEqual([expect.objectContaining({ provider: "test", model: "coder", turns: 1, finished: 1, driveRuns: 1, driveLanded: 1 })]);
     expect((await call("/v1/models/scoreboard?days=0")).status).toBe(400);
     expect(record.actualMinutes).toBeGreaterThanOrEqual(0);
+  } finally { server.stop(true); await app.close(); }
+});
+
+test("a proposal that changes nothing cleans up after itself, keeping what it found", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "drive-unchanged-"))); roots.push(root);
+  const workspace = join(root, "repo");
+  mkdirSync(join(workspace, "src"), { recursive: true });
+  writeFileSync(join(workspace, "src", "slow.ts"), "export const wait = 1;\n");
+  git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
+  // An investigation: it reads and answers, and edits nothing.
+  const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
+    async *stream() { yield { type: "text_delta" as const, delta: "The check is slow because it type-checks twice." }; yield { type: "finish" as const, reason: "stop" }; } };
+  const app = createDaemonApp({ databasePath: join(root, "data", "state.sqlite"), processor });
+  const server = Bun.serve({ port: 0, fetch: app.fetch });
+  const call = async (path: string, init?: RequestInit) => {
+    const response = await fetch(new URL(path, server.url), { headers: { "Content-Type": "application/json" }, ...init });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const proposal = { id: "p2", kind: "investigate", title: "Find why the check is slow", why: "It takes over a minute.", minutes: 20, confidence: "low" };
+  try {
+    await call("/v1/sessions", { method: "POST", body: JSON.stringify({ title: "S", workspacePath: workspace, trustWorkspace: true }) });
+    const fix = (await call("/v1/drive/fixes", { method: "POST", body: JSON.stringify({ workspace, signals: [], proposal }) })).body.fix as DriveFix;
+    let settled: DriveFix | undefined;
+    for (let i = 0; i < 400; i++) {
+      const item = (await call(`/v1/drive/fixes?workspace=${encodeURIComponent(workspace)}`)).body.fixes.find((entry: DriveFix) => entry.id === fix.id) as DriveFix;
+      // Settled once the worktree is gone too, not just the turn.
+      if (item.status === "failed" && !existsSync(item.path)) { settled = item; break; }
+      await Bun.sleep(25);
+    }
+    // What it found stays on Drive's list, with nothing to apply.
+    expect(settled).toMatchObject({ status: "failed", unchanged: true, summary: "The check is slow because it type-checks twice." });
+    // Its worktree and branch are gone, and its chat is archived, so no
+    // project is left behind in the sidebar.
+    expect(out(workspace, "worktree", "list").split("\n")).toHaveLength(1);
+    expect(out(workspace, "branch", "--list", "drive/*")).toBe("");
+    const listed = async (archived: boolean) => ((await call(`/v1/sessions${archived ? "?archived=1" : ""}`)).body.sessions as { id: string }[]).map((session) => session.id);
+    expect(await listed(false)).not.toContain(settled!.sessionId!);
+    expect(await listed(true)).toContain(settled!.sessionId!);
+    // Discarding it later only takes it off the list.
+    expect((await call(`/v1/drive/fixes/${fix.id}/discard`, { method: "POST" })).body.fix.status).toBe("discarded");
   } finally { server.stop(true); await app.close(); }
 });
 

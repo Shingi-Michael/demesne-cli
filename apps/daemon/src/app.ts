@@ -88,7 +88,7 @@ import { modelScoreboard } from "./model-scoreboard.ts";
 import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
-import { AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
+import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
@@ -235,6 +235,12 @@ export function createDaemonApp(options: {
       const inference = session?.preferredModel || session?.preferredReasoning ? inferenceIn(sessionId, true) : snapshotTurnInference(processor, true);
       const { turn } = store.createTurn(sessionId, prompt, "allow", true, false);
       return { turnId: turn.id, done: queueTurn(turn, inference) };
+    },
+    archive: (sessionId) => {
+      const session = store.getSession(sessionId);
+      if (!session || session.archivedAt || session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) return;
+      store.archiveSession(sessionId);
+      heartbeat?.detach(sessionId);
     },
     report: (sessionId, content) => {
       // A short turn in the person's own chat: no thinking, and no tool runs
@@ -1436,7 +1442,21 @@ export function createDaemonApp(options: {
         if (reasoning !== undefined && (typeof reasoning !== "string" || !/^[a-z]{1,16}$/.test(reasoning))) {
           return apiError("invalid_request", "reasoning must be a thinking level such as off, low or high", 400);
         }
+        // An agent's chat runs the agent's own tool (agent-cli.ts), so there
+        // is no model to switch to.
+        if (modelName.startsWith(AGENT_MODEL_PREFIX)) {
+          return apiError("invalid_request", `${modelName} is an agent, not a model: its chats run the agent's own tool`, 400);
+        }
         if (processor && typeof processor.setModel === "function") {
+          // Opening a chat doesn't wait for model discovery, so a model a
+          // provider does serve may not be routed yet: look once, then say
+          // plainly what is available instead of failing the request.
+          const known = () => !processor.availableModels || processor.availableModels().some((model) => model.id === modelName);
+          if (!known()) await processor.listModels().catch(() => []);
+          if (!known()) {
+            const available = processor.availableModels!().map((model) => model.id);
+            return apiError("invalid_request", `Unknown model: ${modelName}.${available.length ? ` Available: ${available.join(", ")}` : " No configured provider lists it."}`, 400);
+          }
           processor.setModel(modelName, reasoning);
           return json({ status: "ok", model: modelName, ...(processor.reasoning ? { reasoning: processor.reasoning } : {}) });
         }

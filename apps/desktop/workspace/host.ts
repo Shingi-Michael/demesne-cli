@@ -2181,7 +2181,7 @@ export class WorkspaceHost {
       const root = this.current && !this.current.session.workspace ? null : this.current?.session.workspace?.root ?? this.workspace;
       if (method === "customize") return customizeView(root);
       if (method === "customize-read") return { text: readCustomizable(string(args.path, "path", 4096), root) };
-      if (method === "customize-new") return { path: newCustomizable(args.kind === "workflow" ? "workflow" : "command", string(args.name, "name", 80), root) };
+      if (method === "customize-new") return { path: newCustomizable(args.kind === "workflow" ? "workflow" : args.kind === "skill" ? "skill" : "command", string(args.name, "name", 80), root) };
       if (typeof args.text !== "string") throw new Error("Expected the file's text");
       writeCustomizable(string(args.path, "path", 4096), args.text, root);
       this.commandCache = null;

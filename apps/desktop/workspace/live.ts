@@ -2909,7 +2909,13 @@ function mountReel(root: HTMLElement) {
   const id = section.dataset.reel ?? "";
   if (reelPlay.id !== id) Object.assign(reelPlay, { id, index: 0, at: 0, hold: false });
   const frames = [...player.querySelectorAll<HTMLElement>(".td-fr")], bars = [...player.querySelectorAll<HTMLElement>(".td-bars b")];
-  const length = (index: number) => { const video = frames[index]?.querySelector("video"); return video && Number.isFinite(video.duration) && video.duration > 0 ? video.duration * 1000 : 3600; };
+  const length = (index: number) => {
+    const frame = frames[index], video = frame?.querySelector("video");
+    if (video && Number.isFinite(video.duration) && video.duration > 0) return video.duration * 1000;
+    // Words stay long enough to read: a chapter or a long line gets more time.
+    const words = (frame?.querySelector(".td-fr-words p")?.textContent ?? "").split(/\s+/).filter(Boolean).length;
+    return Math.min(9000, Math.max(3600, words * 260));
+  };
   const show = (index: number) => {
     reelPlay.index = Math.max(0, Math.min(frames.length - 1, index));
     frames.forEach((frame, at) => {
@@ -3021,6 +3027,11 @@ function setRemembers(agent: string, remembers: SocialRemembered[]) {
 }
 /// A screenshot for your post, from a paste or the file picker.
 /// Any size works: big ones are redrawn at 2048px (the feed shows 1280).
+/// Today's picture picker lives outside the page, so a redraw while the
+/// file dialog is open (pictures arrive every 10 s) can't lose your pick.
+const todayFile = Object.assign(document.createElement("input"), { type: "file", id: "today-file", accept: "image/*", hidden: true });
+todayFile.addEventListener("change", () => { attachPicture(todayFile.files?.[0]); todayFile.value = ""; });
+document.body.append(todayFile);
 function attachPicture(file: File | null | undefined) {
   if (!file || !(file.type.startsWith("image/") || /\.hei[cf]$/i.test(file.name))) return;
   void readPicture(file, { side: 2048, bytes: 3 * 1024 * 1024 }).then(({ url }) => { todayUi.share!.image = url; todayUi.error = ""; renderPage(); },
@@ -3443,7 +3454,6 @@ document.getElementById("page")?.addEventListener("paste", (event) => {
 });
 document.getElementById("page")?.addEventListener("change", (event) => {
   const input = event.target as HTMLElement;
-  if (input instanceof HTMLInputElement && input.id === "today-file") { attachPicture(input.files?.[0]); input.value = ""; return; }
   if (input instanceof HTMLSelectElement && input.matches("[data-foundry-version]") && foundryOpen) return void openFoundry(foundryOpen.id, Number(input.value));
   if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
 });
@@ -5622,6 +5632,7 @@ async function dispatch(
   if (action === "today-model-open") { todayUi.modelOpen = !todayUi.modelOpen; return renderPage(); }
   if (action === "today-model") { if (args.close) todayUi.modelOpen = false; return void pickAgentModel(String(args.agent ?? ""), typeof args.model === "string" ? args.model : "", typeof args.effort === "string" ? args.effort : ""); }
   if (action === "today-profile") return openProfile(typeof args.agent === "string" ? args.agent : "");
+  if (action === "today-file") return todayFile.click();
   if (action === "today-unattach") { todayUi.share!.image = null; return renderPage(); }
   if (action === "today-reply") {
     todayUi.replying = todayUi.replying === args.id ? "" : String(args.id);

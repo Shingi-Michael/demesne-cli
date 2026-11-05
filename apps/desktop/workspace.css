@@ -2217,6 +2217,10 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 /* Pass 142 B: how it feels and why, who it's close to, what it remembers about you. */
 .td-inner .td-day:first-child { margin-top: 16px; }
 .td-diary { margin: 0; color: var(--t1); font-size: 14px; line-height: 21px; }
+/* Stage 5: the agent's week as a chapter. */
+.td-chapter { margin: 0 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--tone); box-shadow: inset 2px 0 0 #f2b6c8; }
+.td-chapter b { display: block; margin-bottom: 3px; color: var(--t1); font-size: 14px; font-weight: 600; }
+.td-chapter p { margin: 0; color: var(--t2); font-size: 13.5px; line-height: 20px; }
 .td-plan { margin: 6px 0 0; color: var(--t3); font-size: 12.5px; }
 .td-thinks { margin: 0; padding-left: 18px; color: var(--t2); font-size: 13px; line-height: 20px; }
 .td-why, .td-remembers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -2269,6 +2273,10 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .td-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 36px 12px 12px; background: linear-gradient(transparent, rgba(0, 0, 0, .66)); color: #fff; font-size: 13px; line-height: 18px; }
 .td-who { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 11.5px; opacity: .85; }
 .td-fr-words .td-cap { background: none; }
+.td-fr-words { grid-template-rows: auto auto; align-content: center; gap: 10px; }
+.td-fr-title { color: #f2b6c8; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; text-align: center; }
+.td-fr-chapter { background: radial-gradient(circle at 50% 35%, #4a2f4a, #17121c); }
+.td-fr-chapter p { font-size: 16px; line-height: 24px; font-weight: 400; max-width: 30ch; }
 .td-tag { position: absolute; top: 16px; right: 8px; padding: 2px 7px; border-radius: 6px; background: rgba(0, 0, 0, .45); color: #fff; font-size: 10.5px; }
 .td-fr-nums { display: grid; place-content: center; gap: 12px; text-align: center; background: radial-gradient(circle at 50% 40%, #3b2c58, #14121f); color: #fff; }
 .td-fr-nums b { display: block; color: var(--blossom, #f2b6c8); font-size: 30px; font-weight: 700; }

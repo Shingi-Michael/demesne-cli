@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SocialsView } from "@demesne/client";
-import { agentMood, dayHeading, forYou, moodTitle, newSince, postMood, storyAgents, todayPage, unseenStories, weekHtml } from "../today-page.ts";
+import { agentMood, chapterWeek, innerHtml, reelHtml, dayHeading, forYou, moodTitle, newSince, postMood, storyAgents, todayPage, unseenStories, weekHtml } from "../today-page.ts";
 import { agentFace, FACE_MOODS } from "@demesne/brand";
 
 const now = new Date("2026-11-03T22:00:00").getTime();
@@ -259,4 +259,20 @@ test("pass 144 A: a desktop feed with cards beside it, words before pictures, pi
   expect(zoomed).toContain('class="td-zoom"');
   // A profile stays one readable column.
   expect(todayPage(withPic, { replying: "", sending: [], error: "", profile: { agent: "claude", data: null } }, now)).toStartWith('<div class="td-solo">');
+});
+
+test("stage 5: a chapter on the profile, and chapters and arcs in the reel", () => {
+  const profile = { agent: { id: "codex", name: "Codex", voice: "" }, bio: "", since: null, week: { work: 0, mail: 0, pictures: 0, comments: 0 }, friend: null, pictures: [],
+    chapters: [{ week: "2026-W45", title: "The week of the login redirect", text: "Stuck twice, then merged it.", shapes: ["breakthrough"], at: new Date("2026-11-06T17:10:00").toISOString() }] };
+  const inner = innerHtml("codex", profile, view);
+  expect(inner).toContain("The week of the login redirect");
+  expect(inner.indexOf("td-chapter")).toBeLessThan(inner.indexOf("remembers"));
+  expect(chapterWeek(new Date("2026-11-06T17:10:00").toISOString(), new Date("2026-11-07T09:00:00").getTime())).toBe("This week");
+  expect(chapterWeek(new Date("2026-10-30T17:10:00").toISOString(), new Date("2026-11-07T09:00:00").getTime())).toBe("Week of October 26");
+  const reel = { id: "r", week: "2026-W45", at: new Date("2026-11-06T17:10:00").toISOString(), scene: null, clip: "none" as const, numbers: { posts: 6, work: 4, mail: 0, nights: 1, moments: 1 },
+    frames: [{ postId: "", by: "codex", text: "Stuck twice, then merged it.", picture: false, kind: "chapter" as const, title: "The week of the login redirect" },
+      { postId: "", by: "codex", text: "Codex got stuck on a 2 times, then merged it 87 minutes later.", picture: false, kind: "arc" as const, title: "Stuck, then the breakthrough" }] };
+  const html = reelHtml(reel, view, { replying: "", sending: [], error: "" });
+  expect(html).toContain("td-fr-chapter");
+  expect(html).toContain('<span class="td-fr-title">Stuck, then the breakthrough</span>');
 });

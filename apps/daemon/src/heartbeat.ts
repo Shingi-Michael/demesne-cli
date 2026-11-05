@@ -213,6 +213,12 @@ export class HeartbeatBridge {
 
   /// Claims the chat's address and starts listening for its mail. Resolves
   /// with the address, or null when Heartbeat is not reachable.
+  /// The chat holding an address on this machine, if any.
+  sessionOf(address: string): string | null {
+    for (const [sessionId, attachment] of this.attachments) if (attachment.address === address) return sessionId;
+    return null;
+  }
+
   attach(sessionId: string, workspaceRoot: string): Promise<string | null> {
     const held = this.attachments.get(sessionId);
     if (held) return Promise.resolve(held.address);

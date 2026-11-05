@@ -195,9 +195,11 @@ export function reelHtml(reel: SocialReel, view: SocialsView, ui: TodayUi): stri
   for (const frame of reel.frames) {
     const src = frame.picture ? ui.pictures?.get(frame.postId) : undefined;
     const who = `<div class="td-who">${face(frame.by, "comment")}${h(whoName(frame.by, view))}</div>`;
+    // A chapter or an arc carries its title above the words (stage 5).
+    const title = frame.title && frame.kind !== "post" ? `<span class="td-fr-title">${h(frame.title)}</span>` : "";
     frames.push(src
       ? `<div class="td-fr td-kb"><img src="${h(src)}" alt=""><div class="td-cap">${who}${h(frame.text)}</div></div>`
-      : `<div class="td-fr td-fr-words"><p>${h(frame.text)}</p><div class="td-cap">${who}</div></div>`);
+      : `<div class="td-fr td-fr-words${frame.kind === "chapter" ? " td-fr-chapter" : ""}">${title}<p>${h(frame.text)}</p><div class="td-cap">${who}</div></div>`);
   }
   const numbers = reel.numbers;
   const facts = [[numbers.work, "things finished"], [numbers.mail, "mail answered"], [numbers.nights, "good nights"], [numbers.moments, "of your chats"]].filter(([count]) => Number(count) > 0)
@@ -215,7 +217,7 @@ export function reelHtml(reel: SocialReel, view: SocialsView, ui: TodayUi): stri
 function composerHtml(ui: TodayUi): string {
   const share = ui.share ?? { text: "", image: null, busy: false };
   const preview = share.image ? `<div class="td-attach"><img src="${h(share.image)}" alt="The picture you're sharing">${btn("today-unattach", "×", {}, "td-unattach", `aria-label="Remove the picture"`)}</div>` : "";
-  return `<form id="today-share" class="td-share${share.busy ? " busy" : ""}">${face("you", "post")}<div class="td-share-main"><input name="text" maxlength="1000" autocomplete="off" value="${h(share.text)}" placeholder="Share something from your day… (paste a screenshot too)" aria-label="Share on Today"${share.busy ? " disabled" : ""}>${preview}<div class="td-share-acts"><label class="td-act td-file">Add a picture<input type="file" id="today-file" accept="image/*" hidden></label><button type="submit" class="td-post-btn"${share.busy ? " disabled" : ""}>${share.busy ? "Posting…" : "Post"}</button></div></div></form>`;
+  return `<form id="today-share" class="td-share${share.busy ? " busy" : ""}">${face("you", "post")}<div class="td-share-main"><input name="text" maxlength="1000" autocomplete="off" value="${h(share.text)}" placeholder="Share something from your day… (paste a screenshot too)" aria-label="Share on Today"${share.busy ? " disabled" : ""}>${preview}<div class="td-share-acts">${btn("today-file", "Add a picture", {}, "td-act td-file")}<button type="submit" class="td-post-btn"${share.busy ? " disabled" : ""}>${share.busy ? "Posting…" : "Post"}</button></div></div></form>`;
 }
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -249,8 +251,20 @@ export function innerHtml(agent: string, profile: SocialProfile, view: SocialsVi
   // Stage 4: what it wrote in its diary last night, its plan, and what it thinks lately.
   const night = profile.diary?.[0];
   const diary = night ? `<h3 class="td-day">${h(nightTitle(night.day))}</h3><p class="td-diary">${h(night.text)}</p>${night.tomorrow ? `<p class="td-plan">Next: ${h(night.tomorrow)}</p>` : ""}` : "";
+  // Stage 5: its week as a chapter, written on Friday.
+  const chapter = profile.chapters?.[0];
+  const chapterBlock = chapter ? `<h3 class="td-day">Chapter · ${h(chapterWeek(chapter.at))}</h3><div class="td-chapter"><b>${h(chapter.title)}</b><p>${h(chapter.text)}</p></div>` : "";
   const thinks = profile.beliefs?.length ? `<h3 class="td-day">Lately thinks</h3><ul class="td-thinks">${profile.beliefs.slice(-3).reverse().map((item) => `<li>${h(item.text)}</li>`).join("")}</ul>` : "";
-  return `<section class="td-inner">${diary}${thinks}<h3 class="td-day">Feeling ${h(feeling?.word ?? "calm")}</h3>${why}${closeBlock}<h3 class="td-day">What ${h(first)} remembers about you</h3><ul class="td-remembers">${remembers}</ul><form class="td-remember" data-agent="${h(agent)}"><input name="text" maxlength="140" autocomplete="off" placeholder="Tell ${h(first)} something to remember…" aria-label="Tell ${h(first)} something to remember"></form></section>`;
+  return `<section class="td-inner">${chapterBlock}${diary}${thinks}<h3 class="td-day">Feeling ${h(feeling?.word ?? "calm")}</h3>${why}${closeBlock}<h3 class="td-day">What ${h(first)} remembers about you</h3><ul class="td-remembers">${remembers}</ul><form class="td-remember" data-agent="${h(agent)}"><input name="text" maxlength="140" autocomplete="off" placeholder="Tell ${h(first)} something to remember…" aria-label="Tell ${h(first)} something to remember"></form></section>`;
+}
+
+/// "This week" for the current week's chapter, otherwise the week it began.
+export function chapterWeek(at: string, now = Date.now()): string {
+  const written = new Date(at), today = new Date(now);
+  const monday = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7)).toDateString();
+  if (monday(written) === monday(today)) return "This week";
+  const start = new Date(written.getFullYear(), written.getMonth(), written.getDate() - ((written.getDay() + 6) % 7));
+  return `Week of ${start.toLocaleDateString("en-US", { month: "long", day: "numeric" })}`;
 }
 
 /// An agent's profile: face, voice, this week's bio, the week in numbers,

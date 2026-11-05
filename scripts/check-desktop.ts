@@ -1426,17 +1426,19 @@ try {
   await until(() => line.innerText().then(text => text.includes("Verify the Drive controls")), "Drive's line names the mission");
   assert.equal(await page.locator("#sidebar-sessions .sidebar-session", { hasText: "Drive mission:" }).count(), 0, "the mission's chat stays off the sidebar");
   const home = await page.locator("#workspace-title").innerText();
-  await line.locator(".bf-tell").click();
-  await page.locator("#drive-tell-form input").fill("Keep the tests green");
-  await page.locator("#drive-tell-form input").press("Enter");
-  await until(() => page.locator("#drive-reply .dt-sent").isVisible(), "the note says it was sent");
-  await until(() => page.locator("#drive-reply .drive-told li").innerText().then(text => text.includes("Keep the tests green") && text.includes(`From ${home}`)), "the mission card shows your note");
+  // One line, one choice (pass 159 A): no fold, no notes or steps at the foot.
+  assert(await page.evaluate(() => document.getElementById("briefing")!.getBoundingClientRect().height <= 96), "a working mission is three short rows at most at the sidebar's foot");
+  assert.equal(await page.locator("#drive-reply .drive-told, #drive-reply .drive-mission, #drive-tell-form").count(), 0, "no notes, steps or Tell box at the foot");
+  // You tell Drive from the composer.
+  await page.locator("textarea").fill("/drive tell Keep the tests green");
+  await page.locator("textarea").press("Enter");
+  await until(async () => (await f.client.listSessions()).length > 0 && (await page.locator("textarea").inputValue()) === "", "the note is sent");
   await capture("08-drive-tell");
   // Drive has no tab of its own on the bar (it lives at the sidebar's foot).
   assert.equal(await page.locator(".header-drive").count(), 0, "no pinned Drive tab");
   // Its own chat opens as a tab; your chat's tab goes back.
   const chatTab = (name: string) => page.locator("#workspace-tabs .bar-tab[data-tab]", { hasText: name });
-  await page.locator('#drive-reply [data-action="select-session"]', { hasText: "Watch" }).click();
+  await page.locator('#briefing [data-action="select-session"]', { hasText: "Watch" }).click();
   await until(() => page.locator("#workspace-title").innerText().then(text => text.startsWith("Drive mission")), "the mission's chat opens as a tab");
   assert.equal(await page.locator("#drive-turn").count(), 0, "Drive's mission is never a turn inside a chat");
   await capture("08-drive-chat");
@@ -1447,7 +1449,6 @@ try {
   await chatTab("Drive mission").locator(".bar-tab-close").click();
   await until(() => chatTab("Drive mission").count().then(count => count === 0), "the mission's tab closes");
   assert.equal(await page.locator(".header-drive").count(), 0, "and no Drive tab takes its place");
-  await line.locator(".bf-word").click();
   await control("pause").click();
   await control("resume").waitFor();
   // Drive never waits on you: its coder trying to publish is declined
@@ -1457,7 +1458,6 @@ try {
   await until(async () => (await f.client.getSessionState(missionId)).session.turns.at(-1)?.status === "completed", "the mission carries on past its publish step");
   assert.equal(await page.locator("#approval .approval-row").count(), 0, "Drive's publish step never asks you");
   assert.equal(await page.locator("#workspace-title").innerText(), home, "you stay in your chat");
-  if (!(await control("resume").isVisible())) await line.locator(".bf-word").click();
   await control("resume").click();
   await control("pause").waitFor();
   await control("stop").click();

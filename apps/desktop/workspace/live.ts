@@ -17,7 +17,7 @@ import { mountSakura, type Sakura } from "./sakura.ts";
 import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
-import { driveSince, driveStepLine, driveTaskList } from "@demesne/drive/drive-timeline.ts";
+import { driveTaskList } from "@demesne/drive/drive-timeline.ts";
 import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { fileName, readPaths, stretchWords, stretches } from "./steps-fold.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
@@ -348,10 +348,7 @@ const expanded = new Set<string>(),
 /// screen, Drive's ideas under it); turns whose steps are open.
 let driveShown = false,
   ideasShown = false,
-  brokeShown = false,
-  /// The "Tell Drive…" box under Drive's line, and the note it last sent.
-  tellOpen = false,
-  tellSent = "";
+  brokeShown = false;
 let driveActionPending = "";
 /// Each mission chat and the chat it was started from.
 function missionLinks() {
@@ -359,12 +356,6 @@ function missionLinks() {
   return new Map(jobs.filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId && job.from)).map((job) => [job.sessionId!, job.from!] as const));
 }
 const chatTitle = (id: string) => state?.sessions.find((item) => item.id === id)?.title || "your chat";
-/// Your notes to a mission, as Drive received them.
-function toldNotes(drive: NonNullable<Snapshot["drive"]>) {
-  const notes = drive.told ?? [], from = missionLinks().get(drive.homeSessionId);
-  if (!notes.length) return "";
-  return `<ul class="drive-told">${notes.slice(-3).map((note) => `<li title="${h(fullTime(note.at))}"><small>From ${h(from ? chatTitle(from) : "your chat")}</small>${h(note.text)}</li>`).join("")}</ul>`;
-}
 /// Drive's page fills the main column in place of the conversation.
 const stepsOpen = new Set<string>();
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
@@ -4164,9 +4155,9 @@ function renderBriefing() {
   if (!review.length) reviewShown = false;
   const signature = JSON.stringify([
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
-    pinned && (driveShown ? [pinned, detailsOpen.has("drive-details"), [...detailsOpen].filter((key) => key.startsWith("drive-step:")), Math.floor(Date.now() / 10_000)] : [pinned.status, pinned.mission, activeMinutes(pinned)]),
+    pinned && [pinned.status, pinned.mission, pinned.homeSessionId, activeMinutes(pinned), stoppedReason(pinned)], state.session?.id,
     run.fix && [run.fix.title, run.fix.status], run.away && [run.away.auto, run.away.items.map((item) => item.state)], state.breakage.auto,
-    state.breakage.signals, state.breakage.busy, state.breakage.message, inSession(), run.fix?.activity, [...detailsOpen].filter((key) => key.startsWith("branch:")), brokeShown, driveShown, ideasShown, tellOpen, tellSent, pinned?.told?.length, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
+    state.breakage.signals, state.breakage.busy, state.breakage.message, inSession(), run.fix?.activity, [...detailsOpen].filter((key) => key.startsWith("branch:")), brokeShown, driveShown, ideasShown, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
   ]);
   if (signature === briefingSignature) return;
   briefingSignature = signature;
@@ -4201,16 +4192,17 @@ function renderBriefing() {
       ].join('<span class="bf-sep">·</span>')}</p>`;
     }
   } else if (pinned) {
-    const time = activeMinutes(pinned);
-    // Working in its own chat: the line says what on, with the shine.
-    const working = pinned.status === "running" || pinned.status === "waiting";
-    const about = working ? time : `${missionTitle(pinned)}${time ? ` · ${time}` : ""}`;
-    parts.push(`${driveMark(pinned)}${btn("drive-show", working ? shine(`Working on ${missionTitle(pinned)}`) : label(pinned), {}, `bf-word${pinned.status === "blocked" ? " amber" : ""}`)}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
-    // You can write to it from here; it reads your note before its next step.
-    parts.push(btn("drive-tell-open", "Tell Drive", {}, `bf-tell${tellOpen ? " on" : ""}`));
-    toggle = { action: "drive-show", open: driveShown };
-    const tell = tellOpen ? `<form class="drive-tell" id="drive-tell-form"><input name="note" maxlength="2000" autocomplete="off" placeholder="${pinned.status === "blocked" ? "Answer Drive, and it goes again…" : "Tell Drive…"}" aria-label="Tell Drive"><kbd>↵</kbd></form>${tellSent ? '<p class="dt-sent">✓ Sent to Drive · read before its next step</p>' : ""}` : "";
-    if (tellOpen || driveShown) fold = `${tell}${driveShown ? `<div class="drive-live">${pinnedCard(pinned)}</div>` : ""}`;
+    // One line, one choice (pass 159 A): what Drive is doing and what you
+    // can do about it. Its notes and steps live in the mission's own chat.
+    const working = pinned.status === "running" || pinned.status === "waiting", stopped = pinned.status === "blocked";
+    const about = [missionTitle(pinned), activeMinutes(pinned)].filter(Boolean).join(" · ");
+    const word = working ? shine("Drive is working") : label(pinned);
+    parts.push(`${driveMark(pinned)}<span class="bf-word${stopped ? " amber" : ""}"${stopped ? ` title="${h(stoppedReason(pinned))}"` : ""}>${word}</span><span class="bf-about" title="${h(missionTitle(pinned))}">${h(about)}</span>`);
+    const watch = pinned.homeSessionId !== state.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "bf-pill") : "";
+    const acts = stopped
+      ? [btn("drive-control", "Resume", { control: "resume" }, "bf-pill primary"), btn("drive-control", "Drop", { control: "stop" }, "bf-pill"), watch]
+      : [btn("drive-control", working ? "Pause" : "Resume", { control: working ? "pause" : "resume" }, "bf-pill primary"), watch, btn("drive-control", "Stop", { control: "stop" }, "bf-pill")];
+    parts.push(`<span class="bf-acts">${acts.filter(Boolean).join("")}</span>`);
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
     parts.push(`${mark("spin")}${btn("drive-show", run.away?.auto ? "Drive is working on its own" : "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
@@ -4296,7 +4288,6 @@ function closeBriefingCard() {
   driveShown = false;
   ideasShown = false;
   brokeShown = false;
-  tellOpen = false;
   renderBriefing();
   return true;
 }
@@ -4334,97 +4325,9 @@ function scoreLine(score: ModelScore) {
     score.driveRuns ? `Drive runs kept ${score.driveLanded}/${score.driveRuns}` : "",
   ].filter(Boolean).join(" · ");
 }
-/// The mission's status line, steps, tasks, stats and Details, for the
-/// pinned card.
-/// "4 steps": how many things Drive has done on this mission.
-const stepCount = (drive: NonNullable<Snapshot["drive"]>) => `${drive.steps.length} step${drive.steps.length === 1 ? "" : "s"}`;
-/// The mission's limits in words, for the tokens tooltip.
-function driveBudget(drive: NonNullable<Snapshot["drive"]>) {
-  const guard = drive.protection;
-  return guard ? `${Math.floor(guard.used.activeMs / 60_000)} of ${guard.limits.maxActiveMinutes} active minutes · ${guard.used.cycles} of ${guard.limits.maxCycles} cycles · ${guard.used.workerRequests} of ${guard.limits.maxWorkerRequests} coder requests` : "";
-}
-/// Drive's steps as quiet lines on the same thin guide as tool calls: what it
-/// did and when. What it asked the coder unfolds under its line, in words.
-function driveSteps(drive: NonNullable<Snapshot["drive"]>) {
-  const now = Date.now(), trace = drive.traces?.at(-1);
-  const rows = drive.steps.slice(-8).map((step) => {
-    const line = driveStepLine(step);
-    let action: { kind?: string; text?: string } = {};
-    try { action = JSON.parse(step.action) as typeof action; } catch { /* an older journal */ }
-    const said = ["compose", "redirect"].includes(action.kind ?? "") ? String(action.text ?? "").trim() : "";
-    const key = `drive-step:${step.at}`, open = detailsOpen.has(key);
-    const first = said.split(/(?<=[.!?])\s/)[0]!.replace(/[.!?]$/, "");
-    const text = said ? `${action.kind === "redirect" ? "Redirected the coder" : "Asked the coder"}: ${first.length > 72 ? `${first.slice(0, 71)}…` : first}` : line.text;
-    const what = said ? btn("drive-step", `${h(text)}${CHEVRON}`, { key }, `ds-what ds-fold${open ? " open" : ""}`).replace("<button ", `<button aria-expanded="${open}" `) : `<span class="ds-what">${h(text)}</span>`;
-    return `<li class="ds tone-${line.tone}"><span class="ds-mark" aria-hidden="true">${h(line.mark === "·" ? "✓" : line.mark)}</span>${what}<time>${h(driveSince(step.at, now))}</time></li>${said && open ? `<li class="ds-said">${h(said)}</li>` : ""}`;
-  });
-  const deciding = Boolean(trace && ["queued", "thinking", "drafting", "acting"].includes(trace.status));
-  if (deciding || drive.status === "waiting") rows.push(`<li class="ds now"><span class="ds-mark" aria-hidden="true">◌</span><span class="ds-what">${deciding ? "Deciding the next step" : "Waiting for the coder"}</span><time>now</time></li>`);
-  return `<ol class="drive-steps">${rows.join("")}</ol>`;
-}
-function missionParts(drive: NonNullable<Snapshot["drive"]>) {
-  const now = Date.now(), trace = drive.traces?.at(-1);
-  const deciding = Boolean(trace && ["queued", "thinking", "drafting", "acting"].includes(trace.status));
-  const [mark, label, tone] = drive.recovery && drive.recovery.retryAt > now
-    ? ["↻", `Retrying in ${Math.ceil((drive.recovery.retryAt - now) / 1000)}s`, "thinking"]
-    : drive.protection?.trip ? ["■", "Stopped at a limit", "signal"]
-    : drive.status === "paused" ? ["‖", "Paused", "secondary"]
-    : drive.status === "blocked" ? ["■", "Stopped", "signal"]
-    : drive.status === "completed" ? ["✓", "Mission complete", "citron"]
-    : drive.status === "waiting" ? ["◌", "Coder is working", "secondary"]
-    : drive.status === "stopped" ? ["■", "Stopped", "secondary"]
-    : drive.status === "idle" ? ["·", "Idle · nothing worthwhile left", "secondary"]
-    : deciding ? ["◇", "Deciding…", "thinking"] : ["●", "Live", "citron"];
-  const summary = drive.protection?.trip?.reason ?? drive.steps.at(-1)?.note ?? drive.activity;
-  const tasks = driveTaskList(drive);
-  const used = drive.protection?.used;
-  const active = used ? (used.activeMs < 3_600_000 ? `${Math.round(used.activeMs / 60_000)}m` : `${Math.floor(used.activeMs / 3_600_000)}h ${Math.round((used.activeMs % 3_600_000) / 60_000)}m`) : "";
-  const planner = trace?.source === "controller" ? "Local controller" : (drive.model ?? state!.model.id).split("/").at(-1)!.trim();
-  const stats = [drive.workflow ? `${drive.workflow.name} · step ${Math.min(drive.workflow.current + 1, drive.workflow.steps.length)} of ${drive.workflow.steps.length}` : `step ${drive.step}`, active, used ? `${num(used.planningTokens + used.workerTokens)} tokens` : "", drive.mode === "continuous" ? "continuous" : "bounded", planner].filter(Boolean).join(" · ");
-  const title = missionTitle(drive);
-  return {
-    mark, label, tone, summary, title, stats,
-    tasks: tasks.length ? `<ul class="drive-tasks">${tasks.map((task) => `<li class="tone-${task.tone}">${h(task.mark)} ${h(task.text)}</li>`).join("")}</ul>` : "",
-  };
-}
-/// Why a stopped mission stopped, and what Resume will do, in a sentence each.
-function stoppedWords(drive: NonNullable<Snapshot["drive"]>) {
-  const reason = drive.activity?.trim() || drive.steps.at(-1)?.note || "Drive stopped without recording a reason.";
-  const hint = drive.protection?.trip
-    ? "Resume keeps going with the same limits; a new /drive mission starts fresh ones."
-    : /^Could not save Drive progress/.test(reason)
-      ? "Drive couldn't save its progress. Check free space for the demesne data folder, then Resume."
-      : drive.feedback?.startsWith("Last rejected decision")
-        ? "Its planner kept choosing steps it couldn't carry out. Resume retries once; if it stops again, reword the mission or switch the model."
-        : "Resume retries the step it stopped on. Tell Drive anything it should know first.";
-  return { reason: drive.protection?.trip?.reason ?? reason, hint };
-}
-/// The live (or paused, or blocked) mission's card: in the Drive panel, and
-/// unfolded from the briefing line above the composer.
-function pinnedCard(pinned: NonNullable<Snapshot["drive"]>) {
-  // Drive speaking, like an answer: what it is doing now, its steps on the
-  // same thin guide as tool calls, and one quiet line of facts and words.
-  const parts = missionParts(pinned), live = pinned.status === "running" || pinned.status === "waiting";
-  // A stopped mission says why, and what Resume will do, in the same voice.
-  const stopped = pinned.status === "blocked" ? stoppedWords(pinned) : null;
-  const status = stopped ? `Stopped · ${stopped.reason}` : parts.label === "Live" ? parts.summary ?? "Working" : `${parts.label}${parts.summary ? ` · ${parts.summary}` : ""}`;
-  const now = `<p class="dm-now">${parts.label === "Live" ? '<span class="dm-live" aria-hidden="true"></span>' : `<span class="dm-mark tone-${parts.tone}" aria-hidden="true">${h(parts.mark)}</span>`}<span>${h(status)}</span></p>`;
-  const steps = driveTaskList(pinned).map((task) => {
-    const kind = task.mark === "✓" ? "done" : task.mark === "◌" ? "on" : "next";
-    return `<li class="dm-step ${kind}"><span class="dm-step-mark" aria-hidden="true">${kind === "done" ? "✓" : kind === "on" ? "" : ""}</span><span>${h(task.text)}</span></li>`;
-  });
-  // Only facts with something to say: no "0 tokens" or "step 0".
-  const used = pinned.protection?.used, tokens = used ? used.planningTokens + used.workerTokens : 0;
-  const facts = [activeMinutes(pinned), tokens ? `${num(tokens)} tokens` : ""].filter(Boolean).map((fact) => `<span title="${h(driveBudget(pinned))}">${h(fact)}</span>`);
-  const open = detailsOpen.has("drive-details");
-  const words = [
-    pinned.homeSessionId !== state?.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "dm-word") : "",
-    btn("drive-control", live ? "Pause" : "Resume", { control: live ? "pause" : "resume" }, "dm-word"),
-    btn("drive-control", "Stop", { control: "stop" }, "dm-word stop"),
-    pinned.steps.length ? btn("drive-details", `${stepCount(pinned)}${CHEVRON}`, {}, `dm-word dm-more${open ? " open" : ""}`).replace("<button ", `<button aria-expanded="${open}" `) : "",
-  ].filter(Boolean);
-  const evidence = stopped && open ? (pinned.evidence ?? []).slice(-2).filter((item) => item.quote?.trim()).map((item) => `<blockquote class="dm-quote">${h(item.quote.length > 400 ? `${item.quote.slice(0, 399)}…` : item.quote)}</blockquote>`).join("") : "";
-  return `<section class="drive-mission${stopped ? " stopped" : ""}" aria-label="${stopped ? "Stopped mission" : "Live mission"}">${now}${stopped ? `<p class="dm-why">${h(stopped.hint)}</p>` : ""}${steps.length ? `<ol class="dm-steps">${steps.join("")}</ol>` : ""}${toldNotes(pinned)}<p class="dm-foot">${[...facts, ...words].join('<span class="bf-sep">·</span>')}</p>${open ? `${driveSteps(pinned)}${evidence}` : ""}</section>`;
+/// Why a stopped mission stopped, in its own words: the line's tooltip.
+function stoppedReason(drive: NonNullable<Snapshot["drive"]>) {
+  return drive.protection?.trip?.reason ?? (drive.activity?.trim() || drive.steps.at(-1)?.note || "Drive stopped without recording a reason.");
 }
 /// The mission homed in this session, which reads as its newest turn.
 /// How far the mission has got, for the briefing line: "step 2 of 3 · 1 min".
@@ -5907,27 +5810,6 @@ async function dispatch(
     renderConversation();
     return;
   }
-  if (action === "drive-step") {
-    const key = String(args.key ?? "");
-    if (detailsOpen.has(key)) detailsOpen.delete(key); else detailsOpen.add(key);
-    briefingSignature = "";
-    renderBriefing();
-    return;
-  }
-  if (action === "drive-details") {
-    if (detailsOpen.has("drive-details")) detailsOpen.delete("drive-details");
-    else detailsOpen.add("drive-details");
-    briefingSignature = "";
-    renderBriefing();
-    return;
-  }
-  if (action === "drive-tell-open") {
-    tellOpen = !tellOpen;
-    tellSent = "";
-    renderBriefing();
-    if (tellOpen) el("drive-reply").querySelector<HTMLInputElement>("#drive-tell-form input")?.focus({ preventScroll: true });
-    return;
-  }
   if (action === "drive-show" || action === "ideas-show" || action === "broke-show") {
     if (action === "drive-show") driveShown = !driveShown;
     else if (action === "broke-show") brokeShown = !brokeShown;
@@ -6495,8 +6377,7 @@ function renderState(next: Snapshot) {
     if (pointing) { pointing = null; void api("desktop-point", { cancel: true }).catch(() => {}); }
     follow = true;
     overlay = null;
-    driveShown = ideasShown = brokeShown = tellOpen = false;
-    tellSent = "";
+    driveShown = ideasShown = brokeShown = false;
     unwatchOutput();
     expanded.clear();
     expandedCompactions.clear();
@@ -6741,14 +6622,6 @@ document.addEventListener("submit", (event) => {
       renderOverlay();
     }
     if (form.id === "setup-form") await setupAction({ key: "return" });
-    if (form.id === "drive-tell-form") {
-      const input = form.elements.namedItem("note") as HTMLInputElement, text = input.value.trim();
-      if (!text) return;
-      await api("drive-tell", { text });
-      input.value = "";
-      tellSent = text;
-      renderBriefing();
-    }
   });
 });
 document.addEventListener(

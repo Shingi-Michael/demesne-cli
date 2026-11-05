@@ -93,6 +93,10 @@ export class WorkspaceDrive {
       } else if (/^forget\s/.test(value)) {
         this.memory.forget(value.replace(/^forget\s+/, ""));
         this.refreshMemory();
+      } else if (/^tell\s/.test(value)) {
+        // /drive tell <note>: Drive reads it before its next step; a stopped
+        // mission takes it as the answer and goes again.
+        await this.handle("drive-tell", { text: value.replace(/^tell\s+/, "") });
       } else if (value.startsWith("reopen ")) {
         const [, id, ...reason] = value.split(/\s+/);
         this.agent.reopen(id ?? "", reason.join(" "));

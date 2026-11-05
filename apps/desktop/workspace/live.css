@@ -939,16 +939,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.drive-tasks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.drive-tasks li {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .tone-electric { color: var(--electric); }
 .tone-secondary { color: var(--secondary); }
 .tone-muted { color: var(--muted); }

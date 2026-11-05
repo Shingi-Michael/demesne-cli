@@ -669,7 +669,7 @@ function renderSidebar() {
   const housedIds = new Set(housed.flatMap((agent) => agent.sessionId ? [agent.sessionId] : []));
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen()]);
+  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()]]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -738,9 +738,11 @@ function renderSidebar() {
   const todayCount = newSince(socialsView, todaySeen());
   const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}${socialsView?.reel && reelSeen() !== socialsView.reel.id ? `<i class="today-reel" title="This week's reel is ready"></i>` : ""}<small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
   const storyRings = unseenStories(socialsView, todayUi.storySeen);
+  const helping = helpingAgents();
   const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${todayRow}${housed.map((agent) => {
-    const tone = agent.state === "working" ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
-    const word = tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
+    const helps = helping.has(agent.id);
+    const tone = agent.state === "working" || helps ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
+    const word = helps && agent.state !== "working" ? "helping" : tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
     return btn("agent-open", `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts, Date.now(), socialsView?.moods))}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
       { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
       .replace("<button ", `<button title="${h(socialsView?.moods?.[agent.id] ? moodTitle(agent.name, socialsView.moods[agent.id]) : agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
@@ -1732,6 +1734,20 @@ function fileFirst(path: string) {
   const at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return at < 0 ? `<span class="name">${h(path)}</span>` : `<span class="name">${h(path.slice(at + 1))}</span> <span class="dir">${h(path.slice(0, at))}</span>`;
 }
+/// A sub-agent running on one of your agent tools (Claude Code, Codex,
+/// Gemini): its id, from the "agent:<id> · " its progress lines carry.
+const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
+function cliAgent(tool: ToolEntry): string | null {
+  const id = tool.name === "subagent" && tool.subagentModel?.startsWith("agent:") ? tool.subagentModel.slice(6) : "";
+  return id && Object.hasOwn(CLI_NAMES, id) ? id : null;
+}
+/// "read live.ts" → "Read live.ts": a sub-agent's step as a line of words.
+const nowWords = (text: string) => text.replace(/^(read|search|list)\b/, (verb) => verb === "read" ? "Read" : verb === "search" ? "Searched" : "Listed");
+/// The agent tools helping a turn of this chat right now, for the sidebar.
+function helpingAgents(): Set<string> {
+  const run = state?.activeTurnId ? state.runs.find((item) => item.id === state!.activeTurnId) : undefined;
+  return new Set((run?.entries ?? []).flatMap((entry) => entry.type === "tool" && entry.state === "running" ? [cliAgent(entry)].filter((id): id is string => Boolean(id)) : []));
+}
 /// "3 steps": how far a sub-agent has got, on the right of its row.
 function subagentSteps(tool: ToolEntry) {
   const steps = tool.name === "subagent" ? (tool.trace ?? []).length : 0;
@@ -1810,6 +1826,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   }
   const key = `${run.id}:${tool.id}`, open = hasFileEdit(tool) ? fileEditsOpen.has(key) : stepOpen.has(key), canFold = foldable(tool);
   const now = tool.state === "running" || tool.drafting, served = serving(tool)?.serves;
+  const cli = cliAgent(tool);
   const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.waiting
     ? `<span class="amber">${tool.name === "ask_user" || state?.questions.some((q) => q.toolCallId === tool.toolCallId) ? "waiting for your answer" : "waiting for you"}</span>`
     : tool.phase === "change"
@@ -1827,7 +1844,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and plain words: the working line
     // under the turn carries the cube and the silver.
-    `${stepIcon(tool)}<span class="verb">${served ? "Serving" : h(verb(tool))}</span><code class="target" title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target" title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -1842,7 +1859,10 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // A commit or a merge draws the tree under its step (repo-flow.ts); the
   // drawing itself is kept across repaints and dropped into this slot.
   const tree = tool.repo && tool.state === "done" ? repoSlot(tool) : "";
-  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + tree + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
+  // What a running sub-agent is on right now, on a quiet line under its row.
+  const last = tool.name === "subagent" && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
+  const nowLine = last ? `<div class="agent-now">${h(nowWords(last))}</div>` : "";
+  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
 }
 const hasFileEdit = (tool: ToolEntry) => tool.phase === "change" && tool.state === "done" && Boolean(tool.changes?.length);
 const fileEditSlot = (tool: ToolEntry) => `<div data-file-edit="${h(tool.toolCallId)}"></div>`;
@@ -2008,13 +2028,15 @@ function agentFold(run: WorkspaceRun, tool: ToolEntry) {
   const steps = (tool.trace ?? []).map((segment) => {
     const text = segment.text.replace(/^[^·]+ · /, "");
     const match = /^(read|search|list|git \w+)(?: (.*))?$/.exec(text);
-    const kind = match?.[1] === "read" || match?.[1]?.startsWith("git") ? "read" : match?.[1] === "search" ? "search" : match?.[1] === "list" ? "list" : "other";
+    const kind = match?.[1] === "read" || match?.[1]?.startsWith("git") ? "read" : match?.[1] === "search" ? "search" : match?.[1] === "list" ? "list" : text.startsWith("Ran ") ? "run" : "other";
     const verb = match?.[1] === "read" ? "Read" : match?.[1] === "search" ? "Searched" : match?.[1] === "list" ? "Listed" : match?.[1]?.startsWith("git") ? "Checked git" : text;
     return { kind, verb, target: match ? match[2] ?? "" : "" };
   });
   const line = (kind: string, verb: string, target: string, meta: string, shining = false) =>
     `<div class="tool-row quiet">${stepIconFor(kind)}<span class="verb">${shining ? shine(verb) : h(verb)}</span>${target ? `<code class="target" title="${h(target)}">${h(target)}</code>` : ""}<span class="sp"></span><small class="meta">${meta}</small></div>`;
-  let body = tool.subagentModel ? `<div class="tool-row quiet agent-on">${stepIconFor("agent")}<span class="verb">on ${h(tool.subagentModel)}</span></div>` : "";
+  const cli = cliAgent(tool);
+  let body = cli && tool.subagentWhy ? `<div class="agent-why"><b>Why ${h(CLI_NAMES[cli]!)}:</b> ${h(tool.subagentWhy.replace(/^[^:]+:\s*/, ""))}</div>`
+    : tool.subagentModel ? `<div class="tool-row quiet agent-on">${stepIconFor("agent")}<span class="verb">on ${h(cli ? CLI_NAMES[cli]! : tool.subagentModel)}</span></div>` : "";
   for (let i = 0; i < steps.length; i++) {
     const last = i === steps.length - 1 && live;
     let j = i;

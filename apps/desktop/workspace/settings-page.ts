@@ -307,13 +307,15 @@ function pages(view: SettingsView): Page[] {
     ] : [{ title: "Reading…" }], hint: "A mission reads these when it starts." },
   ] });
   const subagent = info?.subagent;
-  const subagentLabel = subagent?.model ? view.modelWords({ id: subagent.model }) : "Same as the chat";
+  // Unset or "auto": your agent tools, picked per job; "same": the chat's model.
+  const agentWords = (id: string) => subagent?.models.find((model) => model.id === id)?.provider.replace(/ on this machine$/, "") ?? view.modelWords({ id });
+  const subagentLabel = !subagent?.model || subagent.model === "auto" ? "Auto · your agents" : subagent.model === "same" ? "Same as the chat" : subagent.model.startsWith("agent:") ? agentWords(subagent.model) : view.modelWords({ id: subagent.model });
   out.push({ id: "models", title: "Models", sub: "Which model answers, what helpers run on, and how far one turn may go.", note: restartNote(["agent.", "images."]), groups: [
     { name: "Answers", rows: [
       { title: "Model", line: `${view.model.words}${view.model.provider ? ` from ${view.model.provider}` : ""}${view.model.reasoning ? `, ${view.model.reasoning} thinking` : ""}. This chat uses it`, control: link("overlay", "Change", { name: "models" }), keywords: "model reasoning thinking effort" },
       ...(view.model.chatgpt !== null ? [{ title: "ChatGPT plan", line: `Usage counts against ${view.model.chatgpt || "your"} plan`, control: link("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }), keywords: "usage billing account chatgpt" }] : []),
-      ...(subagent ? [{ title: "Subagents run on", line: "Helpers a turn starts for side work", control: word("subagent", subagentLabel, view.fold === "subagent"), keywords: "subagent helper model",
-        fold: view.fold === "subagent" ? choices("Subagent model", [["Same as the chat", !subagent.model, "subagent-model", { model: null }], ...subagent.models.map((model): [string, boolean, string, Record<string, unknown>] => [view.modelWords({ id: model.id }), subagent.model === model.id, "subagent-model", { model: model.id }])]) : "" }] : []),
+      ...(subagent ? [{ title: "Subagents run on", line: "Helpers a turn starts for side work. Auto runs them on Claude Code, Codex or Gemini when you have them", control: word("subagent", subagentLabel, view.fold === "subagent"), keywords: "subagent helper model",
+        fold: view.fold === "subagent" ? choices("Subagent model", [["Auto · your agents", !subagent.model || subagent.model === "auto", "subagent-model", { model: null }], ["Same as the chat", subagent.model === "same", "subagent-model", { model: "same" }], ...subagent.models.map((model): [string, boolean, string, Record<string, unknown>] => [model.id.startsWith("agent:") ? agentWords(model.id) : view.modelWords({ id: model.id }), subagent.model === model.id, "subagent-model", { model: model.id }])]) : "" }] : []),
       ...(info?.images ? [{ title: "Images", line: "The model that makes pictures when you ask for one", control: `<form class="st-text" data-key="images.model"><input value="${h(info.images.model ?? "")}" aria-label="Image model" autocomplete="off" spellcheck="false"></form>`, keywords: "image picture generation" }] : []),
     ] },
     { name: "Limits for one turn", rows: info ? [
@@ -419,7 +421,7 @@ function overview(view: SettingsView): string {
 
   const tile = (id: SettingsSection, label: string, right: string, body: string, extra = "") =>
     `<div class="ov-tile${extra}" ${ov(id)}><div class="ov-top"><button type="button" class="ov-label" ${ov(id)}>${h(label)}</button>${right ? `<span>${right}</span>` : ""}</div>${body}</div>`;
-  const subagent = info?.subagent.model ? view.modelWords({ id: info.subagent.model }) : "";
+  const subagent = info?.subagent.model && info.subagent.model !== "auto" && info.subagent.model !== "same" ? info.subagent.models.find((model) => model.id === info.subagent.model)?.provider.replace(/ on this machine$/, "") ?? view.modelWords({ id: info.subagent.model }) : "";
   const model = tile("models", "Model", view.model.reasoning ? `${h(view.model.reasoning)} thinking` : "",
     `<b class="ov-big">${h(view.model.words || "No model yet")}</b><small>${view.model.provider ? `<i class="ov-dot${view.online ? "" : " off"}"></i>${h(view.model.provider)}${view.model.chatgpt ? ", signed in" : ""}` : "Pick one in Models"}${subagent ? `<br>Subagents on ${h(subagent)}` : ""}</small>` +
     `<button type="button" class="st-link ov-act" data-action="overlay" data-args='{"name":"models"}'>Change</button>`);

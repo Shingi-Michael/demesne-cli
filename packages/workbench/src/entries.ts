@@ -10,8 +10,9 @@ const TRACE_LIMIT = 64 * 1024;
 /// lines (starting, writing report) and any thinking an old event carries
 /// are dropped. Live updates and history replay share this, so a reopened
 /// session shows the same steps.
-export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string; repo?: import("@demesne/protocol").RepoFlow }, payload: Record<string, unknown>): void {
+export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string; subagentWhy?: string; repo?: import("@demesne/protocol").RepoFlow }, payload: Record<string, unknown>): void {
   if (typeof payload.report === "string" && payload.report) tool.report = payload.report;
+  if (typeof payload.why === "string" && payload.why) tool.subagentWhy = payload.why;
   if (isRepoFlow(payload.repo)) tool.repo = payload.repo;
   if (typeof payload.text !== "string" || !payload.text) return;
   const status = subagentStatus(payload.text);
@@ -49,6 +50,8 @@ export interface ToolEntry {
   report?: string;
   /// The model a sub-agent reported running on, when not the chat's own.
   subagentModel?: string;
+  /// Why Auto gave this sub-agent to the agent tool it runs on.
+  subagentWhy?: string;
   /// A `git commit` or `git merge` step's tree, drawn under its row.
   repo?: import("@demesne/protocol").RepoFlow;
 }

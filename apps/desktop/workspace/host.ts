@@ -672,8 +672,9 @@ export class WorkspaceHost {
   async newSession(title?: string, options: { plain?: boolean; reuse?: boolean; waitForModel?: boolean } = {}) {
     if (this.options.projectless) options = { ...options, plain: true };
     if (options.reuse && !title) {
-      // The assistant's chat is never a new chat, even while it's empty.
-      const empty = this.sessions.filter((session) => session.id !== this.assistant?.sessionId && (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)
+      // The assistant's chat is never a new chat, even while it's empty, and
+      // neither is an agent's (agent-cli.ts), which waits empty in the project.
+      const empty = this.sessions.filter((session) => session.id !== this.assistant?.sessionId && !session.preferredModel?.startsWith("agent:") && (options.plain ? !session.workspace : session.workspace?.root === this.workspace) && !session.turns.length)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       if (empty) {
         await this.select(empty.id, options.waitForModel);

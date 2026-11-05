@@ -2475,3 +2475,9 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 /* Pages (Today, Scheduled, Customize, Foundry) have no chat underneath,
    so the model and context strip goes, as it already did on Settings. */
 .live-app.paging > .status { display: none !important; }
+
+/* Customize: every section's list is one box, filled or empty, like a
+   Settings group; its rows divide it with hairlines. */
+#page[data-kind="customize"] .cp-list { overflow: hidden; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair); }
+#page[data-kind="customize"] .cp-list .sp-row { border-radius: 0; }
+#page[data-kind="customize"] .cp-list > :last-child { box-shadow: none; }

@@ -55,6 +55,9 @@ for (const method of ["drive", "drive-control"]) {
       await host.drive!.handle("drive", { text: "--here --bounded Fix the parser", observation: { invalid: "Direct control does not require UI geometry" } });
       await host.drive!.handle("drive-control", { control: "pause", observation: { invalid: "Nor do mission controls" } });
       expect(host.driveState?.status).toBe("paused");
+      // /drive tell <note> reaches the mission from the composer.
+      await host.drive!.handle("drive", { text: "tell Keep the tests green" });
+      expect(host.driveState?.told?.at(-1)?.text).toBe("Keep the tests green");
       const missionTurn = await f.client.submitTurn(home, { content: "Mission work", permissionMode: "ask" });
       turns.push(missionTurn.turn.id);
       const other = await f.client.createSession({ workspacePath: f.workspace, trustWorkspace: true });

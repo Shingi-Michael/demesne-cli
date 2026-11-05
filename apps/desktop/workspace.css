@@ -749,7 +749,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop :is(#briefing, #drive-reply, #hero) .bf-msg { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; line-height: 18px; color: var(--t3); }
 .desktop :is(#briefing, #drive-reply, #hero) .bf-x { padding: 0 4px; border: 0; background: none; color: var(--t4); font-size: 14px; cursor: pointer; }
 .desktop :is(#briefing, #drive-reply, #hero) .bf-x:hover { color: var(--t1); }
-.desktop :is(#briefing, #drive-reply) .drive-live { margin: 2px; }
 .desktop #drive-reply { max-width: 780px; margin: 0 auto; }
 .desktop #drive-reply[hidden] { display: none; }
 .desktop #drive-reply .dr-fold { display: grid; grid-template-rows: 0fr; }
@@ -768,11 +767,11 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop :is(#briefing, #drive-reply, #hero) .bf-row { transition: background-color 140ms var(--ease); }
   .desktop :is(#briefing, #drive-reply, #hero) .bf-act, .desktop :is(#briefing, #drive-reply, #hero) .bf-r { transition: opacity 140ms var(--ease); }
   .desktop #drive-reply .dr-fold { transition: grid-template-rows 280ms var(--ease); }
-  .desktop #drive-reply .bf-row, .desktop #drive-reply .drive-live, .desktop #drive-reply .bf-foot { opacity: 0; transform: translateY(4px); transition: opacity 200ms var(--ease), transform 240ms var(--ease), background-color 140ms var(--ease); }
-  .desktop #drive-reply.open .bf-row, .desktop #drive-reply.open .drive-live, .desktop #drive-reply.open .bf-foot { opacity: 1; transform: none; }
+  .desktop #drive-reply .bf-row, .desktop #drive-reply .bf-foot { opacity: 0; transform: translateY(4px); transition: opacity 200ms var(--ease), transform 240ms var(--ease), background-color 140ms var(--ease); }
+  .desktop #drive-reply.open .bf-row, .desktop #drive-reply.open .bf-foot { opacity: 1; transform: none; }
   .desktop #drive-reply.open .bf-row:nth-child(1) { transition-delay: 60ms, 60ms, 0ms; }
   .desktop #drive-reply.open .bf-row:nth-child(2) { transition-delay: 100ms, 100ms, 0ms; }
-  .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot, .desktop #drive-reply.open .drive-live { transition-delay: 140ms, 140ms, 0ms; }
+  .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot { transition-delay: 140ms, 140ms, 0ms; }
 }
 /* The cards on the right: one column of quiet cards, each a tone with a
    hairline ring, shown only while the chat uses one and where there is
@@ -956,47 +955,10 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 /* Drive's mission, unfolded from its line: Drive speaking like an answer.
    What it is doing now, its steps on the same thin guide as tool calls,
    and one quiet line of facts and words. No box. */
-.desktop .drive-mission { display: flex; flex-direction: column; gap: 10px; padding: 2px 10px 4px; }
-.desktop .dm-now { display: flex; align-items: baseline; gap: 9px; margin: 0; color: var(--t2); font-size: 13.5px; line-height: 1.55; }
-.desktop .dm-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); transform: translateY(-1px); }
-.desktop .dm-mark { flex: none; width: 10px; text-align: center; color: var(--t3); }
-.desktop .drive-mission.stopped .dm-mark { color: var(--bad); }
-.desktop .dm-why { margin: -2px 0 0 19px; color: var(--t3); font-size: 12.5px; line-height: 1.5; }
-.desktop .dm-quote { margin: 6px 0 0 18px; padding-left: 10px; box-shadow: inset 1px 0 0 var(--hair); color: var(--t3); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
-.desktop .dm-steps { display: flex; flex-direction: column; gap: 7px; margin: 0 0 0 3px; padding: 2px 0 2px 14px; list-style: none; box-shadow: inset 1px 0 0 var(--hair); }
-.desktop .dm-step { display: flex; align-items: center; gap: 9px; color: var(--t3); font-size: 13px; }
-.desktop .dm-step.on { color: var(--t1); }
-.desktop .dm-step-mark { flex: none; display: grid; place-items: center; width: 12px; height: 12px; font-size: 11px; }
-.desktop .dm-step.done .dm-step-mark { color: var(--ok); }
-.desktop .dm-step.on .dm-step-mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 20%, transparent); }
-.desktop .dm-step.next .dm-step-mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--t4); }
-.desktop .dm-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 0; color: var(--t4); font-size: 12px; }
-.desktop .dm-word { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: var(--t3); font: inherit; font-size: 12px; cursor: pointer; }
-.desktop .dm-word:hover { color: var(--t1); }
-.desktop .dm-word.stop:hover { color: var(--bad); }
-.desktop .dm-word .ico { width: 12px; height: 12px; }
-.desktop .dm-more.open .ico { transform: rotate(180deg); }
-.desktop .dm-details { margin-top: 2px; padding: 10px 12px; border-radius: var(--r); background: var(--tone); color: var(--t2); font-size: 12.5px; }
-.desktop .dm-details pre { white-space: pre-wrap; margin: 4px 0 8px; font-size: 12px; color: var(--t3); }
-@media (prefers-reduced-motion: no-preference) {
-  .desktop .dm-live { animation: bf-breathe 2.4s ease-in-out infinite; }
-  .desktop .dm-word, .desktop .dm-word .ico { transition: color 140ms var(--ease), transform 180ms var(--ease); }
-}
 /* Drive linked to your chat: its chat sits under yours and takes notes from
    Drive's line. */
 .sidebar-item.kid { margin-left: 14px; }
 .sidebar-item.kid::before { content: ""; position: absolute; left: -6px; top: 6px; bottom: 6px; width: 1px; background: var(--hair); }
-.desktop #briefing .bf-tell { padding: 0; border: 0; background: none; font: inherit; color: var(--t4); cursor: pointer; }
-.desktop #briefing .bf-tell:hover, .desktop #briefing .bf-tell.on { color: var(--t1); }
-.desktop .drive-tell { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; padding: 7px 10px; border-radius: var(--r); background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
-.desktop .drive-tell input { flex: 1; min-width: 0; border: 0; background: none; color: var(--t1); font: inherit; font-size: 13px; outline: none; }
-.desktop .drive-tell input::placeholder { color: var(--t4); }
-.desktop .drive-tell kbd { font-size: 11px; color: var(--t4); }
-.desktop .dt-sent { margin: 0 0 6px; font-size: 12px; color: var(--t3); }
-.desktop .drive-told { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.desktop .drive-told li { max-width: 80%; padding: 6px 11px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--acc) 9%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 22%, transparent); color: var(--t1); font-size: 13px; }
-.desktop .drive-told small { display: block; font-size: 11px; color: var(--t3); }
-@media (prefers-reduced-motion: no-preference) { .desktop #briefing .bf-tell { transition: color 140ms var(--ease); } }
 /* A finished mission's report: where an ask sits, on the accent surface,
    with what changed and the way to its branch and chat. */
 .desktop .request.drive-report { display: flex; flex-direction: column; gap: 6px; max-width: 560px; background: color-mix(in srgb, var(--acc) 7%, var(--surface2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 18%, transparent); }
@@ -1013,8 +975,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .dr-actions .link:hover { color: var(--t1); }
 /* Drive's steps: quiet lines on the thin guide, like tool calls. What it
    asked the coder unfolds under its line as plain words. */
-.desktop .drive-steps { list-style: none; margin: 10px 0 0 4px; padding: 0 0 0 14px; box-shadow: -1px 0 0 var(--hair); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 19px; color: var(--t3); }
-.desktop .drive-steps .ds { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .desktop .ds-mark { flex: none; width: 12px; color: var(--t4); }
 .desktop .ds.tone-citron .ds-mark { color: var(--ok); }
 .desktop .ds.tone-electric .ds-mark, .desktop .ds.now .ds-mark { color: var(--acc); }
@@ -1025,7 +985,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .ds-fold:hover { color: var(--t1); }
 .desktop .ds-fold .ico { flex: none; width: 12px; height: 12px; opacity: .7; }
 .desktop .ds-fold.open .ico { transform: rotate(180deg); }
-.desktop .drive-steps time { flex: none; font-size: 11.5px; color: var(--t4); font-variant-numeric: tabular-nums; }
 .desktop .drive-asked { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0 0 6px 4px; padding-left: 14px; box-shadow: -1px 0 0 var(--hair); font-size: 12.5px; line-height: 19px; color: var(--t3); }
 .desktop .drive-asked .ds-mark { color: var(--acc); }
 .desktop .drive-asked .ds-fold { min-width: 0; flex: 0 1 auto; }
@@ -2503,3 +2462,10 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop :is(#briefing, #drive-reply, #hero) .bf-group { margin: 6px 0 2px; padding: 0 10px; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--t4); }
 .desktop #sidebar-drive .bf-row.bf-idea { height: auto; min-height: 30px; padding: 4px 6px; }
 .desktop #sidebar-drive .bf-group { padding: 0 6px; }
+/* Pass 159 A: a mission at the sidebar foot is one line and its choices. */
+.desktop #sidebar-drive #briefing .bf-acts { display: flex; flex-basis: 100%; gap: 6px; padding-top: 2px; }
+.desktop #briefing .bf-pill { height: 22px; padding: 0 10px; border: 0; border-radius: 99px; background: none; box-shadow: inset 0 0 0 1px var(--tone2); color: var(--t2); font: inherit; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+.desktop #briefing .bf-pill:hover:not(:disabled) { background: var(--tone); color: var(--t1); }
+.desktop #briefing .bf-pill.primary { background: var(--t1); box-shadow: none; color: var(--surface, #1c1c1e); font-weight: 500; }
+.desktop #briefing .bf-pill.primary:hover:not(:disabled) { background: var(--t1); color: var(--surface, #1c1c1e); opacity: .9; }
+.desktop #briefing span.bf-word { cursor: default; }

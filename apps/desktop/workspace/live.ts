@@ -42,7 +42,7 @@ import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
-import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
+import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
@@ -3276,11 +3276,12 @@ function renderSettingsNav() {
   if (search) { const again = el<HTMLInputElement>("settings-search"); again.focus({ preventScroll: true }); again.setSelectionRange(at, at); }
 }
 function settingsSection(id: SettingsSection) {
+  id = settingsHome(id);
   settingsUi.section = id;
   settingsUi.query = settingsUi.fold = "";
   const search = document.getElementById("settings-search") as HTMLInputElement | null;
   if (search) search.value = "";
-  if (id === "overview" || id === "usage" || id === "archived" || id === "permissions" || id === "data") loadSettings();
+  if (id === "overview" || id === "permissions" || id === "data") loadSettings();
   renderPage();
   document.getElementById("page")?.scrollTo?.({ top: 0 });
 }
@@ -6629,6 +6630,7 @@ function renderState(next: Snapshot) {
   const start = !inSession(next) && !pageOpen;
   el("app").classList.toggle("start", start);
   el("app").classList.toggle("paging", Boolean(pageOpen));
+  el("app").classList.toggle("settings-on", pageOpen === "settings");
   el("hero").hidden = !start;
   el("conversation").hidden = start || Boolean(pageOpen);
   el("page").hidden = !pageOpen;

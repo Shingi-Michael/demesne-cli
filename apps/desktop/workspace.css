@@ -1178,12 +1178,12 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .st-nav.on .ico { color: var(--t1); }
 .st-nav-n { margin-left: auto; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .desktop #page[data-kind="settings"] { max-width: 660px; padding-top: 30px; }
-.st-head { display: flex; justify-content: space-between; align-items: baseline; margin: 20px 2px 7px; color: var(--t2); font-size: 12.5px; font-weight: 500; }
+.st-head { display: flex; justify-content: space-between; align-items: baseline; margin: 24px 16px 8px; color: var(--t2); font-size: 12.5px; font-weight: 500; }
 .st-head span + span { color: var(--t4); font-weight: 400; font-variant-numeric: tabular-nums; }
 .st-goto { padding: 0; color: var(--t2); font-size: 12.5px; font-weight: 500; }
 .st-goto:hover { color: var(--t1); }
 .st-group { border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair); }
-.st-row { display: flex; align-items: center; gap: 16px; min-height: 52px; padding: 8px 14px; box-shadow: inset 0 -1px 0 var(--hair); }
+.st-row { display: flex; align-items: center; gap: 16px; min-height: 52px; padding: 8px 16px; box-shadow: inset 0 -1px 0 var(--hair); }
 .st-group > :last-child, .st-row:has(+ .st-fold:last-child) { box-shadow: none; }
 .st-tx { flex: 1; min-width: 0; }
 .st-tx b { display: block; overflow: hidden; color: var(--t1); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1191,23 +1191,24 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .st-tx code, .st-fold code { font: 11.5px "JetBrains Mono", ui-monospace, monospace; color: var(--t2); }
 .st-tx mark { background: none; color: var(--t1); box-shadow: inset 0 -1.5px 0 var(--acc); }
 .st-ctl { display: flex; flex: none; align-items: center; gap: 12px; }
-.st-link { height: 26px; padding: 0 8px; border-radius: var(--r-sm); color: var(--t1); font-size: 12.5px; }
+.st-link { height: 28px; padding: 0 12px; border-radius: 99px; box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); font-size: 12.5px; white-space: nowrap; }
 .st-link.quiet { color: var(--t3); }
 .st-link.warn { color: var(--warn, #e0a84a); }
 .st-link:hover { color: var(--t1); background: var(--tone2); }
-.st-word { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 4px 0 8px; border-radius: var(--r-sm); color: var(--t1); font-size: 12.5px; }
+.st-word { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px 0 12px; border-radius: 99px; box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); font-size: 12.5px; }
 .st-word .ico { width: 13px; height: 13px; color: var(--t3); transition: transform 160ms var(--ease); }
 .st-word.open .ico { transform: rotate(180deg); }
 .st-word:hover { background: var(--tone2); }
-.st-fold { padding: 2px 14px 12px; box-shadow: inset 0 -1px 0 var(--hair); }
+.st-fold { padding: 2px 16px 12px; box-shadow: inset 0 -1px 0 var(--hair); }
 .st-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; padding: 2px 0; }
 .st-choice-head { width: 64px; color: var(--t4); font-size: 11.5px; }
 .st-choice { height: 26px; padding: 0 9px; border-radius: var(--r-sm); color: var(--t3); font-size: 12.5px; }
 .st-choice:hover { color: var(--t1); background: var(--tone2); }
 .st-choice.on { color: var(--t1); box-shadow: inset 0 0 0 1px var(--hair2); }
-.st-num { display: inline-flex; align-items: center; gap: 6px; color: var(--t3); font-size: 12px; }
-.st-num input, .st-text input, .st-add input { height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent; box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); font: 12px "JetBrains Mono", ui-monospace, monospace; outline: none; }
-.st-num input { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+.st-num { position: relative; display: inline-flex; align-items: center; color: var(--t3); font-size: 12px; }
+.st-num span { position: absolute; left: 10px; color: var(--t4); pointer-events: none; }
+.st-num input, .st-text input, .st-add input { height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent; box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); font: 12px "JetBrains Mono", ui-monospace, monospace; outline: none; }
+.st-num input { width: 120px; padding: 0 10px; text-align: right; font-variant-numeric: tabular-nums; }
 .st-text input { width: 180px; }
 .st-num input:focus, .st-text input:focus, .st-add input:focus { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 60%, var(--hair2)); }
 .st-add { display: flex; gap: 8px; }
@@ -1221,10 +1222,18 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .st-state { color: var(--t3); font-size: 11.5px; }
 .st-state.ready { color: var(--ok, #6cc68e); }
 .st-state.failed { color: var(--bad, #ef8a8a); }
-.st-hint { margin: 8px 2px 0; color: var(--t4); font-size: 12px; }
+/* Pass 154 B: one kit. Every control is 28px tall and ends 16px in. */
+.st-ctl .settings-segments { height: 28px; padding: 2px; align-items: stretch; }
+.st-ctl .settings-segments button { display: flex; align-items: center; padding: 0 12px; }
+.st-default { color: var(--t4); font-size: 12px; white-space: nowrap; }
+.st-reset { margin-left: 8px; color: var(--acc); font-size: 12px; }
+.st-reset:hover { text-decoration: underline; }
+.st-val { max-width: 300px; overflow: hidden; color: var(--t3); font: 12px "JetBrains Mono", ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.live-app.settings-on > .status { display: none !important; }
+.st-hint { margin: 8px 16px 0; color: var(--t4); font-size: 12px; }
 .st-note { margin: 0 0 6px; color: var(--t3); font-size: 12.5px; }
 .st-note .st-link { margin-left: 2px; }
-.st-note.foot { margin: 18px 2px 0; color: var(--t4); font-size: 12px; }
+.st-note.foot { margin: 18px 16px 0; color: var(--t4); font-size: 12px; }
 
 /* Settings, pass 116 A: Overview first, then sections with pictures. */
 .desktop #page[data-kind="settings"] { max-width: 720px; }
@@ -2462,5 +2471,5 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 
 /* The overview's "Worth a look" heading starts on the cards' edge, and a
    card's line keeps its last words together instead of leaving one alone. */
-.ov-tiles ~ .st-head { margin-inline: 0; }
+.ov-tiles + .st-head { margin-inline: 0; }
 .ov-tile small { text-wrap: pretty; }

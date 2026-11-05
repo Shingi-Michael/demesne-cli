@@ -4,7 +4,7 @@
 /// it holds, and groups of rows on a hairline ring. Each row is a title, one
 /// quiet line and its control on the right: a switch, words that unfold in
 /// place, a number you type, or a link. Nothing opens a menu.
-import { PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, planWindows, type ModelScore, type NearbyAgent, type PlanLimits } from "@demesne/protocol";
+import { DEFAULT_DRIVE_LIMITS, PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, planWindows, type ModelScore, type NearbyAgent, type PlanLimits } from "@demesne/protocol";
 import type { ChatsPageChat } from "./chats-page.ts";
 
 const h = (value: unknown) =>
@@ -47,32 +47,28 @@ export interface SettingsInfo {
 
 export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "providers" | "connectors" | "heartbeat" | "data";
 const icon = (path: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${path}</svg>`;
+/// Settings › the list (pass 154 B): nine pages, each worth opening. The
+/// sections that held a row or two live inside another page now, and their
+/// ids still open it (SETTINGS_HOME), so links and search keep working.
 export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = [
-  ["", [["overview", "Overview", '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>']]],
-  ["You", [
+  ["", [
+    ["overview", "Overview", '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'],
     ["general", "General", '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'],
-    ["notifications", "Notifications", '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>'],
     ["appearance", "Appearance", '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z"/>'],
-    ["keys", "Keyboard shortcuts", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>'],
-    ["archived", "Archived chats", '<rect x="3.5" y="5" width="17" height="4" rx="1"/><path d="M5 9v10h14V9"/><path d="M10 13h4"/>'],
-    ["usage", "Usage", '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'],
-  ]],
-  ["How it works", [
+    ["models", "Models", '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 2v4M14 2v4M10 18v4M14 18v4M2 10h4M2 14h4M18 10h4M18 14h4"/>'],
     ["permissions", "Permissions", '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/>'],
     ["drive", "Drive", '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>'],
-    ["models", "Models", '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 2v4M14 2v4M10 18v4M14 18v4M2 10h4M2 14h4M18 10h4M18 14h4"/>'],
-    ["providers", "Providers", '<path d="M12 22v-5M9 8V2M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8z"/>'],
-  ]],
-  ["Around it", [
-    ["connectors", "Connectors", '<path d="M9 7 4 12l5 5M15 7l5 5-5 5"/>'],
-    ["heartbeat", "Heartbeat", '<path d="M3 12h4l2-5 4 10 2-5h6"/>'],
-  ]],
-  ["This computer", [
-    ["data", "Data and daemon", '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'],
+    ["connectors", "Connections", '<path d="M9 7 4 12l5 5M15 7l5 5-5 5"/>'],
+    ["keys", "Keyboard shortcuts", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>'],
+    ["data", "Data", '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'],
   ]],
 ];
+export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { notifications: "general", providers: "models", heartbeat: "connectors", archived: "data", usage: "overview" };
+/// The page a section is drawn on.
+export const settingsHome = (id: SettingsSection): SettingsSection => SETTINGS_HOME[id] ?? id;
 export const SETTINGS_ORDER = SETTINGS_GROUPS.flatMap(([, items]) => items.map(([id]) => id));
-export const isSettingsSection = (value: unknown): value is SettingsSection => SETTINGS_ORDER.includes(value as SettingsSection);
+const ALL_SECTIONS: SettingsSection[] = ["overview", "general", "notifications", "appearance", "keys", "archived", "usage", "permissions", "drive", "models", "providers", "connectors", "heartbeat", "data"];
+export const isSettingsSection = (value: unknown): value is SettingsSection => ALL_SECTIONS.includes(value as SettingsSection);
 
 /// Native desktop notifications, each kind with its own switch.
 export type NotifyKind = "wait" | "error" | "drive" | "done" | "social";
@@ -222,8 +218,14 @@ const word = (fold: string, label: string, open: boolean) =>
 const choices = (label: string, items: [string, boolean, string, Record<string, unknown>][], heading = "") =>
   `<div class="st-choices" role="group" aria-label="${h(label)}">${heading ? `<span class="st-choice-head">${h(heading)}</span>` : ""}${items.map(([text, on, action, data]) => `<button type="button" class="st-choice${on ? " on" : ""}" aria-pressed="${on}" data-action="${action}" data-args="${h(JSON.stringify(data))}">${h(text)}</button>`).join("")}</div>`;
 /// A number you type; Enter or leaving the field saves it.
-const number = (key: string, value: number, unit: string, label: string) =>
-  `<label class="st-num"><input type="text" inputmode="numeric" data-key="${h(key)}" data-value="${value}" value="${h(value.toLocaleString("en-US"))}" aria-label="${h(label)}" autocomplete="off" spellcheck="false">${unit ? `<span>${h(unit)}</span>` : ""}</label>`;
+/// Beside it, its default, and Reset once you changed it.
+const number = (key: string, value: number, unit: string, label: string, fallback?: number) =>
+  (fallback === undefined ? "" : `<span class="st-default">${value === fallback ? "default" : `default ${h(fallback.toLocaleString("en-US"))}${btn("settings-config", "Reset", { key, value: null }, "st-reset")}`}</span>`) +
+  `<label class="st-num">${unit ? `<span>${h(unit)}</span>` : ""}<input type="text" inputmode="numeric" data-key="${h(key)}" data-value="${value}" value="${h(value.toLocaleString("en-US"))}" aria-label="${h(label)}" autocomplete="off" spellcheck="false"></label>`;
+/// A fact with nothing to change, on the right in place of a control.
+const value = (text: string) => `<code class="st-val" title="${h(text)}">${h(text)}</code>`;
+/// The daemon's own limits when config.toml says nothing (DEFAULT_AGENT_LIMITS).
+export const AGENT_DEFAULTS = { maxModelRounds: 64, maxToolCalls: 256 } as const;
 const kbd = (keys: string) => keys.split(" ").map((item) => `<kbd>${h(item)}</kbd>`).join("");
 
 function shortcuts(mac: boolean): Group[] {
@@ -248,8 +250,7 @@ function pages(view: SettingsView): Page[] {
     ] },
     { name: "While it works", rows: [
       ...(view.desktop ? [{ title: "Keep this computer awake while something runs", line: "A chat's turn or a Drive run; the display may still sleep", control: toggle(view.general.awake, "settings-local", { key: "awake", value: !view.general.awake }, "Keep this computer awake"), keywords: "sleep awake power battery" }] : []),
-      { title: "Closing the window", line: "The daemon keeps running, so Drive, routines and mail carry on", keywords: "quit close background daemon" },
-    ] },
+    ], hint: "Closing the window leaves the daemon running, so Drive, routines and mail carry on." },
     ...(view.general.updates ? [{ name: "Updates", rows: [
       { title: "Update Demesne by itself", line: view.general.updates.line, control: toggle(view.general.updates.on, "settings-local", { key: "updates", value: !view.general.updates.on }, "Update Demesne by itself"), keywords: "update upgrade version release download restart" },
     ] }] : []),
@@ -281,12 +282,12 @@ function pages(view: SettingsView): Page[] {
   const scores = (view.usage ?? []).filter((score) => score.turns > 0).sort((a, b) => b.turns - a.turns);
   const most = Math.max(1, ...scores.map((score) => score.turns));
   const runs = scores.reduce((sum, score) => sum + score.driveRuns, 0), landed = scores.reduce((sum, score) => sum + score.driveLanded, 0);
-  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, counted from your own chats on this computer, and what your plan has left.", html: usageTop(view, scores), groups: [
-    { name: "By model", right: scores.length ? `${scores.reduce((sum, score) => sum + score.turns, 0)} turns` : "", rows: view.usage === null ? [{ title: "Counting…" }] : scores.length ? scores.map((score) => {
+  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, counted from your own chats on this computer, and what your plan has left.", html: usageTop(view, scores, false), groups: [
+    { name: "Turns by model", right: scores.length ? `${scores.reduce((sum, score) => sum + score.turns, 0)} turns` : "", rows: view.usage === null ? [{ title: "Counting…" }] : scores.length ? scores.map((score) => {
       const ended = score.finished + score.failed;
       return { title: view.modelWords({ id: score.model }), line: [`${score.provider}`, `${score.turns} ${score.turns === 1 ? "turn" : "turns"}`, ended ? `${Math.round((score.finished / ended) * 100)}% finished` : "", score.tokensPerSecond ? `${Math.round(score.tokensPerSecond)} tok/s` : ""].filter(Boolean).join(" · "), control: `<span class="st-bar" aria-hidden="true"><i style="width:${Math.max(3, Math.round((score.turns / most) * 100))}%"></i></span><span class="st-count">${score.turns}</span>`, keywords: "usage turns tokens speed model" };
     }) : [{ title: "Nothing yet", line: "Turns show here once a model has answered" }] },
-    { name: "Drive", rows: [{ title: "Runs", line: runs ? `${landed} applied or opened as a PR` : "None in the last 30 days", control: `<span class="st-count">${runs}</span>`, keywords: "drive runs branches" }] },
+    { name: "Drive runs", rows: [{ title: "Runs", line: runs ? `${landed} applied or opened as a PR` : "None in the last 30 days", control: `<span class="st-count">${runs}</span>`, keywords: "drive runs branches" }] },
   ] });
   const rules = info?.allow ?? [], mode = view.permissions.mode;
   out.push({ id: "permissions", title: "Permissions", sub: "What it may do without asking, and where.", html: permissionsTop(view), groups: [
@@ -300,9 +301,9 @@ function pages(view: SettingsView): Page[] {
       ? { title: "Start on its own", line: `After ${auto.quietMinutes} quiet minutes it runs the top idea, at most ${auto.perDay} a day${auto.usedToday ? ` (${auto.usedToday} today)` : ""}`, control: toggle(auto.on, "drive-auto", { on: !auto.on }, "Start on its own"), keywords: "drive auto quiet start own" }
       : { title: "Start on its own", line: "Open a project to set Drive for it", keywords: "drive auto quiet" }] },
     { name: "How far one mission may go", rows: info ? [
-      { title: "Active time", line: "It stops and leaves the branch for you", control: number("drive.max_active_minutes", info.drive.maxActiveMinutes, "min", "Active time in minutes"), keywords: "drive limit minutes time" },
-      { title: "Tokens", line: "Planning and coding together", control: number("drive.max_tokens", info.drive.maxTokens, "", "Tokens"), keywords: "drive limit tokens budget" },
-      { title: "Tasks", line: "Steps it hands to the coder, at most 64", control: number("drive.max_tasks", info.drive.maxTasks, "", "Tasks"), keywords: "drive limit tasks" },
+      { title: "Active time", line: "It stops and leaves the branch for you", control: number("drive.max_active_minutes", info.drive.maxActiveMinutes, "min", "Active time in minutes", DEFAULT_DRIVE_LIMITS.maxActiveMinutes), keywords: "drive limit minutes time" },
+      { title: "Tokens", line: "Planning and coding together", control: number("drive.max_tokens", info.drive.maxTokens, "", "Tokens", DEFAULT_DRIVE_LIMITS.maxTokens), keywords: "drive limit tokens budget" },
+      { title: "Tasks", line: "Steps it hands to the coder, at most 64", control: number("drive.max_tasks", info.drive.maxTasks, "", "Tasks", DEFAULT_DRIVE_LIMITS.maxTasks), keywords: "drive limit tasks" },
     ] : [{ title: "Reading…" }], hint: "A mission reads these when it starts." },
   ] });
   const subagent = info?.subagent;
@@ -316,8 +317,8 @@ function pages(view: SettingsView): Page[] {
       ...(info?.images ? [{ title: "Images", line: "The model that makes pictures when you ask for one", control: `<form class="st-text" data-key="images.model"><input value="${h(info.images.model ?? "")}" aria-label="Image model" autocomplete="off" spellcheck="false"></form>`, keywords: "image picture generation" }] : []),
     ] },
     { name: "Limits for one turn", rows: info ? [
-      { title: "Model rounds", line: "A turn stops after this many replies from the model", control: number("agent.max_model_rounds", info.agent.maxModelRounds, "", "Model rounds"), keywords: "limit rounds turn" },
-      { title: "Tool calls", line: "And after this many tool calls", control: number("agent.max_tool_calls", info.agent.maxToolCalls, "", "Tool calls"), keywords: "limit tools turn" },
+      { title: "Model rounds", line: "A turn stops after this many replies from the model", control: number("agent.max_model_rounds", info.agent.maxModelRounds, "", "Model rounds", AGENT_DEFAULTS.maxModelRounds), keywords: "limit rounds turn" },
+      { title: "Tool calls", line: "And after this many tool calls", control: number("agent.max_tool_calls", info.agent.maxToolCalls, "", "Tool calls", AGENT_DEFAULTS.maxToolCalls), keywords: "limit tools turn" },
     ] : [{ title: "Reading…" }], hint: "The daemon reads these when it starts." },
   ] });
   out.push({ id: "providers", title: "Providers", sub: "Where models come from: accounts, API keys and model servers on this computer.", groups: [
@@ -354,12 +355,11 @@ function pages(view: SettingsView): Page[] {
   ] });
   out.push({ id: "data", title: "Data and daemon", sub: "Where Demesne keeps your chats, and the daemon that runs them.", groups: [
     { name: "Where it keeps things", rows: info ? [
-      { title: "Data folder", line: `\`${homeWords(info.dataDirectory, view.home)}\``, keywords: "data folder database" },
-      { title: "Settings file", line: `\`${homeWords(info.configPath, view.home)}\``, keywords: "config toml file" },
+      { title: "Data folder", line: "Your chats, Drive runs and Foundry pages", control: value(homeWords(info.dataDirectory, view.home)), keywords: "data folder database" },
+      { title: "Settings file", line: "What these pages change, as config.toml", control: value(homeWords(info.configPath, view.home)), keywords: "config toml file" },
     ] : [{ title: "Reading…" }] },
     { name: "The daemon", rows: [
-      { title: "Address", line: `${info ? `\`${info.server}\` · ` : ""}${view.online ? "running" : "not answering"}`, keywords: "daemon server address" },
-      { title: "Keeps running when you close the window", line: "So Drive, routines and mail go on", keywords: "quit close background" },
+      { title: view.online ? "Running" : "Not answering", line: "It keeps running when you close the window, so Drive, routines and mail go on", control: info ? value(info.server.replace(/^https?:\/\//, "").replace(/\/$/, "")) : "", keywords: "daemon server address quit close background" },
       { title: "Restart the daemon", line: info?.restart.includes("app.update") ? "A newer daemon came with this app; it restarts by itself once nothing is working" : info?.restart.length ? "Settings you changed wait for a restart" : "It reads its settings again; waits until nothing is working", control: link("restart-daemon", "Restart", {}, info?.restart.length ? " warn" : ""), keywords: "restart daemon reload" },
     ] },
     { name: "Conversations", rows: [
@@ -367,7 +367,25 @@ function pages(view: SettingsView): Page[] {
       { title: "Clean up", line: "Delete empty, quick and old chats; you choose which first", control: link("overlay", "Review", { name: "cleanup" }), keywords: "delete clean sessions" },
     ] },
   ] });
-  return out;
+  return merged(out);
+}
+
+/// Pass 154 B: the small pages join a bigger one, in the list's order.
+const RENAME: Partial<Record<SettingsSection, { title: string; sub: string }>> = {
+  models: { title: "Models", sub: "Which model answers, where models come from, and how far one turn may go." },
+  connectors: { title: "Connections", sub: "Tools from MCP servers, and agents nearby that can message your chats. Everything here runs on this computer." },
+  data: { title: "Data", sub: "Where Demesne keeps your chats, the daemon that runs them, and the chats you put away." },
+};
+const GROUP_NAMES: Record<string, string> = { "Tell me when": "Notifications", "Archived": "Archived chats" };
+function merged(out: Page[]): Page[] {
+  for (const [from, to] of Object.entries(SETTINGS_HOME) as [SettingsSection, SettingsSection][]) {
+    const source = out.find((page) => page.id === from), target = out.find((page) => page.id === to);
+    if (!source || !target) continue;
+    target.groups.push(...source.groups.map((group) => ({ ...group, name: GROUP_NAMES[group.name] ?? group.name, right: group.name === "Tell me when" && !group.right ? "while the app is out of focus" : group.right, hint: group.name === "Tell me when" ? source.sub : group.hint })));
+    if (source.html) target.html = (target.html ?? "") + source.html;
+    if (source.note && source.note !== target.note) target.note = target.note ? `${target.note} ${source.note}` : source.note;
+  }
+  return SETTINGS_ORDER.map((id) => out.find((page) => page.id === id)!).filter(Boolean).map((page) => ({ ...page, ...RENAME[page.id] }));
 }
 
 const ov = (id: SettingsSection) => `data-action="settings-section" data-args="${h(JSON.stringify({ id }))}"`;
@@ -460,8 +478,8 @@ function appearanceTop(view: SettingsView, themeLabel: string, groups: [string, 
 
 const SERIES = ["var(--acc)", "var(--blossom, #f2b6c8)", "var(--ok, #6cc68e)", "var(--t4)"];
 /// Usage: each plan's windows, then turns a day stacked by model.
-function usageTop(view: SettingsView, scores: ModelScore[]): string {
-  const plans = view.plans.filter((plan) => planWindows(plan).length);
+function usageTop(view: SettingsView, scores: ModelScore[], withPlans = true): string {
+  const plans = withPlans ? view.plans.filter((plan) => planWindows(plan).length) : [];
   const planCards = plans.length ? `<div class="us-plans">${plans.map((plan) => `<div class="us-plan"><div class="ov-top"><span>${h(planTitle(plan))}</span>${plan.provider.toLowerCase() === "chatgpt" ? link("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }, " quiet") : ""}</div><div class="ov-rings">${planWindows(plan).map(({ name, window }) => `<div>${ring(window.usedPercent, 34)}<span><b>${pct(window.usedPercent)} of ${h(windowWords(name))}</b><small>${h(resetAt(window.resetsAt) || "no reset reported")}</small></span></div>`).join("")}</div></div>`).join("")}</div>` : "";
   const counted = scores.filter((score) => score.daily?.length);
   if (!counted.length) return planCards;
@@ -535,7 +553,7 @@ export function settingsPage(view: SettingsView) {
       found.map(({ page, rows }) => `<div class="st-head"><button type="button" class="st-goto" data-action="settings-section" data-args="${h(JSON.stringify({ id: page.id }))}">${h(page.title)} ›</button></div><div class="st-group">${rows.map((row) => rowHtml(row, marks)).join("")}</div>`).join("") +
       (count ? `<p class="st-hint">Esc clears the search.</p>` : "");
   }
-  const page = pages(view).find((item) => item.id === view.section) ?? pages(view)[0]!;
+  const all = pages(view), page = all.find((item) => item.id === settingsHome(view.section)) ?? all[0]!;
   const note = page.note ? `<p class="st-note${page.id === "permissions" ? " foot" : ""}">${h(page.note)}${page.note.startsWith("Changed here") ? ` ${link("restart-daemon", "Restart now")}` : ""}</p>` : "";
   return `<h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${error}${note}${page.html ?? ""}${page.groups.filter((group) => !group.hidden).map((group) => groupHtml(group, [])).join("")}`;
 }
@@ -543,14 +561,13 @@ export function settingsPage(view: SettingsView) {
 /// The sidebar while Settings is open: Back to chats, the search, the list.
 export function settingsNav(view: Pick<SettingsView, "section" | "query" | "archived" | "info">) {
   const counts: Partial<Record<SettingsSection, string>> = {
-    ...(view.archived?.length ? { archived: String(view.archived.length) } : {}),
     ...(view.info?.allow.length ? { permissions: String(view.info.allow.length) } : {}),
   };
   const searching = Boolean(view.query.trim());
   return `<button type="button" class="st-back" data-action="page-open" data-args='{"page":""}'>${icon('<path d="m15 6-6 6 6 6"/>')}Back to chats</button>` +
     `<label class="sidebar-search st-search">${icon('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>')}<input id="settings-search" type="search" placeholder="Search settings" aria-label="Search settings" value="${h(view.query)}" autocomplete="off" spellcheck="false"></label>` +
     SETTINGS_GROUPS.map(([name, items]) => `${name ? `<div class="st-nav-group">${h(name)}</div>` : ""}${items.map(([id, label, path]) => {
-      const on = !searching && id === view.section;
+      const on = !searching && id === settingsHome(view.section);
       return `<button type="button" class="st-nav${on ? " on" : ""}" data-action="settings-section" data-args="${h(JSON.stringify({ id }))}"${on ? ' aria-current="page"' : ""}>${icon(path)}<span>${h(label)}</span>${counts[id] ? `<span class="st-nav-n">${h(counts[id])}</span>` : ""}</button>`;
     }).join("")}`).join("");
 }

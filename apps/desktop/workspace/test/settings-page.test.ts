@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { ruleGroups, glassAlphas, GLASS_DEFAULT, homeWords, notifyKinds, parseNumber, ruleWords, settingsNav, settingsPage, settingsSearch, shortNumber, SETTINGS_ORDER, type SettingsInfo, type SettingsView } from "../settings-page.ts";
+import { DEFAULT_AGENT_LIMITS } from "@demesne/config";
+import { AGENT_DEFAULTS, ruleGroups, glassAlphas, GLASS_DEFAULT, homeWords, notifyKinds, parseNumber, ruleWords, settingsNav, settingsPage, settingsSearch, shortNumber, SETTINGS_ORDER, type SettingsInfo, type SettingsView } from "../settings-page.ts";
 
 const info: SettingsInfo = {
   home: "/Users/mike",
@@ -44,12 +45,21 @@ test("notifications carry over the old single choice", () => {
 test("notification settings describe native delivery on every desktop platform", () => {
   for (const mac of [true, false]) {
     const html = settingsPage(view({ section: "notifications", mac }));
+    expect(html).toContain('<h1 class="cp-title">General</h1>');
     expect(html).toContain("Linux, macOS and Windows");
     expect(html).toContain("out of focus");
     expect(html).toContain("A chat waits on you");
     expect(html).toContain("A chat finishes");
     expect(html).not.toContain("Mac banners");
   }
+});
+
+test("every limit shows its default, and Reset once it's changed", () => {
+  const changed = settingsPage(view({ section: "models", info: { ...info, agent: { maxModelRounds: 100, maxToolCalls: AGENT_DEFAULTS.maxToolCalls } } }));
+  expect(changed).toContain("default 64");
+  expect(changed).toContain('data-action="settings-config" data-args="{&quot;key&quot;:&quot;agent.max_model_rounds&quot;,&quot;value&quot;:null}"');
+  expect(changed.match(/st-reset/g)).toHaveLength(1);
+  expect(AGENT_DEFAULTS).toEqual(DEFAULT_AGENT_LIMITS);
 });
 
 test("learned rules read as words", () => {
@@ -69,10 +79,15 @@ test("numbers are typed as you would say them", () => {
   expect(homeWords("/Users/mike/projects/x", "/Users/mike")).toBe("~/projects/x");
 });
 
-test("every section draws, and the list has fourteen with Overview first", () => {
-  expect(SETTINGS_ORDER).toHaveLength(14);
-  expect(SETTINGS_ORDER[0]).toBe("overview");
+test("every section draws, and the list has nine with Overview first", () => {
+  expect(SETTINGS_ORDER).toEqual(["overview", "general", "appearance", "models", "permissions", "drive", "connectors", "keys", "data"]);
   for (const section of SETTINGS_ORDER) expect(settingsPage(view({ section }))).toContain('class="cp-title"');
+  // The small pages live inside a bigger one, and their ids still open it.
+  expect(settingsPage(view({ section: "providers" }))).toContain('<h1 class="cp-title">Models</h1>');
+  expect(settingsPage(view({ section: "providers" }))).toContain("Accounts");
+  expect(settingsPage(view({ section: "heartbeat" }))).toContain('<h1 class="cp-title">Connections</h1>');
+  expect(settingsPage(view({ section: "archived" }))).toContain("Archived chats");
+  expect(settingsNav({ section: "notifications", query: "", archived: [], info })).toMatch(/st-nav on"[^>]*>.*General<\/span>/);
   const nav = settingsNav({ section: "permissions", query: "", archived: [], info });
   expect(nav).toContain("Back to chats");
   expect(nav).toMatch(/st-nav on"[^>]*>.*Permissions<\/span><span class="st-nav-n">2</);

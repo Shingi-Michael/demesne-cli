@@ -124,7 +124,7 @@ test("a finished download goes in the next time it opens, unless that version fa
   expect(third.it.status).toMatchObject({ state: "failed", to: "0.4.52" });
 });
 
-test("the swap script moves the new app in, and puts the old one back if it never starts", async () => {
+test("the swap script moves the new app in, deletes the old one once it starts, and puts it back if it never does", async () => {
   for (const starts of [true, false]) {
     const dir = temp(), root = join(dir, "demesne"), staged = join(dir, "staged");
     mkdirSync(root); writeFileSync(join(root, "which"), "old");
@@ -140,7 +140,7 @@ test("the swap script moves the new app in, and puts the old one back if it neve
     expect(run.exitCode).toBe(0);
     expect(readFileSync(join(root, "which"), "utf8")).toBe(starts ? "new" : "old");
     expect(existsSync(failed)).toBe(!starts);
-    if (starts) expect(readFileSync(join(`${root}.prev`, "which"), "utf8")).toBe("old");
+    expect(existsSync(`${root}.prev`)).toBe(false);
   }
 });
 

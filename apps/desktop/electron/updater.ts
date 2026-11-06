@@ -97,9 +97,10 @@ export function stagedEntry(kind: InstallKind, dir: string): { path: string; nee
 
 const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 /// The script that swaps the app once this one has exited (Mac and Linux).
-/// It waits for `pid`, keeps the old app as `<root>.prev` (only the newest
-/// backup), moves the new one in, opens it, and waits for `started` to name
-/// the new version; if it never does, the old app comes back and opens.
+/// It waits for `pid`, moves the old app aside as `<root>.prev`, moves the
+/// new one in, opens it, and waits for `started` to name the new version;
+/// once it does the old app is deleted, and if it never does the old app
+/// comes back and opens.
 export function swapScript(options: { kind: InstallKind; pid: number; root: string; staged: string; version: string; started: string; failed: string; relaunch: string[] }): string {
   const { kind, pid, root, staged, version, started, failed } = options;
   const prev = `${root}.prev`, launch = options.relaunch.map(q).join(" ");
@@ -119,7 +120,7 @@ export function swapScript(options: { kind: InstallKind; pid: number; root: stri
     `rm -f ${q(started)}`,
     install,
     open,
-    `i=0; while [ $i -lt ${START_WAIT_S * 2} ]; do grep -qx ${q(version)} ${q(started)} 2>/dev/null && exit 0; sleep 0.5; i=$((i+1)); done`,
+    `i=0; while [ $i -lt ${START_WAIT_S * 2} ]; do grep -qx ${q(version)} ${q(started)} 2>/dev/null && { ${kind === "linux-deb" ? "" : `rm -rf ${q(prev)}; `}exit 0; }; sleep 0.5; i=$((i+1)); done`,
     `echo ${q(version)} > ${q(failed)}`,
     rollback,
     rollback ? open : "",

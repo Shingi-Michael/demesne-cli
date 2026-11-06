@@ -168,6 +168,10 @@ jobs:
             demesne-desktop-linux-x64.tar.gz*
             demesne-desktop-darwin-arm64.zip*
           if-no-files-found: ignore
+          # The release job copies these into the GitHub release, so the
+          # artifacts are only a hand-off. Keeping them the default 90 days
+          # filled the repo's artifact storage quota.
+          retention-days: 1
 
   release:
     needs: [version, desktop]

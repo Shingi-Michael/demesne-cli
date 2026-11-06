@@ -152,9 +152,15 @@ export function subagentArgs(id: AgentId, prompt: string, choice: AgentChoice = 
   return ["-p", prompt, "--output-format", "stream-json", ...(root ? ["--settings", JSON.stringify({ permissions: { allow: [`read_file(${root})`] } })] : []), ...(model ? ["--model", model] : [])];
 }
 
+/// Antigravity ends its turn with no answer the moment a headless run is
+/// denied anything (a command, a write, a read outside the project), so as
+/// a sub-agent it is pointed at its own read tools and told never to try
+/// the rest. The read_file(<root>) rule alone is what keeps it read-only.
+const AGY_READ_ONLY = "You are a read-only helper working in the current folder. To see what is there, call list_dir on the folder; to search, use grep_search; to read, use view_file. Never run shell commands, never edit or create files, never start subagents, and never search the web. If the request asks for changes, do not attempt them: describe the change in your answer instead. Always finish with a text answer.\n\n";
+
 /// The brief a CLI sub-agent is given around the main agent's own prompt.
-export function subagentBrief(prompt: string, root: string): string {
-  return `You are a read-only sub-agent working for another coding agent in ${root}. Do not change any files or run anything that changes state.
+export function subagentBrief(prompt: string, root: string, id?: AgentId): string {
+  return `${id === "gemini" ? AGY_READ_ONLY : ""}You are a read-only sub-agent working for another coding agent in ${root}. Do not change any files or run anything that changes state.
 Investigate the task below with your read and search tools, and stop as soon as the evidence answers it.
 Your final message is returned verbatim to the other agent, which cannot see your steps. Make it a self-contained report: the answer first, then the supporting facts with workspace-relative file paths and line numbers, and anything you could not determine.
 
@@ -288,7 +294,12 @@ function parseAgyLine(event: Record<string, unknown>, cwd: string, state: AgySta
   if (kind === "result") {
     const result = record(event.result);
     if (result.status !== "SUCCESS") return [{ error: String(record(result.error).message ?? result.error ?? result.status ?? "Antigravity failed") }];
-    return typeof result.response === "string" ? [{ answer: result.response.trim() }] : [];
+    const answer = typeof result.response === "string" ? result.response.trim() : "";
+    // A denied action in headless mode ends Antigravity's turn with nothing
+    // said; that is a failed run, not an empty answer.
+    const denied = Array.isArray(result.denied_actions) ? result.denied_actions.map((item) => String(record(item).display_name ?? record(item).action ?? "")).filter(Boolean) : [];
+    if (!answer && denied.length) return [{ error: `Antigravity stopped: it wasn't allowed to ${[...new Set(denied)].join(", ")}` }];
+    return typeof result.response === "string" ? [{ answer }] : [];
   }
   if (kind === "error") return [{ error: String(record(event.error).message ?? event.message ?? "Antigravity failed") }];
   return [];
@@ -461,7 +472,7 @@ export class AgentCli {
     if (!path) throw new Error(`${kind.name} isn't installed on this machine`);
     let root = cwd;
     try { root = realpathSync(cwd); } catch { /* as given */ }
-    const child = this.spawn([path, ...subagentArgs(id, subagentBrief(prompt, cwd), this.choice(id), root)], cwd);
+    const child = this.spawn([path, ...subagentArgs(id, subagentBrief(prompt, cwd, id), this.choice(id), root)], cwd);
     const stop = () => child.kill();
     signal.addEventListener("abort", stop, { once: true });
     const stderr = tail(child.stderr);

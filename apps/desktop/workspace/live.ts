@@ -31,6 +31,7 @@ import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
+import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
@@ -270,6 +271,7 @@ const verb = (tool: ToolEntry) =>
     web_search: "Searched the web",
     web_fetch: "Read",
     remember: "Remembered",
+    update_plan: "Planned",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",
@@ -342,6 +344,8 @@ let follow = true,
   noticeTimer: ReturnType<typeof setTimeout> | undefined,
   lastDraftVersion = -1,
   lastSession = "";
+/// Turns whose plan checklist is open; closed until you click Checklist.
+const planOpen = new Set<string>();
 const expanded = new Set<string>(),
   detailsOpen = new Set<string>(),
   detailsClosed = new Set<string>(),
@@ -1833,6 +1837,7 @@ function parkedLines(run: WorkspaceRun) {
     .map((q) => btn("question-back", `<span class="ask-park" aria-hidden="true"></span><b>Waits for your answer</b><span class="ask-q-was">${h(q.questions[q.answers?.length ?? 0]!.question)}</span>`, { id: q.id }, "tool-row ask-parked")).join("");
 }
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
+  if (tool.name === UPDATE_PLAN) return "";
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
   if (tool.name === "ask_user") {
@@ -2165,6 +2170,9 @@ function runHTML(run: WorkspaceRun, index: number) {
     const at = run.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === cut.toolCallId);
     if (at >= 0) run = { ...run, entries: run.entries.slice(0, at + 1) };
   }
+  // The plan is the ribbon at the top, never a step row of its own.
+  const plan = planOf(tools(run));
+  run = { ...run, entries: run.entries.filter((entry) => entry.type !== "tool" || entry.name !== UPDATE_PLAN) };
   const items = tools(run),
     files = new Set(
       items
@@ -2180,7 +2188,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   // latest trace unless the reader explicitly collapses it.
   // A step serving a live page keeps the trace open so its preview shows.
   const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
-  let body = "", steps = "";
+  let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }) : "", steps = "";
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
@@ -2546,6 +2554,13 @@ function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, reta
   }
   for (const node of old) if (!retained.some(([, element]) => element === node)) node.remove();
 }
+/// An open checklist longer than it shows scrolls to the step it is on.
+function planInView() {
+  for (const list of document.querySelectorAll<HTMLElement>(".plan-ribbon.open .pr-list")) {
+    const row = list.querySelector<HTMLElement>(".pr-row.n") ?? list.querySelector<HTMLElement>(".pr-row:not(.d)");
+    if (row && list.scrollHeight > list.clientHeight) list.scrollTop = Math.max(0, row.offsetTop - list.clientHeight / 2);
+  }
+}
 function revealCompactedTurn(id: string) {
   if (!state?.checkpoint) return;
   const compacted = compactedConversation(state.runs, state.checkpoint);
@@ -2621,6 +2636,7 @@ function renderConversation() {
       index === state.runs.length - 1,
       expanded.has(run.id),
       stepsOpen.has(run.id),
+      planOpen.has(run.id),
       [...fileEditsOpen].filter(key => key.startsWith(`${run.id}:`)),
       // Unfolded steps, and the recorded output a command's fold shows.
       [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
@@ -2731,6 +2747,7 @@ function renderConversation() {
   }
   if (changed) placeQuestions();
   if (changed) fillThreadLists();
+  if (changed) planInView();
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
     // Older turns mounted above keep what you're reading where it was.
@@ -6044,6 +6061,13 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  if (action === "toggle-plan") {
+    planOpen.has(args.id) ? planOpen.delete(args.id) : planOpen.add(args.id);
+    follow = false;
+    renderConversation();
+    planInView();
+    return;
   }
   if (action === "toggle-steps") {
     stepsOpen.has(args.id) ? stepsOpen.delete(args.id) : stepsOpen.add(args.id);

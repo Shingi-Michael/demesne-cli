@@ -8,6 +8,7 @@ import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./a
 import { useSkillTool } from "./skills.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
 import { rememberTool } from "./remember.ts";
+import { updatePlanTool } from "./plan.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
@@ -352,6 +353,8 @@ export function createDaemonApp(options: {
   if (options.web !== false) { tools.register(webSearchTool()); tools.register(webFetchTool()); }
   // "Always …": a standing rule, saved to the project's DEMESNE.md.
   tools.register(rememberTool());
+  // The plan checklist the chat shows as a ribbon on a turn of several steps.
+  tools.register(updatePlanTool());
   tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store, look, looks));

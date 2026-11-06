@@ -1177,7 +1177,8 @@ try {
     }, `daemon policy for ${word}`);
     if (word === "Plan") {
       assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the five modes");
-      assert.equal(await page.locator("#composer-mode .mode-opt:visible").count(), 5, "all five modes are in the bar of a project chat");
+      // The words widen in over 240ms, so wait for them rather than sample mid-way.
+      await until(() => page.locator("#composer-mode .mode-opt:visible").count().then(count => count === 5), "all five modes are in the bar of a project chat");
       await capture("03-mode-plan");
     }
   }

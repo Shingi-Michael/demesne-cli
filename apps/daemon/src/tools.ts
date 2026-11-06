@@ -19,7 +19,7 @@ import { isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import type { ProviderToolDefinition } from "@demesne/providers";
 import { isRecord, MAX_QUESTION_SUGGESTIONS, MAX_USER_QUESTIONS, parseUserQuestions, parseAnswerQuestionsRequest, type UserAnswer, type UserQuestion, type QuestionMode } from "@demesne/protocol";
 import { applyEdits, EditApplyError, type EditHunk } from "./edit-engine.ts";
-import { backgroundProcesses } from "./background.ts";
+import { backgroundProcesses, waitPattern } from "./background.ts";
 import { checkTypes } from "./type-check.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
 
@@ -154,6 +154,7 @@ function builtInTools(): AgentTool[] {
     deletePathTool(),
     runCommandTool(),
     commandLogsTool(),
+    commandWaitTool(),
     commandStopTool(),
   ];
 }
@@ -1339,6 +1340,38 @@ function commandLogsTool(): AgentTool {
         outOffset: Math.min(entry.outOffset, fromOut + stdout.length),
         errOffset: Math.min(entry.errOffset, fromErr + stderr.length),
       });
+    },
+  };
+}
+
+/// Wait and watch (pass 174): sleep until a background command prints what
+/// you're waiting for ("ready", "Local:", a test summary), exits, or the time
+/// runs out, instead of reading its logs over and over.
+function commandWaitTool(): AgentTool {
+  return {
+    definition: {
+      name: "wait_for",
+      description: "Wait for a backgrounded command (run_command with background: true) to print a line matching `pattern` (a case-insensitive regex or plain words, e.g. \"ready|Local:\" for a dev server, \"\\d+ (pass|fail)\" for tests), or to exit when no pattern is given. Output it already printed counts. Returns status matched, exited or timeout, the matching line, the exit code and the last lines. Use instead of polling command_logs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          handle: { type: "string" },
+          pattern: { type: "string", minLength: 1, maxLength: 200 },
+          timeoutSeconds: { type: "integer", minimum: 1, maximum: 600 },
+        },
+        required: ["handle"],
+        additionalProperties: false,
+      },
+    },
+    permission: () => null,
+    async execute(input, context) {
+      const value = objectInput(input);
+      const handle = requiredString(value.handle, "handle");
+      const pattern = optionalString(value.pattern, "pattern");
+      const timeoutMs = boundedInteger(value.timeoutSeconds, "timeoutSeconds", 1, 600, 60) * 1000;
+      const result = await backgroundProcesses.waitFor(handle, pattern ? waitPattern(pattern) : null, timeoutMs, context.signal);
+      if (!result) throw toolError("NOT_FOUND", `no background process ${handle}`, "use the handle run_command returned");
+      return JSON.stringify({ ...result, ...(pattern ? { pattern } : {}) });
     },
   };
 }

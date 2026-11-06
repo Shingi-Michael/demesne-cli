@@ -2514,3 +2514,13 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop .pr-pill:hover .pr-ar { color: var(--t1); }
 @media (max-width: 560px) { .desktop .pr-lt { display: none; } .desktop .pr-segs i { width: 12px; } .desktop .pr-segs i.n { width: 18px; } }
 @media (prefers-reduced-motion: reduce) { .desktop .pr-segs i.n::after, .desktop .pr-row.n .pr-bx::after { animation: none; } }
+/* Wait and watch (pass 174): a wait_for step shimmers while it waits, with a
+   thin line running under it; a wait that ended badly shows its last lines. */
+.desktop .tool-row.wait-row.running { position: relative; overflow: hidden; }
+.desktop .tool-row.wait-row.running .verb { background: linear-gradient(90deg, var(--t2) 0 38%, var(--t1) 50%, var(--t2) 62% 100%); background-size: 260% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: wait-shine 2.2s linear infinite; }
+.desktop .tool-row.wait-row.running::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--acc), transparent) no-repeat; background-size: 40% 100%; animation: wait-line 1.6s linear infinite; }
+@keyframes wait-shine { from { background-position: 100% 0; } to { background-position: -160% 0; } }
+@keyframes wait-line { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.desktop .tool-row.wait-row .meta { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop .wait-tail { margin: 2px 0 4px; padding: 6px 10px; border-radius: 8px; background: var(--tone2); color: var(--t2); font: 11.5px/17px var(--mono, ui-monospace, Menlo, monospace); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 110px; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .desktop .tool-row.wait-row.running .verb, .desktop .tool-row.wait-row.running::after { animation: none; } .desktop .tool-row.wait-row.running .verb { color: var(--t1); background: none; } }

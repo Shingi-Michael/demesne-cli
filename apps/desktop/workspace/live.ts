@@ -32,6 +32,7 @@ import { foundryPage, type FoundryUi } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
+import { waitingFor, waitRow } from "./wait-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
@@ -155,7 +156,8 @@ function workingLine(line: WorkingLine, run: WorkspaceRun) {
   const steps = tools(run), latest = steps.findLast((tool) => tool.state === "running" || tool.waiting);
   const fixed = pendingQuestion() ? "Waiting for your answer"
     : latest?.waiting ? `Waiting for your approval${latest.name === "run_command" ? "" : ` · ${verb(latest)}`}`
-      : latest?.drafting ? "Writing a command…" : undefined;
+      : latest?.drafting ? "Writing a command…"
+        : latest?.name === "wait_for" && latest.state === "running" ? `Waiting for ${waitingFor(latest.input.pattern)}` : undefined;
   const thinking = run.entries.findLast((entry) => entry.type === "reasoning");
   line.update(workingPhrases({
     fixed,
@@ -169,6 +171,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
   if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
+  if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
   if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   const path = String(tool.input.path ?? tool.detail ?? "");
@@ -272,6 +275,7 @@ const verb = (tool: ToolEntry) =>
     web_fetch: "Read",
     remember: "Remembered",
     update_plan: "Planned",
+    wait_for: "Waited for",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",
@@ -1842,8 +1846,17 @@ function parkedLines(run: WorkspaceRun) {
   return (state?.questions ?? []).filter((q) => q.open && q.turnId === run.id && (q.answers?.length ?? 0) < q.questions.length && asked.indexOf(q.toolCallId) >= 0 && asked.indexOf(q.toolCallId) < last)
     .map((q) => btn("question-back", `<span class="ask-park" aria-hidden="true"></span><b>Waits for your answer</b><span class="ask-q-was">${h(q.questions[q.answers?.length ?? 0]!.question)}</span>`, { id: q.id }, "tool-row ask-parked")).join("");
 }
+/// Wait and watch: "Waiting for “ready” · bun run dev", then how it ended (wait-row.ts).
+function waitStep(run: WorkspaceRun, tool: ToolEntry) {
+  const at = run.entries.indexOf(tool);
+  const started = run.entries.slice(0, at < 0 ? undefined : at).findLast((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "run_command" && entry.input.background === true);
+  const row = waitRow({ state: tool.drafting ? "running" : tool.state, pattern: tool.input.pattern, command: started ? stepTarget(started) : "", message: tool.message, durationMs: tool.durationMs, icon: "" });
+  return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
+    { runId: run.id, id: tool.id }, `tool-row wait-row ${row.tone}`) + row.tail;
+}
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === UPDATE_PLAN) return "";
+  if (tool.name === "wait_for") return waitStep(run, tool);
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
   if (tool.name === "ask_user") {

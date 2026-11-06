@@ -6,6 +6,8 @@ const MAX_PROCESSES = 16;
 
 interface BackgroundEntry {
   pid: number;
+  /// The command as typed, for what a wait says it waited on.
+  command: string;
   running: boolean;
   exitCode: number | null;
   timedOut: boolean;
@@ -34,6 +36,7 @@ export class BackgroundProcesses {
     const handle = randomUUID().slice(0, 12);
     const entry: BackgroundEntry = {
       pid: child.pid,
+      command: argv.map((part, at) => at === 0 ? part.split(/[\\/]/).at(-1)! : /\s/.test(part) ? JSON.stringify(part) : part).join(" ").slice(0, 200),
       running: true,
       exitCode: null,
       timedOut: false,
@@ -98,6 +101,26 @@ export class BackgroundProcesses {
     return { stopped: true };
   }
 
+  /// Waits until the command prints a line matching `pattern` (searched from
+  /// the start of what it has printed, so a "ready" already printed counts),
+  /// exits, or `timeoutMs` passes. Spends no tokens: the turn just sleeps.
+  async waitFor(handle: string, pattern: RegExp | null, timeoutMs: number, signal?: AbortSignal, pollMs = 150): Promise<WaitResult | null> {
+    const entry = this.entries.get(handle);
+    if (!entry) return null;
+    const started = Date.now();
+    const tail = () => lastLines(`${entry.out.text}${entry.err.text ? `\n${entry.err.text}` : ""}`, 12);
+    while (true) {
+      if (pattern) {
+        const line = matchingLine(entry.out.text, pattern) ?? matchingLine(entry.err.text, pattern);
+        if (line !== null) return { command: entry.command, status: "matched", afterMs: Date.now() - started, line, running: entry.running, exitCode: entry.exitCode, tail: tail() };
+      }
+      if (!entry.running) return { command: entry.command, status: "exited", afterMs: Date.now() - started, line: null, running: false, exitCode: entry.exitCode, tail: tail() };
+      if (Date.now() - started >= timeoutMs) return { command: entry.command, status: "timeout", afterMs: Date.now() - started, line: null, running: true, exitCode: null, tail: tail() };
+      if (signal?.aborted) throw signal.reason ?? new Error("aborted");
+      await Bun.sleep(pollMs);
+    }
+  }
+
   markTimedOut(handle: string): void {
     const entry = this.entries.get(handle);
     if (entry) entry.timedOut = true;
@@ -134,6 +157,33 @@ export class BackgroundProcesses {
     const tail=sink.decoder.decode();sink.text+=tail;if(tail)onText?.(tail);
     void child;
   }
+}
+
+export interface WaitResult {
+  command: string;
+  status: "matched" | "exited" | "timeout";
+  afterMs: number;
+  line: string | null;
+  running: boolean;
+  exitCode: number | null;
+  tail: string;
+}
+
+function matchingLine(text: string, pattern: RegExp): string | null {
+  for (const line of text.split(/\r?\n/)) if (pattern.test(stripAnsi(line))) return stripAnsi(line).trim().slice(0, 300);
+  return null;
+}
+
+const stripAnsi = (text: string) => text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+
+function lastLines(text: string, count: number): string {
+  return stripAnsi(text).split(/\r?\n/).filter((line) => line.trim()).slice(-count).join("\n").slice(-2_000);
+}
+
+/// A pattern as the model wrote it: a regular expression when it parses, else
+/// the literal words; always case-insensitive.
+export function waitPattern(source: string): RegExp {
+  try { return new RegExp(source, "i"); } catch { return new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"); }
 }
 
 function sliceFrom(stream: { text: string; dropped: number }, from: number): string {

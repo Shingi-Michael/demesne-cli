@@ -6,8 +6,8 @@ import { parseMailTurn } from "@demesne/protocol";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
-import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
-import { electronLook, lookCommand, type FoundryLook } from "./foundry-look.ts";
+import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
+import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
   encodeServerSentEvent,
@@ -194,6 +194,8 @@ export function createDaemonApp(options: {
   providerVision?: boolean;
   /// Renders a saved Foundry page for the model to look at (tests); by default the desktop app does it when present.
   foundryLook?: FoundryLook;
+  /// Runs foundry_try's steps (tests pass a fake; otherwise the app that looks).
+  foundryTry?: FoundryTry;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
   /// Agent socials: the agents post about the day (the daemon on; tests off).
@@ -343,6 +345,9 @@ export function createDaemonApp(options: {
   tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store, look, looks));
+  // Trying a page needs the app that renders it, like the look.
+  const tryer = options.foundryTry ?? (lookWith ? electronTry(lookWith) : undefined);
+  if (tryer) tools.register(foundryTryTool(store, tryer));
   // The assistant's shared folders: a tool to read them, and a search index
   // over them, brought up to date at start and every ten minutes.
   let personalIndex: PersonalIndex | undefined;

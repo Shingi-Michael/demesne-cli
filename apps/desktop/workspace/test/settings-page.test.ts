@@ -253,3 +253,10 @@ test("Google API key setup stays separate from browser sign-in and never interpo
   expect(connected).toContain('data-action="google-ai-disconnect"');
   expect(connected).toContain("Remove saved key");
 });
+test("Models has How often for subagents, Usual unless set", () => {
+  const usual = settingsPage(view({ section: "models" }));
+  expect(usual).toContain("How often");
+  expect(usual).toMatch(/class="on" aria-pressed="true" data-action="subagent-often" data-args="[^"]*usual/);
+  const more = settingsPage(view({ section: "models", info: { ...info, subagent: { ...info.subagent, often: "more" } } }));
+  expect(more).toMatch(/class="on" aria-pressed="true" data-action="subagent-often" data-args="[^"]*more/);
+});

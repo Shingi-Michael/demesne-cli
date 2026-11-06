@@ -1375,10 +1375,11 @@ html.glass[data-theme="demesne-light"] body.desktop { --panel-inset: inset 0 2px
    as glass. A light rim catches the top edges, a soft sheen falls from the
    top, the panel floats a little, and answers and code get a soft backing
    that only shows while the glass is clear (--back-a). */
-html.glass body.desktop { --rim: rgb(255 255 255 / 0.12); --rim-edge: rgb(255 255 255 / 0.08); --sheen: rgb(255 255 255 / 0.045); --float: 0 18px 50px rgb(0 0 0 / 0.28); }
-html.glass[data-appearance="light"] body.desktop { --rim: rgb(255 255 255 / 0.6); --rim-edge: rgb(0 0 0 / 0.08); --sheen: rgb(255 255 255 / 0.22); --float: 0 18px 50px rgb(0 0 0 / 0.1); }
-html.glass #desktop-shell { box-shadow: inset 0 1px 0 var(--rim); }
-html.glass #desktop-sidebar:not([hidden]) { background: linear-gradient(180deg, var(--sheen), transparent 38%); }
+html.glass body.desktop { --rim: rgb(255 255 255 / 0.12); --rim-edge: rgb(255 255 255 / 0.08); --sheen: rgb(255 255 255 / 0.045); --float: 0 24px 40px -18px rgb(0 0 0 / 0.32); }
+html.glass[data-appearance="light"] body.desktop { --rim: rgb(255 255 255 / 0.6); --rim-edge: rgb(0 0 0 / 0.08); --sheen: rgb(255 255 255 / 0.22); --float: 0 24px 40px -18px rgb(0 0 0 / 0.12); }
+/* One sheen across the whole shell, so the sidebar and the tab strip beside
+   it are the same colour at every height. */
+html.glass #desktop-shell { background: linear-gradient(180deg, var(--sheen), transparent 340px), var(--shell-glass, var(--ink)); box-shadow: inset 0 1px 0 var(--rim); }
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { background: linear-gradient(180deg, var(--sheen), transparent 30%), var(--panel-glass, var(--panel)); box-shadow: 0 0 0 1px var(--rim-edge), inset 0 1px 0 var(--rim), var(--float); }
 html.glass body.desktop .answer .markdown { position: relative; isolation: isolate; }
 /* Its soft edge is a spread shadow, not a blur filter: a filter makes every

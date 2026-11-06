@@ -420,6 +420,9 @@ export interface Workspace {
   /// checkout. Populated by the daemon when session state is read; absent for
   /// non-repositories and detached HEADs.
   gitBranch?: string;
+  /// Commits the branch is ahead of and behind its upstream; absent without one.
+  gitAhead?: number;
+  gitBehind?: number;
 }
 
 export interface PendingPermissionSnapshot {

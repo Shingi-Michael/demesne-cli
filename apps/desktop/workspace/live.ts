@@ -1281,18 +1281,25 @@ function planHalf(limits: PlanLimits) {
 }
 const capital = (word: string) => `${word[0]!.toUpperCase()}${word.slice(1)}`;
 const planName = (limits: PlanLimits) => `${capital(limits.provider)} plan`;
-/// The cards on the right: what this chat changed, its preview, its context
-/// once half full, the agents near its edits and the connectors it called.
-/// A card shows only while the chat uses it, and a chat that uses none has
-/// no column (pass 86 A); its header folds it to one line.
-const ICON_CHEVRON = '<svg class="ico card-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
-const cardsFolded = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-folded") ?? "[]") as string[]; } catch { return []; } })());
+/// The cards on the right (pass 169 A): they step back so the chat leads.
+/// The environment card says where this chat runs (pass 173 A); every other
+/// card is one dim line (what this chat changed, its preview, its context
+/// once half full, the agents near its edits, the connectors it called) that
+/// unfolds on hover, or stays open after a click. A card shows only while the
+/// chat uses it, and a chat that uses none has no column (pass 86 A). The
+/// only colour is a pink dot on what needs you.
+const CARD_ICON = {
+  context: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 7.6 10.5L12 12z"/></svg>',
+  changes: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14h6M12 11v6"/></svg>',
+  agents: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+  preview: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg>',
+  connectors: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>',
+} as const;
+const cardsOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-open") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
-/// The card whose body is unfolding now; only it animates.
-let cardUnfolding = "";
-function card(name: string, title: string, summary: string, body: string) {
-  const folded = cardsFolded.has(name);
-  return `<section class="card${folded ? " folded" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${!folded}"><span class="card-title">${title}</span>${ICON_CHEVRON}<span class="card-sum">${summary}</span></button>${folded ? "" : `<div class="card-body">${body}</div>`}</section>`;
+function card(name: keyof typeof CARD_ICON, line: string, right: string, body: string, need = false) {
+  const open = cardsOpen.has(name);
+  return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
 }
 function renderCards() {
   // A page in place of the chat (Settings, Customize…) hides the chat's cards.
@@ -1312,45 +1319,49 @@ function renderCards() {
   const here = root && files.length ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
   const servers = chatServers(s.connectors.servers, used.map((t) => t.name));
   const showContext = c.percentage != null && contextInUse(c.percentage);
-  // Where (pass 121 E) leads in a project chat; a plain chat only gets it
+  // The environment card leads in a project chat; a plain chat only gets it
   // while the daemon isn't fine, so the chat keeps its width otherwise.
-  const where = whereCard({ root, branch: s.session?.workspace?.gitBranch, model: housedHere(s) ? { id: housedHere(s)!.model, displayName: housedHere(s)!.name, provider: "run by Demesne" } : s.model, reasoning: housedHere(s) ? null : s.reasoning, connection: s.connection, server: s.server, changed: files.length, context: !showContext && c.percentage != null && c.used != null && c.capacity ? { percentage: c.percentage, used: c.used, capacity: c.capacity } : null });
+  const housed = housedHere(s), workspace = s.session?.workspace;
+  const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
   if (!showWhere && !files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
   app.classList.add("cards-on");
   app.classList.toggle("cards-context", showContext);
   aside.hidden = false;
-  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsFolded], showWhere && where]);
+  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
   const out: string[] = [];
-  if (showWhere) out.push(card("where", where.head, where.summary, where.body).replace('<section class="card', `<section title="${h(where.title)}" class="card${where.state ? ` wh-${where.state}` : ""}`));
+  if (showWhere) {
+    const open = cardsOpen.has("where");
+    out.push(`<section class="card env${open ? " open" : ""}${where.state ? ` env-${where.state}` : ""}" data-card="where"><button type="button" class="card-head" data-action="card-fold" data-args='{"name":"where"}' aria-expanded="${open}">${where.rows}</button>${where.state === "off" ? btn("start-daemon", "Start", {}, "env-start") : ""}<div class="card-body">${where.more}</div></section>`);
+  }
   if (showContext && c.percentage != null) {
     const capacity = c.capacity ?? 0;
     const parts = plan
       ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, ...(c.fresh ? [{ name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : [])]
       : [{ name: "Chat", tokens: c.used ?? 0, tone: "a" }];
     const share = (tokens: number) => (capacity ? Math.min(100, (tokens / capacity) * 100) : 0);
-    out.push(card("context", "Context", `${c.percentage}%<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,
+    out.push(card("context", `${c.percentage}% context`, `<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,
       `<div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
       `<div class="card-legend">${parts.filter((part) => part.tokens > 0).map((part) => `<span><u class="tone-${part.tone}"></u>${part.name} ${tokensShort(part.tokens)}</span>`).join("")}</div>` +
       `<div class="card-foot"><span>${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span>${worthCompacting(c.percentage) ? btn("compact", s.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link") : ""}</div>`));
   }
   if (files.length) {
     const shownFiles = files.slice(0, 6);
-    out.push(card("changes", "Changes", counts(changes),
+    out.push(card("changes", files.length === 1 ? "1 file changed" : `${files.length} files changed`, counts(changes),
       shownFiles.map((file) => row("", h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
-      `<div class="card-foot"><span>${files.length === 1 ? "1 file" : `${files.length} files`}${files.length > shownFiles.length ? ` · ${files.length - shownFiles.length} more` : ""} · not committed</span>${btn("ship", "Commit & PR", {}, "card-btn")}</div>`));
+      `<div class="card-foot"><span>${files.length > shownFiles.length ? `${files.length - shownFiles.length} more · ` : ""}not committed</span>${btn("ship", "Commit & PR", {}, "link")}</div>`, true));
   }
   if (here.length)
-    out.push(card("agents", "Agents", here.slice(0, 3).map(agentMark).join(""),
+    out.push(card("agents", here.length === 1 ? `${h(here[0]!.name)} ${h(agentPlace(here[0]!))}` : `${here.length} agents here`, here.slice(0, 3).map(agentMark).join(""),
       here.map((agent) => `<div class="card-row card-hover" title="${h(agent.address)}">${agentMark(agent)}<span class="card-label">${h(agent.name)}<em> · ${h(agentPlace(agent).replace(/^on /, ""))}</em></span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "card-act")}</div>`).join("")));
   if (previews.length)
-    out.push(card("preview", "Preview", h(new URL(previews[0]!.serves!).host),
-      previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "card-btn")}</div>`).join("")));
+    out.push(card("preview", h(new URL(previews[0]!.serves!).host), previews.length > 1 ? `${previews.length}` : '<span class="pv-live" aria-hidden="true"></span>',
+      previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "link")}</div>`).join("")));
   if (servers.length)
-    out.push(card("connectors", "Connectors", h(servers.map((server) => server.name).join(", ")),
+    out.push(card("connectors", h(servers.map((server) => server.name).join(", ")), servers.some((server) => server.state === "failed") ? '<span class="card-dot failed"></span>' : "",
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
   // Only the cards that changed are replaced, so the others keep their
   // hover and never repaint while the chat streams.
@@ -1369,10 +1380,6 @@ function renderCards() {
         replacement.classList.add("arriving");
         replacement.addEventListener("animationend", () => replacement.classList.remove("arriving"), { once: true });
       }
-      if (key === cardUnfolding) {
-        replacement.classList.add("unfolding");
-        replacement.addEventListener("animationend", () => replacement.classList.remove("unfolding"), { once: true });
-      }
       if (node) node.replaceWith(replacement);
       node = replacement;
     }
@@ -1380,7 +1387,6 @@ function renderCards() {
     if (node !== at) aside.insertBefore(node, at);
     index++;
   }
-  cardUnfolding = "";
 }
 /// The sidebar's foot: who you are and what pays for the models, the theme
 /// switch, and Settings.
@@ -5775,8 +5781,8 @@ async function dispatch(
   }
   if (action === "card-fold") {
     const name = String(args.name);
-    if (cardsFolded.has(name)) { cardsFolded.delete(name); cardUnfolding = name; } else cardsFolded.add(name);
-    try { localStorage.setItem("demesne-cards-folded", JSON.stringify([...cardsFolded])); } catch {}
+    if (cardsOpen.has(name)) cardsOpen.delete(name); else cardsOpen.add(name);
+    try { localStorage.setItem("demesne-cards-open", JSON.stringify([...cardsOpen])); } catch {}
     renderCards();
     document.querySelector<HTMLButtonElement>(`#cards [data-card="${name}"] .card-head`)?.focus({ preventScroll: true });
     return;

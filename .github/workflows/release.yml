@@ -72,7 +72,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             artifact: demesne-darwin-arm64.zip
           # Built on 22.04 so the package also installs on 24.04.
           - os: ubuntu-22.04

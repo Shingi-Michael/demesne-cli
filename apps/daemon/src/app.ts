@@ -12,6 +12,7 @@ import { rememberTool } from "./remember.ts";
 import { updatePlanTool } from "./plan.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
+import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
   encodeServerSentEvent,
@@ -204,6 +205,8 @@ export function createDaemonApp(options: {
   foundryLook?: FoundryLook;
   /// Runs foundry_try's steps (tests pass a fake; otherwise the app that looks).
   foundryTry?: FoundryTry;
+  /// Opens the app being built for look_at_page (tests pass a fake; the daemon uses the desktop app).
+  pageLook?: PageLook;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
   /// Agent socials: the agents post about the day (the daemon on; tests off).
@@ -362,6 +365,9 @@ export function createDaemonApp(options: {
   // Trying a page needs the app that renders it, like the look.
   const tryer = options.foundryTry ?? (lookWith ? electronTry(lookWith) : undefined);
   if (tryer) tools.register(foundryTryTool(store, tryer));
+  // Seeing the app being built: the same hidden window, opened on a local address.
+  const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
+  if (pageLook) tools.register(lookAtPageTool(pageLook));
   // The assistant's shared folders: a tool to read them, and a search index
   // over them, brought up to date at start and every ten minutes.
   let personalIndex: PersonalIndex | undefined;

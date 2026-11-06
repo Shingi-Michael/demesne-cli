@@ -2164,6 +2164,14 @@ export class WorkspaceHost {
     // Foundry: what the agent made. The list and a source are read by the
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
+    // A picture a tool took this chat (look_at_page), for its step in the turn.
+    if (method === "tool-picture") {
+      const id = string(args.id, "picture", 64);
+      if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("Invalid picture");
+      const artifact = await this.client.getArtifact(String(args.sessionId), id);
+      const bytes = await this.client.artifactContent(artifact, "original");
+      return `data:${/^image\/(png|jpeg|webp|gif)$/.test(artifact.mimeType) ? artifact.mimeType : "image/png"};base64,${Buffer.from(bytes).toString("base64")}`;
+    }
     if (method === "foundry-get") return this.client.foundryGet(string(args.id, "artifact", 200), typeof args.version === "number" && Number.isSafeInteger(args.version) && args.version > 0 ? args.version : undefined);
     if (method === "foundry-data") return this.client.foundryData(string(args.id, "artifact", 200));
     if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);

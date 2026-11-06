@@ -2638,6 +2638,7 @@ function mapEvent(row: EventRow): EventEnvelope {
 }
 
 function toolResultMetadata(name: string, resultText: string): Record<string, unknown> {
+  if (name === "look_at_page") return pageLookMetadata(resultText);
   let result: unknown;
   try {
     result = JSON.parse(resultText);
@@ -2696,4 +2697,21 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
 /// How steered words read to the model: the person's, mid-task, to act on now.
 export function steerContent(texts: string[]): string {
   return `The user sent this while you were working. Take it into account from your next step on:\n\n${texts.join("\n\n")}`;
+}
+
+/// See the app: where it looked, how each step went and its pictures (the
+/// session artifacts the engine listed after the report), for the step row.
+export function pageLookMetadata(resultText: string): Record<string, unknown> {
+  const [head = "", ...rest] = resultText.split("\nImage artifact ");
+  let value: Record<string, unknown>;
+  try { const parsed = JSON.parse(head) as unknown; if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}; value = parsed as Record<string, unknown>; } catch { return {}; }
+  const labels = Array.isArray(value.pictures) ? value.pictures.filter((item): item is string => typeof item === "string") : [];
+  const pictures = rest.map((line, index) => {
+    const match = /^([0-9a-f-]{36}): \S+ \((\d+)×(\d+)\)/.exec(line);
+    return match ? { id: match[1], width: Number(match[2]), height: Number(match[3]), label: (labels[index] ?? "").slice(0, 120) } : null;
+  }).filter((item) => item !== null).slice(0, 3);
+  const steps = Array.isArray(value.steps) ? value.steps.filter((item): item is string => typeof item === "string").slice(0, 12).map((line) => line.slice(0, 240)) : [];
+  const errors = Array.isArray(value.console_errors) ? value.console_errors.filter((item): item is string => typeof item === "string") : [];
+  return { message: JSON.stringify({ url: typeof value.url === "string" ? value.url.slice(0, 500) : "", title: typeof value.title === "string" ? value.title.slice(0, 200) : "",
+    width: typeof value.width === "string" ? value.width : "", steps, errors: errors.slice(0, 3).map((line) => line.slice(0, 200)), errorCount: errors.length, pictures }) };
 }

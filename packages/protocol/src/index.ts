@@ -621,6 +621,9 @@ export interface SubmitTurnRequest {
   content: string;
   /// Images uploaded to this session's artifacts first (at most 6).
   attachmentIds?: string[];
+  /// Opt in to requiring actual pixel input, rather than attachment names.
+  /// The daemon rechecks the turn's effective provider before consuming uploads.
+  requireImageInput?: boolean;
   permissionMode?: PermissionMode;
   thinkingEnabled?: boolean;
   planOnly?: boolean;
@@ -631,6 +634,18 @@ export interface SubmitTurnRequest {
 export interface SubmitTurnResponse {
   turn: Turn;
   eventId: number;
+}
+
+export interface SessionInputCapabilities {
+  sessionId: string;
+  provider: string;
+  model: string;
+  images: {
+    enabled: boolean;
+    mimeTypes: string[];
+    maxBytes: number;
+    maxCount: number;
+  };
 }
 
 export interface CancelTurnResponse {
@@ -876,6 +891,9 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
   if (!Array.isArray(attachmentIds) || attachmentIds.length > 6 || attachmentIds.some((id) => typeof id !== "string" || !id || id.length > 64)) {
     throw new ProtocolValidationError("attachmentIds must be at most 6 artifact ids");
   }
+  if (value.requireImageInput !== undefined && typeof value.requireImageInput !== "boolean") {
+    throw new ProtocolValidationError("requireImageInput must be a boolean");
+  }
   return {
     content,
     ...(value.permissionMode ? { permissionMode: value.permissionMode } : {}),
@@ -883,6 +901,7 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
     ...(value.planOnly !== undefined ? { planOnly: value.planOnly } : {}),
     ...(value.fromDrive ? { fromDrive: true } : {}),
     ...(attachmentIds.length ? { attachmentIds } : {}),
+    ...(value.requireImageInput !== undefined ? { requireImageInput: value.requireImageInput } : {}),
   };
 }
 

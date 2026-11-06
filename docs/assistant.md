@@ -287,3 +287,11 @@ The code holds the token, which can do anything the Demesne window can. It's pri
 ### Notifications open the app
 
 Every notification the daemon sends through ntfy (step 4) carries a link: tapping a routine's answer opens its chat in the app, and a note sent with `notify_phone` opens the chat that sent it. Without the app, the tap does nothing more than open ntfy, as before.
+
+## Image input from the phone
+
+The iPhone queries `GET /v1/sessions/:id/input-capabilities` before enabling image selection. This authenticated, read-only endpoint reports the chat's effective provider/model and `images: { enabled, mimeTypes, maxBytes, maxCount }`. It follows the Assistant's pinned model and per-chat preferences. Native CLI agent transports that do not forward pixels report image input as disabled.
+
+Uploads still use the session attachment endpoint. New clients can send `requireImageInput: true` with nonempty `attachmentIds`; the daemon rechecks the effective inference route before creating the turn or consuming uploads. A model change can therefore reject the message safely rather than silently provide only image names. Existing clients that omit the flag retain their previous behavior. The reported capability reflects configured pixel forwarding; the chosen model and its runtime must actually support vision.
+
+Rebuild and restart the PC daemon to expose this endpoint. This API addition does not change the selected model or provider configuration.

@@ -39,6 +39,7 @@ import {
   type DaemonStatusResponse,
   type EventEnvelope,
   type SubmitTurnResponse,
+  type SessionInputCapabilities,
   type Turn,
   type TurnAttachment,
   type TurnChangesResponse,
@@ -696,6 +697,11 @@ export function createDaemonApp(options: {
     } catch (error) {
       throw new Error(`The assistant's chat runs only on ${options.assistantModel} ([assistant] model, or the [provider] model), which no configured provider serves: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+  function acceptsImageInput(inference: TurnInference): boolean {
+    // Native CLI agents currently receive a plain-text prompt. Hydrating the
+    // engine's messages cannot make that separate transport pass image pixels.
+    return inference.external !== true && (inference.vision === true || options.providerVision === true);
   }
   function queueTurn(turn: Turn, inference: TurnInference): Promise<void> {
     const controller = new AbortController();
@@ -1723,6 +1729,22 @@ export function createDaemonApp(options: {
         }catch(error){return apiError("invalid_request",error instanceof Error?error.message:String(error),400);}
       }
 
+      // Read-only capability of the chat's actual inference route, including
+      // the Assistant's pinned model and native-agent transport limitations.
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "input-capabilities") {
+        if (!store.getSession(path[2]!)) return apiError("not_found", "Session not found", 404);
+        try {
+          const inference = inferenceIn(path[2]!, undefined);
+          return json({
+            sessionId: path[2]!, provider: inference.providerId, model: inference.modelId,
+            images: { enabled: acceptsImageInput(inference), mimeTypes: ["image/png", "image/jpeg", "image/webp"],
+              maxBytes: 20 * 1024 * 1024, maxCount: 6 },
+          } satisfies SessionInputCapabilities);
+        } catch (error) {
+          return apiError("not_supported", error instanceof Error ? error.message : "Image input capability is unavailable", 400);
+        }
+      }
+
       // An image the person attaches to their next message: checked and held
       // here until the message names it in attachmentIds, then saved as an
       // image artifact of that turn.
@@ -1853,6 +1875,9 @@ export function createDaemonApp(options: {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Turn processor cannot snapshot inference configuration";
           return apiError("not_supported", message, 400);
+        }
+        if (body.requireImageInput === true && body.attachmentIds?.length && !acceptsImageInput(inference)) {
+          return apiError("image_input_unavailable", "This chat's current model isn't set up to read images. Choose an image-capable setup on your PC and try again.", 400);
         }
         const held = (body.attachmentIds ?? []).map((id) => {
           const upload = uploads.get(id);

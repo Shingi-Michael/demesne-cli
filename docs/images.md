@@ -63,6 +63,8 @@ Artifacts are session-scoped. The descriptor links to a recorded turn/tool and s
 
 | Route | Behavior |
 | --- | --- |
+| `GET /v1/sessions/:id/input-capabilities` | Effective model/provider and image-input enablement, MIME types, byte/count limits; follows the Assistant's pinned model |
+| `POST /v1/sessions/:id/attachments` | Stage PNG/JPEG/WebP bytes for a message, up to 20 MiB each; returns the attachment identifier |
 | `GET /v1/sessions/:id/artifacts?after=N&limit=N` | Cursor page, next cursor and event watermark; limit 1–100, default 50 |
 | `GET /v1/sessions/:id/artifacts/:artifactId` | Session-scoped descriptor |
 | `GET /v1/sessions/:id/artifacts/:artifactId/content?variant=preview` | PNG derivative; default variant |
@@ -70,6 +72,8 @@ Artifacts are session-scoped. The descriptor links to a recorded turn/tool and s
 | `POST /v1/sessions/:id/artifacts/import` | Import permitted workspace image; optional reference/viewport metadata |
 
 All routes require production daemon authentication. Content responses include MIME type, length and ETag. Missing files return an unavailable/not-found response. Reference import requires a session with a workspace and existing turn. The [typed client](../packages/client/src/index.ts) is the source for request/response shapes.
+
+Messages can name up to six staged `attachmentIds`. Clients that require actual pixels should also send `requireImageInput: true`: the turn route rechecks the effective inference configuration before creating work or consuming uploads. Unsupported image input returns `image_input_unavailable`; omitting the flag preserves legacy names-only behavior. Capability reads do not load a model or change provider settings. Native CLI transports without image forwarding report disabled.
 
 ## Model input and packaging
 

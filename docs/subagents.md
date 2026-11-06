@@ -6,7 +6,7 @@
 
 The coding agent calls the `subagent` tool with a task label, a self-contained prompt, and optionally a configured model ID. Each invocation gets a fresh context. The parent receives its final report. In the app a sub-agent is one step on the turn's guide, like a read or a command: "Agent · task" with its step count on the right, and clicking it unfolds the sub-agent's own steps one level in (reads folded as Explored, searches and lists as lines) and what it found. Sub-agents run with thinking off, and no thinking of theirs is shown.
 
-Allowed tools are `list_files`, `read_file`, `read_files`, `search_files`, `git_status`, `git_diff`, and `git_history`. Subagents cannot edit files, run commands, ask the human, or spawn more subagents. They are useful for independent investigations, not parallel code changes. [Implementation](../apps/daemon/src/subagent.ts) · [tests](../apps/daemon/test/subagent.test.ts).
+Allowed tools are `list_files`, `read_file`, `read_files`, `search_files`, `git_status`, `git_diff`, `git_history`, `web_search` and `web_fetch`. Subagents cannot edit files, run commands, ask the human, or spawn more subagents. They are useful for independent investigations, not parallel code changes. [Implementation](../apps/daemon/src/subagent.ts) · [tests](../apps/daemon/test/subagent.test.ts).
 
 ```text
 /subagent qwen3.8-27b

@@ -10,7 +10,7 @@ import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { isReadyKind } from "./foundry-kinds.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { installFor, Updater } from "./updater.ts";
+import { githubToken, installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
@@ -73,7 +73,11 @@ if (!lookJob) void app.whenReady().then(async () => {
     install: installFor(process.platform, process.arch, process.execPath), current: app.getVersion(), release: releaseBuild,
     dir: join(app.getPath("userData"), "updates"), pid: process.pid,
     relaunch: [process.execPath, ...(app.commandLine.hasSwitch("no-sandbox") ? ["--no-sandbox"] : []), ...(userData && isAbsolute(userData) ? [`--user-data-dir=${userData}`] : [])],
-    fetch: (url, init) => net.fetch(url, init), emit: status => emit("demesne:app-update", status), log, quit: () => void quit(),
+    // A request with the GitHub token goes through Node's fetch, which drops
+    // the token when GitHub redirects a download to its signed file link;
+    // Electron's keeps it, and can't follow a redirect by hand.
+    fetch: (url, init) => init?.headers?.Authorization ? fetch(url, init) : net.fetch(url, init), emit: status => emit("demesne:app-update", status), log, quit: () => void quit(),
+    token: () => githubToken(),
   });
   if (updater.status.state === "off") log(`Updates off: ${updater.status.why}.`);
   // A download finished last time: it goes in before the window opens.

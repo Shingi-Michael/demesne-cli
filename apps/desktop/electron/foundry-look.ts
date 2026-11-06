@@ -14,7 +14,8 @@ import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember
 import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryPlan, type TryResult, type TryStep, type TryStepResult } from "./foundry-try.ts";
 
 /// try: run these steps on the page instead of looking at it (foundry-try.ts).
-export interface LookJob { kind: string; source: string; title: string; try?: TryPlan }
+/// url: open the person's own app instead (look_at_page: a local dev server or a project file).
+export interface LookJob { kind: string; source: string; title: string; try?: TryPlan; url?: string }
 export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
 export interface LookResult { pages: LookPage[]; errors: string[] }
 
@@ -58,6 +59,7 @@ export function runFoundryLook(path: string) {
       const page = foundryDocument(job.kind, job.source, job.title);
       return new Response(job.kind === "html" && usesRemember(job.source) ? withRemember(page, kitFile("remember.js").toString("utf8")) : page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });
     });
+    if (job.url) { done(await tryPage(session, job.try ?? { width: 1280, steps: [] }, job.url)); return; }
     if (job.try) { done(await tryPage(session, job.try)); return; }
     const errors: string[] = [], pages: LookPage[] = [];
     for (const view of VIEWS) {
@@ -88,8 +90,10 @@ export function runFoundryLook(path: string) {
 
 /// Runs the steps with real input events, one at a time, and says after each
 /// what a person would have seen happen. A picture after the last step, and
-/// after the first step that went wrong.
-async function tryPage(session: Electron.Session, plan: TryPlan): Promise<TryResult> {
+/// after the first step that went wrong. With a url (the person's own app) it
+/// also takes one before the first step, may follow links on the same site,
+/// and says the page's title.
+async function tryPage(session: Electron.Session, plan: TryPlan, url?: string): Promise<TryResult> {
   const view = plan.width < 800 ? TRY_WIDTHS.phone : TRY_WIDTHS.desktop;
   const win = new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
     webPreferences: { session, offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
@@ -102,13 +106,18 @@ async function tryPage(session: Electron.Session, plan: TryPlan): Promise<TryRes
   };
   try {
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
-    contents.on("will-navigate", (event) => event.preventDefault());
+    contents.on("will-navigate", (event) => { if (!url || !sameSite(url, event.url)) event.preventDefault(); });
     contents.on("console-message", (event) => { if (event.level === "error" && errors.length < 8) errors.push(event.message.slice(0, 200)); });
-    await win.loadURL("foundry://artifact/look");
+    await win.loadURL(url ?? "foundry://artifact/look");
     await Promise.race([contents.executeJavaScript("document.fonts.ready.then(() => true)"), settle(3000)]);
     await settle(300);
     await contents.executeJavaScript(TRY_RUNTIME);
     contents.focus();
+    // The person's own app can go to another page: the runtime comes back with it.
+    const loaded = async () => {
+      if (contents.isLoading()) await Promise.race([new Promise<void>((resolve) => contents.once("did-stop-loading", () => resolve())), settle(5000)]);
+      await contents.executeJavaScript(TRY_RUNTIME);
+    };
     const print = () => contents.executeJavaScript("window.__demesneTry.fingerprint()") as Promise<Fingerprint>;
     const scrollY = () => contents.executeJavaScript("scrollY") as Promise<number>;
     const find = (target: string) => contents.executeJavaScript(`window.__demesneTry.find(${JSON.stringify(target)})`) as Promise<{ found: boolean; names?: string[]; x: number; y: number; many: number; what: string; covered: string | null; disabled: boolean }>;
@@ -126,9 +135,11 @@ async function tryPage(session: Electron.Session, plan: TryPlan): Promise<TryRes
       await then(found.x, found.y);
       return { ok: true, said: `${found.what}${found.many > 1 ? ` (first of ${found.many} matches)` : ""}` };
     };
+    if (url && plan.steps.length) await picture("opening");
     let firstBad = true;
     for (const step of plan.steps) {
-      const before = await print(), y0 = await scrollY(), errorsBefore = errors.length;
+      if (url) await loaded();
+      const before = await print(), y0 = await scrollY(), errorsBefore = errors.length, at = contents.getURL();
       let result: { ok: boolean; said: string };
       if ("click" in step) result = await reach(step.click, click);
       else if ("hover" in step) result = await reach(step.hover, async (x, y) => { contents.sendInputEvent({ type: "mouseMove", x, y }); });
@@ -144,8 +155,10 @@ async function tryPage(session: Electron.Session, plan: TryPlan): Promise<TryRes
       } else if ("scroll" in step) { await contents.executeJavaScript(`scrollBy(0, ${step.scroll})`); result = { ok: true, said: "" }; }
       else { await settle(step.wait); result = { ok: true, said: "" }; }
       await settle(350);
+      if (url) await loaded();
+      const went = url && contents.getURL() !== at ? wentTo(at, contents.getURL()) : null;
       const after = await print(), scrolled = "scroll" in step && (await scrollY()) !== y0;
-      const what = result.ok ? changed(before, after, scrolled, "key" in step) : null;
+      const what = result.ok ? went ?? changed(before, after, scrolled, "key" in step) : null;
       const newErrors = errors.slice(errorsBefore);
       const said = !result.ok ? result.said
         : [result.said, what ? `→ ${what}` : ("wait" in step || "hover" in step ? "" : "→ nothing visible changed"), newErrors.length ? `console error: ${newErrors[0]}` : ""].filter(Boolean).join(" ");
@@ -153,10 +166,26 @@ async function tryPage(session: Electron.Session, plan: TryPlan): Promise<TryRes
       steps.push({ step: stepName(step as TryStep), ok, said });
       if (!ok && firstBad && plan.steps.at(-1) !== step) { firstBad = false; await picture(stepName(step as TryStep)); }
     }
-    await picture(steps.length ? steps.at(-1)!.step : "loading");
+    await picture(steps.length ? steps.at(-1)!.step : url ? "opening" : "loading");
     const tree = await contents.executeJavaScript("window.__demesneTry.tree()") as string[];
-    return { width: view.width, steps, tree, errors, pictures };
+    return { width: view.width, steps, tree, errors, pictures, ...(url ? { title: contents.getTitle(), url: contents.getURL() } : {}) };
   } catch (error) {
     return { width: view.width, steps, tree: [], errors: [...errors, `Could not try the page: ${error instanceof Error ? error.message : String(error)}`], pictures };
   } finally { win.destroy(); }
+}
+
+/// "went to /home": where a step took the person's own app.
+export function wentTo(from: string, to: string): string {
+  try {
+    const a = new URL(from), b = new URL(to);
+    return `went to ${a.origin === b.origin ? `${b.pathname}${b.search}${b.hash}` || "/" : b.href}`;
+  } catch { return `went to ${to}`; }
+}
+
+/// A link the person's own app may follow while it is tried: the same origin (or a file beside it).
+export function sameSite(from: string, to: string): boolean {
+  try {
+    const a = new URL(from), b = new URL(to);
+    return a.protocol === "file:" ? b.protocol === "file:" : a.origin === b.origin;
+  } catch { return false; }
 }

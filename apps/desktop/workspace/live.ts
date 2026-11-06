@@ -33,6 +33,7 @@ import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { waitingFor, waitRow } from "./wait-row.ts";
+import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
@@ -157,7 +158,8 @@ function workingLine(line: WorkingLine, run: WorkspaceRun) {
   const fixed = pendingQuestion() ? "Waiting for your answer"
     : latest?.waiting ? `Waiting for your approval${latest.name === "run_command" ? "" : ` · ${verb(latest)}`}`
       : latest?.drafting ? "Writing a command…"
-        : latest?.name === "wait_for" && latest.state === "running" ? `Waiting for ${waitingFor(latest.input.pattern)}` : undefined;
+        : latest?.name === "wait_for" && latest.state === "running" ? `Waiting for ${waitingFor(latest.input.pattern)}`
+        : latest?.name === "look_at_page" && latest.state === "running" ? `Looking at ${pageName(latest.input.url)}` : undefined;
   const thinking = run.entries.findLast((entry) => entry.type === "reasoning");
   line.update(workingPhrases({
     fixed,
@@ -172,6 +174,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
   if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
   if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
+  if (tool.name === "look_at_page") return pageName(tool.input.url);
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
   if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   const path = String(tool.input.path ?? tool.detail ?? "");
@@ -276,6 +279,7 @@ const verb = (tool: ToolEntry) =>
     remember: "Remembered",
     update_plan: "Planned",
     wait_for: "Waited for",
+    look_at_page: "Opened",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",
@@ -1854,9 +1858,29 @@ function waitStep(run: WorkspaceRun, tool: ToolEntry) {
   return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
     { runId: run.id, id: tool.id }, `tool-row wait-row ${row.tone}`) + row.tail;
 }
+/// See the app: its pictures, fetched once from the chat's images and kept.
+const lookPictures = new Map<string, string>(), lookLoading = new Set<string>();
+function lookPicture(id: string): string | undefined {
+  const known = lookPictures.get(id);
+  if (known || lookLoading.has(id)) return known;
+  lookLoading.add(id);
+  void api<string>("tool-picture", { id }).then((src) => {
+    if (typeof src !== "string" || !src.startsWith("data:image/")) return;
+    lookPictures.set(id, src);
+    if (lookPictures.size > 60) lookPictures.delete(lookPictures.keys().next().value!);
+    document.querySelectorAll<HTMLImageElement>(`img[data-picture="${CSS.escape(id)}"]`).forEach((img) => { img.src = src; });
+  }).catch(() => {});
+  return undefined;
+}
+function lookStep(run: WorkspaceRun, tool: ToolEntry) {
+  const row = pageLookRow(tool, lookPicture);
+  return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
+    { runId: run.id, id: tool.id }, `tool-row wait-row look-row ${row.tone}`) + row.below;
+}
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === UPDATE_PLAN) return "";
   if (tool.name === "wait_for") return waitStep(run, tool);
+  if (tool.name === "look_at_page") return lookStep(run, tool);
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
   if (tool.name === "ask_user") {
@@ -6111,6 +6135,11 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  if (action === "look-picture") {
+    const src = lookPictures.get(String(args.id));
+    if (src) showPicture(src, String(args.caption ?? ""));
+    return;
   }
   if (action === "toggle-plan") {
     planOpen.has(args.id) ? planOpen.delete(args.id) : planOpen.add(args.id);

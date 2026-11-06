@@ -63,14 +63,14 @@ export function electronTry(command: string[]): FoundryTry {
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 /// One off-screen app at a time, for looks and tries alike.
 let queue: Promise<unknown> = Promise.resolve();
-function queued<T>(work: () => Promise<T>): Promise<T> {
+export function queued<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work);
   queue = run.catch(() => {});
   return run;
 }
 
 /// Starts the app on one job file and reads the JSON line it prints; null when it can't.
-async function runJob(command: string[], job: unknown, signal: AbortSignal): Promise<unknown> {
+export async function runJob(command: string[], job: unknown, signal: AbortSignal): Promise<unknown> {
   if (signal.aborted) return null;
   const dir = await mkdtemp(join(tmpdir(), "demesne-look-job-"));
   const path = join(dir, "job.json");

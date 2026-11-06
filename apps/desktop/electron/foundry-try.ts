@@ -12,7 +12,7 @@ export { parseSteps, stepName, TRY_KEYS, TRY_MAX_STEPS, type TryStep } from "../
 
 export interface TryPlan { width: number; steps: TryStep[] }
 export interface TryStepResult { step: string; ok: boolean; said: string }
-export interface TryResult { width: number; steps: TryStepResult[]; tree: string[]; errors: string[]; pictures: { after: string; png: string }[] }
+export interface TryResult { width: number; steps: TryStepResult[]; tree: string[]; errors: string[]; pictures: { after: string; png: string }[]; title?: string; url?: string }
 
 const short = (text: string, n = 40) => { const clean = text.replace(/\s+/g, " ").trim(); return clean.length > n ? `${clean.slice(0, n - 1)}…` : clean; };
 export const TRY_WIDTHS = { desktop: { width: 1280, height: 800, scaleTo: 960 }, phone: { width: 390, height: 844, scaleTo: 390 } } as const;

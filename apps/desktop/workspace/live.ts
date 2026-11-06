@@ -2523,7 +2523,8 @@ function runningRowOnly(entry: WorkspaceRun["entries"][number], previous: Worksp
   return entry.type === "tool" && previous.type === "tool" && entry.id === previous.id && entry.name === previous.name &&
     entry.phase === previous.phase && entry.state === "running" && previous.state === "running" &&
     !entry.drafting && !previous.drafting && !entry.waiting && !previous.waiting && !entry.repo && !previous.repo &&
-    !stepOpen.has(`${runId}:${entry.id}`);
+    // A sub-agent's guide grows in place when open (patchAgentLines).
+    (isAgentStep(entry) || !stepOpen.has(`${runId}:${entry.id}`));
 }
 function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
   const args = JSON.stringify({ runId: run.id, id: tool.id });
@@ -2532,7 +2533,11 @@ function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry)
   const next = document.createElement("template");
   next.innerHTML = toolRow(run, tool);
   const fresh = next.content.querySelector<HTMLButtonElement>("button.tool-row");
-  if (!fresh || next.content.childElementCount !== 1) return false;
+  // A running sub-agent also has the line under its row: what it's on now,
+  // or its own guide when open. Those are patched in place too.
+  const extras = [...next.content.children].slice(1);
+  if (!fresh || next.content.firstElementChild !== fresh || (extras.length && (!isAgentStep(tool) || extras.some((node) => !node.matches(".agent-now, .agent-steps"))))) return false;
+  if (isAgentStep(tool)) patchAgentLines(row, extras as HTMLElement[]);
   // Read before the swap below, which moves the fresh target into the row.
   const title = fresh.querySelector(".target")?.getAttribute("title") ?? "";
   // The shining verb keeps running; only the words that changed are swapped.
@@ -2546,6 +2551,32 @@ function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry)
   for (const attr of [...row.attributes]) if (!fresh.hasAttribute(attr.name)) row.removeAttribute(attr.name);
   for (const attr of [...fresh.attributes]) if (row.getAttribute(attr.name) !== attr.value) row.setAttribute(attr.name, attr.value);
   return true;
+}
+/// Under a working sub-agent's row: its "now" line, or its guide when open.
+/// Each step changes only the lines that changed, so the turn never redraws
+/// (it flickered on every step) and the last line keeps shining.
+function patchAgentLines(row: HTMLElement, fresh: HTMLElement[]) {
+  const kinds = [".agent-now", ".agent-steps"];
+  let at: Element = row;
+  for (const kind of kinds) {
+    const was = at.nextElementSibling?.matches(kind) ? at.nextElementSibling as HTMLElement : null;
+    const now = fresh.find((node) => node.matches(kind));
+    if (was && now) { syncChildren(was, now); at = was; }
+    else if (now) { at.after(now); at = now; }
+    else if (was) was.remove();
+  }
+}
+/// The shine's phase follows the clock, so lines compare without it.
+const steadyHTML = (node: Element) => node.outerHTML.replace(/ style="animation-delay:-\d+ms"/g, "");
+function syncChildren(was: HTMLElement, now: HTMLElement) {
+  if (!was.children.length && !now.children.length) { if (was.textContent !== now.textContent) was.textContent = now.textContent; return; }
+  const old = [...was.children], next = [...now.children];
+  next.forEach((node, i) => {
+    const before = old[i];
+    if (!before) was.append(node);
+    else if (steadyHTML(before) !== steadyHTML(node)) before.replaceWith(node);
+  });
+  for (const node of old.slice(next.length)) node.remove();
 }
 // Attach the new shell before moving retained answers. Chromium's state-
 // preserving move keeps streaming text animations alive through tool boundaries.

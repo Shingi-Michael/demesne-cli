@@ -382,6 +382,20 @@ export interface Turn {
 
 export interface TurnAttachment { id: string; filename: string; width: number; height: number }
 
+/// A current file that a completed read in this turn actually returned.
+/// IDs are scoped to the session/turn; the content route never accepts paths.
+export interface SourceDocument {
+  id: string;
+  filename: string;
+  path: string;
+  mimeType: "application/pdf" | "text/plain";
+  byteLength: number | null;
+  revision: string | null;
+  issue: "missing" | "unavailable" | "unsupported" | "too_large" | null;
+}
+
+export interface SourceDocumentList { documents: SourceDocument[] }
+
 export interface SessionCheckpoint {
   id: string;
   sessionId: string;

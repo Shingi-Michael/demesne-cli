@@ -1,4 +1,5 @@
 import { collectDriveReview } from "./drive-review.ts";
+import { listSourceDocuments, sourceDocumentResponse } from "./source-documents.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
@@ -1590,6 +1591,14 @@ export function createDaemonApp(options: {
         const query = url.searchParams.get("query")?.trim();
         if (url.searchParams.get("archived") === "1") return json({ sessions: store.listSessions(100, { archivedOnly: true }) });
         return json({ sessions: query ? store.searchSessions(query) : store.listSessions() });
+      }
+
+      if (request.method === "GET" && (path.length === 6 || path.length === 8) && path[0] === "v1" && path[1] === "sessions" && path[3] === "turns" && path[5] === "sources") {
+        const turn = store.getTurn(path[4]!);
+        if (!turn || turn.sessionId !== path[2]) return apiError("not_found", "Turn not found in session", 404);
+        const context = { store, folders: options.assistantFolders ?? {}, trusted: (root: string) => workspaceTrust.isTrusted(root) };
+        if (path.length === 6) return json({ documents: listSourceDocuments(context, path[2]!, turn.id) });
+        if (path[7] === "content") return sourceDocumentResponse(context, path[2]!, turn.id, path[6]!, url.searchParams.get("revision"));
       }
 
       if (request.method === "PATCH" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

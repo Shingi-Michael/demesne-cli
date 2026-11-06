@@ -24,7 +24,7 @@ test("search results come out of DuckDuckGo's page with their real addresses", (
 
 test("web_search asks DuckDuckGo and returns the results", async () => {
   const asked: string[] = [];
-  const tool = webSearchTool({ fetcher: (async (url: string) => { asked.push(url); return new Response(DDG, { headers: { "content-type": "text/html" } }); }) as typeof fetch });
+  const tool = webSearchTool({ fetcher: (async (url: string) => { asked.push(url); return new Response(DDG, { headers: { "content-type": "text/html" } }); }) as unknown as typeof fetch });
   expect(tool.permission({ query: "x" })).toBeNull();
   const result = JSON.parse(await tool.execute({ query: "bun fetch proxy", limit: 1 }, context()));
   expect(asked[0]).toBe("https://html.duckduckgo.com/html/?q=bun%20fetch%20proxy");
@@ -47,7 +47,7 @@ test("web_fetch reads a page in slices and follows redirects", async () => {
     "https://example.com/old": () => new Response(null, { status: 301, headers: { location: "/new" } }),
     "https://example.com/new": () => new Response(`<title>New</title><p>${"word ".repeat(600)}</p>`, { headers: { "content-type": "text/html; charset=utf-8" } }),
   };
-  const fetcher = (async (url: string) => (pages[url] as () => Response)()) as typeof fetch;
+  const fetcher = (async (url: string) => (pages[url] as () => Response)()) as unknown as typeof fetch;
   const tool = webFetchTool({ fetcher, resolve: publicHost });
   const first = JSON.parse(await tool.execute({ url: "https://example.com/old", maxChars: 1000 }, context()));
   expect(first).toMatchObject({ url: "https://example.com/new", title: "New", nextOffset: 1000 });
@@ -58,7 +58,7 @@ test("web_fetch reads a page in slices and follows redirects", async () => {
 });
 
 test("web_fetch refuses this machine and its local network, even after a redirect", async () => {
-  const fetcher = (async () => new Response(null, { status: 302, headers: { location: "http://127.0.0.1:8080/v1/sessions" } })) as typeof fetch;
+  const fetcher = (async () => new Response(null, { status: 302, headers: { location: "http://127.0.0.1:8080/v1/sessions" } })) as unknown as typeof fetch;
   const tool = webFetchTool({ fetcher, resolve: async (host) => host === "router.example" ? ["192.168.1.1"] : ["93.184.216.34"] });
   await expect(tool.execute({ url: "http://localhost:3000" }, context())).rejects.toThrow("LOCAL_ADDRESS");
   await expect(tool.execute({ url: "http://router.example/admin" }, context())).rejects.toThrow("LOCAL_ADDRESS");
@@ -73,6 +73,6 @@ test("private addresses", () => {
 });
 
 test("web_fetch says a PDF or image isn't text", async () => {
-  const tool = webFetchTool({ fetcher: (async () => new Response("%PDF", { headers: { "content-type": "application/pdf" } })) as typeof fetch, resolve: publicHost });
+  const tool = webFetchTool({ fetcher: (async () => new Response("%PDF", { headers: { "content-type": "application/pdf" } })) as unknown as typeof fetch, resolve: publicHost });
   await expect(tool.execute({ url: "https://example.com/a.pdf" }, context())).rejects.toThrow("NOT_TEXT");
 });

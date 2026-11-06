@@ -26,7 +26,7 @@ export interface SessionRule {
 const MAX_SESSION_RULES = 16;
 
 /// What "Accept edits" lets through without asking. Deletes and commands still ask.
-export const EDIT_TOOLS = new Set(["edit_file", "write_file", "move_path"]);
+export const EDIT_TOOLS = new Set(["edit_file", "write_file", "move_path", "remember"]);
 
 /// In-memory per-session approval grants ("always this session") plus the
 /// persisted user allowlist, which is consulted first. Session grants never

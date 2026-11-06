@@ -7,6 +7,7 @@ import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, T
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
+import { rememberTool } from "./remember.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
@@ -347,6 +348,8 @@ export function createDaemonApp(options: {
   tools.register(useSkillTool());
   // Search the web and read pages: in every chat, projectless ones too.
   if (options.web !== false) { tools.register(webSearchTool()); tools.register(webFetchTool()); }
+  // "Always …": a standing rule, saved to the project's DEMESNE.md.
+  tools.register(rememberTool());
   tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store, look, looks));

@@ -167,6 +167,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "run_command") return (tool.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "");
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
+  if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
   if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   const path = String(tool.input.path ?? tool.detail ?? "");
@@ -268,6 +269,7 @@ const verb = (tool: ToolEntry) =>
     search_files: "Search",
     web_search: "Searched the web",
     web_fetch: "Read",
+    remember: "Remembered",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",

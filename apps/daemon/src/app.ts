@@ -6,6 +6,7 @@ import { parseMailTurn } from "@demesne/protocol";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
+import { webFetchTool, webSearchTool } from "./web.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
@@ -175,6 +176,8 @@ export function createDaemonApp(options: {
   /// Your phone, through ntfy: routines push their answers to it, and chats
   /// get a notify_phone tool.
   phone?: Phone;
+  /// false leaves out web_search and web_fetch.
+  web?: boolean;
   /// The model the assistant's chat always runs on. The picker switches the
   /// daemon's model for every other chat; your personal files never follow
   /// it to another provider.
@@ -342,6 +345,8 @@ export function createDaemonApp(options: {
   const lookWith = options.foundryLook === undefined ? lookCommand() : null;
   const look = options.foundryLook ?? (lookWith ? electronLook(lookWith) : undefined), looks = new Map<string, number>();
   tools.register(useSkillTool());
+  // Search the web and read pages: in every chat, projectless ones too.
+  if (options.web !== false) { tools.register(webSearchTool()); tools.register(webFetchTool()); }
   tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store, look, looks));

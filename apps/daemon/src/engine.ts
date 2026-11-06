@@ -19,6 +19,7 @@ import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { forgetFoundrySources, FOUNDRY_TOOL_NAMES } from "./foundry.ts";
+import { WEB_TOOL_NAMES } from "./web.ts";
 import { forgetOldReadsInHistory } from "./forget-reads.ts";
 import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./assistant.ts";
 import { routeInspection } from "./inspection-commands.ts";
@@ -261,7 +262,7 @@ export class AgentEngine {
         ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
-        FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+        FOUNDRY_TOOL_NAMES.has(definition.name) || WEB_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
     // Orchestrate mode: the chat reads, plans and runs threads; the threads change the files.
     const orchestrating = !themefy && !assistant && Boolean(session.workspace) && this.store.isSessionOrchestrate(session.id);
     if (orchestrating) for (let index = definitions.length - 1; index >= 0; index--) if (!ORCHESTRATE_TOOL_NAMES.has(definitions[index]!.name)) definitions.splice(index, 1);
@@ -902,7 +903,7 @@ export class AgentEngine {
       return result;
     }
     // The assistant's file, search and phone tools need no project folder.
-    if (!workspaceRoot && call.name !== "ask_user" && call.name !== RECALL_TURN && !FOUNDRY_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
+    if (!workspaceRoot && call.name !== "ask_user" && call.name !== RECALL_TURN && !FOUNDRY_TOOL_NAMES.has(call.name) && !WEB_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
       && !(assistant && call.name !== "assistant_notes")) {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
@@ -1256,6 +1257,8 @@ const qualitativeInspectionTools = new Set(["list_files", "read_file", "read_fil
 /// Tools a plan-mode turn may use. The engine also enforces this at execution
 /// time, so a hallucinated write tool call is denied rather than executed.
 export const PLAN_MODE_TOOL_NAMES = new Set([
+  "web_search",
+  "web_fetch",
   // A Foundry page changes no project files, and plan mode is where design talk happens.
   "foundry_read",
   "foundry_save",
@@ -1278,7 +1281,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
 /// Orchestrate mode: reading, planning and the threads. No edits, no commands.
 export const ORCHESTRATE_TOOL_NAMES = new Set([
   "list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history",
-  "session_tools", "ask_user", "subagent", "start_threads", "message_thread",
+  "session_tools", "ask_user", "subagent", "start_threads", "message_thread", "web_search", "web_fetch",
 ]);
 const ORCHESTRATE_GUIDANCE = "Orchestrate mode: you are this project's orchestrator. You never change files or run commands yourself; threads do all the work. Read and plan, then hand the work out with start_threads (each thread a clear brief and the files it may change), pass the person's rules, corrections and answers to a thread with message_thread, and read the reports as they come back. When the person asks for a change, start or message a thread rather than explaining how they could do it. Only the person merges threads.";
 

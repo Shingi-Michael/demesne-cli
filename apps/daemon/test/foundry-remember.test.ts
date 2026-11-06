@@ -61,5 +61,5 @@ test("an answer is trimmed and a silent model is an error", async () => {
   async function* says(text: string) { yield { type: "text_delta", delta: text }; }
   expect(await askOnce(() => says("  Yes.\n"), "Quiz", "Is it?")).toBe("Yes.");
   await expect(askOnce(() => says(""), "Quiz", "Is it?")).rejects.toThrow(/no answer/);
-  expect(askMessages("Quiz", "x".repeat(9000))[1]!.content.length).toBeLessThan(8100);
+  expect(String(askMessages("Quiz", "x".repeat(9000))[1]!.content).length).toBeLessThan(8100);
 });

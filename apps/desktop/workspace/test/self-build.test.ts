@@ -42,11 +42,11 @@ describe("Demesne rebuilding itself", () => {
     expect(new SelfBuilder({ ...options, app: `${commit}.mvw2vmza` }).view(other)).toMatchObject({ source: false, can: false });
   });
 
-  test("the swap waits for the app to quit, keeps the old one and puts it back if the copy fails", () => {
+  test("the swap waits for the app to quit, deletes the old one once the copy lands and puts it back if the copy fails", () => {
     const script = swapScript(42, "/A/Demesne.app", "/src/release/mac-arm64/Demesne.app", "/A/Demesne.app.prev");
     expect(script).toContain("while kill -0 42");
     expect(script).toContain("mv '/A/Demesne.app' '/A/Demesne.app.prev' || { open '/A/Demesne.app'; exit 1; }");
-    expect(script).toContain("cp -R '/src/release/mac-arm64/Demesne.app' '/A/Demesne.app' || { rm -rf '/A/Demesne.app'; mv '/A/Demesne.app.prev' '/A/Demesne.app'; }");
+    expect(script).toContain("if cp -R '/src/release/mac-arm64/Demesne.app' '/A/Demesne.app'; then rm -rf '/A/Demesne.app.prev'; else rm -rf '/A/Demesne.app'; mv '/A/Demesne.app.prev' '/A/Demesne.app'; fi");
     expect(script.trim().endsWith("open '/A/Demesne.app'")).toBe(true);
   });
 });

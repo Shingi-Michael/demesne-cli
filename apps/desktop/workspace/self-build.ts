@@ -48,8 +48,9 @@ export function builtApp(root: string): string | null {
   } catch { return null; }
 }
 
-/// Waits for the app to quit, keeps the old one beside it, puts the new one
-/// in its place and opens it.
+/// Waits for the app to quit, moves the old one aside, puts the new one in its
+/// place and opens it. The old one is deleted once the copy lands; a failed
+/// copy puts it back.
 export function swapScript(pid: number, installed: string, built: string, keep: string): string {
   const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
   return [
@@ -58,7 +59,7 @@ export function swapScript(pid: number, installed: string, built: string, keep: 
     `rm -rf ${q(keep)}`,
     // The old app is only ever moved aside; a failed copy puts it back.
     `mv ${q(installed)} ${q(keep)} || { open ${q(installed)}; exit 1; }`,
-    `cp -R ${q(built)} ${q(installed)} || { rm -rf ${q(installed)}; mv ${q(keep)} ${q(installed)}; }`,
+    `if cp -R ${q(built)} ${q(installed)}; then rm -rf ${q(keep)}; else rm -rf ${q(installed)}; mv ${q(keep)} ${q(installed)}; fi`,
     `open ${q(installed)}`,
   ].join("\n") + "\n";
 }

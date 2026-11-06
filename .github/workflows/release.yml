@@ -60,11 +60,31 @@ jobs:
             bun run scripts/version.ts --github
           fi
 
+  # The build jobs upload straight to a draft release rather than through
+  # workflow artifacts, which count against the account's Actions storage
+  # quota (release assets don't). The release job publishes the draft once
+  # every build has uploaded, so a failed build still publishes nothing.
+  draft:
+    name: Draft Release
+    needs: [version]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="${{ needs.version.outputs.tag }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --target "${{ github.sha }}" --title "$tag" --generate-notes
+          fi
+
   # The desktop app, so installing demesne needs neither Bun nor Rust. Each
   # bundle carries its own daemon, desktop host and native image runtime.
   desktop:
     name: Desktop / ${{ matrix.artifact }}
-    needs: [version]
+    needs: [version, draft]
     if: needs.version.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -158,20 +178,18 @@ jobs:
             bun -e 'const p=process.argv[1]; const bytes=await Bun.file(p).arrayBuffer(); await Bun.write(p+".sha256",new Bun.CryptoHasher("sha256").update(bytes).digest("hex")+"  "+p+"\n")' "$p"
           done
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: artifacts-${{ matrix.os }}
-          path: |
-            ${{ matrix.artifact }}
-            ${{ matrix.artifact }}.sha256
-            demesne-linux-x64.tar.gz*
-            demesne-desktop-linux-x64.tar.gz*
-            demesne-desktop-darwin-arm64.zip*
-          if-no-files-found: ignore
-          # The release job copies these into the GitHub release, so the
-          # artifacts are only a hand-off. Keeping them the default 90 days
-          # filled the repo's artifact storage quota.
-          retention-days: 1
+      - name: Upload to the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          files=()
+          for p in "${{ matrix.artifact }}" demesne-linux-x64.tar.gz demesne-desktop-linux-x64.tar.gz demesne-desktop-darwin-arm64.zip; do
+            [ -f "$p" ] || continue
+            files+=("$p" "$p.sha256")
+          done
+          gh release upload "${{ needs.version.outputs.tag }}" "${files[@]}" --clobber
 
   release:
     needs: [version, desktop]
@@ -181,10 +199,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
       - name: Tag commit on origin if missing
         shell: bash
         run: |
@@ -195,14 +209,12 @@ jobs:
             git tag "$tag" "${{ github.sha }}"
             git push origin "$tag" || true
           fi
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          name: ${{ needs.version.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          files: artifacts/*
-          generate_release_notes: true
-          make_latest: true
+      - name: Publish the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "${{ needs.version.outputs.tag }}" --draft=false --latest
 
   # Signed public releases remain blocked: see docs/macos-release-signing.md
   # for the signing-path assessment, required credentials and acceptance checks.

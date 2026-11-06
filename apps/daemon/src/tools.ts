@@ -467,11 +467,14 @@ function searchFilesTool(): AgentTool {
   return {
     definition: {
       name: "search_files",
-      description: "Literal case-insensitive search; include globs relative to path (*.ts matches any depth). Default 50; max 500 matching lines. Returns workspace-relative path:line:text.",
+      description: "Search file contents. Literal and case-insensitive by default; regex:true takes a regular expression, caseSensitive:true matches case. context:N adds N lines before and after each match, often enough to skip reading the file. include globs are relative to path (*.ts matches any depth). Default 50; max 500 matching lines. Returns workspace-relative path:line:text; with context, one block per stretch, context lines as path-line-text.",
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string" },
+          regex: { type: "boolean" },
+          caseSensitive: { type: "boolean" },
+          context: { type: "integer", minimum: 0, maximum: 10 },
           path: { type: "string" },
           include: { type: "string" },
           limit: { type: "integer", minimum: 1, maximum: 500 },
@@ -487,6 +490,41 @@ function searchFilesTool(): AgentTool {
       if (query.length > 4096) throw toolError("QUERY_TOO_LARGE", "query exceeds 4096 characters", "search a narrower literal");
       const path = optionalString(value.path, "path") ?? ".";
       const include = optionalString(value.include, "include");
+      const regex = value.regex === true, caseSensitive = value.caseSensitive === true;
+      const contextLines = boundedInteger(value.context, "context", 0, 10, 0);
+      let matcher: (line: string) => boolean;
+      if (regex) {
+        let compiled: RegExp;
+        try { compiled = new RegExp(query, caseSensitive ? "u" : "iu"); } catch (error) {
+          throw toolError("BAD_REGEX", `invalid regular expression: ${error instanceof Error ? error.message : String(error)}`, "fix the pattern, or search a literal without regex");
+        }
+        matcher = (line) => compiled.test(line);
+      } else if (caseSensitive) matcher = (line) => line.includes(query);
+      else { const lower = query.toLocaleLowerCase("en-US"); matcher = (line) => line.toLocaleLowerCase("en-US").includes(lower); }
+      // Each match with the lines around it, overlapping blocks joined.
+      const withContext = (matches: string[]): string[] => {
+        if (!contextLines) return matches;
+        const byFile = new Map<string, number[]>();
+        for (const match of matches) {
+          const at = /^(.*?):(\d+):/.exec(match);
+          if (at) byFile.set(at[1]!, [...byFile.get(at[1]!) ?? [], Number(at[2])]);
+        }
+        const blocks: string[] = [];
+        for (const [file, lines] of byFile) {
+          let text: string[];
+          try { text = readFileSync(resolveWorkspacePath(context.workspaceRoot, file, false), "utf8").split("\n"); } catch { continue; }
+          const hits = new Set(lines);
+          let block: string[] = [], last = -Infinity;
+          for (const line of [...hits].sort((a, b) => a - b)) {
+            const from = Math.max(1, line - contextLines), to = Math.min(text.length, line + contextLines);
+            if (from > last + 1 && block.length) { blocks.push(block.join("\n")); block = []; }
+            for (let n = Math.max(from, last + 1); n <= to; n++) block.push(`${file}${hits.has(n) ? ":" : "-"}${n}${hits.has(n) ? ":" : "-"}${(text[n - 1] ?? "").slice(0, 2000)}`);
+            last = Math.max(last, to);
+          }
+          if (block.length) blocks.push(block.join("\n"));
+        }
+        return blocks;
+      };
       let pattern: RegExp | undefined;
       if (include) {
         try {
@@ -514,6 +552,8 @@ function searchFilesTool(): AgentTool {
             rgPath: ripgrepPaths,
             cwd: start,
             query,
+            regex,
+            caseSensitive,
             accepts,
             limit,
             signal: context.signal,
@@ -526,7 +566,7 @@ function searchFilesTool(): AgentTool {
               .sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line)
               .slice(0, limit)
               .map((entry) => `${prefixLines(entry.path)}:${entry.line}:${entry.text}`);
-            return JSON.stringify({ matches, truncated: result.hadMore });
+            return JSON.stringify({ matches: withContext(matches), truncated: result.hadMore });
           }
         } catch (error) {
           if (context.signal.aborted) throw error;
@@ -548,13 +588,13 @@ function searchFilesTool(): AgentTool {
           return;
         }
         for (const [index, line] of text.split("\n").entries()) {
-          if (line.toLocaleLowerCase("en-US").includes(query.toLocaleLowerCase("en-US"))) {
+          if (matcher(line)) {
             if (matches.length === limit) { truncated = true; return; }
             matches.push(`${relativePath}:${index + 1}:${line.slice(0, 2000)}`);
           }
         }
       }, limit * 4, () => truncated);
-      return JSON.stringify({ matches, truncated });
+      return JSON.stringify({ matches: withContext(matches), truncated });
     },
   };
 }
@@ -563,6 +603,8 @@ async function ripgrepSearch(options: {
   rgPath: string;
   cwd: string;
   query: string;
+  regex?: boolean;
+  caseSensitive?: boolean;
   accepts: (path: string) => boolean;
   limit: number;
   signal: AbortSignal;
@@ -571,8 +613,8 @@ async function ripgrepSearch(options: {
     "--no-heading",
     "--color",
     "never",
-    "--fixed-strings",
-    "--ignore-case",
+    ...(options.regex ? [] : ["--fixed-strings"]),
+    ...(options.caseSensitive ? ["--case-sensitive"] : ["--ignore-case"]),
     "--line-number",
     "--with-filename",
     "--sort", "path",

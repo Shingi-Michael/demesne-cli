@@ -27,6 +27,8 @@ export function toolTarget(name: string, input: Record<string, unknown>): string
   if (Array.isArray(input.argv) && input.argv.every((value) => typeof value === "string"))
     return `$ ${[String(input.argv[0] ?? "").split("/").pop(), ...input.argv.slice(1)].join(" ")}`;
   if (typeof input.query === "string") return `"${input.query}"`;
+  // web_fetch: the page's address, without the scheme.
+  if (typeof input.url === "string") return input.url.replace(/^https?:\/\//, "");
   return undefined;
 }
 

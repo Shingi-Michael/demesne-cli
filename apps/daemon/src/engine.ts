@@ -19,6 +19,7 @@ import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { forgetFoundrySources, FOUNDRY_TOOL_NAMES } from "./foundry.ts";
+import { WEB_TOOL_NAMES } from "./web.ts";
 import { forgetOldReadsInHistory } from "./forget-reads.ts";
 import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./assistant.ts";
 import { routeInspection } from "./inspection-commands.ts";
@@ -261,7 +262,7 @@ export class AgentEngine {
         ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
-        FOUNDRY_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+        FOUNDRY_TOOL_NAMES.has(definition.name) || WEB_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
     // Orchestrate mode: the chat reads, plans and runs threads; the threads change the files.
     const orchestrating = !themefy && !assistant && Boolean(session.workspace) && this.store.isSessionOrchestrate(session.id);
     if (orchestrating) for (let index = definitions.length - 1; index >= 0; index--) if (!ORCHESTRATE_TOOL_NAMES.has(definitions[index]!.name)) definitions.splice(index, 1);
@@ -902,7 +903,7 @@ export class AgentEngine {
       return result;
     }
     // The assistant's file, search and phone tools need no project folder.
-    if (!workspaceRoot && call.name !== "ask_user" && call.name !== RECALL_TURN && !FOUNDRY_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
+    if (!workspaceRoot && call.name !== "ask_user" && call.name !== RECALL_TURN && !FOUNDRY_TOOL_NAMES.has(call.name) && !WEB_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
       && !(assistant && call.name !== "assistant_notes")) {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
@@ -1248,7 +1249,7 @@ export function assistantSystemPrompt(options: { home?: string; definitions: Pro
 export function defaultSystemPrompt(workspaceRoot: string | undefined, autoApprove = false): string {
   if (!workspaceRoot) return "You are Demesne, a concise assistant. This chat has no project, files or commands.";
   return `You are Demesne, a careful coding agent in ${workspaceRoot}.
-Inspect before editing with focused list, search, and read tools. Work in few rounds: put independent reads and searches in the same round (read_files takes up to 8 files), read each file once in a large window instead of paging through small slices, and do not re-read what you already have. Use purpose-built tools, never run_command, for file listing, reading, searching, or qualitative repository measurements; use git_history, not run_command, for commit logs, files at other revisions, blame, and diffs between commits. When you'd repeat the same calls, define your own tool once with session_tools (a preset of a tool's defaults, or a few read-only steps run as one call) and run it by name; it lasts for this session. For qualitative summaries, do not compute line counts, file counts, or disk usage unless requested; stop when evidence is sufficient. Use relative paths. ${autoApprove ? "All tool approvals are authorized for this session, including edits, commands and publishing." : "Reads are automatic; edits and commands need approval."} run_command executes host argv, not a shell/sandbox. Verify changes and summarize concisely. When you finish a final answer, end it with one line <next>…</next> holding the single most useful request the person might send next, written as they'd type it (imperative, under 12 words); leave it out when nothing obvious follows. It is hidden from your answer and offered to them as a suggestion.`;
+Inspect before editing with focused list, search, and read tools. Work in few rounds: put independent reads and searches in the same round (read_files takes up to 8 files), and when a change spans several files (a rename, a refactor) make all its edit_file calls in one round, with several hunks per file in one call's edits, read each file once in a large window instead of paging through small slices, and do not re-read what you already have. Use purpose-built tools, never run_command, for file listing, reading, searching, or qualitative repository measurements; use git_history, not run_command, for commit logs, files at other revisions, blame, and diffs between commits. When you'd repeat the same calls, define your own tool once with session_tools (a preset of a tool's defaults, or a few read-only steps run as one call) and run it by name; it lasts for this session. For qualitative summaries, do not compute line counts, file counts, or disk usage unless requested; stop when evidence is sufficient. Use relative paths. ${autoApprove ? "All tool approvals are authorized for this session, including edits, commands and publishing." : "Reads are automatic; edits and commands need approval."} run_command executes host argv, not a shell/sandbox. Verify changes and summarize concisely. When you finish a final answer, end it with one line <next>…</next> holding the single most useful request the person might send next, written as they'd type it (imperative, under 12 words); leave it out when nothing obvious follows. It is hidden from your answer and offered to them as a suggestion.`;
 }
 
 const qualitativeInspectionTools = new Set(["list_files", "read_file", "read_files", "search_files"]);
@@ -1256,6 +1257,8 @@ const qualitativeInspectionTools = new Set(["list_files", "read_file", "read_fil
 /// Tools a plan-mode turn may use. The engine also enforces this at execution
 /// time, so a hallucinated write tool call is denied rather than executed.
 export const PLAN_MODE_TOOL_NAMES = new Set([
+  "web_search",
+  "web_fetch",
   // A Foundry page changes no project files, and plan mode is where design talk happens.
   "foundry_read",
   "foundry_save",
@@ -1278,7 +1281,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
 /// Orchestrate mode: reading, planning and the threads. No edits, no commands.
 export const ORCHESTRATE_TOOL_NAMES = new Set([
   "list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history",
-  "session_tools", "ask_user", "subagent", "start_threads", "message_thread",
+  "session_tools", "ask_user", "subagent", "start_threads", "message_thread", "web_search", "web_fetch", "remember",
 ]);
 const ORCHESTRATE_GUIDANCE = "Orchestrate mode: you are this project's orchestrator. You never change files or run commands yourself; threads do all the work. Read and plan, then hand the work out with start_threads (each thread a clear brief and the files it may change), pass the person's rules, corrections and answers to a thread with message_thread, and read the reports as they come back. When the person asks for a change, start or message a thread rather than explaining how they could do it. Only the person merges threads.";
 

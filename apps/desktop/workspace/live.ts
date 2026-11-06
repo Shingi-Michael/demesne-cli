@@ -167,6 +167,9 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "run_command") return (tool.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "");
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
+  if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
+  if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
+  if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   const path = String(tool.input.path ?? tool.detail ?? "");
   return tool.name === "subagent" ? "" : path.split("/").at(-1) ?? path;
 }
@@ -264,6 +267,9 @@ const verb = (tool: ToolEntry) =>
     write_file: "Write",
     edit_file: "Edit",
     search_files: "Search",
+    web_search: "Searched the web",
+    web_fetch: "Read",
+    remember: "Remembered",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",
@@ -1780,12 +1786,12 @@ const stepIconFor = (kind: string) => `<svg class="ico" viewBox="0 0 24 24" aria
 const stepIcon = (tool: ToolEntry) => {
   const kind = tool.name === "run_command" ? "run"
     : tool.phase === "change" ? "edit"
-    : tool.name === "search_files" ? "search"
+    : tool.name === "search_files" || tool.name === "web_search" ? "search"
     : tool.name === "list_files" ? "list"
     : tool.name === "subagent" ? "agent"
     : tool.name === "ask_user" ? "ask"
     : tool.name === "heartbeat" ? "mail"
-    : ["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
+    : ["read_file", "read_files", "web_fetch", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
     : "other";
   return stepIconFor(kind);
 };

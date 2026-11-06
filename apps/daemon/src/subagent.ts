@@ -12,7 +12,7 @@ export const SUBAGENT_TOOL = "subagent";
 /// What a sub-agent may use: reading and searching only. It cannot edit, run
 /// commands, ask the person, or start sub-agents of its own, so it never needs
 /// an approval and several can run at once.
-export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history"]);
+export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history", "web_search", "web_fetch"]);
 
 export const SUBAGENT_LIMITS = { rounds: 16, toolCalls: 48, toolResultBytes: 32 * 1024, reportBytes: 16 * 1024 } as const;
 
@@ -191,7 +191,7 @@ export async function runReadOnlyTool(call: ProviderToolCall, options: { workspa
 /// `read src/app.ts`, `search "restoreSession"`: what the card shows live.
 export function describeCall(name: string, input: unknown): string {
   const record = isRecord(input) ? input : {};
-  const verb = name === "search_files" ? "search" : name.startsWith("read_") ? "read" : name === "list_files" ? "list" : name.replace("_", " ");
+  const verb = name === "search_files" || name === "web_search" ? "search" : name.startsWith("read_") ? "read" : name === "list_files" ? "list" : name.replace("_", " ");
   const target = typeof record.path === "string" ? record.path
     : typeof record.query === "string" ? `"${record.query}"`
     : typeof record.pattern === "string" ? `"${record.pattern}"`

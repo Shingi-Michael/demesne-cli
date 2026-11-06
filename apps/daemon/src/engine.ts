@@ -1260,6 +1260,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "foundry_read",
   "foundry_save",
   "foundry_edit",
+  "foundry_try",
   "list_files",
   "read_file",
   "read_files",

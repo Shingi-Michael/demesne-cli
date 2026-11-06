@@ -11,8 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DESIGN_MEASURE, LOOK_MEASURE, type DesignMeasure, type LookMeasure } from "./foundry-look-measure.ts";
 import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember, withRemember } from "./policy.ts";
+import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryPlan, type TryResult, type TryStep, type TryStepResult } from "./foundry-try.ts";
 
-export interface LookJob { kind: string; source: string; title: string }
+/// try: run these steps on the page instead of looking at it (foundry-try.ts).
+export interface LookJob { kind: string; source: string; title: string; try?: TryPlan }
 export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
 export interface LookResult { pages: LookPage[]; errors: string[] }
 
@@ -37,7 +39,7 @@ export function runFoundryLook(path: string) {
   if (process.platform === "darwin") app.setActivationPolicy("accessory");
   app.dock?.hide();
   let finished = false;
-  const done = (result: LookResult | { error: string }) => {
+  const done = (result: LookResult | TryResult | { error: string }) => {
     if (finished) return;
     finished = true;
     process.stdout.write(JSON.stringify(result) + "\n", () => { try { rmSync(profile, { recursive: true, force: true }); } catch {} app.exit(0); });
@@ -56,6 +58,7 @@ export function runFoundryLook(path: string) {
       const page = foundryDocument(job.kind, job.source, job.title);
       return new Response(job.kind === "html" && usesRemember(job.source) ? withRemember(page, kitFile("remember.js").toString("utf8")) : page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });
     });
+    if (job.try) { done(await tryPage(session, job.try)); return; }
     const errors: string[] = [], pages: LookPage[] = [];
     for (const view of VIEWS) {
       const win = new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
@@ -81,4 +84,79 @@ export function runFoundryLook(path: string) {
     }
     done({ pages, errors });
   }).catch((error) => done({ error: error instanceof Error ? error.message : String(error) }));
+}
+
+/// Runs the steps with real input events, one at a time, and says after each
+/// what a person would have seen happen. A picture after the last step, and
+/// after the first step that went wrong.
+async function tryPage(session: Electron.Session, plan: TryPlan): Promise<TryResult> {
+  const view = plan.width < 800 ? TRY_WIDTHS.phone : TRY_WIDTHS.desktop;
+  const win = new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
+    webPreferences: { session, offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  const errors: string[] = [], steps: TryStepResult[] = [], pictures: TryResult["pictures"] = [];
+  const contents = win.webContents;
+  const picture = async (after: string) => {
+    let image = await contents.capturePage();
+    if (image.getSize().width > view.scaleTo) image = image.resize({ width: view.scaleTo, quality: "good" });
+    pictures.push({ after, png: image.toPNG().toString("base64") });
+  };
+  try {
+    contents.setWindowOpenHandler(() => ({ action: "deny" }));
+    contents.on("will-navigate", (event) => event.preventDefault());
+    contents.on("console-message", (event) => { if (event.level === "error" && errors.length < 8) errors.push(event.message.slice(0, 200)); });
+    await win.loadURL("foundry://artifact/look");
+    await Promise.race([contents.executeJavaScript("document.fonts.ready.then(() => true)"), settle(3000)]);
+    await settle(300);
+    await contents.executeJavaScript(TRY_RUNTIME);
+    contents.focus();
+    const print = () => contents.executeJavaScript("window.__demesneTry.fingerprint()") as Promise<Fingerprint>;
+    const scrollY = () => contents.executeJavaScript("scrollY") as Promise<number>;
+    const find = (target: string) => contents.executeJavaScript(`window.__demesneTry.find(${JSON.stringify(target)})`) as Promise<{ found: boolean; names?: string[]; x: number; y: number; many: number; what: string; covered: string | null; disabled: boolean }>;
+    const click = async (x: number, y: number) => {
+      contents.sendInputEvent({ type: "mouseMove", x, y });
+      contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+    };
+    // Reach a control the way a person would; null when they couldn't.
+    const reach = async (target: string, then: (x: number, y: number) => Promise<void>): Promise<{ ok: boolean; said: string }> => {
+      const found = await find(target);
+      if (!found.found) return { ok: false, said: `nothing matches${found.names?.length ? `; the controls are ${found.names.map((n) => `“${n}”`).join(", ")}` : ""}` };
+      if (found.covered) return { ok: false, said: `${found.what} is covered by ${found.covered}, so a person can't reach it` };
+      if (found.disabled) return { ok: false, said: `${found.what} is disabled` };
+      await then(found.x, found.y);
+      return { ok: true, said: `${found.what}${found.many > 1 ? ` (first of ${found.many} matches)` : ""}` };
+    };
+    let firstBad = true;
+    for (const step of plan.steps) {
+      const before = await print(), y0 = await scrollY(), errorsBefore = errors.length;
+      let result: { ok: boolean; said: string };
+      if ("click" in step) result = await reach(step.click, click);
+      else if ("hover" in step) result = await reach(step.hover, async (x, y) => { contents.sendInputEvent({ type: "mouseMove", x, y }); });
+      else if ("type" in step) {
+        result = step.into ? await reach(step.into, click) : { ok: true, said: "" };
+        if (result.ok) { await settle(80); await contents.insertText(step.type); }
+      } else if ("key" in step) {
+        const keyCode = step.key === "Space" ? "Space" : step.key;
+        contents.sendInputEvent({ type: "keyDown", keyCode });
+        if (step.key === "Enter" || step.key === "Space") contents.sendInputEvent({ type: "char", keyCode: step.key === "Enter" ? "\r" : " " });
+        contents.sendInputEvent({ type: "keyUp", keyCode });
+        result = { ok: true, said: "" };
+      } else if ("scroll" in step) { await contents.executeJavaScript(`scrollBy(0, ${step.scroll})`); result = { ok: true, said: "" }; }
+      else { await settle(step.wait); result = { ok: true, said: "" }; }
+      await settle(350);
+      const after = await print(), scrolled = "scroll" in step && (await scrollY()) !== y0;
+      const what = result.ok ? changed(before, after, scrolled, "key" in step) : null;
+      const newErrors = errors.slice(errorsBefore);
+      const said = !result.ok ? result.said
+        : [result.said, what ? `→ ${what}` : ("wait" in step || "hover" in step ? "" : "→ nothing visible changed"), newErrors.length ? `console error: ${newErrors[0]}` : ""].filter(Boolean).join(" ");
+      const ok = result.ok && !newErrors.length && (what !== null || "wait" in step || "hover" in step || "scroll" in step);
+      steps.push({ step: stepName(step as TryStep), ok, said });
+      if (!ok && firstBad && plan.steps.at(-1) !== step) { firstBad = false; await picture(stepName(step as TryStep)); }
+    }
+    await picture(steps.length ? steps.at(-1)!.step : "loading");
+    const tree = await contents.executeJavaScript("window.__demesneTry.tree()") as string[];
+    return { width: view.width, steps, tree, errors, pictures };
+  } catch (error) {
+    return { width: view.width, steps, tree: [], errors: [...errors, `Could not try the page: ${error instanceof Error ? error.message : String(error)}`], pictures };
+  } finally { win.destroy(); }
 }

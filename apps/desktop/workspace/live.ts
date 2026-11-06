@@ -276,8 +276,15 @@ const verb = (tool: ToolEntry) =>
     foundry_save: "Made",
     foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
+    foundry_try: "Tried",
     use_skill: "Using skill",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
+/// A try's steps in a few words, for its step row.
+function trySteps(steps: Record<string, unknown>[]) {
+  const one = (step: Record<string, unknown>) => "click" in step ? `click “${step.click}”` : "type" in step ? `type “${step.type}”` : "key" in step ? `press ${step.key}` : "scroll" in step ? "scroll" : "hover" in step ? `hover “${step.hover}”` : "wait";
+  const words = steps.slice(0, 3).map(one).join(", ");
+  return steps.length > 3 ? `${words} and ${steps.length - 3} more` : words || "the page";
+}
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: WorkspaceRun) =>
@@ -1711,6 +1718,8 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
   if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
+  // A try names its steps: click “Add”, type “Milk”, press Enter.
+  if (tool.name === "foundry_try") { const steps = Array.isArray(tool.input.steps) ? tool.input.steps as Record<string, unknown>[] : []; return h(trySteps(steps) + (tool.input.width === "phone" ? " · phone" : "")); }
   if (tool.name === "use_skill") return `<span class="step-skill">${h(String(tool.input.name ?? ""))}</span>`;
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.

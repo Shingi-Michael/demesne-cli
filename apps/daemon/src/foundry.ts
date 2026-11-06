@@ -8,13 +8,13 @@
 /// once its turn is over (forgetFoundrySources): the artifact is stored,
 /// and foundry_read brings it back when the agent needs it.
 import type { DemesneStore } from "@demesne/storage";
-import { LOOKS_PER_TURN, lookReport, type FoundryLook } from "./foundry-look.ts";
+import { LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
-import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, type FoundryKind, type ModelMessage } from "@demesne/protocol";
+import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseSteps, TRY_MAX_STEPS, type FoundryKind, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool } from "./tools.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
-export const FOUNDRY_TOOL_NAMES = new Set(["foundry_read", "foundry_save", "foundry_edit"]);
+export const FOUNDRY_TOOL_NAMES = new Set(["foundry_read", "foundry_save", "foundry_edit", "foundry_try"]);
 
 /// Where an artifact may load from (the frame's policy allows exactly this).
 export const FOUNDRY_LIBRARY_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com"] as const;
@@ -317,4 +317,59 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
   const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN);
   return { text: JSON.stringify({ ...saved, look: report.look }), images: report.images };
+}
+
+/// A turn tries one artifact at most this many times: the first try, and
+/// two more after fixes.
+export const TRIES_PER_TURN = 3;
+const TRY_STEPS = TRY_MAX_STEPS;
+
+/// Foundry tries its own page (pass 164 E): clicks, typing and keys run for
+/// real in an off-screen window, and the model hears after each step what
+/// changed, or that the control was covered, disabled or missing, plus the
+/// page's tree and a picture. Only where the desktop app can render pages.
+export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = new Map<string, number>()): AgentTool {
+  const tool: AgentTool = {
+    definition: {
+      name: "foundry_try",
+      description: "Use a Foundry page the way a person would, to check that it works: run up to 12 steps on its latest version (or one you name) in a hidden window, with real clicks and typing. "
+        + "After each step you hear what visibly changed, or that nothing did, or that the control is covered, disabled or not found; then the page's tree (every heading and control: name, place, size, state) and a picture. "
+        + "Use it after making or changing a page that has controls: run its main path (add an item, switch a tab, open and close a dialog, submit the form), at phone width too when layout matters. "
+        + "Steps: {click: name}, {type: text, into?: name}, {key: Enter|Tab|Escape|Backspace|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight}, {scroll: px}, {hover: name}, {wait: ms}. "
+        + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). Pages that remember start empty here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          version: { type: "integer", minimum: 1 },
+          width: { type: "string", enum: ["desktop", "phone"], description: "desktop is 1280px (default), phone is 390px." },
+          steps: { type: "array", minItems: 1, maxItems: TRY_STEPS, items: { type: "object" } },
+        },
+        required: ["id", "steps"],
+        additionalProperties: false,
+      },
+    },
+    // Nothing leaves the page and nothing is saved: it runs like a look.
+    permission: () => null,
+    async execute() { throw new Error("[unavailable] foundry_try needs the desktop app"); },
+    async executeWithArtifacts(input, context) {
+      const args = isRecord(input) ? input : {};
+      if (typeof args.id !== "string" || !args.id) throw new Error("[invalid] id is required. Hint: foundry_read without id lists the artifacts");
+      let steps: TryStep[];
+      try { steps = parseSteps(args.steps); } catch (error) { throw new Error(`[invalid] ${error instanceof Error ? error.message : String(error)}`); }
+      const found = store.getFoundryArtifact(args.id, typeof args.version === "number" ? args.version : undefined);
+      if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
+      if (!LOOKED_KINDS.has(found.kind)) throw new Error(`[invalid] A ${found.kind} artifact has nothing to try; only pages, decks, docs and dashboards do`);
+      const key = `${context.turnId ?? ""}:${found.id}`, seen = tries.get(key) ?? 0;
+      if (seen >= TRIES_PER_TURN) throw new Error(`[limit] This page was tried ${TRIES_PER_TURN} times this turn; answer with what you found`);
+      tries.set(key, seen + 1);
+      if (tries.size > 200) tries.delete(tries.keys().next().value!);
+      const result = await tryer({ kind: found.kind, source: found.source, title: found.title }, { width: args.width === "phone" ? 390 : 1280, steps }, context.signal);
+      if (!result) throw new Error("[unavailable] The page could not be tried just now");
+      if (!result.steps.length && result.errors.length) throw new Error(`[unavailable] ${result.errors.join("; ")}`);
+      const report = tryReport(result);
+      return { text: JSON.stringify({ id: found.id, version: found.version, title: found.title, ...report.report }), images: report.images };
+    },
+  };
+  return tool;
 }

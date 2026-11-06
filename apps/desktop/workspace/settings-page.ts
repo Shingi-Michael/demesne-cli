@@ -34,7 +34,7 @@ export interface SettingsInfo {
   allow: { rule: string; mine: boolean }[];
   /// Folders you trust, or null when the daemon can't say.
   trusted: string[] | null;
-  subagent: { model: string | null; models: { id: string; provider: string }[] };
+  subagent: { model: string | null; often?: string; models: { id: string; provider: string }[] };
   agent: { maxModelRounds: number; maxToolCalls: number };
   drive: { maxActiveMinutes: number; maxTokens: number; maxTasks: number };
   /// Null when no image service is set up.
@@ -315,7 +315,8 @@ function pages(view: SettingsView): Page[] {
       { title: "Model", line: `${view.model.words}${view.model.provider ? ` from ${view.model.provider}` : ""}${view.model.reasoning ? `, ${view.model.reasoning} thinking` : ""}. This chat uses it`, control: link("overlay", "Change", { name: "models" }), keywords: "model reasoning thinking effort" },
       ...(view.model.chatgpt !== null ? [{ title: "ChatGPT plan", line: `Usage counts against ${view.model.chatgpt || "your"} plan`, control: link("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }), keywords: "usage billing account chatgpt" }] : []),
       ...(subagent ? [{ title: "Subagents run on", line: "Helpers a turn starts for side work. Auto runs them on Claude Code, Codex or Gemini when you have them", control: word("subagent", subagentLabel, view.fold === "subagent"), keywords: "subagent helper model",
-        fold: view.fold === "subagent" ? choices("Subagent model", [["Auto · your agents", !subagent.model || subagent.model === "auto", "subagent-model", { model: null }], ["Same as the chat", subagent.model === "same", "subagent-model", { model: "same" }], ...subagent.models.map((model): [string, boolean, string, Record<string, unknown>] => [model.id.startsWith("agent:") ? agentWords(model.id) : view.modelWords({ id: model.id }), subagent.model === model.id, "subagent-model", { model: model.id }])]) : "" }] : []),
+        fold: view.fold === "subagent" ? choices("Subagent model", [["Auto · your agents", !subagent.model || subagent.model === "auto", "subagent-model", { model: null }], ["Same as the chat", subagent.model === "same", "subagent-model", { model: "same" }], ...subagent.models.map((model): [string, boolean, string, Record<string, unknown>] => [model.id.startsWith("agent:") ? agentWords(model.id) : view.modelWords({ id: model.id }), subagent.model === model.id, "subagent-model", { model: model.id }])]) : "" },
+        { title: "How often", line: "How readily a turn hands bigger lookups to subagents instead of reading everything itself. Less is how it used to be", control: segments((["less", "usual", "more"] as const).map((often): [string, boolean, string, Record<string, unknown>] => [often === "less" ? "Less" : often === "usual" ? "Usual" : "More", (subagent.often ?? "usual") === often, "subagent-often", { often }]), "How often subagents are sent"), keywords: "subagent helper delegate often more less" }] : []),
       ...(info?.images ? [{ title: "Images", line: "The model that makes pictures when you ask for one", control: `<form class="st-text" data-key="images.model"><input value="${h(info.images.model ?? "")}" aria-label="Image model" autocomplete="off" spellcheck="false"></form>`, keywords: "image picture generation" }] : []),
     ] },
     { name: "Limits for one turn", rows: info ? [

@@ -10,7 +10,8 @@ import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 import { parseAgentLine, subagentArgs, subagentBrief, subagentStep } from "../src/agent-cli.ts";
 import { grounded, jobKind, pickAgent, RouteBook } from "../src/subagent-route.ts";
-import { parseSubagentInput } from "../src/subagent.ts";
+import { parseSubagentInput, subagentDefinition } from "../src/subagent.ts";
+import { agentSystemPrompt, delegateGuidance } from "../src/engine.ts";
 import { claudeRun, fakeProcess } from "./agent-cli-fakes.ts";
 
 test("a job's kind comes from its label and brief", () => {
@@ -159,4 +160,32 @@ test("Antigravity as a sub-agent is told to use only its read tools, and a denia
   expect(parseAgentLine("gemini", denied, "/w", { words: {} })).toEqual([{ error: "Antigravity stopped: it wasn't allowed to RunCommand" }]);
   const answered = JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "In pane.ts.", denied_actions: [{ action: "command", display_name: "RunCommand" }] } });
   expect(parseAgentLine("gemini", answered, "/w", { words: {} })).toEqual([{ answer: "In pane.ts." }]);
+});
+
+test("the chat is told when to send sub-agents, by how often you set", () => {
+  expect(delegateGuidance({ often: "less", onAgents: true })).toBeNull();
+  const usual = delegateGuidance({ often: "usual", onAgents: true })!;
+  expect(usual).toContain("more than about four files");
+  expect(usual).toContain("own Claude Code, Codex or Gemini");
+  expect(delegateGuidance({ often: "usual", onAgents: false })).not.toContain("Codex");
+  expect(delegateGuidance({ often: "more", onAgents: false })).toContain("one or two files");
+  const prompt = (often: "less" | "usual" | "more", definitions = [subagentDefinition]) => agentSystemPrompt({ workspaceRoot: "/w", definitions, delegate: { often, onAgents: true } });
+  expect(prompt("usual")).toContain("send sub-agents for that lookup");
+  expect(prompt("less")).not.toContain("send sub-agents for that lookup");
+  expect(prompt("usual", [])).not.toContain("send sub-agents for that lookup");
+});
+
+test("how often is read, set and saved through the sub-agent endpoint", async () => {
+  const root = mkdtempSync(join(tmpdir(), "demesne-often-"));
+  const saved: string[] = [];
+  const processor: TurnProcessor = { providerId: "test", modelId: "test", contextCapacity: 262144, maxOutputTokens: 1024, async listModels() { return []; }, async *stream() { yield { type: "finish", reason: "stop" }; } };
+  const app = createDaemonApp({ databasePath: join(root, "state.sqlite"), processor, saveSubagentOften: (often) => { saved.push(often); } });
+  try {
+    const call = async (init?: RequestInit) => (await app.fetch(new Request("http://localhost/v1/subagent-model", init))).json() as Promise<Record<string, unknown>>;
+    expect((await call()).often).toBe("usual");
+    expect(await call({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ often: "more" }) })).toMatchObject({ often: "more", saved: true });
+    expect((await call()).often).toBe("more");
+    expect(saved).toEqual(["more"]);
+    expect((await app.fetch(new Request("http://localhost/v1/subagent-model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ often: "always" }) }))).status).toBe(400);
+  } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
 });

@@ -167,7 +167,10 @@ export class DemesneClient {
     return this.request(`/v1/permissions/asks?workspace=${encodeURIComponent(workspace)}`);
   }
   /// The model sub-agents run on (null: the chat's own), and the ones they may.
-  async subagentModel(): Promise<{ model: string | null; models: { id: string; provider: string }[] }> {
+  async setSubagentOften(often: "less" | "usual" | "more"): Promise<{ model: string | null; often: string; saved: boolean }> {
+    return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ often }) });
+  }
+  async subagentModel(): Promise<{ model: string | null; often?: string; models: { id: string; provider: string }[] }> {
     return this.request("/v1/subagent-model");
   }
   async setSubagentModel(model: string | null): Promise<{ model: string | null; models: { id: string; provider: string }[]; saved: boolean }> {

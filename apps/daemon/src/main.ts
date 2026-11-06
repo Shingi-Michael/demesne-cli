@@ -108,6 +108,7 @@ try {
     agent: config.agent,
     // /subagent saves its choice where the rest of the user's settings live.
     saveSubagentModel: (model) => { updateUserConfig(process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(), { agent: { subagent_model: model } }); },
+    saveSubagentOften: (often) => { updateUserConfig(process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(), { agent: { subagent_often: often } }); },
     providerFirstEventTimeoutMs,
     // Let each turn's output budget determine the default streaming deadline.
     providerRequestTimeoutMs: config.provider.requestTimeoutMs,

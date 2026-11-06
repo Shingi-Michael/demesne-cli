@@ -95,7 +95,7 @@ import { imageGenerationTool } from "./image-generation.ts";
 import { captureWindowTool } from "./window-capture.ts";
 import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
 import { loadConfig, type LoadedConfig } from "@demesne/config";
-import type { AgentConfig, HeartbeatConfig, ImageGenerationConfig } from "@demesne/config";
+import { SUBAGENT_OFTEN, type AgentConfig, type HeartbeatConfig, type ImageGenerationConfig, type SubagentOften } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
@@ -200,6 +200,7 @@ export function createDaemonApp(options: {
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
   saveSubagentModel?: (model: string | null) => void;
+  saveSubagentOften?: (often: SubagentOften) => void;
   /// Where breakage fixes get their git worktrees (default: beside the data directory).
   worktreeRoot?: string;
   /// The user config file to re-read on reload; null skips config re-loading.
@@ -1420,6 +1421,15 @@ export function createDaemonApp(options: {
       if (url.pathname === "/v1/subagent-model" && (request.method === "GET" || request.method === "POST")) {
         if (request.method === "POST") {
           const body = await readJson(request);
+          // How often: a separate field, sent on its own.
+          if (isRecord(body) && body.often !== undefined && body.model === undefined) {
+            if (typeof body.often !== "string" || !(SUBAGENT_OFTEN as readonly string[]).includes(body.often))
+              return apiError("invalid_request", `often must be one of ${SUBAGENT_OFTEN.join(", ")}`, 400);
+            engine.setSubagentOften(body.often as SubagentOften);
+            let saved = true;
+            try { options.saveSubagentOften?.(body.often as SubagentOften); } catch { saved = false; }
+            return json({ model: engine.subagentModel ?? null, often: engine.subagentOften, models: subagentModels(), saved });
+          }
           if (!isRecord(body) || !(body.model === null || typeof body.model === "string" && body.model.trim()))
             return apiError("invalid_request", "model must be a model id or null", 400);
           const model = typeof body.model === "string" ? body.model.trim() : null;
@@ -1428,9 +1438,9 @@ export function createDaemonApp(options: {
           engine.setSubagentModel(model ?? undefined);
           let saved = true;
           try { options.saveSubagentModel?.(model); } catch { saved = false; }
-          return json({ model, models: subagentModels(), saved });
+          return json({ model, often: engine.subagentOften, models: subagentModels(), saved });
         }
-        return json({ model: engine.subagentModel ?? null, models: subagentModels() });
+        return json({ model: engine.subagentModel ?? null, often: engine.subagentOften, models: subagentModels() });
       }
 
       // Providers changed (signed in or out): rebuild them without a restart.

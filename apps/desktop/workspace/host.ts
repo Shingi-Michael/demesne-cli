@@ -1166,7 +1166,7 @@ export class WorkspaceHost {
       server: this.client.server,
       allow: config.permissions.allow.map((rule) => ({ rule, mine: mine.has(rule) })),
       trusted,
-      subagent: subagent ? { model: subagent.model, models: subagent.models } : { model: config.agent?.subagentModel ?? null, models: [] },
+      subagent: subagent ? { model: subagent.model, often: subagent.often ?? "usual", models: subagent.models } : { model: config.agent?.subagentModel ?? null, often: config.agent?.subagentOften ?? "usual", models: [] },
       agent: { maxModelRounds: config.agent?.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds, maxToolCalls: config.agent?.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls },
       drive: { maxActiveMinutes: limits.maxActiveMinutes ?? DEFAULT_DRIVE_LIMITS.maxActiveMinutes, maxTokens: limits.maxTokens ?? DEFAULT_DRIVE_LIMITS.maxTokens, maxTasks: limits.maxTasks ?? DEFAULT_DRIVE_LIMITS.maxTasks },
       images: config.images?.url ? { model: config.images.model ?? null } : null,
@@ -2307,6 +2307,13 @@ export class WorkspaceHost {
       updateUserConfig(this.settings.configPath, { [section]: { [field]: typeof value === "string" ? value.trim() : value } });
       this.reloadSettings();
       if (spec.restart) this.restartFor.add(key);
+      return this.settingsInfo();
+    }
+    if (method === "subagent-often") {
+      const often = args.often;
+      if (often !== "less" && often !== "usual" && often !== "more") throw new Error("Invalid value");
+      await this.client.setSubagentOften(often);
+      this.reloadSettings();
       return this.settingsInfo();
     }
     if (method === "subagent-model") {

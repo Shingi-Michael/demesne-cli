@@ -1947,6 +1947,17 @@ export class DemesneStore {
       .all(sessionId,turnId??null,turnId??null) as EventRow[]).map(mapEvent);
   }
 
+  /// Source previews are authorized by completed tool records, never by a
+  /// filename invented in model prose or supplied in a download URL.
+  completedFileReads(sessionId: string, turnId: string) {
+    const turn = this.getTurn(turnId);
+    if (!turn || turn.sessionId !== sessionId) throw new NotFoundError("Turn not found in session");
+    return this.database.query(`SELECT id, name, arguments_json AS argumentsJson, result_text AS resultText
+      FROM tool_calls WHERE turn_id = ? AND status = 'completed'
+      AND name IN ('read_file', 'read_files', 'personal_files') ORDER BY rowid LIMIT 256`)
+      .all(turnId) as { id: string; name: string; argumentsJson: string; resultText: string | null }[];
+  }
+
   eventsAfter(sessionId: string, afterEventId: number, limit = 100): EventEnvelope[] {
     this.requireSession(sessionId);
     const boundedLimit = Math.max(1, Math.min(limit, 500));

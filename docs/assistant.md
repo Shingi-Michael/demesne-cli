@@ -295,3 +295,13 @@ The iPhone queries `GET /v1/sessions/:id/input-capabilities` before enabling ima
 Uploads still use the session attachment endpoint. New clients can send `requireImageInput: true` with nonempty `attachmentIds`; the daemon rechecks the effective inference route before creating the turn or consuming uploads. A model change can therefore reject the message safely rather than silently provide only image names. Existing clients that omit the flag retain their previous behavior. The reported capability reflects configured pixel forwarding; the chosen model and its runtime must actually support vision.
 
 Rebuild and restart the PC daemon to expose this endpoint. This API addition does not change the selected model or provider configuration.
+
+## Source documents on iPhone
+
+The phone can open a compact source card into a PDF or plain-text preview and explicitly share the opened file. Previews show the **current file on the PC**, which may have changed since the assistant read it. They do not require a vision model. PDFs are limited to 20 MiB and text to 2 MiB; password-protected or damaged PDFs are reported by the phone. Other binary formats are unavailable.
+
+`GET /v1/sessions/:session/turns/:turn/sources` returns `{ documents: SourceDocument[] }`. Only completed `read_file`, successful members of `read_files`, and `personal_files` read results create source IDs; prose, failed reads, folder listings and commands do not. IDs remain stable across restarts. The bounded list considers the first 256 completed read calls in a turn (up to eight files per batch).
+
+`GET /v1/sessions/:session/turns/:turn/sources/:id/content?revision=…` requires authentication and the listed revision. It rechecks the session/turn, current workspace trust or shared-folder configuration, protected paths, symlinks, hard links, byte limits and file identity. The URL cannot select an arbitrary filesystem path. A changed file returns 409; the phone's Retry refreshes metadata before downloading. Content responses disable HTTP caching. Missing files and removed access have distinct responses.
+
+The iPhone keeps only source metadata for offline navigation. Downloaded document bytes and share copies last while the preview is open and are removed on close; Forget PC also clears them. Files never upload to another service unless the person explicitly uses Share. Rebuild/restart the PC daemon for these routes; older daemons retain the phone's source-path details sheet.

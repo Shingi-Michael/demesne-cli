@@ -775,98 +775,79 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #drive-reply.open .bf-row:nth-child(2) { transition-delay: 100ms, 100ms, 0ms; }
   .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot { transition-delay: 140ms, 140ms, 0ms; }
 }
-/* The cards on the right: one column of quiet cards, each a tone with a
-   hairline ring, shown only while the chat uses one and where there is
-   room; headers fold a card to one line. */
+/* The cards on the right (pass 169 A): they step back so the chat leads.
+   No boxes: the environment card's three dim facts (pass 173 A), then one dim
+   line per card. A line brightens and unfolds on hover, or stays open after a
+   click; the only colour is a pink dot on what needs you. */
 #cards { display: none; }
 @media (min-width: 1100px) {
-  .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 8px; flex: none; width: 288px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
+  .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 2px; flex: none; width: 236px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
   .desktop .live-app.cards-context #composer-context { display: none; }
 }
-@keyframes card-arrive { from { opacity: 0; transform: translateX(12px); } }
-@media (prefers-reduced-motion: no-preference) { .desktop #cards .card.arriving { animation: card-arrive 240ms cubic-bezier(.32,.72,0,1); } }
-.desktop #cards .card { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair); border-radius: var(--r); font-size: 12.5px; color: var(--t2); }
-.desktop #cards .card-head { display: flex; align-items: center; gap: 4px; width: 100%; padding: 10px 12px; text-align: left; color: var(--t1); font-weight: 600; font-size: 12.5px; border-radius: var(--r); }
-.desktop #cards .card-head:hover .card-chev { opacity: 1; }
-.desktop #cards .card-chev { width: 13px; height: 13px; color: var(--t3); opacity: 0.6; }
-.desktop #cards .folded .card-chev { transform: rotate(-90deg); }
-.desktop #cards .card-sum { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--t3); }
-.desktop #cards .card:not(.folded) .card-sum:not(:has(.counts, .card-meter, .agent-mark)) { visibility: hidden; }
-.desktop #cards .card-body { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 2px; }
-.desktop #cards .card-row { position: relative; display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; }
-.desktop #cards .card-row .ico { width: 14px; height: 14px; flex: none; color: var(--t3); }
+@keyframes card-arrive { from { opacity: 0; transform: translateX(8px); } }
+@keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #cards .card.arriving { animation: card-arrive 240ms cubic-bezier(.32,.72,0,1); }
+  .desktop #cards .card:is(:hover, :focus-within, .open) .card-body { animation: card-unfold 180ms var(--ease); }
+  .desktop #cards .card { transition: color 160ms var(--ease), background-color 160ms var(--ease); }
+  .desktop #cards .card-act { transition: opacity 140ms var(--ease); }
+}
+.desktop #cards .card { position: relative; border-radius: var(--r-sm); font-size: 12px; color: var(--t3); }
+.desktop #cards .card:is(:hover, :focus-within, .open) { color: var(--t2); background: var(--hair); }
+.desktop #cards .card-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 4px 8px; text-align: left; color: inherit; font: inherit; border-radius: var(--r-sm); }
+.desktop #cards .card-head .ico { width: 13px; height: 13px; flex: none; opacity: 0.85; }
+.desktop #cards .card-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop #cards .card-sum { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.desktop #cards .card-sum .counts { opacity: 0.8; }
+.desktop #cards .card-need { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--blossom); }
+.desktop #cards .card-body { display: none; padding: 0 8px 8px 29px; flex-direction: column; gap: 1px; color: var(--t2); }
+.desktop #cards .card:is(:hover, :focus-within, .open) .card-body { display: flex; }
+.desktop #cards .card-row { position: relative; display: flex; align-items: center; gap: 8px; min-height: 22px; min-width: 0; }
+.desktop #cards .card-row .ico { width: 13px; height: 13px; flex: none; color: var(--t3); }
 .desktop #cards .card-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); }
 .desktop #cards .card-label em { font-style: normal; color: var(--t3); }
-.desktop #cards .card-right { flex: none; color: var(--t3); }
-.desktop #cards .card-meter { display: inline-block; width: 28px; height: 4px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
-.desktop #cards .card-meter i { display: block; height: 100%; background: var(--t2); }
-.desktop #cards .context-bar { display: flex; height: 6px; margin: 4px 0 8px; border-radius: 3px; overflow: hidden; background: var(--tone2); }
+.desktop #cards .card-right { flex: none; color: var(--t3); font-size: 11.5px; }
+.desktop #cards .card-meter { display: inline-block; width: 24px; height: 3px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
+.desktop #cards .card-meter i { display: block; height: 100%; background: currentColor; }
+.desktop #cards .context-bar { display: flex; height: 4px; margin: 4px 0 6px; border-radius: 2px; overflow: hidden; background: var(--tone2); }
 .desktop #cards .context-bar i { display: block; height: 100%; min-width: 2px; }
 .desktop #cards .tone-a { background: var(--acc, #7eaef0); }
 .desktop #cards .tone-b { background: #a58cf0; }
 .desktop #cards .tone-c { background: var(--t4); }
-.desktop #cards .card-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--t3); font-size: 11.5px; }
-.desktop #cards .card-legend u { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 2px; }
-.desktop #cards .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; color: var(--t3); font-size: 11.5px; }
-.desktop #cards .card-foot .link { color: var(--t2); text-decoration: underline; text-decoration-color: var(--hair2); text-underline-offset: 3px; }
-.desktop #cards .card-btn { flex: none; padding: 4px 10px; border-radius: var(--r-sm); background: var(--tone2); color: var(--t1); font-size: 12px; }
-.desktop #cards .card-btn:hover { background: var(--surface3, var(--hair2)); }
-.desktop #cards .card-act { position: absolute; right: 0; padding: 3px 9px; border-radius: var(--r-sm); background: var(--surface2); color: var(--t1); font-size: 12px; opacity: 0; pointer-events: none; }
+.desktop #cards .card-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--t3); font-size: 11.5px; }
+.desktop #cards .card-legend u { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; }
+.desktop #cards .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; color: var(--t3); font-size: 11.5px; }
+.desktop #cards .link { flex: none; color: var(--t1); font-size: 12px; text-decoration: underline; text-decoration-color: var(--t4); text-underline-offset: 3px; }
+.desktop #cards .link:hover { text-decoration-color: var(--t1); }
+.desktop #cards .need .card-foot .link { color: var(--blossom); text-decoration-color: color-mix(in srgb, var(--blossom) 45%, transparent); }
+.desktop #cards .card-act { position: absolute; right: 0; padding: 2px 8px; border-radius: var(--r-sm); background: var(--surface2); color: var(--t1); font-size: 12px; opacity: 0; pointer-events: none; }
 .desktop #cards .card-hover:hover .card-act, .desktop #cards .card-act:focus-visible { opacity: 1; pointer-events: auto; }
-.desktop #cards .card-dot { width: 7px; height: 7px; margin: 0 3.5px; border-radius: 50%; flex: none; background: var(--t4); }
+.desktop #cards .card-dot { width: 6px; height: 6px; margin: 0 3.5px; border-radius: 50%; flex: none; background: var(--t4); }
 .desktop #cards .card-dot.ready { background: var(--ok); }
 .desktop #cards .card-dot.failed { background: var(--danger, #e5484d); }
-/* Where: the card that says where this chat runs (pass 121 E). The head is
-   a monogram tile, the project and its folder, and the model with its effort
-   as three dots; the daemon shows only as a coloured edge and a note when it
-   isn't fine. */
-.desktop #cards [data-card="where"] .card-head { align-items: center; gap: 10px; padding: 11px 12px 9px; }
-.desktop #cards [data-card="where"] .card-title { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
-.desktop #cards [data-card="where"] .card-chev { order: 3; }
-.desktop #cards [data-card="where"] .card-sum { order: 4; margin-left: 0; }
-.desktop #cards [data-card="where"]:not(.folded) .card-sum { display: none; }
-.desktop #cards [data-card="where"].folded .card-title .wh-who, .desktop #cards [data-card="where"].folded .card-title .wh-model { display: none; }
-.desktop #cards [data-card="where"].folded .card-head { padding: 8px 12px; }
-.desktop #cards [data-card="where"].folded .wh-tile { width: 22px; height: 22px; font-size: 11px; border-radius: 6px; }
-.desktop #cards .wh-tile { flex: none; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; font-size: 15px; letter-spacing: -0.02em; color: #1b1c1f; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
-.desktop #cards .wh-pink { background: linear-gradient(135deg, #f6cbd8, #f2b6c8); }
-.desktop #cards .wh-blue { background: linear-gradient(135deg, #c6d9f6, #a9c4ee); }
-.desktop #cards .wh-green { background: linear-gradient(135deg, #bfe3cd, #9ed3b4); }
-.desktop #cards .wh-amber { background: linear-gradient(135deg, #f3dcb0, #ebc98a); }
-.desktop #cards .wh-lilac { background: linear-gradient(135deg, #dcd0f4, #c6b4ec); }
-.desktop #cards .wh-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.desktop #cards .wh-model { flex: none; max-width: 46%; display: flex; flex-direction: column; align-items: flex-end; text-align: right; font-weight: 500; }
-.desktop #cards .wh-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; color: var(--t1); }
-.desktop #cards .wh-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 400; line-height: 16px; color: var(--t3); }
-.desktop #cards .wh-sub em { font-style: normal; color: var(--t4); }
-.desktop #cards .wh-eff { display: inline-flex; gap: 3px; align-items: center; margin-left: 6px; vertical-align: 1px; }
-.desktop #cards .wh-eff i { width: 5px; height: 5px; border-radius: 50%; background: var(--t4); }
-.desktop #cards .wh-eff i.on { background: var(--t2); }
-.desktop #cards [data-card="where"] { overflow: hidden; }
-.desktop #cards [data-card="where"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: transparent; }
-.desktop #cards [data-card="where"] { position: relative; }
-.desktop #cards [data-card="where"].wh-wait::before { background: var(--warn); }
-.desktop #cards [data-card="where"].wh-off::before { background: var(--bad); }
-.desktop #cards [data-card="where"] .card-body { padding: 0 12px 11px; gap: 0; }
-.desktop #cards .wh-note { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 9px; border-radius: var(--r-sm); background: var(--tone2); font-size: 12px; color: var(--t2); }
-.desktop #cards .wh-note.wait { color: var(--warn); }
-.desktop #cards .wh-note.off { color: var(--bad); }
-.desktop #cards .wh-note .card-btn { margin-left: auto; padding: 2px 9px; }
-.desktop #cards .wh-pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
-.desktop #cards .wh-lines { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; font-size: 12px; }
-.desktop #cards .wh-k { color: var(--t3); }
-.desktop #cards .wh-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); }
-.desktop #cards .wh-v em { font-style: normal; color: var(--t3); }
-.desktop #cards .wh-v .card-meter { width: 40px; margin-left: 6px; vertical-align: middle; }
-.desktop #cards .wh-r { color: var(--t3); font-size: 11.5px; text-align: right; }
-.desktop #cards .wh-chip { display: inline-block; padding: 0 6px; border-radius: 5px; background: var(--tone2); font: 11px/18px var(--mono); color: var(--t2); }
 .desktop #cards .counts { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: no-preference) {
-  .desktop #cards .card-chev { transition: transform 160ms var(--ease), opacity 140ms var(--ease); }
-  .desktop #cards .card-act { transition: opacity 140ms var(--ease); }
-  .desktop #cards .card.unfolding .card-body { animation: card-unfold 200ms var(--ease); }
-}
-@keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }
+/* The environment card (pass 173 A): where this chat runs, no greeting. */
+.desktop #cards .env { margin-bottom: 6px; }
+.desktop #cards .env::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -4px; height: 1px; background: var(--hair); }
+.desktop #cards .env .card-head { flex-direction: column; align-items: stretch; gap: 1px; padding: 6px 8px; }
+.desktop #cards .env-row { display: flex; align-items: center; gap: 8px; min-height: 20px; min-width: 0; white-space: nowrap; }
+.desktop #cards .env-row .ico { width: 13px; height: 13px; flex: none; opacity: 0.85; }
+.desktop #cards .env-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.desktop #cards .env-v em { font-style: normal; }
+.desktop #cards .env-r { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
+.desktop #cards .env-dot { display: inline-block; width: 6px; height: 6px; margin: 0 3.5px; border-radius: 50%; flex: none; }
+.desktop #cards .env-dot.on { background: var(--ok); opacity: 0.8; }
+.desktop #cards .env-dot.wait { background: var(--warn); }
+.desktop #cards .env-dot.off { background: var(--blossom); }
+.desktop #cards .env:is(.env-off, .env-wait) { color: var(--t2); }
+.desktop #cards .env-eff { display: inline-flex; gap: 2px; align-items: center; }
+.desktop #cards .env-eff i { width: 4px; height: 4px; border-radius: 50%; background: var(--t4); }
+.desktop #cards .env-eff i.on { background: currentColor; }
+.desktop #cards .env-start { position: absolute; top: 7px; right: 8px; color: var(--blossom); font-size: 12px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--blossom) 45%, transparent); text-underline-offset: 3px; }
+.desktop #cards .env .card-body { padding-left: 8px; }
+.desktop #cards .env-more { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; font-size: 11.5px; }
+.desktop #cards .env-k { color: var(--t3); }
+.desktop #cards .env-m { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
 /* Work in progress: the working cube (working-cube.ts draws it as one SVG
    each frame) and a silver shine across the words. */
 .cube-mark { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; vertical-align: -2px; }

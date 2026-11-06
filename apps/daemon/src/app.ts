@@ -67,7 +67,7 @@ import { ThemeStore } from "./themes.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { WorkspaceTrust } from "./workspace-trust.ts";
 import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
-import { detectGitBranch } from "./git-branch.ts";
+import { detectGitBranch, detectGitSync } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
 import { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS, planDrive } from "./drive-planner.ts";
@@ -1835,9 +1835,10 @@ export function createDaemonApp(options: {
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
         const state = store.getSessionState(path[2]!);
         if (!state) return apiError("not_found", "Session not found", 404);
-        const branch = state.session.workspace ? await detectGitBranch(state.session.workspace.root) : null;
+        const root = state.session.workspace?.root;
+        const [branch, sync] = root ? await Promise.all([detectGitBranch(root), detectGitSync(root)]) : [null, null];
         const session = state.session.workspace && branch
-          ? { ...state.session, workspace: { ...state.session.workspace, gitBranch: branch } }
+          ? { ...state.session, workspace: { ...state.session.workspace, gitBranch: branch, ...(sync ? { gitAhead: sync.ahead, gitBehind: sync.behind } : {}) } }
           : state.session;
         return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!) });
       }

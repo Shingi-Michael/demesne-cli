@@ -535,7 +535,6 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop :is(#composer, #tp-composer) .composer-bar .cb, .desktop :is(#composer, #tp-composer) .composer-bar .cb-box { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; color: var(--t3); }
 .desktop :is(#composer, #tp-composer) .composer-bar .cb:hover { background: var(--surface2); color: var(--t1); }
 .desktop :is(#composer, #tp-composer) .composer-bar .cb .ico { width: 15px; height: 15px; }
-.desktop :is(#composer, #tp-composer) .composer-bar #composer-context:hover { background: none; }
 .desktop :is(#composer, #tp-composer) .composer-effort { margin-left: 4px; color: var(--t4); }
 .desktop :is(#composer, #tp-composer) .composer-bar .hints { margin-left: 6px; }
 .desktop .live-app:not(.start) #composer .composer-bar .hints { display: none; }
@@ -543,19 +542,22 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* Branch chip with changes: a button that asks for a commit and a PR. */
 /* The context ring's breakdown, unfolded above it. */
 .desktop #composer .composer-bar #composer-context { cursor: pointer; }
-.desktop #composer .composer-bar #composer-context.on .ring { outline: 2px solid var(--line2); outline-offset: 3px; border-radius: 50%; }
+.desktop #composer .composer-bar #composer-context { gap: 0; font-variant-numeric: tabular-nums; }
+.desktop #composer .composer-bar #composer-context:is(:hover, .on) { background: var(--tone2); color: var(--t1); }
+.desktop #composer .composer-bar #composer-context .cw-dot { color: var(--t4); white-space: pre; }
+.desktop #composer .composer-bar #composer-context .cw-plan.warn { color: var(--warn); }
 .desktop :is(#context-card, #tp-context-card) { position: absolute; right: 6px; bottom: calc(100% + 6px); z-index: 20; width: 248px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12.5px; color: var(--t2); }
-.desktop :is(#context-card, #tp-context-card) .context-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--t4); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
-.desktop :is(#context-card, #tp-context-card) .context-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line2); margin-bottom: 10px; }
-.desktop :is(#context-card, #tp-context-card) .context-bar i { display: block; height: 100%; min-width: 2px; }
-.desktop :is(#context-card, #tp-context-card) .context-legend { display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 8px; align-items: center; }
-.desktop :is(#context-card, #tp-context-card) .context-legend u { width: 7px; height: 7px; border-radius: 2px; }
-.desktop :is(#context-card, #tp-context-card) .context-legend em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
-.desktop :is(#context-card, #tp-context-card) .tone-a { background: var(--acc, #7eaef0); }
-.desktop :is(#context-card, #tp-context-card) .tone-b { background: #a58cf0; }
-.desktop :is(#context-card, #tp-context-card) .tone-c { background: var(--t4); }
-.desktop :is(#context-card, #tp-context-card) .tone-free { background: var(--line2); }
-.desktop :is(#context-card, #tp-context-card) .context-compact { margin-top: 10px; padding: 0; font-size: 12px; color: var(--acc); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--t4); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line2); margin-bottom: 10px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar i { display: block; height: 100%; min-width: 2px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-legend { display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 8px; align-items: center; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-legend u { width: 7px; height: 7px; border-radius: 2px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-legend em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-a { background: var(--acc, #7eaef0); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-b { background: #a58cf0; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-c { background: var(--t4); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-free { background: var(--line2); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-compact { margin-top: 10px; padding: 0; font-size: 12px; color: var(--acc); }
 
 /* Polish: one surface system and motion. Surfaces are tones over the
    background and hairlines, not solid outlines; three radii (6, 10, 14);
@@ -591,7 +593,7 @@ body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone
 .desktop :is(#composer, #tp-composer) .send, .desktop :is(#composer, #tp-composer) .composer-bar .cb, .desktop :is(#composer, #tp-composer) .composer-bar .cb-box { border-radius: var(--r-sm); }
 .desktop :is(#composer, #tp-composer) .composer-bar .cb-box { border: 0; }
 .desktop :is(#context-card, #tp-context-card) { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
-.desktop :is(#context-card, #tp-context-card) .context-bar { background: var(--tone2); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar { background: var(--tone2); }
 /* Sheets, popovers and menus: no outline, a hairline ring and one shadow. */
 .desktop .popover, .desktop .modal, .desktop #overlay.sheet, .desktop #overlay.anchored, .desktop #overlay.dropped { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
 .desktop .settings-toggle { border: 0; }
@@ -782,7 +784,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 #cards { display: none; }
 @media (min-width: 1100px) {
   .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 2px; flex: none; width: 236px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
-  .desktop .live-app.cards-context #composer-context { display: none; }
 }
 @keyframes card-arrive { from { opacity: 0; transform: translateX(8px); } }
 @keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }
@@ -1520,12 +1521,6 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 .st-inks button.on { box-shadow: 0 0 0 2px var(--panel, var(--ink)), 0 0 0 3.5px var(--t1); }
 
 /* Your plan's limit (pass 75 D): one quiet word beside the model, amber from 75%. */
-.desktop #composer .composer-bar #composer-limit { cursor: default; gap: 6px; font-variant-numeric: tabular-nums; }
-.desktop #composer .composer-bar #composer-limit:hover { background: none; color: var(--t2); }
-.desktop #composer .composer-bar #composer-limit .ring { width: 12px; height: 12px; }
-.desktop #composer .composer-bar #composer-limit .ring::after { width: 8px; height: 8px; }
-.desktop #composer .composer-bar #composer-limit.warn { color: var(--warn); }
-.desktop #composer .composer-bar #composer-limit.warn .ring { background: conic-gradient(var(--warn) 0 var(--usage, 0%), var(--surface3) 0); }
 
 #desktop-shell { position: relative; }
 
@@ -1810,29 +1805,25 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop #overlay .menu-actions button.danger { background: var(--bad-soft); color: var(--bad); }
 .desktop #overlay.sheet { max-height: min(560px, calc(100% - 120px)); }
 
-/* Context and your plan (pass 112 A): the context ring and the plan's mark
-   open one card, the chat's context explained on top, the plan's windows below. */
-.desktop #composer .composer-bar #composer-limit { cursor: pointer; }
-.desktop #composer .composer-bar #composer-limit:hover, .desktop #composer .composer-bar #composer-limit.on { background: var(--tone2); color: var(--t1); }
-.desktop #composer .composer-bar #composer-limit.on .ring { outline: none; }
+/* Context and your plan (pass 112 A, 177 C): the context word opens one card, the chat's context explained on top, the plan's windows below. */
 .desktop :is(#context-card, #tp-context-card) { width: 320px; }
-.desktop :is(#context-card, #tp-context-card) .context-head { font-size: 13px; color: var(--t1); font-weight: 600; margin-bottom: 6px; }
-.desktop :is(#context-card, #tp-context-card) .context-head span + span { font-weight: 400; color: var(--t3); font-size: 12px; }
-.desktop :is(#context-card, #tp-context-card) .context-say { margin: 0 0 10px; line-height: 18px; color: var(--t2); }
-.desktop :is(#context-card, #tp-context-card) .context-say b { font-weight: 500; color: var(--t1); }
-.desktop :is(#context-card, #tp-context-card) .context-bar { gap: 1px; }
-.desktop :is(#context-card, #tp-context-card) .tone-i { background: var(--blossom, #f2b6c8); }
-.desktop :is(#context-card, #tp-context-card) .tone-o { background: var(--ok); }
-.desktop :is(#context-card, #tp-context-card) .plan-window em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
-.desktop :is(#context-card, #tp-context-card) .context-divider { height: 1px; background: var(--hair); margin: 12px -14px; }
-.desktop :is(#context-card, #tp-context-card) .plan-window { margin-top: 8px; }
-.desktop :is(#context-card, #tp-context-card) .plan-window > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
-.desktop :is(#context-card, #tp-context-card) .plan-window .context-bar { height: 5px; margin: 4px 0 0; }
-.desktop :is(#context-card, #tp-context-card) .plan-window .context-bar i { background: var(--acc); }
-.desktop :is(#context-card, #tp-context-card) .plan-window.warn .context-bar i { background: var(--warn); }
-.desktop :is(#context-card, #tp-context-card) .plan-window.warn em { color: var(--warn); }
-.desktop :is(#context-card, #tp-context-card) .context-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 11px; padding-top: 9px; box-shadow: 0 -1px 0 var(--hair); font-size: 12px; color: var(--t3); }
-.desktop :is(#context-card, #tp-context-card) .context-foot .context-compact { margin: 0; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-head { font-size: 13px; color: var(--t1); font-weight: 600; margin-bottom: 6px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-head span + span { font-weight: 400; color: var(--t3); font-size: 12px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-say { margin: 0 0 10px; line-height: 18px; color: var(--t2); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-say b { font-weight: 500; color: var(--t1); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar { gap: 1px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-i { background: var(--blossom, #f2b6c8); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-o { background: var(--ok); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-divider { height: 1px; background: var(--hair); margin: 12px -14px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window { margin-top: 8px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window .context-bar { height: 5px; margin: 4px 0 0; }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window .context-bar i { background: var(--acc); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window.warn .context-bar i { background: var(--warn); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window.warn em { color: var(--warn); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 11px; padding-top: 9px; box-shadow: 0 -1px 0 var(--hair); font-size: 12px; color: var(--t3); }
+.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-foot .context-compact { margin: 0; }
 /* Compaction from notes (pass 114): the Keep list and the turns strip, pink for notes, blue for whole turns. */
 /* Changed, not running yet (pass 115): under the last turn that changed Demesne's own source. */
 .desktop .live-build { display: flex; align-items: center; gap: 8px; margin: 10px 0 0 34px; padding: 6px 8px 6px 10px; border-radius: 9px; background: var(--tone, rgba(255,255,255,.035)); box-shadow: inset 0 0 0 1px var(--hair, rgba(255,255,255,.07)); font-size: 12.5px; color: var(--t3); }
@@ -2543,3 +2534,15 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .pl-big figcaption { color: rgba(255, 255, 255, .78); font-size: 12.5px; }
 @keyframes pl-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .pl-big { animation: none; } }
+
+/* The same card in the right column (pass 177 C): open, flat, at the
+   column's width; a short window folds its parts list away first so the
+   cards below it still fit. */
+.desktop #cards .card.ctx { margin: 2px 0 6px; padding: 10px 10px 10px; color: var(--t2); background: var(--hair); }
+.desktop #cards .card.ctx:hover { background: var(--hair); }
+.desktop #cards .ctx-card { font-size: 12px; }
+.desktop #cards .ctx-card .context-divider { margin: 10px -10px; }
+.desktop #cards .ctx-card .context-compact { margin-top: 0; }
+@media (max-height: 760px) {
+  .desktop #cards .ctx-card :is(.context-legend, .context-say) { display: none; }
+}

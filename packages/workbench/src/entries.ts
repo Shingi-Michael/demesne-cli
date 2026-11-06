@@ -10,8 +10,9 @@ const TRACE_LIMIT = 64 * 1024;
 /// lines (starting, writing report) and any thinking an old event carries
 /// are dropped. Live updates and history replay share this, so a reopened
 /// session shows the same steps.
-export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string; subagentWhy?: string; repo?: import("@demesne/protocol").RepoFlow }, payload: Record<string, unknown>): void {
+export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string; subagentWhy?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard }, payload: Record<string, unknown>): void {
   if (typeof payload.report === "string" && payload.report) tool.report = payload.report;
+  if (isHandoffCard(payload.handoff)) tool.handoff = payload.handoff;
   if (typeof payload.why === "string" && payload.why) tool.subagentWhy = payload.why;
   if (isRepoFlow(payload.repo)) tool.repo = payload.repo;
   if (typeof payload.text !== "string" || !payload.text) return;
@@ -21,6 +22,12 @@ export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: strin
   const size = trace.reduce((sum, segment) => sum + segment.text.length, 0);
   if (size >= TRACE_LIMIT) return;
   trace.push({ kind: "step", text: payload.text.slice(0, TRACE_LIMIT - size) });
+}
+
+function isHandoffCard(value: unknown): value is import("@demesne/protocol").HandoffCard {
+  if (!value || typeof value !== "object") return false;
+  const card = value as Record<string, unknown>;
+  return typeof card.id === "string" && typeof card.agent === "string" && typeof card.status === "string" && Array.isArray(card.files) && Array.isArray(card.checks);
 }
 
 /// A commit or merge step's tree, as the daemon recorded it.
@@ -52,6 +59,8 @@ export interface ToolEntry {
   subagentModel?: string;
   /// Why Auto gave this sub-agent to the agent tool it runs on.
   subagentWhy?: string;
+  /// A hand-off's change card: what the agent changed in its own copy.
+  handoff?: import("@demesne/protocol").HandoffCard;
   /// A `git commit` or `git merge` step's tree, drawn under its row.
   repo?: import("@demesne/protocol").RepoFlow;
 }

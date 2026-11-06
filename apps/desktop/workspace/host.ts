@@ -2316,6 +2316,14 @@ export class WorkspaceHost {
       if (spec.restart) this.restartFor.add(key);
       return this.settingsInfo();
     }
+    if (method === "handoff" || method === "handoff-act") {
+      const id = typeof args.id === "string" && /^[a-z0-9-]{1,40}$/.test(args.id) ? args.id : null;
+      if (!id) throw new Error("Invalid hand-off");
+      if (method === "handoff") return this.client.handoff(id);
+      const action = args.action;
+      if (action !== "apply" && action !== "undo" && action !== "discard") throw new Error("Invalid value");
+      return this.client.handoffAct(id, action);
+    }
     if (method === "subagent-often") {
       const often = args.often;
       if (often !== "less" && often !== "usual" && often !== "more") throw new Error("Invalid value");

@@ -2506,3 +2506,89 @@ button:disabled {
   font-weight: 500;
   color: var(--text, inherit);
 }
+
+/* A hand-off's change card (pass 165 A): what an agent changed in its own
+   copy, and Bring it in / Ask for changes / Discard. */
+.ho-card {
+  margin: 4px 0 8px 23px;
+  max-width: 64ch;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--rule);
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 18px;
+  white-space: normal;
+  color: var(--strong);
+}
+.ho-card .ho-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.ho-card .ho-h b { font-weight: 500; }
+.ho-card .ho-h small { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.ho-card .sp { flex: 1; }
+.ho-card .add { color: var(--citron, #3f9e68); }
+.ho-card .del { color: var(--signal); }
+.ho-card .ho-files { border-top: 1px solid var(--rule); display: flex; flex-direction: column; }
+.ho-card .ho-file {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--secondary);
+  font-size: 12px;
+  min-width: 0;
+}
+.ho-card .ho-file .name { color: var(--strong); }
+.ho-card .ho-file .dir { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ho-card .ho-file small { font-size: 11px; white-space: nowrap; }
+.ho-card .ho-file:hover, .ho-card .ho-file.open { background: color-mix(in srgb, var(--paper) 4%, transparent); }
+.ho-card .ho-diff {
+  margin: 0;
+  padding: 6px 12px;
+  max-height: 300px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  font: 11.5px/17px var(--mono, ui-monospace, monospace);
+  color: var(--secondary);
+  white-space: pre;
+}
+.ho-card .ho-diff .a { color: var(--citron, #3f9e68); }
+.ho-card .ho-diff .d { color: var(--signal); }
+.ho-card .ho-diff .at { color: var(--muted); }
+.ho-card .ho-checks, .ho-card .ho-error {
+  padding: 6px 12px;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 12px;
+}
+.ho-card .ho-checks code { margin-right: 4px; color: var(--secondary); }
+.ho-card .ho-error { color: var(--signal); }
+.ho-card .ho-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--rule);
+}
+.ho-card .ho-actions button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 3px 11px;
+  border-radius: 99px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--paper) 8%, transparent);
+  color: var(--strong);
+}
+.ho-card .ho-actions button.ho-go { background: var(--electric); color: var(--ink); }
+.ho-card .ho-actions button.quiet { background: none; color: var(--muted); }
+.ho-card .ho-actions button:disabled { opacity: 0.45; cursor: default; }
+.ho-card .ho-actions .ico { width: 13px; height: 13px; }
+.ho-card.discarded, .ho-card.failed { opacity: 0.8; }

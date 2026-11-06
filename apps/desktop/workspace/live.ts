@@ -171,7 +171,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
   if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   const path = String(tool.input.path ?? tool.detail ?? "");
-  return tool.name === "subagent" ? "" : path.split("/").at(-1) ?? path;
+  return isAgentStep(tool) ? "" : path.split("/").at(-1) ?? path;
 }
 /// The thinking level each /model row would switch to: picked with ←→,
 /// else the current choice for the current model, else the model's default.
@@ -1734,10 +1734,10 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   // files names each one. The full paths are on hover.
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? paths.map((path) => `<span class="name">${h(fileName(path))}</span>`).join(", ") : paths[0] ? fileFirst(paths[0]) : h(base); }
   if (FILE_TOOLS.has(tool.name) && !tool.drafting && base && !/\s/.test(base)) return fileFirst(base);
-  if (tool.name !== "subagent" || tool.state !== "running") return h(base);
+  if (!isAgentStep(tool) || tool.state !== "running") return h(base);
   // Still being written by the model: not running yet.
   if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
-  const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
+  const slot = run.entries.filter((entry) => entry.type === "tool" && isAgentStep(entry)).indexOf(tool);
   const model = tool.subagentModel ?? state!.model.id;
   const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model);
   return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
@@ -1752,8 +1752,10 @@ function fileFirst(path: string) {
 /// A sub-agent running on one of your agent tools (Claude Code, Codex,
 /// Gemini): its id, from the "agent:<id> · " its progress lines carry.
 const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
+/// A sub-agent, or a hand-off (an agent tool making a change in its own copy).
+function isAgentStep(tool: ToolEntry) { return tool.name === "subagent" || tool.name === "hand_off"; }
 function cliAgent(tool: ToolEntry): string | null {
-  const id = tool.name === "subagent" && tool.subagentModel?.startsWith("agent:") ? tool.subagentModel.slice(6) : "";
+  const id = isAgentStep(tool) && tool.subagentModel?.startsWith("agent:") ? tool.subagentModel.slice(6) : "";
   return id && Object.hasOwn(CLI_NAMES, id) ? id : null;
 }
 /// "read live.ts" → "Read live.ts": a sub-agent's step as a line of words.
@@ -1765,7 +1767,7 @@ function helpingAgents(): Set<string> {
 }
 /// "3 steps": how far a sub-agent has got, on the right of its row.
 function subagentSteps(tool: ToolEntry) {
-  const steps = tool.name === "subagent" ? (tool.trace ?? []).length : 0;
+  const steps = isAgentStep(tool) ? (tool.trace ?? []).length : 0;
   return steps ? `${steps} step${steps === 1 ? "" : "s"}` : "";
 }
 /// One quiet line per step: an icon for the kind of work, the verb, the
@@ -1788,7 +1790,7 @@ const stepIcon = (tool: ToolEntry) => {
     : tool.phase === "change" ? "edit"
     : tool.name === "search_files" || tool.name === "web_search" ? "search"
     : tool.name === "list_files" ? "list"
-    : tool.name === "subagent" ? "agent"
+    : isAgentStep(tool) ? "agent"
     : tool.name === "ask_user" ? "ask"
     : tool.name === "heartbeat" ? "mail"
     : ["read_file", "read_files", "web_fetch", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
@@ -1806,7 +1808,7 @@ const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><p
 const foldable = (tool: ToolEntry) =>
   (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
   (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId)) ||
-  (tool.name === "subagent" && !tool.drafting && Boolean(tool.toolCallId));
+  (isAgentStep(tool) && !tool.drafting && Boolean(tool.toolCallId));
 /// A turn the answer to an open question started reads as that answer,
 /// not as a message you typed.
 function answerAsked(run: WorkspaceRun) {
@@ -1851,7 +1853,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
         : now
           ? subagentSteps(tool) || ""
           : tool.state === "done"
-            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${tool.name === "subagent" && subagentSteps(tool) ? `${subagentSteps(tool)} · ` : ""}${duration(tool.durationMs)}`
+            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${isAgentStep(tool) && subagentSteps(tool) ? `${subagentSteps(tool)} · ` : ""}${duration(tool.durationMs)}`
             : tool.state === "failed" || tool.state === "denied"
               ? `<span class="danger">×</span> ${tool.exitCode != null ? `exit ${tool.exitCode}` : h(tool.state)}`
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
@@ -1875,9 +1877,10 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // drawing itself is kept across repaints and dropped into this slot.
   const tree = tool.repo && tool.state === "done" ? repoSlot(tool) : "";
   // What a running sub-agent is on right now, on a quiet line under its row.
-  const last = tool.name === "subagent" && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
+  const last = isAgentStep(tool) && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
   const nowLine = last ? `<div class="agent-now">${h(nowWords(last))}</div>` : "";
-  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
+  const card = tool.handoff && tool.state !== "running" ? handoffCard(tool.handoff) : "";
+  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + card + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
 }
 const hasFileEdit = (tool: ToolEntry) => tool.phase === "change" && tool.state === "done" && Boolean(tool.changes?.length);
 const fileEditSlot = (tool: ToolEntry) => `<div data-file-edit="${h(tool.toolCallId)}"></div>`;
@@ -2000,7 +2003,7 @@ function rewindLine(rewind: Snapshot["rewinds"][number]) {
 /// command's recorded output (its tail), loaded when first opened, or a
 /// sub-agent's own guide.
 function stepFold(run: WorkspaceRun, tool: ToolEntry) {
-  if (tool.name === "subagent") return agentFold(run, tool);
+  if (isAgentStep(tool)) return agentFold(run, tool);
   if (tool.phase === "change") {
     if (tool.changes?.length) return `<div class="step-fold">${fileEditSlot(tool)}</div>`;
     const files = tool.changes?.length ? tool.changes.map((change) => ({ path: change.path, before: change.before ?? "", after: change.after ?? "" })) : tool.diff ? [{ path: String(tool.input.path ?? tool.detail ?? ""), before: tool.diff.oldText, after: tool.diff.newText }] : [];
@@ -2069,10 +2072,59 @@ function agentFold(run: WorkspaceRun, tool: ToolEntry) {
     body += `<div class="agent-found"><b><span class="danger">×</span> ${h(tool.state === "stopped" ? "Stopped" : "Failed")}</b>${tool.message ? ` · ${h(tool.message.replace(/^Error: (sub-agent failed: )?/, "").split("\n")[0] ?? "")}` : ""}</div>`;
   else if (tool.report) {
     const open = foundOpen.has(key), text = tool.report.trim(), clipped = !open && text.length > 240;
-    body += `<div class="agent-found"><b>Found</b> · ${h(clipped ? `${text.slice(0, 240).trimEnd()}…` : text)}${text.length > 240 ? btn("agent-found", open ? "less" : "more", { key }, "link agent-more") : ""}</div>`;
+    body += `<div class="agent-found"><b>${tool.name === "hand_off" ? "Said" : "Found"}</b> · ${h(clipped ? `${text.slice(0, 240).trimEnd()}…` : text)}${text.length > 240 ? btn("agent-found", open ? "less" : "more", { key }, "link agent-more") : ""}</div>`;
   }
   return `<div class="agent-steps" role="group">${body}</div>`;
 }
+/// A hand-off's change card (pass 165 A): what the agent changed in its own
+/// copy, with Bring it in, Ask for changes and Discard, and once brought in,
+/// Undo. Where it is now comes from the daemon (the turn's own record is how
+/// it was when the turn ended); the diff loads when a file is opened.
+const handoffNow = new Map<string, { status: string; error?: string; patch?: string }>();
+const handoffAsked = new Set<string>();
+const handoffOpenFile = new Map<string, string>();
+const handoffBusy = new Set<string>();
+function handoffFetch(id: string) {
+  if (handoffAsked.has(id)) return;
+  handoffAsked.add(id);
+  void api<{ handoff: { status: string; error?: string }; patch: string }>("handoff", { id }).then((found) => {
+    handoffNow.set(id, { status: found.handoff.status, ...(found.handoff.error ? { error: found.handoff.error } : {}), patch: found.patch });
+    follow = false;
+    renderConversation();
+  }).catch(() => { /* the turn's own record stands */ });
+}
+/// One file's part of a git patch, as colored lines.
+function patchFor(patch: string, path: string) {
+  const parts = patch.split(/^(?=diff --git )/m);
+  const part = parts.find((chunk) => chunk.startsWith(`diff --git a/${path} `) || chunk.includes(` b/${path}\n`)) ?? "";
+  const body = part.split("\n").filter((line) => !/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode|similarity|rename )/.test(line));
+  if (!body.length || !part) return '<div class="ho-diff muted">No diff to show</div>';
+  const shown = body.slice(0, 400);
+  return `<pre class="ho-diff">${shown.map((line) => `<span class="${line.startsWith("+") ? "a" : line.startsWith("-") ? "d" : line.startsWith("@@") ? "at" : ""}">${h(line)}</span>`).join("\n")}${body.length > shown.length ? `\n<span class="muted">… ${body.length - shown.length} more lines</span>` : ""}</pre>`;
+}
+function handoffCard(card: NonNullable<ToolEntry["handoff"]>) {
+  handoffFetch(card.id);
+  const now = handoffNow.get(card.id), status = now?.status ?? card.status, error = now ? now.error : card.error;
+  const name = CLI_NAMES[card.agent] ?? card.agent, busy = handoffBusy.has(card.id);
+  const added = card.files.reduce((sum, file) => sum + file.added, 0), removed = card.files.reduce((sum, file) => sum + file.removed, 0);
+  const open = handoffOpenFile.get(card.id);
+  const files = card.files.map((file) => btn("handoff-file", `${fileFirst(file.path)}<span class="sp"></span><small><span class="add">+${file.added}</span> <span class="del">−${file.removed}</span></small>`,
+    { id: card.id, path: file.path }, `ho-file ${open === file.path ? "open" : ""}`) + (open === file.path ? now?.patch !== undefined ? patchFor(now.patch, file.path) : '<div class="ho-diff muted">Loading…</div>' : "")).join("");
+  const state = status === "applied" ? `<span class="success">Brought in</span>` : status === "discarded" ? "Discarded" : status === "working" ? "Working…" : status === "failed" ? `<span class="danger">Didn't finish</span>` : "Not in your files yet";
+  const actions = status === "ready"
+    ? btn("handoff-act", "Bring it in", { id: card.id, action: "apply" }, "ho-go", busy) + btn("handoff-again", "Ask for changes", { id: card.id, agent: card.agent }, "ho-btn", busy) + btn("handoff-act", "Discard", { id: card.id, action: "discard" }, "ho-btn quiet", busy)
+    : status === "applied" ? btn("handoff-act", `${ICON_UNDO}Undo`, { id: card.id, action: "undo" }, "ho-btn", busy)
+    : status === "failed" && card.files.length ? btn("handoff-act", "Discard", { id: card.id, action: "discard" }, "ho-btn quiet", busy) : "";
+  const changed = card.files.length ? `${name} changed ${card.files.length} file${card.files.length === 1 ? "" : "s"}` : `${name} changed nothing`;
+  return `<div class="ho-card ${h(status)}" data-handoff="${h(card.id)}">
+    <div class="ho-h"><span class="agent-face step-face" data-provider="${h(card.agent)}" aria-hidden="true">${agentFace(card.agent, "calm")}</span><b>${h(changed)}</b>${card.files.length ? `<span class="add">+${added}</span><span class="del">−${removed}</span>` : ""}<span class="sp"></span><small>${state}</small></div>
+    ${files ? `<div class="ho-files">${files}</div>` : ""}
+    ${card.checks.length ? `<div class="ho-checks">Ran ${card.checks.slice(0, 4).map((check) => `<code>${h(check.length > 60 ? `${check.slice(0, 59)}…` : check)}</code>`).join(" ")}</div>` : ""}
+    ${error && status !== "applied" ? `<div class="ho-error">${h(error)}</div>` : ""}
+    ${actions ? `<div class="ho-actions">${actions}</div>` : ""}
+  </div>`;
+}
+
 /// Under the last turn that changed Demesne's own source: whether the app
 /// you're in runs it yet (its build is newer than the turn), and on a Mac,
 /// Rebuild and open. The open waits until nothing is working.
@@ -2141,6 +2193,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       // Folded steps keep their trees: a commit or merge stays drawn.
       if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
       if (entry.type === "tool" && entry.name === "start_threads" && entry.state === "done") { flush(); body += THREADS_SLOT; }
+      if (entry.type === "tool" && entry.handoff) { flush(); body += handoffCard(entry.handoff); }
       if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
@@ -5893,6 +5946,35 @@ async function dispatch(
     else {
       heroSignature = "";
       renderHero();
+    }
+    return;
+  }
+  if (action === "handoff-file") {
+    const id = String(args.id), path = String(args.path);
+    handoffOpenFile.get(id) === path ? handoffOpenFile.delete(id) : handoffOpenFile.set(id, path);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "handoff-again") {
+    setDraft(`Ask ${CLI_NAMES[String(args.agent)] ?? "the agent"} to change hand-off ${String(args.id)}: `);
+    return;
+  }
+  if (action === "handoff-act") {
+    const id = String(args.id), verb = String(args.action);
+    if (handoffBusy.has(id)) return;
+    handoffBusy.add(id);
+    follow = false;
+    renderConversation();
+    try {
+      const done = await api<{ handoff: { status: string; error?: string } }>("handoff-act", { id, action: verb });
+      handoffNow.set(id, { ...handoffNow.get(id), status: done.handoff.status, error: undefined });
+      notice(verb === "apply" ? "Brought in: the change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded");
+    } catch (error) {
+      notice(error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error));
+    } finally {
+      handoffBusy.delete(id);
+      renderConversation();
     }
     return;
   }

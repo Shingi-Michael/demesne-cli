@@ -11,7 +11,7 @@ export function toolArguments(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 export function toolTarget(name: string, input: Record<string, unknown>): string | undefined {
-  if (name === "subagent") return typeof input.description === "string" ? input.description : undefined;
+  if (name === "subagent" || name === "hand_off") return typeof input.description === "string" ? input.description : undefined;
   // heartbeat: the address a message goes to, or the machine a pairing answers.
   if (name === "heartbeat") return [input.to, input.node_id].find((part): part is string => typeof part === "string" && part.length > 0) ?? (typeof input.action === "string" ? input.action : undefined);
   // session_tools: "run find_definition", "define ts_search".

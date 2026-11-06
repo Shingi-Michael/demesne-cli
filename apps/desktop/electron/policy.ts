@@ -77,12 +77,36 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   // The ready kinds (foundry-kinds.ts): how a Deck, a Doc and a Dashboard look and move.
   "kinds.css": { path: "kit/kinds.css", type: "text/css; charset=utf-8" },
   "kinds.js": { path: "kit/kinds.js", type: "application/javascript; charset=utf-8" },
+  // Pages that remember: demesne.save / load / ask / pick. Demesne puts it in front of every page (withRemember).
+  "remember.js": { path: "kit/remember.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
 export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
 export const FOUNDRY_PICK_SCRIPT = "foundry://kit/pick.js", FOUNDRY_PARTS_SCRIPT = "foundry://kit/parts.js";
 /** A page that marks options (data-option) gets the Pick runtime after it. */
 export const withPick = (html: string) => /\bdata-option\b/.test(html) ? `${html}\n<script src="${FOUNDRY_PICK_SCRIPT}"></script>` : html;
+/** A page's own calls to Demesne: foundry://data/<id> keeps what the page
+ * saves, foundry://ask/<id> asks the chat's model. Null for anything else. */
+export function foundryPageCall(value: string): { what: "data" | "ask"; id: string } | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "foundry:" || (url.hostname !== "data" && url.hostname !== "ask") || url.username || url.password || url.port || url.search) return null;
+    const id = decodeURIComponent(url.pathname.slice(1));
+    return /^[\w-]{1,200}$/.test(id) ? { what: url.hostname, id } : null;
+  } catch { return null; }
+}
+/** A page uses the remember runtime when it calls one of its four functions. */
+export const usesRemember = (html: string) => /\bdemesne\s*\.\s*(?:save|load|ask|pick)\s*\(/.test(html);
+/** A page that uses it gets the runtime first, before its own scripts run. With
+ * a page (its id and the key Demesne made for it) saves and asks reach
+ * Demesne; without one (the look window, an exported file) they stay in the
+ * page. A script before <html> would not change the document's mode once
+ * the doctype is read, so it goes straight after the doctype. */
+export function withRemember(html: string, runtime: string, page?: { id: string; key: string }) {
+  const script = `${page ? `<script>window.__demesnePage=${JSON.stringify(page).replace(/</g, "\\u003c")};</script>` : ""}<script>${runtime.replace(/<\//g, "<\\/")}</script>`;
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  return doctype ? `${doctype[0]}${script}${html.slice(doctype[0].length)}` : `${script}${html}`;
+}
 /** The kit file a foundry://kit/<file> address names, or null. */
 export function foundryKitFile(value: string): string | null {
   try {
@@ -94,7 +118,9 @@ export function foundryKitFile(value: string): string | null {
 }
 /** A page as it leaves Demesne (Export): the kit it leaned on is inlined,
  * so the file stands on its own. The fonts fall back to the system's. */
-export function exportedSource(source: string, kit: { style: string; script: string; parts?: string; kinds?: { style: string; script: string } }) {
+export function exportedSource(source: string, kit: { style: string; script: string; parts?: string; kinds?: { style: string; script: string }; remember?: string }) {
+  // A page that remembers keeps its saves in the browser once it's a file.
+  if (kit.remember !== undefined && usesRemember(source)) source = withRemember(source, kit.remember);
   const tag = (name: string, address: string) => new RegExp(`<${name}\\b[^>]*\\b(?:href|src)=["']?${address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']?[^>]*>(?:\\s*</${name}>)?`, "gi");
   const style = kit.style.replace(/@font-face\{[^}]*foundry:\/\/kit\/[^}]*\}\n?/g, "");
   return source
@@ -110,8 +136,9 @@ export const FOUNDRY_SCRIPT_HOSTS = ["https://cdnjs.cloudflare.com", "https://cd
 export const FOUNDRY_FONT_HOSTS = { styles: "https://fonts.googleapis.com", files: "https://fonts.gstatic.com" } as const;
 /** What an artifact frame may do: run its own inline code, load the kit,
  * pinned libraries from the hosts above and Google Fonts, and nothing
- * else: no fetch, no forms, no other origins. */
-export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
+ * else: no forms, no other origins. Its only fetch is to foundry:, for
+ * what the page saves and asks (foundryPageCall). */
+export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; connect-src foundry:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
 /** The first show of a version assembles the page: anime.js and the
  * assembly script ride along, with the previous version to diff against. */
 export interface FoundryAssembly { library: string; previous: string | null }

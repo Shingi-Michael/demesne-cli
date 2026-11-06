@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DESIGN_MEASURE, LOOK_MEASURE, type DesignMeasure, type LookMeasure } from "./foundry-look-measure.ts";
-import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile } from "./policy.ts";
+import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember, withRemember } from "./policy.ts";
 
 export interface LookJob { kind: string; source: string; title: string }
 export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
@@ -52,7 +52,9 @@ export function runFoundryLook(path: string) {
     session.protocol.handle("foundry", async (request) => {
       const kit = foundryKitFile(request.url);
       if (kit) return new Response(kitFile(kit), { headers: { "Content-Type": FOUNDRY_KIT[kit]!.type, "Access-Control-Allow-Origin": "*" } });
-      return new Response(foundryDocument(job.kind, job.source, job.title), { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });
+      // A page that remembers runs on its own here: saves stay in memory, asks get a placeholder.
+      const page = foundryDocument(job.kind, job.source, job.title);
+      return new Response(job.kind === "html" && usesRemember(job.source) ? withRemember(page, kitFile("remember.js").toString("utf8")) : page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });
     });
     const errors: string[] = [], pages: LookPage[] = [];
     for (const view of VIEWS) {

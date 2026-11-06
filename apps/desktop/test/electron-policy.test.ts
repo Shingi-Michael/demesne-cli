@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, exportedSource, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, exportedSource, foundryPageCall, usesRemember, withRemember, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 import { ASSEMBLE_SCRIPT, assembledDocument, scriptText } from "../electron/foundry-assemble.ts";
 
 test("project switching may reload only the exact main application document", () => {
@@ -69,7 +69,8 @@ test("Foundry frames accept only artifact URLs and block the network", () => {
   expect(foundryURL("foundry://other/abc")).toBe(false);
   expect(foundryURL("https://artifact/abc")).toBe(false);
   expect(FOUNDRY_CSP).toContain("default-src 'none'");
-  expect(FOUNDRY_CSP).not.toContain("connect-src");
+  // Its only fetch: a page's own saves and asks, to foundry:.
+  expect(FOUNDRY_CSP).toContain("connect-src foundry:;");
   expect(FOUNDRY_CSP).toMatch(/script-src 'unsafe-inline' foundry: https:\/\/cdnjs\.cloudflare\.com https:\/\/cdn\.jsdelivr\.net https:\/\/unpkg\.com;/);
   expect(FOUNDRY_CSP).toContain("style-src 'unsafe-inline' foundry: https://fonts.googleapis.com;");
   expect(FOUNDRY_CSP).toContain("font-src data: foundry: https://fonts.gstatic.com;");
@@ -163,4 +164,21 @@ test("the kit is served at foundry://kit/<file>, only the files it has, and inli
   expect(foundryKitFile("foundry://kit/parts.js")).toBe("parts.js");
   // A page without the kit is exported as it is.
   expect(exportedSource("<p>plain</p>", kit)).toBe("<p>plain</p>");
+});
+
+test("pages that remember: only a page's own data and ask addresses, and the runtime goes in first", () => {
+  expect(foundryPageCall("foundry://data/abc-1")).toEqual({ what: "data", id: "abc-1" });
+  expect(foundryPageCall("foundry://ask/abc-1")).toEqual({ what: "ask", id: "abc-1" });
+  for (const bad of ["foundry://data/", "foundry://data/a/b", "foundry://data/a?x=1", "foundry://kit/remember.js", "foundry://artifact/a", "https://data/a", "foundry://data/a%2F..%2Fb"]) expect(foundryPageCall(bad)).toBeNull();
+  expect(usesRemember("<script>demesne.save('a', 1)</script>")).toBe(true);
+  expect(usesRemember("<script>await demesne . load(\"a\")</script>")).toBe(true);
+  expect(usesRemember("<script>demesne.motion('Arrive', tl)</script>")).toBe(false);
+  const page = withRemember("<!DOCTYPE html><html><body><script>demesne.load('x')</script>", "window.demesne={}</script>", { id: "a1", key: "k<" });
+  // Straight after the doctype, so the page stays in standards mode and the runtime runs before the page's own script.
+  expect(page.startsWith("<!DOCTYPE html><script>window.__demesnePage={\"id\":\"a1\",\"key\":\"k\\u003c\"};</script><script>window.demesne={}<\\/script></script><html>")).toBe(true);
+  expect(withRemember("<p>x</p>", "R")).toBe("<script>R</script><p>x</p>");
+  const kit = { style: "", script: "" };
+  expect(exportedSource("<p>demesne.save('a', 1)</p>", { ...kit, remember: "R" })).toBe("<script>R</script><p>demesne.save('a', 1)</p>");
+  expect(exportedSource("<p>plain</p>", { ...kit, remember: "R" })).toBe("<p>plain</p>");
+  expect(FOUNDRY_KIT["remember.js"]?.path).toBe("kit/remember.js");
 });

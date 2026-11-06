@@ -8,6 +8,7 @@ import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./a
 import { useSkillTool } from "./skills.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
 import { electronLook, lookCommand, type FoundryLook } from "./foundry-look.ts";
+import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -335,6 +336,7 @@ export function createDaemonApp(options: {
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   // Pages are looked at after each save when the desktop app is there to render them.
+  const askLimits = new AskLimits();
   const lookWith = options.foundryLook === undefined ? lookCommand() : null;
   const look = options.foundryLook ?? (lookWith ? electronLook(lookWith) : undefined), looks = new Map<string, number>();
   tools.register(useSkillTool());
@@ -1636,6 +1638,32 @@ export function createDaemonApp(options: {
           catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
         }
         if (id && path.length === 3 && request.method === "DELETE") return store.deleteFoundryArtifact(id) ? json({ deleted: true }) : apiError("not_found", "Foundry artifact not found", 404);
+        // Pages that remember: what a page saved, one named value at a time,
+        // and a question the page asks the chat's model (thinking off, no tools).
+        if (id && path.length === 4 && path[3] === "data") {
+          try {
+            if (request.method === "GET") return json({ data: store.getFoundryData(id) });
+            if (request.method === "POST") {
+              const body = await readJson(request);
+              if (!isRecord(body) || typeof body.name !== "string") return apiError("invalid_request", "A saved value needs a name", 400);
+              return json({ data: store.setFoundryData(id, body.name, body.value ?? null) });
+            }
+          } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
+        }
+        if (id && path.length === 4 && path[3] === "ask" && request.method === "POST") {
+          const body = await readJson(request);
+          const question = isRecord(body) && typeof body.question === "string" ? body.question.trim() : "";
+          if (!question) return apiError("invalid_request", "Ask a question", 400);
+          const artifact = store.getFoundryArtifact(id);
+          if (!artifact) return apiError("not_found", "Foundry artifact not found", 404);
+          const wait = askLimits.take(id);
+          if (wait) return apiError("rate_limited", wait, 429);
+          const inference = snapshotTurnInference(processor, false);
+          const lease = await scheduler.for(inference.providerId).acquire(`foundry-ask:${randomUUID()}`, request.signal);
+          try { return json({ answer: await askOnce((messages, signal) => inference.stream(messages, [], signal), artifact.title, question) }); }
+          catch (error) { return apiError("ask_failed", error instanceof Error ? error.message : String(error), 502); }
+          finally { lease.release(); }
+        }
         return apiError("not_found", "Unknown Foundry request", 404);
       }
 

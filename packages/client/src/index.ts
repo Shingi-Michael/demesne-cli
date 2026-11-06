@@ -228,6 +228,16 @@ export class DemesneClient {
   async foundryRename(id: string, title: string): Promise<import("@demesne/protocol").FoundryArtifact> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
   }
+  /// Pages that remember: what a page saved, and a question it asks the model.
+  async foundryData(id: string): Promise<{ data: Record<string, unknown> }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/data`);
+  }
+  async foundrySetData(id: string, name: string, value: unknown): Promise<{ data: Record<string, unknown> }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/data`, { method: "POST", body: JSON.stringify({ name, value }) });
+  }
+  async foundryAsk(id: string, question: string): Promise<{ answer: string }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/ask`, { method: "POST", body: JSON.stringify({ question }) });
+  }
   async foundryDelete(id: string): Promise<{ deleted: boolean }> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "DELETE" });
   }

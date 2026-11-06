@@ -78,7 +78,13 @@ export const READY_KINDS_RULES = "Ready kinds: slides are kind deck, a report, b
   + "A deck splits into slides on lines that are only ---: one idea per slide, few words; # 3.1× with a sentence becomes a big-number slide, a lone quote a quote slide, a heading and a chart a chart slide, a list with a chart a split "
   + "(<!-- layout: title|statement|number|quote|split|chart|points --> overrides). A dashboard's ## headings group its stats, charts and tables. Anything interactive or custom is html.";
 
-const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + DESIGN_BRIEF;
+/// Pages that remember (apps/desktop/foundry-kit/remember.js): Demesne puts
+/// the runtime in front of any page that calls it, so the page needs no tag.
+export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: await demesne.save(name, jsonValue) and await demesne.load(name, fallback) keep what the person enters with the artifact (across closing, reloads and new versions; 256 KB; localStorage does not work here); "
+  + "await demesne.ask(question) returns the chat model's answer as text, for a button the person presses (never on load or in a loop; a few a minute); await demesne.pick({accept}) lets them choose a file ({name, type, text} or {name, type, dataURL}). "
+  + "Use them when the page is a tool to keep (a tracker, checklist, planner, journal, quiz): load on start, save on every change, show a saved state.";
+
+const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + REMEMBER_RULES + " " + DESIGN_BRIEF;
 
 /// What stands in for a page's source once its turn is over.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";

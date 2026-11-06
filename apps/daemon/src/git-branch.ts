@@ -58,3 +58,34 @@ async function runGit(command: string[]): Promise<{ code: number; stdout: string
     clearTimeout(timer);
   }
 }
+
+/// How far the branch is from the one it tracks (usually on GitHub): commits
+/// to push and commits to pull. Null without an upstream, outside a
+/// repository, or when git fails; cached like the branch.
+export interface GitSync { ahead: number; behind: number }
+const syncCache = new Map<string, { sync: GitSync | null; checkedAt: number }>();
+
+export async function detectGitSync(
+  workspaceRoot: string,
+  overrides: Partial<GitBranchDependencies> = {},
+): Promise<GitSync | null> {
+  const now = overrides.now ?? Date.now;
+  const cached = syncCache.get(workspaceRoot);
+  if (cached && now() - cached.checkedAt < GIT_BRANCH_CACHE_TTL_MS) return cached.sync;
+  const run = overrides.run ?? runGit;
+  let sync: GitSync | null = null;
+  try {
+    // "<behind>\t<ahead>": the left side is the upstream, the right is HEAD.
+    const result = await run(["git", "-C", workspaceRoot, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"]);
+    const match = /^(\d+)\s+(\d+)$/.exec(result.stdout.trim());
+    if (result.code === 0 && match) sync = { behind: Number(match[1]), ahead: Number(match[2]) };
+  } catch {
+    sync = null;
+  }
+  syncCache.set(workspaceRoot, { sync, checkedAt: now() });
+  return sync;
+}
+
+export function clearGitSyncCache(): void {
+  syncCache.clear();
+}

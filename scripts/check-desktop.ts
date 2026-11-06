@@ -488,7 +488,7 @@ try {
   await click("toggle-steps");
   assert.equal(await page.locator("#conversation .thinking").count(), 0, "opened steps show no thinking either");
   await click("toggle-steps");
-  // A project chat that uses no other card has only Where on the right (pass 121 E).
+  // A project chat that uses no other card has only the environment card on the right (pass 173 A).
   assert.deepEqual(await evaluate<string[]>("return [...document.querySelectorAll('#cards > .card')].map(card => card.dataset.card);"), ["where"], "a chat that uses no card has only Where on the right");
   // Native notifications: record them in the main process, and look away from the window.
   // The Dock's working bar: record what the window sets.
@@ -1229,18 +1229,23 @@ try {
   const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
-  // The cards on the right show only what this chat uses (pass 86 A): its
-  // own edit brings Changes in; Where leads in a project chat (pass 121 E),
-  // there is no switch, and Context waits until half full, so the composer's
-  // ring stays.
-  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what this chat changed");
+  // The cards on the right show only what this chat uses (pass 86 A) and
+  // step back (pass 169 A): its own edit brings a dim Changes line with a
+  // pink dot; the environment card leads in a project chat (pass 173 A),
+  // and Context waits until half full, so the composer's ring stays.
+  const changesCard = page.locator("#cards [data-card=changes]");
+  await until(() => changesCard.locator(".card-head").innerText().then(text => text.includes("1 file changed") && text.includes("+1") && text.includes("−1")), "the Changes line says what this chat changed");
+  assert.equal(await changesCard.locator(".card-need").count(), 1, "uncommitted changes carry the pink dot");
+  assert.equal(await changesCard.locator(".card-body").isVisible(), false, "a line keeps its details until you hover it");
+  await changesCard.hover();
+  await until(() => changesCard.locator(".card-body").innerText().then(text => text.includes("Commit & PR")), "hover unfolds the line with Commit & PR");
   assert.equal(await page.locator("#cards [data-card=environment]").count(), 0, "there is no Environment card");
   const where = page.locator("#cards [data-card=where]");
-  assert.equal(await page.locator("#cards > .card").first().getAttribute("data-card"), "where", "Where is the first card");
-  assert.equal(await where.locator(".wh-tile").innerText(), "W", "the monogram is the project's letter");
-  assert.equal(await where.locator(".wh-who .wh-name").innerText(), "workspace", "the project's name");
-  assert.match(await where.locator(".wh-lines").innerText(), /Branch[\s\S]*1 changed[\s\S]*Runs on\s*This computer\s*online/, "the branch with what this chat changed, and where it runs");
-  assert.equal(await where.locator(".wh-note").count(), 0, "the daemon says nothing while it's fine");
+  assert.equal(await page.locator("#cards > .card").first().getAttribute("data-card"), "where", "the environment card is first");
+  assert.equal(await where.locator(".wh-tile").count(), 0, "no monogram tile: it doesn't greet you");
+  assert.match(await where.locator(".card-head").innerText(), /This computer[\s\S]*master[\s\S]*uncommitted/, "where it runs and the branch with what's uncommitted");
+  assert.equal(await where.locator(".env-dot.on").count(), 1, "the daemon is a quiet dot while it's fine");
+  assert.equal(await where.locator(".env-start").count(), 0, "Start shows only when the daemon is off");
   await capture("02-where");
   assert.equal(await page.locator(".header-cards").count(), 0, "the top bar has no cards switch");
   if (percentage < 50) assert.equal(await page.locator("#cards [data-card=context]").count(), 0, "Context waits until the chat is half full");
@@ -1251,10 +1256,12 @@ try {
   });
   assert.equal(cardInsets.top, cardInsets.right, "the cards have matching top and right insets");
   await capture("04-cards");
-  await page.locator("#cards [data-card=changes] .card-head").click();
-  await until(() => page.locator("#cards [data-card=changes].folded").count().then(count => count === 1), "a card folds to one line");
-  await page.locator("#cards [data-card=changes] .card-head").click();
-  await page.locator("#cards [data-card=changes] .card-body").waitFor();
+  await changesCard.locator(".card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].open").count().then(count => count === 1), "a click keeps a line open");
+  await page.mouse.move(5, 5);
+  assert.equal(await changesCard.locator(".card-body").isVisible(), true, "an opened line stays open without hover");
+  await changesCard.locator(".card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].open").count().then(count => count === 0), "a second click closes it");
   await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
   // The ring unfolds the context breakdown above it until Esc.
   await page.locator("#composer-context").click();

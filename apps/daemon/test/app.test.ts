@@ -1,4 +1,5 @@
 import { webFetchTool, webSearchTool } from "../src/web.ts";
+import { updatePlanTool } from "../src/plan.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,10 +34,10 @@ const apps: DaemonApp[] = [];
 
 // Context-boundary fixtures account for tools available without a project.
 // Keep their transcript budgets stable as the tool definitions change.
-function plainChatToolOverhead(): number {
+function plainChatToolOverhead(plan = true): number {
   const store = new DemesneStore(":memory:");
   try {
-    const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition, foundryEditTool(store).definition, webSearchTool().definition, webFetchTool().definition];
+    const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition, foundryEditTool(store).definition, webSearchTool().definition, webFetchTool().definition, ...(plan ? [updatePlanTool().definition] : [])];
     const estimate = (tools: typeof definitions) => planRawContextRequest({
       // These tests submit turns without a permission mode ("deny"): nobody is at the window.
       messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools, attended: false }) }], tools, historicalTurns: [],
@@ -1685,7 +1686,8 @@ describe("Demesne daemon", () => {
     const processor: TurnProcessor = {
       providerId: "llama.cpp",
       modelId: "cache-aware-model",
-      contextCapacity: 2_600 + plainChatToolOverhead(),
+      // Its soft-band window was tuned before update_plan; the margin is a fixture, not a rule.
+      contextCapacity: 2_600 + plainChatToolOverhead(false),
       maxOutputTokens: 128,
       preservesPromptCache: true,
       async listModels() { return []; },

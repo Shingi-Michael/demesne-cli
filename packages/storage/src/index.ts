@@ -7,6 +7,7 @@ import {
   type FoundryArtifactDetail,
   type FoundryKind,
   FOUNDRY_KINDS,
+  FOUNDRY_MAX_DATA_BYTES,
   FOUNDRY_MAX_SOURCE_BYTES,
   type ImageArtifact,
   type TurnAttachment,
@@ -248,6 +249,9 @@ export class DemesneStore {
       artifact_id TEXT NOT NULL REFERENCES foundry_artifacts(id) ON DELETE CASCADE, version INTEGER NOT NULL,
       created_at TEXT NOT NULL, session_id TEXT, turn_id TEXT, note TEXT NOT NULL, source TEXT NOT NULL,
       PRIMARY KEY (artifact_id, version)
+    );
+    CREATE TABLE IF NOT EXISTS foundry_data (
+      artifact_id TEXT PRIMARY KEY REFERENCES foundry_artifacts(id) ON DELETE CASCADE, data TEXT NOT NULL, updated_at TEXT NOT NULL
     );`);
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
@@ -348,8 +352,31 @@ export class DemesneStore {
     return foundryArtifact(this.database.query("SELECT * FROM foundry_artifacts WHERE id = ?").get(id) as FoundryRow);
   }
 
+  /// What a page saved (demesne.save): one JSON object per artifact, kept
+  /// across versions, gone with the artifact.
+  getFoundryData(id: string): Record<string, unknown> {
+    if (!this.database.query("SELECT 1 FROM foundry_artifacts WHERE id = ?").get(id)) throw new NotFoundError("Foundry artifact not found");
+    const row = this.database.query("SELECT data FROM foundry_data WHERE artifact_id = ?").get(id) as { data: string } | null;
+    try { const data = row ? JSON.parse(row.data) : {}; return data && typeof data === "object" && !Array.isArray(data) ? data : {}; } catch { return {}; }
+  }
+
+  /// Keeps one named value (null forgets it); the whole page keeps up to 256 KB.
+  setFoundryData(id: string, name: string, value: unknown): Record<string, unknown> {
+    if (!name || name.length > 200) throw new InvalidStateError("A saved value needs a name of up to 200 characters");
+    return this.database.transaction(() => {
+      const data = this.getFoundryData(id);
+      if (value === null || value === undefined) delete data[name]; else data[name] = value;
+      const text = JSON.stringify(data);
+      if (Buffer.byteLength(text) > FOUNDRY_MAX_DATA_BYTES) throw new InvalidStateError("That is too much to save; a page keeps up to 256 KB");
+      this.database.query("INSERT INTO foundry_data(artifact_id,data,updated_at) VALUES (?,?,?) ON CONFLICT(artifact_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at")
+        .run(id, text, new Date().toISOString());
+      return data;
+    })();
+  }
+
   deleteFoundryArtifact(id: string): boolean {
     return this.database.transaction(() => {
+      this.database.query("DELETE FROM foundry_data WHERE artifact_id = ?").run(id);
       this.database.query("DELETE FROM foundry_versions WHERE artifact_id = ?").run(id);
       return this.database.query("DELETE FROM foundry_artifacts WHERE id = ?").run(id).changes > 0;
     })();

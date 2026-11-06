@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, screen, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { createHmac, randomBytes } from "node:crypto";
 import { homedir, release } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,9 +11,9 @@ import { isReadyKind } from "./foundry-kinds.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
-protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
 const lookJob = lookJobPath(process.argv);
@@ -189,10 +190,29 @@ if (!lookJob) void app.whenReady().then(async () => {
   // and leave it faded.
   let assembleLibrary: string | undefined;
   const kitFile = (name: string) => { const file = FOUNDRY_KIT[name]!; return Buffer.concat([readFileSync(join(base, "ui", file.path)), ...(file.then ? [Buffer.from("\n"), readFileSync(join(base, "ui", file.then))] : [])]); };
+  // Pages that remember: each page Demesne shows gets a key made from its id
+  // and a secret that lives only as long as the app, so a page can reach its
+  // own saves and asks and no other artifact's.
+  const pageSecret = randomBytes(32), pageKey = (id: string) => createHmac("sha256", pageSecret).update(id).digest("base64url");
+  const pageCall = async (call: { what: "data" | "ask"; id: string }, request: Request) => {
+    const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+    if (request.method !== "POST") return reply({ error: "Not found" }, 404);
+    let body: Record<string, unknown>;
+    try { const text = await request.text(); if (text.length > 300_000) return reply({ error: "That is too much to save; a page keeps up to 256 KB" }, 413); body = JSON.parse(text); }
+    catch { return reply({ error: "Bad request" }, 400); }
+    if (!body || typeof body !== "object" || body.page !== pageKey(call.id)) return reply({ error: "This page can't reach Demesne" }, 403);
+    try {
+      if (call.what === "ask") return reply(await backend!.request("foundry-ask", { id: call.id, question: String(body.question ?? "") }));
+      if (typeof body.name === "string") return reply(await backend!.request("foundry-data-set", { id: call.id, name: body.name, value: body.value ?? null }));
+      return reply(await backend!.request("foundry-data", { id: call.id }));
+    } catch (error) { return reply({ error: error instanceof Error ? error.message : String(error) }, 400); }
+  };
   await session.protocol.handle("foundry", async request => {
     // The kit: the frames' origins are opaque, so the fonts need the CORS header.
     const kit = foundryKitFile(request.url);
     if (kit) return new Response(kitFile(kit), { headers: { "Content-Type": FOUNDRY_KIT[kit]!.type, "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff", "Cache-Control": "max-age=3600" } });
+    const call = foundryPageCall(request.url);
+    if (call) return pageCall(call, request);
     if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
     try {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
@@ -212,6 +232,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       }
       let page = foundryDocument(found.kind, found.source, found.title, assembly);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
+      if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });
@@ -392,7 +413,7 @@ if (!lookJob) void app.whenReady().then(async () => {
         await writeFile(selected.filePath, await foundryPDF(session, String(id), found.version, found.kind));
         return { path: selected.filePath };
       }
-      const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") } };
+      const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
       await writeFile(selected.filePath, found.kind === "html" ? exportedSource(found.source, kit) : ready ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit) : found.source, "utf8");
       return { path: selected.filePath };
     }

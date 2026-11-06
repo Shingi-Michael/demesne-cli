@@ -1122,6 +1122,8 @@ function parseRuleArguments(value: unknown): Record<string, unknown> {
 export type FoundryKind = "html" | "svg" | "markdown" | "deck" | "doc" | "dashboard";
 export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown", "deck", "doc", "dashboard"];
 export const FOUNDRY_MAX_SOURCE_BYTES = 512 * 1024;
+/// What one page may keep with demesne.save, all names together.
+export const FOUNDRY_MAX_DATA_BYTES = 256 * 1024;
 
 export interface FoundryVersion {
   version: number;

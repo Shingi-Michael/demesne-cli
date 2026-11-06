@@ -1554,6 +1554,10 @@ export class WorkspaceHost {
       "setup-action",
       "foundry-list",
       "foundry-get",
+      // A page's own saves and asks (pages that remember), from the foundry: handler.
+      "foundry-data",
+      "foundry-data-set",
+      "foundry-ask",
       "google-ai-cancel",
       // The sidebar's right-click menu acts on any chat or project.
       "delete-chat",
@@ -2161,6 +2165,9 @@ export class WorkspaceHost {
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
     if (method === "foundry-get") return this.client.foundryGet(string(args.id, "artifact", 200), typeof args.version === "number" && Number.isSafeInteger(args.version) && args.version > 0 ? args.version : undefined);
+    if (method === "foundry-data") return this.client.foundryData(string(args.id, "artifact", 200));
+    if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);
+    if (method === "foundry-ask") return this.client.foundryAsk(string(args.id, "artifact", 200), string(args.question, "question", 8000));
     if (method === "foundry-rename") return this.client.foundryRename(string(args.id, "artifact", 200), string(args.title, "title", 200));
     if (method === "foundry-delete") return this.client.foundryDelete(string(args.id, "artifact", 200));
     if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you" });

@@ -29,6 +29,7 @@ export async function prepareUi(out: string) {
   cpSync(join(desktop, "foundry-kit/parts.js"), join(out, "kit/parts.js"));
   cpSync(join(desktop, "foundry-kit/kinds.css"), join(out, "kit/kinds.css"));
   cpSync(join(desktop, "foundry-kit/kinds.js"), join(out, "kit/kinds.js"));
+  cpSync(join(desktop, "foundry-kit/remember.js"), join(out, "kit/remember.js"));
   mkdirSync(join(out, "vendor/katex"), { recursive: true });
   cpSync(join(desktop, "node_modules/katex/dist/katex.min.css"), join(out, "vendor/katex/katex.min.css"));
   cpSync(join(desktop, "node_modules/katex/dist/fonts"), join(out, "vendor/katex/fonts"), { recursive: true });

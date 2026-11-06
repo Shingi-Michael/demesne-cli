@@ -170,6 +170,13 @@ export class DemesneClient {
   async setSubagentOften(often: "less" | "usual" | "more"): Promise<{ model: string | null; often: string; saved: boolean }> {
     return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ often }) });
   }
+  /// A hand-off (pass 165 A): its record and its diff, or act on it.
+  async handoff(id: string): Promise<{ handoff: { id: string; agent: string; status: string; files: { path: string; added: number; removed: number }[]; checks: string[]; error?: string; root: string }; patch: string }> {
+    return this.request(`/v1/handoffs/${encodeURIComponent(id)}`);
+  }
+  async handoffAct(id: string, action: "apply" | "undo" | "discard"): Promise<{ handoff: { id: string; status: string; error?: string } }> {
+    return this.request(`/v1/handoffs/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ action }) });
+  }
   async subagentModel(): Promise<{ model: string | null; often?: string; models: { id: string; provider: string }[] }> {
     return this.request("/v1/subagent-model");
   }

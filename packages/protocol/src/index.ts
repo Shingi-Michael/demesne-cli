@@ -81,6 +81,10 @@ export interface RepoResult {
   totals: { added: number; removed: number };
 }
 export interface RepoFlow { command: "commit" | "merge"; before: RepoSnapshot; after: RepoSnapshot; result?: RepoResult }
+/// A hand-off's change card (pass 165 A): what one of your agent tools
+/// changed in its own worktree. `status` is as the turn left it; the card
+/// asks /v1/handoffs/:id for where it is now.
+export interface HandoffCard { id: string; agent: string; status: string; files: { path: string; added: number; removed: number }[]; checks: string[]; error?: string }
 
 export interface ToolFileChange {
   path: string;

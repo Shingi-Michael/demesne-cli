@@ -92,6 +92,7 @@ import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
 import { RouteBook } from "./subagent-route.ts";
+import { Handoffs } from "./handoff.ts";
 import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
@@ -390,6 +391,11 @@ export function createDaemonApp(options: {
     : Promise.resolve();
   const commands=new CommandMonitor(store);
   const agentCli = new AgentCli(dirname(options.databasePath), options.agentCli);
+  // Hand-offs (handoff.ts): a change one of your agent tools makes in its
+  // own worktree, beside Drive's, until you bring it in or discard it.
+  const subagentBook = new RouteBook(join(dirname(options.databasePath), "subagent-route.json"));
+  const handoffs = new Handoffs(join(dirname(options.databasePath), "handoffs.json"), options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees"),
+    (agent, prompt, cwd, resume, signal, step) => agentCli.edit(agent, prompt, cwd, resume, signal, step));
   /// Codex's models on Demesne's own Codex plan, for its model picker
   /// (best effort: none when the plan can't be listed in a few seconds).
   const codexPlan = async (agent: string): Promise<string[]> => {
@@ -465,7 +471,13 @@ export function createDaemonApp(options: {
       cliSubagents: cliSubagentsOn ? {
         available: () => agentCli.agents().map((agent) => agent.id),
         run: (id, prompt, cwd, signal, step) => agentCli.subagent(id, prompt, cwd, signal, step),
-        book: new RouteBook(join(dirname(options.databasePath), "subagent-route.json")),
+        book: subagentBook,
+      } : undefined,
+      handoffs: cliSubagentsOn ? {
+        available: () => agentCli.agents().map((agent) => agent.id),
+        offer: (root) => !root.split(/[\\/]/).includes(".demesne-worktrees") && !inDriveWorktree(root),
+        book: subagentBook,
+        store: handoffs,
       } : undefined,
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       keepEdits,
@@ -1428,6 +1440,26 @@ export function createDaemonApp(options: {
           })),
         };
         return json(response);
+      }
+
+      // A hand-off's card: where it is now, its diff, and Bring it in /
+      // Undo / Discard (Ask for changes goes through the chat).
+      if (path[0] === "v1" && path[1] === "handoffs" && path.length === 3) {
+        const item = handoffs.get(path[2]!);
+        if (!item) return apiError("not_found", "No such hand-off", 404);
+        if (request.method === "GET") return json({ handoff: item, patch: handoffs.patch(item.id).slice(0, 200_000) });
+        if (request.method === "POST") {
+          const body = await readJson(request);
+          const action = isRecord(body) ? body.action : undefined;
+          if (action !== "apply" && action !== "undo" && action !== "discard") return apiError("invalid_request", "action must be apply, undo or discard", 400);
+          if (action !== "discard" && commands.runningInWorkspace(item.root)) return apiError("invalid_state", "Wait for running commands in the project first", 409);
+          try {
+            const done = action === "apply" ? await handoffs.apply(item.id) : action === "undo" ? await handoffs.undo(item.id) : await handoffs.discard(item.id);
+            return json({ handoff: done });
+          } catch (error) {
+            return apiError("conflict", error instanceof Error ? error.message : String(error), 409);
+          }
+        }
       }
 
       // The model sub-agents run on when the agent doesn't name one: null or

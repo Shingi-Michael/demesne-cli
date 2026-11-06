@@ -126,7 +126,8 @@ export function agyModelList(output: string): AgentModelOption[] {
 /// `allow` is Antigravity's permission rules for this run (agyAllow).
 export function agentArgs(id: AgentId, prompt: string, resume: { id: string; fresh: boolean } | null, choice: AgentChoice = {}, allow: string[] = []): string[] {
   const model = choice.model && MODEL_NAME.test(choice.model) ? choice.model : null;
-  if (id === "claude") return ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
+  // --allowedTools takes several values: one comma-joined value, before the other flags.
+  if (id === "claude") return ["-p", ...(allow.length ? ["--allowedTools", allow.join(",")] : []), "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
     ...(model ? ["--model", model] : []), ...(resume ? [resume.fresh ? "--session-id" : "--resume", resume.id] : []), prompt];
   if (id === "codex") {
     // Config overrides (-c) hold for `exec resume` too.
@@ -188,6 +189,16 @@ export function agyAllow(root: string, home: string): string[] {
   return [...new Set([`read_file(${root})`, `write_file(${root})`, ...yours])];
 }
 
+/// The checks Claude Code may run in a hand-off's worktree without asking
+/// (in -p nobody can approve them): tests, type checks and linters, on top
+/// of whatever your own Claude Code settings allow. Nothing that pushes,
+/// installs or deletes.
+export const HANDOFF_CHECKS: readonly string[] = [
+  ...["bun test", "bun run test", "bun run typecheck", "bun run lint", "bun run check", "bunx tsc", "npm test", "npm run test", "npm run lint", "npm run typecheck", "npm run check", "npx tsc",
+    "pnpm test", "pnpm run test", "pnpm lint", "pnpm typecheck", "yarn test", "yarn lint", "yarn typecheck", "tsc", "cargo test", "cargo check", "cargo clippy", "go test", "go vet", "pytest", "python -m pytest", "ruff check", "mypy"].map((command) => `Bash(${command}:*)`),
+  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+];
+
 /// What one line of a tool's output means for the turn.
 export interface AgentLine { session?: string; step?: string; said?: string; answer?: string; error?: string }
 
@@ -232,8 +243,22 @@ export function parseAgentLine(id: AgentId, line: string, cwd: string, state: Ag
       return (Array.isArray(content) ? content : []).flatMap((part): AgentLine[] => {
         const block = record(part);
         if (block.type === "text" && typeof block.text === "string" && block.text.trim()) return [{ said: block.text }];
-        if (block.type === "tool_use" && typeof block.name === "string") return [{ step: stepLine(block.name, record(block.input), cwd) }];
+        if (block.type === "tool_use" && typeof block.name === "string") {
+          const step = stepLine(block.name, record(block.input), cwd);
+          if (typeof block.id === "string") (state.calls ??= {})[block.id] = step;
+          return [{ step }];
+        }
         return [];
+      });
+    }
+    // A call it wasn't allowed (in -p nobody can approve it) says so.
+    if (type === "user") {
+      const content = record(event.message).content;
+      return (Array.isArray(content) ? content : []).flatMap((part): AgentLine[] => {
+        const block = record(part);
+        const said = typeof block.content === "string" ? block.content : Array.isArray(block.content) ? block.content.map((item) => String(record(item).text ?? "")).join(" ") : "";
+        const step = typeof block.tool_use_id === "string" ? state.calls?.[block.tool_use_id] : undefined;
+        return block.type === "tool_result" && block.is_error === true && step && /requires approval|permission|not allowed|denied/i.test(said) ? [{ step: `${step} (not allowed)` }] : [];
       });
     }
     if (type === "result") {
@@ -262,7 +287,9 @@ export function parseAgentLine(id: AgentId, line: string, cwd: string, state: Ag
   return parseAgyLine(event, cwd, state);
 }
 
-export interface AgyState { words: Record<number, string> }
+/// Words streamed so far by step (Antigravity), and each Claude Code tool
+/// call's line by its id, so a refused one can say so.
+export interface AgyState { words: Record<number, string>; calls?: Record<string, string> }
 
 /// Antigravity's stream-json: `init` names the conversation, `step_update`s
 /// stream words (text_delta) and tools by step, and `result` is the answer.
@@ -493,6 +520,48 @@ export class AgentCli {
       const final = (answer ?? said).trim();
       if (error || !final) throw new Error(`${kind.name} stopped${code ? ` (exit ${code})` : ""}: ${error ?? (await stderr || "no report")}`);
       return final;
+    } finally {
+      signal.removeEventListener("abort", stop);
+      child.kill();
+    }
+  }
+
+  /// One editing run for a hand-off (handoff.ts), in its own worktree: the
+  /// tool's accept-edits mode, as an agent chat runs, carrying on `resume`
+  /// (its own session) when the change is sent back. Returns its report and
+  /// session. Throws when the tool isn't here, fails, or says nothing.
+  async edit(id: AgentId, prompt: string, cwd: string, resume: string | null, signal: AbortSignal, step: (line: string) => void): Promise<{ report: string; session: string | null }> {
+    const kind = AGENT_KINDS.find((item) => item.id === id)!;
+    const path = this.find(kind.command);
+    if (!path) throw new Error(`${kind.name} isn't installed on this machine`);
+    let root = cwd;
+    try { root = realpathSync(cwd); } catch { /* as given */ }
+    // Claude Code takes the session id we give it; Codex and Antigravity name their own.
+    const fresh = !resume && id === "claude" ? randomUUID() : null;
+    let session = resume ?? fresh;
+    const allow = id === "gemini" ? agyAllow(root, this.home) : id === "claude" ? [...HANDOFF_CHECKS] : [];
+    const child = this.spawn([path, ...agentArgs(id, prompt, session ? { id: session, fresh: Boolean(fresh) } : null, this.choice(id), allow)], cwd);
+    const stop = () => child.kill();
+    signal.addEventListener("abort", stop, { once: true });
+    const stderr = tail(child.stderr);
+    let said = "", answer: string | null = null, error: string | null = null;
+    const state: AgyState = { words: {} };
+    try {
+      for await (const line of lines(child.stdout)) {
+        if (signal.aborted) throw signal.reason;
+        for (const item of parseAgentLine(id, line, cwd, state)) {
+          if (item.session) session = item.session;
+          if (item.step) step(item.step);
+          if (item.said) said = item.said;
+          if (item.answer !== undefined) answer = item.answer;
+          if (item.error) error = item.error;
+        }
+      }
+      const code = await child.exited;
+      if (signal.aborted) throw signal.reason;
+      const final = (answer ?? said).trim();
+      if (error || (code !== 0 && !final)) throw new Error(`${kind.name} stopped${code ? ` (exit ${code})` : ""}: ${error ?? (await stderr || "no output")}`);
+      return { report: final || `${kind.name} finished without a message.`, session };
     } finally {
       signal.removeEventListener("abort", stop);
       child.kill();

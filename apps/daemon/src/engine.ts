@@ -26,6 +26,7 @@ import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
 import { agentIdOf, subagentStep, type AgentId } from "./agent-cli.ts";
+import { agentName, HANDOFF_TOOL, handoffDefinition, handoffResult, parseHandoffInput, type Handoffs } from "./handoff.ts";
 import { grounded, jobKind, pickAgent, type JobKind, type RouteBook } from "./subagent-route.ts";
 import type { InferenceSchedulers } from "./inference-scheduler.ts";
 import { composeSystemPrompt, loadProjectInstructions } from "./instructions.ts";
@@ -79,6 +80,9 @@ interface AgentEngineOptions extends AgentConfig {
   /// Your agent tools as sub-agents (agent-cli.ts): which are installed, a
   /// read-only run of one, and the record Auto picks from.
   cliSubagents?: { available: () => AgentId[]; run: (id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void) => Promise<string>; book?: RouteBook };
+  /// Hand-offs (handoff.ts): a whole change made by one of your agent
+  /// tools in its own worktree, which you bring in or discard.
+  handoffs?: { available: () => AgentId[]; offer?: (workspaceRoot: string) => boolean; book?: RouteBook; store: Pick<Handoffs, "start" | "patch" | "get"> };
   /// The model's own presets and compositions, per session.
   sessionTools?: SessionToolStore;
   /// What you added to or took off each chat's Keep list.
@@ -251,6 +255,7 @@ export class AgentEngine {
     // `ask_user` needs someone to answer: only in a chat you're in (ask).
     // Drive, mail and other Auto turns decide for themselves.
     const canAsk = Boolean(this.options.questions) && turn.permissionMode === "ask";
+    const handoffAgents = !themefy && !assistant && session.workspace && (this.options.handoffs?.offer?.(session.workspace.root) ?? true) ? this.options.handoffs?.available() ?? [] : [];
     const definitions = themefy
       ? [...this.tools.definitions().filter(definition=>definition.name === "ask_user"),themefyDefinition]
       : assistant
@@ -259,7 +264,8 @@ export class AgentEngine {
       : session.workspace
       ? planModeDefinitions(selectToolsForTurn([...this.tools.definitions().filter((definition) => definition.name !== "assistant_notes"),
         subagentDefinitionFor(this.options.subagentModels?.() ?? [], this.options.subagentModel ?? inference.modelId),
-        ...(this.options.sessionTools ? [sessionToolsDefinition] : [])], turn.content), turn.planOnly === true)
+        ...(this.options.sessionTools ? [sessionToolsDefinition] : []),
+        ...(handoffAgents.length ? [handoffDefinition(handoffAgents)] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
         FOUNDRY_TOOL_NAMES.has(definition.name) || WEB_TOOL_NAMES.has(definition.name) || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
@@ -786,6 +792,38 @@ export class AgentEngine {
     }
   }
 
+  /// hand_off: one of your agent tools makes a change in its own worktree.
+  /// It needs no approval: nothing reaches your files until you bring it in
+  /// on its card. Its steps stream like a sub-agent's, under "agent:<id> · ".
+  private async executeHandoff(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string, signal: AbortSignal): Promise<string> {
+    const fail = (status: "failed" | "denied", text: string) => { this.store.settleToolCall(toolCallId, status, text); return text; };
+    const handoffs = this.options.handoffs;
+    if (!handoffs) return fail("failed", "Error: hand-offs are unavailable here");
+    let parsed: ReturnType<typeof parseHandoffInput>;
+    try { parsed = parseHandoffInput(input); } catch (error) { return fail("failed", `Error: ${error instanceof Error ? error.message : "invalid hand_off input"}`); }
+    const available = handoffs.available();
+    // A sent-back hand-off runs on its own agent, whatever Auto would pick now.
+    const earlier = parsed.again ? handoffs.store.get(parsed.again) : null;
+    if (parsed.again && (!earlier || earlier.sessionId !== sessionId)) return fail("failed", `Error: no hand-off ${parsed.again} in this chat. Start a new one without continue.`);
+    const pick = earlier ? { agent: earlier.agent, why: "" } : parsed.agent ? (available.includes(parsed.agent) ? { agent: parsed.agent, why: "" } : null) : pickAgent("fix", available, handoffs.book?.read() ?? { jobs: {}, restUntil: {} });
+    if (!pick) return fail("failed", `Error: ${parsed.agent ? `${agentName(parsed.agent)} isn't installed on this machine` : "none of your agent tools is installed"}.`);
+    this.store.startToolCall(toolCallId);
+    const label = `agent:${pick.agent} · `;
+    this.store.appendToolProgress(turnId, toolCallId, { text: `${label}starting`, ...(pick.why ? { why: pick.why } : {}) });
+    try {
+      const item = await handoffs.store.start({ sessionId, root: workspaceRoot, agent: pick.agent, description: parsed.description, prompt: parsed.prompt, signal,
+        step: (line) => this.store.appendToolProgress(turnId, toolCallId, { text: label + subagentStep(line) }), ...(parsed.again ? { again: parsed.again } : {}) });
+      if (!parsed.agent && !parsed.again) handoffs.book?.note(pick.agent, "fix", item.status === "ready", item.error);
+      this.store.appendToolProgress(turnId, toolCallId, { report: item.report.slice(0, 4000), handoff: { id: item.id, agent: item.agent, status: item.status, files: item.files.slice(0, 60), checks: item.checks, ...(item.error ? { error: item.error } : {}) } });
+      const result = handoffResult(item, handoffs.store.patch(item.id));
+      this.store.settleToolCall(toolCallId, item.status === "ready" ? "completed" : "failed", result);
+      return result;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return fail("failed", `Error: hand-off failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
   /// session_tools: define, list, remove, or run the session's own tools. A
   /// preset runs as its base tool (normal approval); a composition runs its
   /// read-only steps in order, each able to use earlier results.
@@ -940,6 +978,10 @@ export class AgentEngine {
       const result="Error: Themefy questions must use mode=interview";this.store.settleToolCall(toolCallId,"failed",result);return result;
     }
     if (call.name === RECALL_TURN) return this.recallTurn(toolCallId, input, sessionId);
+    if (call.name === HANDOFF_TOOL) {
+      if (planOnly) { const result = "Error: hand_off is not available in plan mode"; this.store.settleToolCall(toolCallId, "denied", result); return result; }
+      return this.executeHandoff(toolCallId, input, workspaceRoot, turnId, sessionId, signal);
+    }
     if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
     if (call.name === SESSION_TOOLS) return this.executeSessionTool(toolCallId, call, input, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
     // ls, cat, grep… through run_command: answered by the built-in read tool

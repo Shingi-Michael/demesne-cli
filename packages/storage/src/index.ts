@@ -2672,6 +2672,12 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
       ...(typeof value.bytes === "number" ? { bytes: value.bytes } : {}),
     };
   }
+  // Wait and watch: what it waited for and how it ended, for the step row.
+  if (name === "wait_for" && ["matched", "exited", "timeout"].includes(String(value.status))) {
+    return { message: JSON.stringify({ command: typeof value.command === "string" ? value.command.slice(0, 200) : "", status: value.status, afterMs: typeof value.afterMs === "number" ? value.afterMs : 0,
+      line: typeof value.line === "string" ? value.line.slice(0, 300) : null, exitCode: typeof value.exitCode === "number" ? value.exitCode : null,
+      tail: typeof value.tail === "string" ? value.tail.slice(-1_200) : "" }) };
+  }
   if (name === "run_command") {
     const limit = 16_000;
     return {

@@ -8,7 +8,7 @@ import type { EventEnvelope } from "@demesne/protocol";
 import type { ProviderMessage, ProviderStreamEvent } from "@demesne/providers";
 import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
-import { subagentArgs, subagentStep } from "../src/agent-cli.ts";
+import { parseAgentLine, subagentArgs, subagentBrief, subagentStep } from "../src/agent-cli.ts";
 import { grounded, jobKind, pickAgent, RouteBook } from "../src/subagent-route.ts";
 import { parseSubagentInput } from "../src/subagent.ts";
 import { claudeRun, fakeProcess } from "./agent-cli-fakes.ts";
@@ -149,4 +149,14 @@ test("a report is good only when it points at files that are really in the proje
 test("a report with no real files counts against the tool Auto picked", async () => {
   const { route } = await turn({ spawn: () => fakeProcess(claudeRun("s1", "I looked around but could not find it.")) });
   expect(JSON.parse(route).jobs.claude.find).toEqual({ ok: 0, failed: 1 });
+});
+
+test("Antigravity as a sub-agent is told to use only its read tools, and a denial with no answer is a failure", () => {
+  expect(subagentBrief("Where is the pane?", "/w", "gemini")).toStartWith("You are a read-only helper");
+  expect(subagentBrief("Where is the pane?", "/w", "gemini")).toContain("Never run shell commands");
+  expect(subagentBrief("Where is the pane?", "/w", "claude")).not.toContain("list_dir");
+  const denied = JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "", num_turns: 1, denied_actions: [{ action: "command", display_name: "RunCommand" }] } });
+  expect(parseAgentLine("gemini", denied, "/w", { words: {} })).toEqual([{ error: "Antigravity stopped: it wasn't allowed to RunCommand" }]);
+  const answered = JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "In pane.ts.", denied_actions: [{ action: "command", display_name: "RunCommand" }] } });
+  expect(parseAgentLine("gemini", answered, "/w", { words: {} })).toEqual([{ answer: "In pane.ts." }]);
 });

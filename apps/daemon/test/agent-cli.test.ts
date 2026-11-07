@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentCli, agentArgs, agyAllow, agentIdOf, agentPrompt, parseAgentLine } from "../src/agent-cli.ts";
+import { AGY_LOOK_COMMANDS, AgentCli, agentArgs, agyAllow, agentIdOf, agentPrompt, parseAgentLine } from "../src/agent-cli.ts";
 import { claudeRun, fakeProcess } from "./agent-cli-fakes.ts";
 
 async function collect(stream: AsyncIterable<{ type: string; delta?: string }>) {
@@ -90,7 +90,8 @@ describe("agent tools", () => {
       agy.choose("gemini", null);
       // Headless Antigravity may change files in the project and run only the commands you already allow it.
       writeFileSync(join(home, ".gemini", "antigravity-cli", "settings.json"), JSON.stringify({ model: "x", permissions: { allow: ["command(bun test)", 3] } }));
-      expect(agyAllow("/private/w", home)).toEqual(["read_file(/private/w)", "write_file(/private/w)", "command(bun test)"]);
+      expect(agyAllow("/private/w", home)).toEqual(["read_file(/private/w)", "write_file(/private/w)", ...AGY_LOOK_COMMANDS, "command(bun test)"]);
+      expect(agyAllow("/private/w", home)).toContain("command(ls)");
 
       cli.choose("codex", "gpt-6.1-sol", "high");
       cli.choose("claude", "opus");

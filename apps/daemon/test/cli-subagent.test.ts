@@ -8,7 +8,7 @@ import type { EventEnvelope } from "@demesne/protocol";
 import type { ProviderMessage, ProviderStreamEvent } from "@demesne/providers";
 import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
-import { parseAgentLine, subagentArgs, subagentBrief, subagentStep } from "../src/agent-cli.ts";
+import { AGY_LOOK_COMMANDS, parseAgentLine, subagentArgs, subagentBrief, subagentStep } from "../src/agent-cli.ts";
 import { grounded, jobKind, pickAgent, RouteBook } from "../src/subagent-route.ts";
 import { parseSubagentInput, subagentDefinition } from "../src/subagent.ts";
 import { agentSystemPrompt, delegateGuidance } from "../src/engine.ts";
@@ -52,7 +52,10 @@ test("CLI sub-agents run read-only, and their steps read in the window's verbs",
   expect(subagentArgs("codex", "brief")).not.toContain("workspace-write");
   const agy = subagentArgs("gemini", "brief", {}, "/w");
   expect(agy).not.toContain("accept-edits");
-  expect(agy).toContain(JSON.stringify({ permissions: { allow: ["read_file(/w)"] } }));
+  // agy 1.5.2 starts with `ls -la`: a denied look ends the run with no answer.
+  expect(agy).toContain(JSON.stringify({ permissions: { allow: ["read_file(/w)", ...AGY_LOOK_COMMANDS] } }));
+  expect(AGY_LOOK_COMMANDS).toContain("command(ls)");
+  expect(AGY_LOOK_COMMANDS.some((rule) => /\b(find|sed|tee|rm|mv|touch)\b/.test(rule))).toBe(false);
   expect(subagentStep("Read src/a.ts")).toBe("read src/a.ts");
   expect(subagentStep("Searched pane")).toBe("search pane");
   expect(subagentStep("Ran git log")).toBe("Ran git log");
@@ -154,7 +157,7 @@ test("a report with no real files counts against the tool Auto picked", async ()
 
 test("Antigravity as a sub-agent is told to use only its read tools, and a denial with no answer is a failure", () => {
   expect(subagentBrief("Where is the pane?", "/w", "gemini")).toStartWith("You are a read-only helper");
-  expect(subagentBrief("Where is the pane?", "/w", "gemini")).toContain("Never run shell commands");
+  expect(subagentBrief("Where is the pane?", "/w", "gemini")).toContain("Run no other shell commands");
   expect(subagentBrief("Where is the pane?", "/w", "claude")).not.toContain("list_dir");
   const denied = JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "", num_turns: 1, denied_actions: [{ action: "command", display_name: "RunCommand" }] } });
   expect(parseAgentLine("gemini", denied, "/w", { words: {} })).toEqual([{ error: "Antigravity stopped: it wasn't allowed to RunCommand" }]);

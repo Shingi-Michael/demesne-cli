@@ -1346,15 +1346,14 @@ try {
   const columnCard = page.locator("#cards [data-card=context] .ctx-card");
   await until(() => columnCard.innerText().then(text => /5-hour window[\s\S]*78% used/.test(text)), "the plan past half puts the context card in the column");
   assert.equal(await page.locator("#cards > .card").nth(1).getAttribute("data-card"), "context", "the context card comes right after the environment");
-  // The word opens the context card, whose lower half gives each window, its reset and Drive's rule.
-  await contextWord.click();
-  const contextCard = page.locator("#context-card");
-  await contextCard.waitFor();
-  const cardText = (await contextCard.innerText()).replace(/\s+/g, " ");
+  // The column card's lower half gives each window, its reset and Drive's rule.
+  const cardText = (await columnCard.innerText()).replace(/\s+/g, " ");
   assert.match(cardText, /Test plan Plus 5-hour window 78% used · resets .+ This week 41% used Drive pauses its own runs at 90%/, `the plan's half of the card: ${cardText}`);
+  // With the card in the column, the word points at it instead of opening a second copy.
+  await contextWord.click();
+  await until(() => page.locator("#cards [data-card=context].pointed").count().then(count => count === 1), "the word points at the card in the column");
+  assert(await page.locator("#context-card").isHidden(), "the card never shows twice");
   await capture("06-context-and-plan");
-  await page.keyboard.press("Escape");
-  await until(() => contextCard.isHidden(), "Esc closes the context card");
   assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");
   await capture("06-plan-limit");
   await capture("06-work-survived-close");

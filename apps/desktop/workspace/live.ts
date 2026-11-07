@@ -1226,7 +1226,7 @@ function renderContextCard() {
   const card = el("context-card"), word = el("composer-context");
   const c = context(), limits = currentPlan();
   const showContext = inSession() && c.percentage != null, showPlan = Boolean(limits && planWindows(limits).length);
-  const open = contextCardOpen && (showContext || showPlan);
+  const open = contextCardOpen && (showContext || showPlan) && !columnContextCard();
   word.setAttribute("aria-expanded", String(open));
   word.classList.toggle("on", open);
   card.hidden = !open;
@@ -1235,6 +1235,11 @@ function renderContextCard() {
   if (html === card.dataset.html) return;
   card.innerHTML = html;
   card.dataset.html = html;
+}
+/// The context card in the right column, when it is on screen there.
+function columnContextCard() {
+  const node = document.querySelector<HTMLElement>("#cards [data-card=context]");
+  return node && node.offsetParent ? node : null;
 }
 function contextCardHTML(c: ReturnType<typeof context>, limits: PlanLimits | undefined, showContext: boolean, showPlan: boolean) {
   const compact = showContext && worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
@@ -5860,7 +5865,15 @@ async function dispatch(
   if (action === "detach") return api("detach", { id: args.id });
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
   if (action === "context-card") {
-    contextCardOpen = !contextCardOpen;
+    // The card already sits in the column: point at it, never show it twice.
+    const inColumn = columnContextCard();
+    if (inColumn) {
+      contextCardOpen = false;
+      inColumn.classList.remove("pointed");
+      void inColumn.offsetWidth;
+      inColumn.classList.add("pointed");
+      inColumn.scrollIntoView({ block: "nearest" });
+    } else contextCardOpen = !contextCardOpen;
     renderContextCard();
     return;
   }

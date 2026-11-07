@@ -41,6 +41,8 @@ import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
+import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
+import { previewable, type FilePreview } from "@demesne/protocol";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
@@ -1321,6 +1323,10 @@ let cardsSignature = "";
 const windowShots: WindowShot[] = [];
 const shotsLanding = new Map<string, Rect | undefined>();
 const chatShots = () => windowShots.filter((shot) => shot.sessionId === state?.session?.id);
+/// The file open in its preview card (file-preview.ts), in the chat it was
+/// opened from.
+let preview: OpenPreview | null = null;
+const chatPreview = () => preview && preview.sessionId === state?.session?.id ? preview : null;
 function card(name: keyof typeof CARD_ICON, line: string, right: string, body: string, need = false) {
   const open = cardsOpen.has(name);
   return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
@@ -1351,11 +1357,13 @@ function renderCards() {
   const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
   const shots = chatShots();
-  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length) return hide();
+  const filePreview = chatPreview();
+  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !filePreview) return hide();
   app.classList.add("cards-on");
+  app.classList.toggle("cards-wide", Boolean(filePreview?.wide));
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, shots.map((shot) => [shot.id, shot.sent, shot.big])]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, shots.map((shot) => [shot.id, shot.sent, shot.big]), filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1375,7 +1383,7 @@ function renderCards() {
   if (files.length) {
     const shownFiles = files.slice(0, 6);
     out.push(card("changes", files.length === 1 ? "1 file changed" : `${files.length} files changed`, counts(changes),
-      shownFiles.map((file) => row("", h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
+      shownFiles.map((file) => row("", previewable(file.path) ? fileLink(file.path, file.path.split("/").at(-1) ?? file.path) : h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
       `<div class="card-foot"><span>${files.length > shownFiles.length ? `${files.length - shownFiles.length} more · ` : ""}not committed</span>${btn("ship", "Commit & PR", {}, "link")}</div>`, true));
   }
   if (here.length)
@@ -1389,6 +1397,8 @@ function renderCards() {
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
   // Screenshots come last, in the order they were taken.
   for (const shot of shots) out.push(shotCardHTML(shot, cardsOpen.has(shotKey(shot))));
+  // A file you opened comes last of all (pass 188 A).
+  if (filePreview) out.push(previewCardHTML(filePreview));
   // Only the cards that changed are replaced, so the others keep their
   // hover and never repaint while the chat streams.
   const next = new Map(out.map((html) => [/data-card="([a-z0-9-]+)"/.exec(html)![1]!, html]));
@@ -1406,10 +1416,14 @@ function renderCards() {
       // A screenshot glides in from its window (window-shots.ts).
       if (!node && shot && shotsLanding.has(shot.id)) landing.push([replacement, shot]);
       // A card the chat just started using slides in.
-      else if (!node) {
+      else if (!node && key !== PREVIEW_CARD) {
         replacement.classList.add("arriving");
         replacement.addEventListener("animationend", () => replacement.classList.remove("arriving"), { once: true });
       }
+      // A redrawn preview keeps its PDF pages until they're drawn again.
+      const pages = node?.querySelector("[data-pdf]"), into = replacement.querySelector("[data-pdf]");
+      if (pages && into) into.replaceChildren(...pages.childNodes);
+      if (!node && key === PREVIEW_CARD && filePreview?.landing) arrivingPreview = replacement;
       if (node) node.replaceWith(replacement);
       node = replacement;
     }
@@ -1418,6 +1432,71 @@ function renderCards() {
     index++;
   }
   for (const [node, shot] of landing) landWhenSeen(node, shot);
+  if (arrivingPreview) void landPreview(arrivingPreview);
+  else if (filePreview?.data?.kind === "pdf") { const pages = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"] [data-pdf]`); if (pages) void drawPdf(pages, filePreview.data.data, filePreview.wide ? 30 : 3).catch(() => {}); }
+}
+
+// File previews (pass 188 A) ------------------------------------------------
+
+/// A file name a click previews: in answers (markdown.ts marks them), in
+/// the steps and in the Changes card.
+const fileLink = (path: string, label: string) => `<button type="button" class="file-link" data-action="preview-file" data-args="${h(JSON.stringify({ path }))}" data-preview-path="${h(path)}">${h(label)}</button>`;
+/// The name a preview came from, still on screen if it is.
+function previewName(path: string): HTMLElement | null {
+  const names = [...document.querySelectorAll<HTMLElement>("[data-preview-path]")].filter((name) => name.dataset.previewPath === path && name.offsetParent && !name.closest("#cards"));
+  const seen = names.filter((name) => { const r = name.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; });
+  return seen.at(-1) ?? names.at(-1) ?? null;
+}
+const wideEnough = () => matchMedia("(min-width: 1100px)").matches;
+async function openPreview(path: string, source?: Element) {
+  if (!state?.session) return;
+  const sessionId = state.session.id, from = source ? rectOfElement(source) : undefined;
+  if (preview?.sessionId === sessionId && preview.path === path) return closePreview();
+  // No room for the column: the file opens in its own app.
+  if (!wideEnough()) {
+    const data = await api<FilePreview>("file-preview", { path });
+    if (data?.absolute) await api("open-preview", { absolute: data.absolute });
+    return;
+  }
+  const loading = api<FilePreview>("file-preview", { path }).then((data) => ({ data }), (error: unknown) => ({ error: error instanceof Error ? error.message.replace(/^.*?:\s*(?=[A-Z])/, "") : String(error) }));
+  if (chatPreview()) await closePreview();
+  const got = await loading;
+  if (state?.session?.id !== sessionId) return;
+  preview = { sessionId, path, name: previewFileName(path), ...got, wide: false, sheet: 0, slide: 0, from, landing: true };
+  renderCards();
+}
+let arrivingPreview: HTMLElement | null = null;
+async function landPreview(card: HTMLElement) {
+  arrivingPreview = null;
+  const open = preview;
+  if (!open) return;
+  open.landing = false;
+  card.style.visibility = "hidden";
+  const pages = card.querySelector<HTMLElement>("[data-pdf]");
+  if (pages && open.data?.kind === "pdf") await drawPdf(pages, open.data.data, 3).catch(() => { pages.innerHTML = '<div class="fp-empty">This PDF couldn\u2019t be drawn. Open it to read it.</div>'; });
+  card.style.visibility = "";
+  if (!card.isConnected || !card.offsetParent) return;
+  const name = previewName(open.path);
+  await growPreview(card, name ? rectOfElement(name) : open.from, name);
+}
+async function closePreview() {
+  const open = chatPreview();
+  if (!open) return;
+  const aside = el("cards"), card = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"]`), width = aside.offsetWidth;
+  const name = previewName(open.path);
+  if (card) await foldPreview(card, name ? rectOfElement(name) : open.from, name);
+  if (preview === open) preview = null;
+  renderCards();
+  if (open.wide && !aside.hidden) resizePreview(aside, width, null, undefined);
+}
+function widenPreview() {
+  const open = chatPreview();
+  if (!open || !open.data) return;
+  const aside = el("cards"), width = aside.offsetWidth;
+  const height = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"] .fp-box`)?.offsetHeight;
+  open.wide = !open.wide;
+  renderCards();
+  resizePreview(aside, width, aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"]`), height);
 }
 /// A screenshot lands when the window can be seen: at once, or when you
 /// come back to Demesne if it was hidden.
@@ -2038,6 +2117,8 @@ function askedSignature(run: WorkspaceRun): string {
   return JSON.stringify([asked.map((item) => item.state), [...answers.keys()], [...askedOpen].filter((key) => key.startsWith(`${run.id}:`)),
     (state?.housed ?? []).filter((item) => asked.some((one) => one.agent === item.id)).map((item) => item.state)]);
 }
+/// A step that read or wrote one file a preview can show: its path.
+const stepPreviewPath = (tool: ToolEntry) => ["read_file", "write_file", "edit_file"].includes(tool.name) && typeof tool.input.path === "string" && previewable(tool.input.path) ? tool.input.path : "";
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === UPDATE_PLAN) return "";
   if (isSend(tool)) return firstSend(run, tool) ? askStep(run) : "";
@@ -2076,7 +2157,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and plain words: the working line
     // under the turn carries the cube and the silver.
-    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target" title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target"${stepPreviewPath(tool) ? ` data-preview-path="${h(stepPreviewPath(tool))}"` : ""} title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -6042,6 +6123,15 @@ async function dispatch(
     if (at >= 0) { windowShots.splice(at, 1); renderCards(); }
     return api("detach", { id: args.id });
   }
+  if (action === "preview-file") return openPreview(String(args.path ?? ""), target);
+  if (action === "preview-close") return closePreview();
+  if (action === "preview-wide") return widenPreview();
+  if (action === "preview-open") { const open = chatPreview(); return open?.data ? api("open-preview", { absolute: open.data.absolute }) : undefined; }
+  if (action === "preview-sheet" || action === "preview-slide") {
+    const open = chatPreview();
+    if (open) { if (action === "preview-sheet") open.sheet = Number(args.index) || 0; else open.slide = Number(args.index) || 0; renderCards(); }
+    return;
+  }
   if (action === "shot-big") {
     const shot = windowShots.find((one) => one.id === args.id);
     if (shot) { shot.big = !shot.big; renderCards(); }
@@ -6954,6 +7044,13 @@ document.addEventListener("click", (event) => {
       detailsClosed.delete(id);
       detailsOpen.add(id);
     }
+  }
+  // A file name in a step previews the file instead of unfolding the step.
+  const named = (event.target as Element).closest<HTMLElement>(".tool-row [data-preview-path]");
+  if (named) {
+    event.preventDefault();
+    void act(() => openPreview(named.dataset.previewPath!, named));
+    return;
   }
   const target = (event.target as Element).closest<HTMLElement>(
     "[data-action]",

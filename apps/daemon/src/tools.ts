@@ -1,3 +1,4 @@
+import { documentText, readable } from "./documents.ts";
 import type { CommandReporter } from "./command-monitor.ts";
 import { createHash } from "node:crypto";
 import {
@@ -266,7 +267,7 @@ function readFileTool(): AgentTool {
   return {
     definition: {
       name: "read_file",
-      description: "Read numbered UTF-8 lines. Files up to 600 lines come back whole; longer ones return at least 200 lines from offset (default limit 400, max 500). Read once; do not page in small slices.",
+      description: "Read numbered UTF-8 lines. Files up to 600 lines come back whole; longer ones return at least 200 lines from offset (default limit 400, max 500). PDFs, spreadsheets (.xlsx), Word files (.docx) and decks (.pptx) come back as their text. Read once; do not page in small slices.",
       inputSchema: {
         type: "object",
         properties: {
@@ -434,14 +435,21 @@ async function readSingleFile(
     throw toolError("NOT_FOUND", `no file at ${path}`, "run list_files to inspect the tree");
   }
   if (!stat.isFile() || stat.nlink > 1) throw toolError("NOT_A_FILE", `${path} is not a regular file`, "read_file requires a regular file");
-  if (stat.size > 8 * 1024 * 1024) throw toolError("TOO_LARGE", `${path} exceeds the 8 MiB read limit`, "read a narrower file or use search_files");
-  const bytes = readFileSync(absolute);
-  if (bytes.includes(0)) throw toolError("BINARY_FILE", `${path} is binary`, "use run_command for binary inspection");
   let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw toolError("NOT_UTF8", `${path} is not valid UTF-8`, "use run_command with an appropriate decoder");
+  // PDFs, spreadsheets, Word files and decks come back as their text.
+  const kind = readable(absolute);
+  if (kind === "pdf" || kind === "office") {
+    try { text = await documentText(absolute, stat.size); }
+    catch (error) { throw toolError("UNREADABLE", `${path} is ${error instanceof Error ? error.message : "unreadable"}`, "use run_command for other ways to inspect it"); }
+  } else {
+    if (stat.size > 8 * 1024 * 1024) throw toolError("TOO_LARGE", `${path} exceeds the 8 MiB read limit`, "read a narrower file or use search_files");
+    const bytes = readFileSync(absolute);
+    if (bytes.includes(0)) throw toolError("BINARY_FILE", `${path} is binary`, "use run_command for binary inspection");
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw toolError("NOT_UTF8", `${path} is not valid UTF-8`, "use run_command with an appropriate decoder");
+    }
   }
   const lines = text.split("\n");
   const totalLines = lines.length - (lines.at(-1) === "" ? 1 : 0);

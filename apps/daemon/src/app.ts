@@ -1,3 +1,4 @@
+import { previewFile, PreviewError } from "./file-preview.ts";
 import { collectDriveReview } from "./drive-review.ts";
 import { listSourceDocuments, sourceDocumentResponse } from "./source-documents.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
@@ -1786,6 +1787,14 @@ export function createDaemonApp(options: {
           for (const id of uploads.keys()) { if (uploads.size <= 24) break; uploads.delete(id); }
           return json(attachment, 201);
         } catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
+      }
+
+      // A file shown in its preview card (pass 188 A).
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "preview") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        try { return json(previewFile(session.workspace?.root ?? null, url.searchParams.get("path") ?? "")); }
+        catch (error) { return apiError("preview_unavailable", error instanceof Error ? error.message : String(error), error instanceof PreviewError ? error.status : 400); }
       }
 
       if (request.method === "GET" && path[0] === "v1" && path[1] === "sessions" && path[3] === "artifacts") {

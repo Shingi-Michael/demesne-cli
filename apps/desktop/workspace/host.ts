@@ -264,6 +264,8 @@ export class WorkspaceHost {
   verificationFingerprint: WorkspaceFingerprint | null = null;
   processesError: string | null = null;
   reviewRevision = 0;
+  /// Files a preview card showed, which Open may hand to their own app.
+  private previewed = new Set<string>();
   private reviewCache = new Map<
     string,
     import("@demesne/protocol").ReviewResponse
@@ -1971,6 +1973,21 @@ export class WorkspaceHost {
     if (method === "files") {
       await this.refreshFiles();
       return this.files;
+    }
+    // A file for its preview card (pass 188 A).
+    if (method === "file-preview") {
+      if (!this.current) throw new Error("Choose a session first.");
+      const preview = await this.client.preview(this.current.session.id, string(args.path, "path", 4000));
+      this.previewed.add(preview.absolute);
+      return preview;
+    }
+    // Opens a previewed file in its own app: only a file the daemon just
+    // previewed, so a page can't open anything else.
+    if (method === "open-preview") {
+      const absolute = string(args.absolute, "file", 4000);
+      if (!this.previewed.has(absolute)) throw new Error("Preview the file first");
+      await this.open(absolute);
+      return;
     }
     if (method === "file-edit-details") {
       const turnId = string(args.turnId, "turn id", 200);

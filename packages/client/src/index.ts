@@ -1,4 +1,4 @@
-import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent} from "@demesne/protocol";
+import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent, FilePreview} from "@demesne/protocol";
 import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
@@ -371,6 +371,10 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/replay?after=${after}&through=${through}`, { signal });
   }
 
+  /// A file for its preview card: relative to the chat's folder, or absolute.
+  async preview(sessionId: string, path: string): Promise<FilePreview> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/preview?${new URLSearchParams({ path })}`);
+  }
   async review(sessionId:string,scope:ReviewScope,turnId?:string):Promise<ReviewResponse>{
     const query=new URLSearchParams({scope});if(turnId)query.set("turn",turnId);
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/review?${query}`);

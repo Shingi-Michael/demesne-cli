@@ -1,3 +1,4 @@
+import { previewable } from "@demesne/protocol";
 import { marked, Renderer, type Token, type TokensList } from "marked";
 import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/common";
@@ -101,6 +102,7 @@ function decorate(parsed: string): string {
     katex.render(element.dataset.math ?? "", element, { displayMode: display, throwOnError: false, output: "htmlAndMathml", strict: "ignore", trust: false });
   }
   decorateTables(wrapper);
+  markFiles(wrapper);
   for (const block of wrapper.querySelectorAll("pre")) {
     const code = block.querySelector("code");
     if (!code) continue;
@@ -276,5 +278,27 @@ export class MarkdownView {
     this.links = links;
     this.raw = raw;
     return mutated;
+  }
+}
+
+/// File names a click previews (pass 188 A): `q3-budget.xlsx` in code, or a
+/// link to a file rather than a page.
+function markFiles(root: HTMLElement) {
+  const mark = (element: HTMLElement, path: string) => {
+    element.classList.add("file-link");
+    element.dataset.action = "preview-file";
+    element.dataset.args = JSON.stringify({ path });
+    element.dataset.previewPath = path;
+  };
+  for (const code of root.querySelectorAll<HTMLElement>("code")) {
+    const text = code.textContent?.trim() ?? "";
+    if (!code.closest("pre, a") && text.length < 300 && !text.includes("\n") && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && previewable(text)) mark(code, text);
+  }
+  for (const link of root.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const href = link.getAttribute("href") ?? "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("file://")) continue;
+    let path = href.replace(/^file:\/\//, "").replace(/[?#].*$/, "");
+    try { path = decodeURI(path); } catch { /* keep it as written */ }
+    if (path && previewable(path)) mark(link, path);
   }
 }

@@ -2,6 +2,7 @@ export const PROTOCOL_VERSION = 1 as const;
 export * from "./drive.ts";
 export * from "./panels.ts";
 export * from "./plan-limits.ts";
+export * from "./file-preview.ts";
 import { isPullRequestUrl } from "./pull-requests.ts";
 
 export type EventType =

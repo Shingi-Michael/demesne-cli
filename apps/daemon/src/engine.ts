@@ -27,6 +27,7 @@ import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./ass
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
+import { parseResearchInput, RESEARCH_TOOL, researchDefinition, runResearch } from "./research.ts";
 import { agentIdOf, subagentStep, type AgentId } from "./agent-cli.ts";
 import { agentName, HANDOFF_TOOL, handoffDefinition, handoffResult, parseHandoffInput, type Handoffs } from "./handoff.ts";
 import { grounded, jobKind, pickAgent, type JobKind, type RouteBook } from "./subagent-route.ts";
@@ -81,7 +82,7 @@ interface AgentEngineOptions extends AgentConfig {
   subagentModels?: () => SubagentModel[];
   /// Your agent tools as sub-agents (agent-cli.ts): which are installed, a
   /// read-only run of one, and the record Auto picks from.
-  cliSubagents?: { available: () => AgentId[]; run: (id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void) => Promise<string>; book?: RouteBook };
+  cliSubagents?: { available: () => AgentId[]; run: (id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void, web?: boolean) => Promise<string>; book?: RouteBook };
   /// Hand-offs (handoff.ts): a whole change made by one of your agent
   /// tools in its own worktree, which you bring in or discard.
   handoffs?: { available: () => AgentId[]; offer?: (workspaceRoot: string) => boolean; book?: RouteBook; store: Pick<Handoffs, "start" | "patch" | "get"> };
@@ -271,6 +272,8 @@ export class AgentEngine {
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
         FOUNDRY_TOOL_NAMES.has(definition.name) || WEB_TOOL_NAMES.has(definition.name) || definition.name === UPDATE_PLAN || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+    // Deep research wherever the web is: the chat plans, agents read, a judge checks.
+    if (!themefy && !assistant && definitions.some((definition) => definition.name === "web_search")) definitions.push(researchDefinition);
     // Orchestrate mode: the chat reads, plans and runs threads; the threads change the files.
     const orchestrating = !themefy && !assistant && Boolean(session.workspace) && this.store.isSessionOrchestrate(session.id);
     if (orchestrating) for (let index = definitions.length - 1; index >= 0; index--) if (!ORCHESTRATE_TOOL_NAMES.has(definitions[index]!.name)) definitions.splice(index, 1);
@@ -561,7 +564,7 @@ export class AgentEngine {
       // the model asks again next round instead of the turn failing.
       const runRecords = callRecords.slice(0, TOOLS_PER_ROUND), skippedRecords = callRecords.slice(TOOLS_PER_ROUND);
       const allReadOnly = runRecords.every(({ call }) => {
-        if (call.name === SUBAGENT_TOOL) return true;
+        if (call.name === SUBAGENT_TOOL || call.name === RESEARCH_TOOL) return true;
         const tool = this.tools.get(call.name);
         if (!tool) return false;
         try {
@@ -794,6 +797,54 @@ export class AgentEngine {
     }
   }
 
+  /// research: the questions go to your agent tools at once (a sub-agent on
+  /// the chat's model for any that can't), then the judge checks them. Read
+  /// only, so no approval; the window draws its state as one quiet line.
+  private async executeResearch(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string,
+    inference: TurnInference, signal: AbortSignal): Promise<string> {
+    let parsed: ReturnType<typeof parseResearchInput>;
+    try { parsed = parseResearchInput(input); } catch (error) {
+      const result = `Error: ${error instanceof Error ? error.message : "invalid research input"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+    const cli = this.options.cliSubagents;
+    const book = cli?.book?.read() ?? { jobs: {}, restUntil: {} };
+    // Auto's pick for research first, then the rest that aren't resting.
+    const ready = (cli?.available() ?? []).filter((agent) => !((book.restUntil[agent] ?? 0) > Date.now()));
+    const first = pickAgent("research", ready, book)?.agent;
+    const agents = first ? [first, ...ready.filter((agent) => agent !== first)] : ready;
+    let delegate = inference;
+    if (inference.thinkingEnabled !== false && this.options.inferenceFor)
+      try { delegate = this.options.inferenceFor(inference.modelId, false); } catch { /* the turn's own model, thinking and all */ }
+    let runs = 0;
+    const onModel = (prompt: string, system: string, toolNames: ReadonlySet<string>, signal: AbortSignal, step: (line: string) => void) =>
+      runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate, cacheKey: `${sessionId}:${toolCallId}:${runs++}`,
+        scheduler: this.scheduler.for(delegate.providerId), signal, limits: this.options, system, toolNames,
+        progress: (update) => { if (update.text) step(update.text); } });
+    const WEB = new Set(["web_search", "web_fetch"]);
+    this.store.startToolCall(toolCallId);
+    try {
+      const { text } = await runResearch(parsed, {
+        agents, signal,
+        runAgent: (agent, prompt, signal, step) => cli!.run(agent, prompt, workspaceRoot, signal, step, true),
+        runModel: (prompt, signal, step) => onModel(prompt, "You are a careful web researcher. Use web_search to find pages and web_fetch to read them, then write your notes exactly as asked.", WEB, signal, step),
+        runJudge: (prompt, signal) => parsed.judge && agents.includes(parsed.judge)
+          ? cli!.run(parsed.judge, prompt, workspaceRoot, signal, () => {}, true)
+          : onModel(prompt, "You are a fair judge of research notes. Answer with the JSON asked for and nothing else.", new Set(), signal, () => {}),
+        note: (agent, ok, error) => cli?.book?.note(agent, "research", ok, error),
+        update: (state) => this.store.appendToolProgress(turnId, toolCallId, { research: state }),
+      });
+      this.store.settleToolCall(toolCallId, "completed", text);
+      return text;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      const result = `Error: research failed: ${error instanceof Error ? error.message : "unknown error"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+  }
+
   /// hand_off: one of your agent tools makes a change in its own worktree.
   /// It needs no approval: nothing reaches your files until you bring it in
   /// on its card. Its steps stream like a sub-agent's, under "agent:<id> · ".
@@ -985,6 +1036,7 @@ export class AgentEngine {
       return this.executeHandoff(toolCallId, input, workspaceRoot, turnId, sessionId, signal);
     }
     if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
+    if (call.name === RESEARCH_TOOL && inference) return this.executeResearch(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
     if (call.name === SESSION_TOOLS) return this.executeSessionTool(toolCallId, call, input, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
     // ls, cat, grep… through run_command: answered by the built-in read tool
     // when equivalent (no approval, no host process), or pointed at it.

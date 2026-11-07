@@ -482,7 +482,7 @@ export function createDaemonApp(options: {
       subagentModels: () => subagentModels(),
       cliSubagents: cliSubagentsOn ? {
         available: () => agentCli.agents().map((agent) => agent.id),
-        run: (id, prompt, cwd, signal, step) => agentCli.subagent(id, prompt, cwd, signal, step),
+        run: (id, prompt, cwd, signal, step, web) => agentCli.subagent(id, prompt, cwd, signal, step, web),
         book: subagentBook,
       } : undefined,
       handoffs: cliSubagentsOn ? {

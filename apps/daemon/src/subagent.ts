@@ -86,6 +86,10 @@ export async function runSubagent(options: {
   limits?: ProviderStreamLimits;
   /// Stable for this run, so its rounds can reuse the provider's prompt cache.
   cacheKey?: string;
+  /// In place of the coding researcher's instructions (research.ts).
+  system?: string;
+  /// Which read-only tools it may use; default all of SUBAGENT_TOOLS. Empty: it only answers.
+  toolNames?: ReadonlySet<string>;
 }): Promise<string> {
   try {
     return await runSubagentInference(options);
@@ -96,9 +100,10 @@ export async function runSubagent(options: {
 
 async function runSubagentInference(options: Parameters<typeof runSubagent>[0]): Promise<string> {
   const { inference, signal } = options;
-  const definitions = options.tools.definitions().filter((definition) => SUBAGENT_TOOLS.has(definition.name));
+  const allowed = options.toolNames ?? SUBAGENT_TOOLS;
+  const definitions = options.tools.definitions().filter((definition) => SUBAGENT_TOOLS.has(definition.name) && allowed.has(definition.name));
   const streamLimits = providerStreamLimits(inference.maxOutputTokens, options.limits);
-  const messages: ProviderMessage[] = [{ role: "system", content: instructions(options.workspaceRoot) }, { role: "user", content: options.prompt }];
+  const messages: ProviderMessage[] = [{ role: "system", content: options.system ?? instructions(options.workspaceRoot) }, { role: "user", content: options.prompt }];
   const used = new Map<string, number>();
   let toolCalls = 0, reasoning = 0;
   for (let round = 0; round <= SUBAGENT_LIMITS.rounds; round++) {
@@ -193,6 +198,7 @@ export function describeCall(name: string, input: unknown): string {
   const record = isRecord(input) ? input : {};
   const verb = name === "search_files" || name === "web_search" ? "search" : name.startsWith("read_") ? "read" : name === "list_files" ? "list" : name.replace("_", " ");
   const target = typeof record.path === "string" ? record.path
+    : typeof record.url === "string" ? record.url
     : typeof record.query === "string" ? `"${record.query}"`
     : typeof record.pattern === "string" ? `"${record.pattern}"`
     : Array.isArray(record.files) ? `${record.files.length} files` : "";

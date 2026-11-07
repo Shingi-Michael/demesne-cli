@@ -35,6 +35,7 @@ import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { waitingFor, waitRow } from "./wait-row.ts";
 import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
 import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
+import { researchRowHTML } from "./research-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
@@ -1903,6 +1904,13 @@ function askStep(run: WorkspaceRun) {
     face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood === "focus" ? "focus" : "calm")}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
     working: (agent) => housed.some((item) => item.id === agent && item.state === "working") });
 }
+/// Deep research (pass 182 A): one quiet line; click for who took what.
+const researchOpen = new Set<string>();
+const researchFace = (agent: string | null, mood: "focus" | "calm") => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood)}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`;
+function researchStep(run: WorkspaceRun, tool: ToolEntry) {
+  const key = `${run.id}:${tool.id}`;
+  return researchRowHTML({ research: tool.research, tool, open: researchOpen.has(key), key, face: researchFace, icon: stepIcon(tool) });
+}
 /// What the row shows depends on mail that came later: part of a turn's signature.
 function askedSignature(run: WorkspaceRun): string {
   if (!run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
@@ -1917,6 +1925,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "heartbeat" && tool.input.action === "agents" && run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
   if (tool.name === "wait_for") return waitStep(run, tool);
   if (tool.name === "look_at_page") return lookStep(run, tool);
+  if (tool.name === "research") return researchStep(run, tool);
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
   if (tool.name === "ask_user") {
@@ -2283,6 +2292,8 @@ function runHTML(run: WorkspaceRun, index: number) {
       if (entry.type === "tool" && entry.handoff) { flush(); body += handoffCard(entry.handoff); }
       // Who this turn asked stays in sight, with how many have answered.
       if (entry.type === "tool" && firstSend(run, entry)) { flush(); body += `<div class="steps">${askStep(run)}</div>`; }
+      // So does a research line: the work behind the report.
+      if (entry.type === "tool" && entry.name === "research") { flush(); body += `<div class="steps">${researchStep(run, entry)}</div>`; }
       if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
@@ -2750,6 +2761,7 @@ function renderConversation() {
       stepsOpen.has(run.id),
       planOpen.has(run.id),
       askedSignature(run),
+      run.entries.flatMap((entry) => entry.type === "tool" && entry.name === "research" ? [JSON.stringify(entry.research ?? null), researchOpen.has(`${run.id}:${entry.id}`)] : []),
       [...fileEditsOpen].filter(key => key.startsWith(`${run.id}:`)),
       // Unfolded steps, and the recorded output a command's fold shows.
       [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
@@ -6188,6 +6200,13 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  if (action === "toggle-research") {
+    const key = String(args.id);
+    researchOpen.has(key) ? researchOpen.delete(key) : researchOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
   }
   if (action === "toggle-asked") {
     const key = String(args.id);

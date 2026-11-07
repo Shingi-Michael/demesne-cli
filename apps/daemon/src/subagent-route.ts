@@ -6,9 +6,9 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import type { AgentId } from "./agent-cli.ts";
 
 /// "fix" is a hand-off (handoff.ts): the agent makes a change in its own copy.
-export type JobKind = "find" | "trace" | "review" | "read" | "fix";
+export type JobKind = "find" | "trace" | "review" | "read" | "fix" | "research";
 
-export const JOB_WORDS: Record<JobKind, string> = { find: "finding code", trace: "tracing a flow across files", review: "reviewing changes", read: "reading a lot at once", fix: "making a change" };
+export const JOB_WORDS: Record<JobKind, string> = { find: "finding code", trace: "tracing a flow across files", review: "reviewing changes", read: "reading a lot at once", fix: "making a change", research: "researching on the web" };
 const NAMES: Record<AgentId, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
 
 /// Who to try first for each kind before there's any history: Claude Code
@@ -20,6 +20,7 @@ const FIRST: Record<JobKind, AgentId[]> = {
   review: ["claude", "codex", "gemini"],
   read: ["gemini", "claude", "codex"],
   fix: ["claude", "codex", "gemini"],
+  research: ["claude", "codex", "gemini"],
 };
 
 /// The kind of job, from its label and brief.

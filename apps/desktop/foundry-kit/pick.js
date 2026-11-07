@@ -20,6 +20,11 @@
     var heading = element.querySelector("h1,h2,h3,h4,b,strong");
     return ((heading || element).textContent || "").trim().replace(/\s+/g, " ").slice(0, 80);
   }
+  // Options in the parts' strip (d-compare) carry their own Pick button.
+  function optionOf(node) {
+    var element = node && node.closest ? node.closest("[data-option]") : null;
+    return element && !(element.parentElement && element.parentElement.classList.contains("dp-switch")) ? element : null;
+  }
   function place() {
     if (!target || !target.isConnected) { hide(); return; }
     var box = target.getBoundingClientRect(), width = button.offsetWidth || 60;
@@ -46,7 +51,7 @@
   }
   document.addEventListener("mouseover", function (event) {
     if (event.target === button) { clearTimeout(hideTimer); return; }
-    var element = event.target && event.target.closest ? event.target.closest("[data-option]") : null;
+    var element = optionOf(event.target);
     if (element) show(element);
     else if (target) { clearTimeout(hideTimer); hideTimer = setTimeout(hide, 160); }
   });
@@ -54,7 +59,7 @@
   // Keyboard: focusing inside an option offers its Pick too.
   document.addEventListener("focusin", function (event) {
     if (event.target === button) return;
-    var element = event.target && event.target.closest ? event.target.closest("[data-option]") : null;
+    var element = optionOf(event.target);
     if (element) show(element);
   });
   window.addEventListener("scroll", place, true);

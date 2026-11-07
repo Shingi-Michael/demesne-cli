@@ -1672,7 +1672,6 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 /* A page (Settings, Scheduled, All chats…) hides the chat's pane; it comes back with the chat. */
 .desktop .live-app.pane-on:not(.paging) #cards { display: none; }
 .pane-head { flex: none; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px 0 8px; border-bottom: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; white-space: nowrap; }
-.pane-making { margin-left: 2px; color: var(--t4); }
 .pane-head .sp { flex: 1; }
 .pane-title { min-width: 0; overflow: hidden; color: var(--t1); font-weight: 500; text-overflow: ellipsis; }
 b.pane-title { padding: 0 6px; }

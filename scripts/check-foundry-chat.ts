@@ -95,27 +95,26 @@ try {
   await editor.press("Enter");
   const chips = page.locator("#conversation .fd-chip");
   const pane = page.locator("#pane"), frame = pane.frameLocator("iframe.pane-frame");
-  // While Foundry writes the page, the pane opens on its title alone.
-  await pane.locator(".pane-head").filter({ hasText: "making…" }).filter({ hasText: "Idea garden" }).waitFor();
-  assert.equal(await pane.locator("iframe").count(), 0, "nothing shows until the page is written");
+  // While Foundry writes and tries the page, the pane stays shut.
+  await page.locator("#conversation .turn").first().waitFor();
+  assert(await pane.isHidden(), "nothing opens while Foundry works");
   making.resolve();
-  // A new artifact is a chip in the chat and opens in the pane beside it by itself.
+  // The page arrives as a link (its chip) in the chat; the pane opens only when it's clicked.
   await chips.first().filter({ hasText: "Idea garden" }).waitFor();
+  await page.waitForTimeout(400);
+  assert(await pane.isHidden(), "a new page waits for its link to be opened");
+  await chips.first().click();
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
-  // Its first show asks for the assembly, but a page that moves by itself
-  // (the kit's anime.js) is served plain: its own Arrive motion is the
-  // arrival, and the assembly would cancel it and leave the page faded.
-  const assembled = async (inline = 1) => {
-    assert.match((await pane.locator("iframe.pane-frame").getAttribute("src"))!, /[?&]assemble=1$/, "a version's first show asks for the assembly");
-    const inner = page!.frames().find(item => item.url().includes("assemble=1"));
-    assert(inner, "the first-show frame is reachable");
-    await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined && document.documentElement.style.visibility === ""));
-    // The kit reached the page: its stylesheet and its anime.js, and no assembly beside it.
+  // The kit reached the page: its stylesheet and its anime.js, and no assembly beside it.
+  const served = async (inline: number) => {
+    const inner = page!.frames().find(item => item.url().startsWith("foundry://artifact/"));
+    assert(inner, "the page's frame is reachable");
+    await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined));
     assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
-    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "a page that moves by itself is not served the assembly (a revision carries only the what-changed outline)");
-    assert.equal(await inner.evaluate(() => "__demesnePrevious" in window), false, "no assembly, no previous version to diff");
+    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "the page is served as written (a revision carries only the what-changed outline)");
+    assert.equal(await inner.evaluate(() => "__demesnePrevious" in window), false, "no assembly");
   };
-  await assembled();
+  await served(1);
   // The page named a motion: the thin line under the page plays, scrubs and replays it.
   const motion = pane.locator(".pane-motion");
   await motion.getByRole("button", { name: "Arrive" }).waitFor();
@@ -165,7 +164,7 @@ try {
   await pane.getByRole("button", { name: "Copy the source" }).waitFor();
   await pane.getByRole("button", { name: "Code", exact: true }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("PASS: /foundry makes a chip and opens the pane; the page's state survives streaming, completion, step folding and the pane's controls.");
+  console.log("PASS: /foundry makes a link that opens the pane; the page's state survives streaming, completion, step folding and the pane's controls.");
 
   await editor.fill("Make it blue"); await editor.press("Enter");
   // The artifact keeps its one chip; the turn that changed it says so in a quiet line.
@@ -178,9 +177,9 @@ try {
   // The pane follows the chat onto the new version; the arrows walk back.
   await pane.locator(".pane-v").filter({ hasText: "v2" }).waitFor();
   await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
-  // A revision's first show is the page's own motion again, with no assembly
-  // diff; the previous version rides along only to outline what changed.
-  await assembled(3);
+  // A revision's first show is the page as written; the previous version rides along only to outline what changed.
+  assert.match((await pane.locator("iframe.pane-frame").getAttribute("src"))!, /[?&]first=1$/, "a new version's first show asks for the what-changed outline");
+  await served(3);
   assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
   await pane.getByRole("button", { name: "Earlier version" }).click();
@@ -207,11 +206,15 @@ try {
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await editor.fill("Make an SVG badge graphic"); await editor.press("Enter");
   await chips.nth(2).filter({ hasText: "Graphic · v1" }).waitFor();
+  // Another new artifact doesn't take the pane over: its link opens it.
+  await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
+  await chips.nth(2).click();
   await frame.locator("img").waitFor();
   assert.equal(await pane.getByRole("button", { name: "Phone width" }).count(), 0, "A graphic has no phone width");
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await editor.fill("Make a project brief document"); await editor.press("Enter");
   await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
+  await chips.nth(3).click();
   await pane.locator(".pane-doc").getByRole("heading", { name: "Project brief" }).waitFor();
   assert.equal(await pane.locator(".pane-doc script").count(), 0);
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
@@ -252,6 +255,7 @@ try {
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status !== "running" && !(await page!.locator("#composer.stopping").count()));
   await editor.fill("Make a slide deck for the launch"); await editor.press("Enter");
   await chips.filter({ hasText: "Deck · v1" }).first().waitFor();
+  await chips.filter({ hasText: "Deck · v1" }).first().click();
   await eventually(async () => await frame.locator(".deck-stage > .slide").count() === 3 && await frame.locator(".deck-thumb").count() === 3);
   assert.equal(await frame.locator("html").getAttribute("data-look"), "forest");
   assert.equal(await frame.locator(".slide.on").getAttribute("data-layout"), "title");

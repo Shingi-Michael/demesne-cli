@@ -97,7 +97,7 @@ export function tryReport(result: TryResult): { report: Record<string, unknown>;
   const bad = result.steps.filter((step) => !step.ok);
   const next = bad.length || result.errors.length
     ? "Fix what went wrong (unless a step was meant to change nothing) with one foundry_edit, then try the same steps again once."
-    : "Every step did something. Answer, or try another path if one matters.";
+    : "Every step did something. Answer, or try the controls not clicked yet.";
   return {
     report: { width: `${result.width}px`, steps: result.steps.map((step) => `${step.ok ? "✓" : "✕"} ${step.step}: ${step.said}`),
       tree_after: result.tree, ...(result.errors.length ? { console_errors: result.errors } : {}), pictures: result.pictures.map((p) => `after ${p.after}`), next },
@@ -120,7 +120,8 @@ export function lookReport(look: LookResult, last: boolean): { look: Record<stri
       ? "Fix these, and anything off in the pictures, with one foundry_edit, then answer. Ignore a problem only if it is intended."
       : "Glance at the pictures; if nothing is off, answer without saving again.";
   // A page with controls gets its main path tried once (foundry_try) before the answer.
-  const tryIt = last ? "" : " If the page has controls, try its main path once with foundry_try before you answer.";
+  // A mockup is for using: every control gets one click (foundry_try), so a dead one is found before the person is.
+  const tryIt = last ? "" : " If the page has controls, click each of them once with foundry_try (up to 12 steps) before you answer; one that changes nothing is dead: make it do something.";
   return {
     look: { ...problems, ...(look.errors.length ? { console_errors: look.errors } : {}), pictures: look.pages.map((page) => name(page.width)), next: next + tryIt },
     images: look.pages.map((page) => ({ data: Buffer.from(page.png, "base64"), mimeType: "image/png", filename: `${FOUNDRY_LOOK_PREFIX}${page.width}.png` })),

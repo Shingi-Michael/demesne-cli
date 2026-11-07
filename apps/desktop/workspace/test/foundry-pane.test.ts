@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifactDetail } from "@demesne/protocol";
-import { frameSource, motionLine, motionMessage, neighbours, paneHead, paneMakingHead, pickMessage, buildRequest } from "../foundry-pane.ts";
+import { frameSource, motionLine, motionMessage, neighbours, paneHead, pickMessage, buildRequest } from "../foundry-pane.ts";
 
 const versions = [3, 2, 1].map((version) => ({ version, createdAt: "2026-10-27T22:00:00.000Z", sessionId: null, turnId: null, note: version === 3 ? "Blue" : "", byteLength: 10 }));
 const detail: FoundryArtifactDetail = { id: "garden", title: "Tiny garden", kind: "html", workspace: null, sessionId: "s1", createdAt: versions[2]!.createdAt, updatedAt: versions[0]!.createdAt, version: 3, source: "<h1>Garden</h1>", versions };
@@ -42,17 +42,9 @@ test("the pane is one line: the title opens Foundry, the version and its arrows,
   expect(paneHead({ ...detail, title: '<b>"x"</b>' }, { id: "garden", version: 3, view: "preview", phone: false })).not.toContain("<b>");
 });
 
-test("the first show of a version asks the frame to assemble; any other show is plain", () => {
-  expect(frameSource("garden", 2, true)).toBe("foundry://artifact/garden?v=2&assemble=1");
+test("a new version's first show asks for what changed to be outlined; any other show is plain", () => {
+  expect(frameSource("garden", 2, true)).toBe("foundry://artifact/garden?v=2&first=1");
   expect(frameSource("garden", 2, false)).toBe("foundry://artifact/garden?v=2");
-});
-
-test("while Foundry writes, the line above the pane is the title alone", () => {
-  const head = paneMakingHead("Tiny <garden>");
-  expect(head).toContain("Tiny &lt;garden&gt;");
-  expect(head).toContain("making…");
-  expect(head).toContain('data-pane="close"');
-  expect(head).not.toContain("Code");
 });
 
 test("the frame's runtime is heard only in the two shapes it speaks, and nothing else", () => {

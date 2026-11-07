@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chatArtifacts, makingTitle, type ChatArtifact } from "../foundry-inline.ts";
+import { chatArtifacts, type ChatArtifact } from "../foundry-inline.ts";
 import type { ToolEntry } from "@demesne/workbench/entries.ts";
 
 const save = (value: unknown, state: ToolEntry["state"] = "done") => ({ name: "foundry_save", state, message: JSON.stringify(value) });
@@ -44,15 +44,4 @@ test("an artifact keeps one chip, in the turn that first showed it; later turns 
   const garden = { id: "garden", title: "Garden", kind: "html" as const, version: 1 }, badge = { id: "badge", title: "Badge", kind: "svg" as const, version: 1 };
   expect(editedIn([[garden], [], [{ ...garden, version: 2 }, badge], [{ ...badge, version: 2 }, { ...garden, version: 3 }]]).map((set) => [...set]))
     .toEqual([[], [], ["garden"], ["badge", "garden"]]);
-});
-
-test("the title of the page Foundry is writing comes from the arguments still arriving", () => {
-  const draft = (draftArguments: string, extra: Partial<ToolEntry> = {}) => ({ name: "foundry_save", state: "running" as const, input: {}, drafting: true, draftArguments, ...extra });
-  expect(makingTitle([])).toBeNull();
-  expect(makingTitle([{ name: "foundry_save", state: "done", input: { title: "Done" } }])).toBeNull();
-  expect(makingTitle([draft('{"title": "Idea \\"garden\\"", "kind": "html", "source": "<!doctype')])).toBe('Idea "garden"');
-  expect(makingTitle([draft('{"kind": "html", "sou')])).toBe("Something new");
-  expect(makingTitle([draft("", { input: { title: "From input" }, drafting: false })])).toBe("From input");
-  // An edit of an open artifact is not a new page: the pane keeps what it shows.
-  expect(makingTitle([{ name: "foundry_edit", state: "running", input: { id: "garden" }, drafting: true, draftArguments: '{"title": "x"' }])).toBeNull();
 });

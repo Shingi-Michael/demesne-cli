@@ -161,9 +161,9 @@ try {
   console.log("PASS: /foundry makes a link that opens the pane; the page's state survives streaming, completion and step folding.");
 
   await editor.fill("Make it blue"); await editor.press("Enter");
-  // The artifact keeps its one chip; the turn that changed it says so in a quiet line.
-  await chips.nth(1).filter({ hasText: "Edited Idea garden · v2" }).waitFor();
-  assert.equal(await chips.nth(1).locator(".fd-chip-ic").count(), 0, "a change is a line, not a second chip");
+  // The turn that changed it ends with its own chip, a link to the newest version.
+  await chips.nth(1).filter({ hasText: "Idea garden" }).filter({ hasText: "Prototype · v2" }).waitFor();
+  assert.equal(await chips.nth(1).locator(".fd-chip-ic").count(), 1, "a change gets a full chip, not a faint line");
   await eventually(async () => (await f.client.foundryGet(artifact.id)).version === 2);
   assert.equal(await chips.nth(1).getAttribute("data-artifact-id"), artifact.id);
   assert.match((await f.client.foundryGet(artifact.id)).source, /#3158ba/);

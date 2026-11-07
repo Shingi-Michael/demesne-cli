@@ -1,97 +1,67 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { isRecord } from "@demesne/protocol";
+import { captureWindow, listWindows, supported, type Shot, type ShotWindow } from "../../../packages/screen/src/index.ts";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
 
-export interface NativeWindow { id: number; application: string; title: string }
-interface WindowCaptureDependencies {
-  list(signal: AbortSignal): Promise<NativeWindow[]>;
-  capture(id: number, signal: AbortSignal): Promise<Uint8Array>;
-}
-
-// CGWindow IDs are native window IDs, not browser tab IDs or AppleScript window indices.
-const listScript = `import CoreGraphics
-import Foundation
-guard CGPreflightScreenCaptureAccess() else {
-  print("SCREEN_RECORDING_REQUIRED")
-  exit(2)
-}
-let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-let visible = windows.filter { ($0[kCGWindowLayer as String] as? Int) == 0 }.compactMap { w -> [String: Any]? in
-  guard let id = w[kCGWindowNumber as String] as? Int, let owner = w[kCGWindowOwnerName as String] as? String else { return nil }
-  return ["id": id, "application": owner, "title": w[kCGWindowName as String] as? String ?? ""]
-}
-let data = try JSONSerialization.data(withJSONObject: visible)
-print(String(data: data, encoding: .utf8)!)`;
-
-async function run(command: string[], signal: AbortSignal): Promise<{ code: number; output: string }> {
-  signal.throwIfAborted();
-  const child = Bun.spawn(command, { stdout: "pipe", stderr: "ignore" });
-  const abort = () => child.kill();
-  signal.addEventListener("abort", abort, { once: true });
-  try {
-    // Swift emits only window metadata; cap it rather than accepting unbounded process output.
-    let output = "";
-    for await (const chunk of child.stdout) {
-      output += Buffer.from(chunk).toString("utf8");
-      if (output.length > 1024 * 1024) { child.kill(); throw new Error("Native window listing exceeded its limit"); }
-    }
-    const code = await child.exited;
-    signal.throwIfAborted();
-    return { code, output };
-  } finally { signal.removeEventListener("abort", abort); }
+/// The model's window capture (pass 187): a named window, or the one the
+/// user is in when no application is given, on Mac, Windows and Linux
+/// (packages/screen). It returns the picture and, where the system shares
+/// it, the window's text.
+export interface WindowCaptureDependencies {
+  list(signal: AbortSignal): Promise<ShotWindow[]>;
+  capture(window: ShotWindow, signal: AbortSignal): Promise<Shot>;
 }
 
 export const nativeWindowCapture: WindowCaptureDependencies = {
-  async list(signal) {
-    const result = await run(["/usr/bin/swift", "-e", listScript], signal);
-    if (result.output.includes("SCREEN_RECORDING_REQUIRED")) throw new Error("macOS Screen Recording access is required. Enable it for the app hosting Demesne in System Settings > Privacy & Security > Screen & System Audio Recording, then restart that app.");
-    if (result.code !== 0) throw new Error("Could not enumerate macOS windows. Native capture requires the Swift command-line tools and Screen Recording access.");
-    return JSON.parse(result.output) as NativeWindow[];
-  },
-  async capture(id, signal) {
-    const root = await mkdtemp(join(tmpdir(), "demesne-window-"));
-    try {
-      const file = join(root, "window.png");
-      const result = await run(["/usr/sbin/screencapture", "-x", "-o", "-l", String(id), "-t", "png", file], signal);
-      if (result.code !== 0) throw new Error("Window capture failed. Ensure the window is visible and macOS Screen Recording access is enabled; list windows again if it was closed.");
-      if ((await stat(file)).size > 20 * 1024 * 1024) throw new Error("Window screenshot exceeds 20 MiB");
-      return await readFile(file);
-    } finally { await rm(root, { recursive: true, force: true }); }
-  },
+  list: (signal) => listWindows({ signal }),
+  capture: (window, signal) => captureWindow(window, { signal, text: true }),
 };
+
+/// The model gets this much of a window's text; the picture carries the rest.
+const MODEL_TEXT = 20_000;
+const OWN = ["demesne", "electron"];
+const describe = (windows: ShotWindow[]) => JSON.stringify(windows.slice(0, 40).map(({ id, app, title }) => ({ windowId: id, application: app, title })));
 
 export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindowCapture): AgentTool {
   async function execute(input: unknown, context: ToolContext): Promise<string | StructuredToolResult> {
+    const id = isRecord(input) ? input.windowId : undefined;
     if (!isRecord(input) || Object.keys(input).some((key) => !["application", "title", "windowId"].includes(key))
-      || typeof input.application !== "string" || !input.application.trim() || input.application.length > 200
+      || (input.application !== undefined && (typeof input.application !== "string" || !input.application.trim() || input.application.length > 200))
       || (input.title !== undefined && (typeof input.title !== "string" || input.title.length > 500))
-      || (input.windowId !== undefined && (!Number.isSafeInteger(input.windowId) || (input.windowId as number) <= 0))) {
-      throw new Error("capture_window requires an application name and optional exact title or positive windowId");
+      || (id !== undefined && !(Number.isSafeInteger(id) && (id as number) > 0) && !(typeof id === "string" && /^[A-Za-z0-9]{1,40}$/.test(id)))) {
+      throw new Error("capture_window takes an optional application name, exact title and windowId (a number or the id it listed)");
     }
-    const signal = AbortSignal.any([context.signal, AbortSignal.timeout(60_000)]);
-    const application = input.application.trim().toLowerCase();
+    const signal = AbortSignal.any([context.signal, AbortSignal.timeout(90_000)]);
+    const all = await deps.list(signal);
+    signal.throwIfAborted();
+    const application = typeof input.application === "string" ? input.application.trim().toLowerCase() : undefined;
     const title = typeof input.title === "string" ? input.title.toLowerCase() : undefined;
-    const windows = (await deps.list(signal)).filter((window) => window.application.toLowerCase() === application);
-    const matches = windows.filter((window) => (input.windowId === undefined || window.id === input.windowId)
-      && (title === undefined || window.title.toLowerCase() === title));
-    signal.throwIfAborted();
-    if (matches.length !== 1) {
-      return `No unique matching window was captured. ${matches.length ? "Specify a windowId to select the intended window." : "Open the requested application/window or correct the title filter."}\nVisible windows for ${input.application}: ${JSON.stringify(windows)}\nDo not substitute a browser or another application's window. For Demesne, ask the user to make its window visible if it is not identifiable.`;
+    let window: ShotWindow | undefined;
+    if (application === undefined && id === undefined && title === undefined) {
+      // The window the user is in, past Demesne's own.
+      window = all.find((one) => one.id === "active" || !OWN.includes(one.app.toLowerCase()));
+      if (!window) return `There's no window besides Demesne to capture. Visible windows: ${describe(all)}`;
+    } else {
+      const windows = application === undefined ? all : all.filter((one) => one.app.toLowerCase() === application);
+      const matches = windows.filter((one) => (id === undefined || one.id === String(id)) && (title === undefined || one.title.toLowerCase() === title));
+      if (matches.length !== 1) {
+        return `No unique matching window was captured. ${matches.length ? "Specify a windowId to select the intended window." : "Open the requested application/window or correct the title filter."}\nVisible windows${input.application ? ` for ${input.application}` : ""}: ${describe(windows)}\nDo not substitute a browser or another application's window. For Demesne, ask the user to make its window visible if it is not identifiable.`;
+      }
+      window = matches[0]!;
     }
-    const window = matches[0]!;
-    const data = await deps.capture(window.id, signal);
+    const shot = await deps.capture(window, signal);
     signal.throwIfAborted();
-    return { text: `Captured native window ${window.id}: ${window.application} — ${window.title}`,
-      images: [{ data, mimeType: "image/png", filename: "window-screenshot.png" }] };
+    const text = shot.text ? `\n\nText in the window${shot.text.length > MODEL_TEXT ? " (first part)" : ""}:\n${shot.text.slice(0, MODEL_TEXT)}` : shot.textNote ? `\n(${shot.textNote})` : "";
+    return { text: `Captured window ${window.id}: ${window.app} — ${window.title}${text}`,
+      images: [{ data: shot.png, mimeType: "image/png", filename: "window-screenshot.png" }] };
   }
   return {
-    definition: { name: "capture_window", description: "Capture a visible native macOS application window into Preview for visual inspection. Demesne is a native desktop app: use application Demesne. Do not search web-server ports for Demesne. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",
-      inputSchema: { type: "object", properties: { application: { type: "string" }, title: { type: "string", description: "Exact window title, case-insensitive. Omit to list ambiguous windows." }, windowId: { type: "integer", minimum: 1 } }, required: ["application"], additionalProperties: false } },
-    permission: () => ({ kind: "execute", summary: "Capture a native application window" }),
+    definition: { name: "capture_window", description: "Capture a visible desktop window as a picture, with the window's text where the system shares it. With no input it takes the window the user is in (besides Demesne): use it when the user says to look at their screen or window. Demesne is a native desktop app: to see Demesne itself use application Demesne; do not search web-server ports for it. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",
+      inputSchema: { type: "object", properties: { application: { type: "string", description: "Application name, e.g. Safari. Omit for the window the user is in." }, title: { type: "string", description: "Exact window title, case-insensitive. Omit to list ambiguous windows." }, windowId: { type: ["integer", "string"], description: "A window id from an earlier listing." } }, additionalProperties: false } },
+    permission: () => ({ kind: "execute", summary: "Capture a desktop window" }),
     execute: async () => { throw new Error("capture_window requires artifact-aware execution"); },
     executeWithArtifacts: execute,
   };
 }
+
+export const windowCaptureSupported = () => supported();

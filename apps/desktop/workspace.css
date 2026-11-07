@@ -827,6 +827,24 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .card-dot.ready { background: var(--ok); }
 .desktop #cards .card-dot.failed { background: var(--danger, #e5484d); }
 .desktop #cards .counts { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
+/* A screenshot from the capture keys (pass 187 A): its own card after the
+   last one, the picture always showing until it's sent, then one line. */
+.desktop #cards .card.shot:not(.sent) { padding: 0 0 8px; color: var(--t2); }
+.desktop #cards .card.shot:not(.sent):hover { background: none; }
+.desktop #cards .shot-head { cursor: default; }
+.desktop #cards .shot-head b { font-weight: 500; color: var(--t1); }
+.desktop #cards .shot-x { margin-left: auto; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--t3); font: inherit; line-height: 18px; cursor: pointer; }
+.desktop #cards .shot-x:hover, .desktop #cards .shot-x:focus-visible { color: var(--t1); background: var(--hair); }
+.desktop #cards .shot-pic { display: block; width: calc(100% - 16px); margin: 0 8px; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: var(--tone2); box-shadow: 0 0 0 1px var(--hair); aspect-ratio: 1.55; cursor: zoom-in; }
+.desktop #cards .shot-pic.big { aspect-ratio: auto; cursor: zoom-out; }
+.desktop #cards .shot-pic img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.desktop #cards .shot-pic.big img { height: auto; }
+.desktop #cards .card-body .shot-pic { width: 100%; margin: 4px 0 0; }
+.desktop #cards .shot-note { display: block; margin: 5px 8px 0; color: var(--t3); font-size: 11px; line-height: 15px; }
+.shot-copy { position: fixed; z-index: 60; overflow: hidden; border-radius: 8px; pointer-events: none; background: var(--tone2); }
+.shot-copy img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.desktop #attach-row .att.shot-note-att { gap: 6px; height: 32px; padding: 0 10px; max-width: 260px; font-size: 12px; color: var(--t3); background: none; box-shadow: none; }
+.desktop #attach-row .att.shot-note-att .ico { width: 12px; height: 12px; flex: none; }
 /* The environment card (pass 173 A): where this chat runs, no greeting. */
 .desktop #cards .env { margin-bottom: 6px; }
 .desktop #cards .env::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -4px; height: 1px; background: var(--hair); }

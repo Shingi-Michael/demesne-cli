@@ -40,6 +40,7 @@ import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
+import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
@@ -1315,6 +1316,11 @@ const CARD_ICON = {
 } as const;
 const cardsOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-open") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
+/// Screenshots from the capture keys (window-shots.ts), each its own card
+/// after the last card; the ones still to land, with where their window was.
+const windowShots: WindowShot[] = [];
+const shotsLanding = new Map<string, Rect | undefined>();
+const chatShots = () => windowShots.filter((shot) => shot.sessionId === state?.session?.id);
 function card(name: keyof typeof CARD_ICON, line: string, right: string, body: string, need = false) {
   const open = cardsOpen.has(name);
   return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
@@ -1344,11 +1350,12 @@ function renderCards() {
   const housed = housedHere(s), workspace = s.session?.workspace;
   const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
-  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length) return hide();
+  const shots = chatShots();
+  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length) return hide();
   app.classList.add("cards-on");
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, shots.map((shot) => [shot.id, shot.sent, shot.big])]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1380,9 +1387,12 @@ function renderCards() {
   if (servers.length)
     out.push(card("connectors", h(servers.map((server) => server.name).join(", ")), servers.some((server) => server.state === "failed") ? '<span class="card-dot failed"></span>' : "",
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
+  // Screenshots come last, in the order they were taken.
+  for (const shot of shots) out.push(shotCardHTML(shot, cardsOpen.has(shotKey(shot))));
   // Only the cards that changed are replaced, so the others keep their
   // hover and never repaint while the chat streams.
-  const next = new Map(out.map((html) => [/data-card="([a-z]+)"/.exec(html)![1]!, html]));
+  const next = new Map(out.map((html) => [/data-card="([a-z0-9-]+)"/.exec(html)![1]!, html]));
+  const landing: [HTMLElement, WindowShot][] = [];
   for (const node of [...aside.children] as HTMLElement[]) if (!next.has(node.dataset.card ?? "")) node.remove();
   let index = 0;
   for (const [key, html] of next) {
@@ -1392,8 +1402,11 @@ function renderCards() {
       fresh.innerHTML = html;
       const replacement = fresh.content.firstElementChild as HTMLElement;
       replacement.dataset.html = html;
+      const shot = shots.find((one) => shotKey(one) === key);
+      // A screenshot glides in from its window (window-shots.ts).
+      if (!node && shot && shotsLanding.has(shot.id)) landing.push([replacement, shot]);
       // A card the chat just started using slides in.
-      if (!node) {
+      else if (!node) {
         replacement.classList.add("arriving");
         replacement.addEventListener("animationend", () => replacement.classList.remove("arriving"), { once: true });
       }
@@ -1404,7 +1417,43 @@ function renderCards() {
     if (node !== at) aside.insertBefore(node, at);
     index++;
   }
+  for (const [node, shot] of landing) landWhenSeen(node, shot);
 }
+/// A screenshot lands when the window can be seen: at once, or when you
+/// come back to Demesne if it was hidden.
+function landWhenSeen(node: HTMLElement, shot: WindowShot) {
+  const from = shotsLanding.get(shot.id);
+  shotsLanding.delete(shot.id);
+  const go = () => { if (node.isConnected && node.offsetParent) void landShot(node, from); };
+  if (document.visibilityState !== "hidden") { go(); return; }
+  node.style.visibility = "hidden";
+  document.addEventListener("visibilitychange", function seen() {
+    if (document.visibilityState === "hidden") return;
+    document.removeEventListener("visibilitychange", seen);
+    node.style.visibility = "";
+    requestAnimationFrame(go);
+  });
+}
+/// The capture keys took a window (electron/capture-keys.ts).
+document.addEventListener("demesne:window-shot", (event) => {
+  const shot = (event as CustomEvent<{ app?: string; title?: string; data?: string; text?: string; textNote?: string; from?: Rect; error?: string }>).detail;
+  if (shot.error) { notice(shot.error); return; }
+  if (!state?.session || !shot.data) { notice("Open a chat, then press the keys again to add the window."); return; }
+  const sessionId = state.session.id;
+  void act(async () => {
+    const bytes = Uint8Array.from(atob(shot.data!), (char) => char.charCodeAt(0));
+    const fitted = await fitImage(new Blob([bytes], { type: "image/png" }), { side: 4096, bytes: 15 * 1024 * 1024 });
+    const name = `${(shot.app || "window").replace(/[^\w .-]+/g, "").trim() || "window"}.png`;
+    const image = await api("attach", { name, mimeType: fitted.type, data: fitted.url.slice(fitted.url.indexOf(",") + 1) }) as { id: string } | undefined;
+    if (!image?.id) return;
+    attachmentPreviews.set(image.id, fitted.url);
+    windowShots.push({ id: image.id, sessionId, app: shot.app ?? "", title: shot.title ?? "", url: fitted.url, text: shot.text ?? "", textNote: shot.textNote, at: Date.now() });
+    shotsLanding.set(image.id, shot.from);
+    composerSignature = "";
+    renderComposer();
+    renderCards();
+  });
+});
 /// The sidebar's foot: who you are and what pays for the models, the theme
 /// switch, and Settings.
 const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
@@ -4117,7 +4166,10 @@ function renderComposer() {
   const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || pointed.length > 0 || state.attachments.length > 0 || pastes.length > 0, session = inSession();
   const attachRow = el("attach-row");
   attachRow.hidden = (!state.attachments.length && !pastes.length) || Boolean(question);
-  attachRow.innerHTML = state.attachments.map((image) => {
+  // A screenshot from the capture keys shows in its card; here only a note.
+  // (A narrow window has no card column: then it's an ordinary picture chip.)
+  const waitingShots = getComputedStyle(el("cards")).display === "none" ? [] : chatShots().filter((shot) => !shot.sent && state!.attachments.some((image) => image.id === shot.id));
+  attachRow.innerHTML = shotsNote(waitingShots) + state.attachments.filter((image) => !waitingShots.some((shot) => shot.id === image.id)).map((image) => {
     const preview = attachmentPreviews.get(image.id);
     return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
   }).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
@@ -5440,6 +5492,13 @@ async function submitText(value = editor.value, wait = false) {
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
   // Folded pastes go after the words, whole.
   if (pastes.length && !value.startsWith("/")) { value = withPastes(value, pastes); pastes.length = 0; }
+  // A screenshot's window text goes folded after them; its card folds to one line.
+  const going = value.startsWith("/") || pendingQuestion() ? [] : chatShots().filter((shot) => !shot.sent && state!.attachments.some((image) => image.id === shot.id));
+  if (going.length) {
+    value = withPastes(value, going.map(shotPaste).filter((paste): paste is Paste => paste !== null));
+    for (const shot of going) shot.sent = Date.now();
+    renderCards();
+  }
   if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;
@@ -5978,7 +6037,16 @@ async function dispatch(
   }
   if (action === "cycle-mode") return cycleMode();
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
-  if (action === "detach") return api("detach", { id: args.id });
+  if (action === "detach") {
+    const at = windowShots.findIndex((shot) => shot.id === args.id && !shot.sent);
+    if (at >= 0) { windowShots.splice(at, 1); renderCards(); }
+    return api("detach", { id: args.id });
+  }
+  if (action === "shot-big") {
+    const shot = windowShots.find((one) => one.id === args.id);
+    if (shot) { shot.big = !shot.big; renderCards(); }
+    return;
+  }
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
   if (action === "context-card") {
     // The card already sits in the column: open it there, never show it twice.

@@ -8,7 +8,7 @@
 /// A chat is an agent's when its model is `agent:<id>`. The tool runs its own
 /// tools under its own rules; Demesne shows what it did as the turn's
 /// working lines and its last message as the answer.
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -400,8 +400,27 @@ async function tail(stream: ReadableStream<Uint8Array>): Promise<string> {
   try { return (await new Response(stream).text()).trim().slice(-600); } catch { return ""; }
 }
 
+/// Where agent tools install themselves. An app opened from the Dock or
+/// Finder starts the daemon with a short PATH (/usr/bin:/bin…), so Codex from
+/// Homebrew or npm, and the node it runs on, are looked for here as well.
+export function toolDirs(home = homedir(), platform = process.platform): string[] {
+  if (platform === "win32") return [join(home, "AppData", "Roaming", "npm"), join(home, ".bun", "bin"), join(home, ".local", "bin")];
+  const nvm = join(home, ".nvm", "versions", "node");
+  let nvmBins: string[] = [];
+  try { nvmBins = readdirSync(nvm).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((version) => join(nvm, version, "bin")); } catch { /* no nvm */ }
+  return [join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", join(home, ".npm-global", "bin"), join(home, ".bun", "bin"),
+    join(home, ".volta", "bin"), ...nvmBins, join(home, ".cargo", "bin"), "/home/linuxbrew/.linuxbrew/bin"];
+}
+
+/// PATH with the tool folders after what was already there, so a tool's
+/// `#!/usr/bin/env node` finds node from an app-started daemon too.
+export function toolPath(path = process.env.PATH ?? "", home = homedir(), platform = process.platform): string {
+  const separator = platform === "win32" ? ";" : ":";
+  return [...new Set([...path.split(separator).filter(Boolean), ...toolDirs(home, platform)])].join(separator);
+}
+
 function defaultSpawn(argv: string[], cwd: string): AgentProcess {
-  const child = Bun.spawn(argv, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+  const child = Bun.spawn(argv, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: toolPath(), NO_COLOR: "1" } });
   return { stdout: child.stdout, stderr: child.stderr, exited: child.exited, kill: () => child.kill() };
 }
 
@@ -427,13 +446,16 @@ export class AgentCli {
   private readonly agyModels: (path: string) => string;
   private agyListed: AgentModelOption[] | null = null;
 
-  /// A tool on PATH, or in ~/.local/bin, where Antigravity installs itself
-  /// (an app-started daemon's PATH may not have it).
+  /// A tool on PATH, or where tools install themselves (toolDirs): an
+  /// app-started daemon's PATH has none of Homebrew, npm or ~/.local/bin.
   private find(command: string): string | null {
     const found = this.which(command);
     if (found || this.whichGiven) return found;
-    const local = join(this.home, ".local", "bin", command);
-    return existsSync(local) ? local : null;
+    for (const dir of toolDirs(this.home)) {
+      const candidate = join(dir, process.platform === "win32" ? `${command}.cmd` : command);
+      if (existsSync(candidate)) return candidate;
+    }
+    return null;
   }
 
   private choices(): Partial<Record<AgentId, AgentChoice>> {

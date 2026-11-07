@@ -131,9 +131,11 @@ func text(_ pid: pid_t, _ title: String, _ ask: Bool) -> [String: Any] {
     }
   }
   walk(root, 0)
-  if asked && size < 400 {
-    // The tree was just switched on; give it a moment to fill.
-    Thread.sleep(forTimeInterval: 0.6)
+  // A tree just switched on fills in over a second or two; look again a few times.
+  var tries = 0
+  while asked && size < 400 && tries < 4 {
+    tries += 1
+    Thread.sleep(forTimeInterval: 0.5)
     lines = []; seen = 0; size = 0
     walk(root, 0)
   }

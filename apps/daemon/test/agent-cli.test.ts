@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGY_LOOK_COMMANDS, AgentCli, agentArgs, agyAllow, agentIdOf, agentPrompt, parseAgentLine } from "../src/agent-cli.ts";
+import { AGY_LOOK_COMMANDS, AgentCli, agentArgs, agyAllow, agentIdOf, agentPrompt, parseAgentLine, toolDirs, toolPath } from "../src/agent-cli.ts";
 import { claudeRun, fakeProcess } from "./agent-cli-fakes.ts";
 
 async function collect(stream: AsyncIterable<{ type: string; delta?: string }>) {
@@ -138,4 +138,23 @@ describe("agent tools", () => {
       await expect(collect(missing.inference("gemini", "c", "/w").stream([], [], new AbortController().signal))).rejects.toThrow("isn't installed");
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
+});
+
+test("an app-started daemon finds Codex from npm or Homebrew, and gives it node on PATH", () => {
+  const directory = mkdtempSync(join(tmpdir(), "demesne-tooldirs-"));
+  try {
+    const home = join(directory, "home"), bin = join(home, ".npm-global", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "codex"), "#!/usr/bin/env node\n");
+    const path = toolPath("/usr/bin:/bin", home, "darwin").split(":");
+    expect(path.slice(0, 2)).toEqual(["/usr/bin", "/bin"]);
+    expect(path).toContain("/opt/homebrew/bin");
+    expect(path).toContain(bin);
+    expect(toolDirs(home, "darwin")[0]).toBe(join(home, ".local", "bin"));
+    // Not on PATH (Bun.which finds nothing for this name), but in ~/.npm-global/bin.
+    const saved = Bun.which;
+    (Bun as { which: typeof Bun.which }).which = () => null;
+    try { expect(new AgentCli(join(directory, "data"), { home }).agents().find((agent) => agent.id === "codex")?.path).toBe(join(bin, "codex")); }
+    finally { (Bun as { which: typeof Bun.which }).which = saved; }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

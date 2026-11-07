@@ -2566,6 +2566,17 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop .research-lines .rs-who { color: var(--t3); font-size: 11.5px; width: 82px; flex: none; overflow: hidden; text-overflow: ellipsis; }
 .desktop .research-lines .rs-q { color: var(--t2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .desktop .research-lines .rs-judge .rs-who { color: var(--t2); }
+/* Sub-agents at work (pass 183 A): one crew line, a line each when open */
+.desktop .crew-row .crew-phrase, .desktop .crew-row .crew-now { color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.desktop .crew-row .crew-phrase { flex: none; max-width: 40%; }
+.desktop .crew-row .crew-now { margin-left: 8px; }
+.desktop .crew-row.failed .verb { color: var(--bad); }
+.desktop .crew-lines .crew-line { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; min-height: 22px; width: 100%; font-size: 12.5px; color: var(--t2); white-space: nowrap; cursor: pointer; border-radius: 6px; }
+.desktop .crew-lines .crew-line:hover .crew-task { color: var(--t1); }
+.desktop .crew-lines .crew-line:focus-visible { outline: 2px solid var(--accent, #7eaef0); outline-offset: 1px; }
+.desktop .crew-lines .crew-task { color: var(--t1); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.desktop .crew-lines .crew-said { margin-left: 45px; color: var(--t3); }
+.desktop .crew-lines .agent-steps { margin-left: 24px; }
 
 /* The same card in the right column (pass 177 C): one line like the others
    that opens to the whole card; a short window folds its parts list away first so the

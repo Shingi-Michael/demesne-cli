@@ -105,6 +105,8 @@ try {
     assistantModel: config.assistant?.model ?? config.provider.model,
     images: config.images,
     providerVision: config.provider.vision,
+    // Rarely used tools load on demand (DEMESNE_DEFER_TOOLS=0 sends them all).
+    deferTools: process.env.DEMESNE_DEFER_TOOLS !== "0",
     agent: config.agent,
     // /subagent saves its choice where the rest of the user's settings live.
     saveSubagentModel: (model) => { updateUserConfig(process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(), { agent: { subagent_model: model } }); },

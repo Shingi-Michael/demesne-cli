@@ -99,6 +99,8 @@ func text(_ pid: pid_t, _ title: String, _ ask: Bool) -> [String: Any] {
   if !trusted { return ["text": "", "note": "accessibility"] }
   let app = AXUIElementCreateApplication(pid)
   AXUIElementSetMessagingTimeout(app, 1.0)
+  // Electron and Chrome-based apps build their text tree only when asked.
+  let asked = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue) == .success
   var value: CFTypeRef?
   var window: AXUIElement?
   if AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success, let all = value as? [AXUIElement] {
@@ -129,6 +131,12 @@ func text(_ pid: pid_t, _ title: String, _ ask: Bool) -> [String: Any] {
     }
   }
   walk(root, 0)
+  if asked && size < 400 {
+    // The tree was just switched on; give it a moment to fill.
+    Thread.sleep(forTimeInterval: 0.6)
+    lines = []; seen = 0; size = 0
+    walk(root, 0)
+  }
   return ["text": lines.joined(separator: "\\n")]
 }
 let args = CommandLine.arguments

@@ -433,6 +433,7 @@ export function createDaemonApp(options: {
     },
     // An agent tool's chat answers its mail by itself: the answer goes back.
     answersMail: isAgentChat,
+    agentOf: (sessionId) => agentIdOf(store.getSession(sessionId)?.preferredModel),
     answerOf: (turnId) => {
       const turn = store.getTurn(turnId);
       if (turn?.status !== "completed") return null;

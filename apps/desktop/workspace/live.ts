@@ -34,6 +34,7 @@ import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { waitingFor, waitRow } from "./wait-row.ts";
 import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
+import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
@@ -1885,8 +1886,35 @@ function lookStep(run: WorkspaceRun, tool: ToolEntry) {
   return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
     { runId: run.id, id: tool.id }, `tool-row wait-row look-row ${row.tone}`) + row.below;
 }
+/// Who you asked (pass 178 B): a turn's Heartbeat sends are one row.
+const askedOpen = new Set<string>();
+const isSend = (tool: ToolEntry) => tool.name === "heartbeat" && tool.input.action === "send";
+const firstSend = (run: WorkspaceRun, tool: ToolEntry) => isSend(tool) && run.entries.find((entry): entry is ToolEntry => entry.type === "tool" && isSend(entry)) === tool;
+function askedAnswers(run: WorkspaceRun) {
+  const asked = askedIn(run.entries);
+  if (!asked.length || !state) return { asked, answers: new Map<string, { text: string; performative: string }>() };
+  const at = state.runs.findIndex((other) => other.id === run.id);
+  return { asked, answers: answersAfter(state.runs, at, asked.map((item) => item.to)) };
+}
+function askStep(run: WorkspaceRun) {
+  const { asked, answers } = askedAnswers(run);
+  const housed = state?.housed ?? [];
+  return askRowHTML({ asked, answers, runId: run.id, open: asked.length ? askedOpen.has(`${run.id}:${asked[0]!.key}`) : false, mail: stepIconFor("mail"),
+    face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood === "focus" ? "focus" : "calm")}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
+    working: (agent) => housed.some((item) => item.id === agent && item.state === "working") });
+}
+/// What the row shows depends on mail that came later: part of a turn's signature.
+function askedSignature(run: WorkspaceRun): string {
+  if (!run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
+  const { asked, answers } = askedAnswers(run);
+  return JSON.stringify([asked.map((item) => item.state), [...answers.keys()], [...askedOpen].filter((key) => key.startsWith(`${run.id}:`)),
+    (state?.housed ?? []).filter((item) => asked.some((one) => one.agent === item.id)).map((item) => item.state)]);
+}
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === UPDATE_PLAN) return "";
+  if (isSend(tool)) return firstSend(run, tool) ? askStep(run) : "";
+  // Finding who to ask is part of asking: no row of its own beside the one above.
+  if (tool.name === "heartbeat" && tool.input.action === "agents" && run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
   if (tool.name === "wait_for") return waitStep(run, tool);
   if (tool.name === "look_at_page") return lookStep(run, tool);
   // An open question is a card at its step; one the turn waits on is asked
@@ -2253,6 +2281,8 @@ function runHTML(run: WorkspaceRun, index: number) {
       if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
       if (entry.type === "tool" && entry.name === "start_threads" && entry.state === "done") { flush(); body += THREADS_SLOT; }
       if (entry.type === "tool" && entry.handoff) { flush(); body += handoffCard(entry.handoff); }
+      // Who this turn asked stays in sight, with how many have answered.
+      if (entry.type === "tool" && firstSend(run, entry)) { flush(); body += `<div class="steps">${askStep(run)}</div>`; }
       if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
@@ -2719,6 +2749,7 @@ function renderConversation() {
       expanded.has(run.id),
       stepsOpen.has(run.id),
       planOpen.has(run.id),
+      askedSignature(run),
       [...fileEditsOpen].filter(key => key.startsWith(`${run.id}:`)),
       // Unfolded steps, and the recorded output a command's fold shows.
       [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
@@ -6157,6 +6188,13 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  if (action === "toggle-asked") {
+    const key = String(args.id);
+    askedOpen.has(key) ? askedOpen.delete(key) : askedOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
   }
   if (action === "look-picture") {
     const src = lookPictures.get(String(args.id));

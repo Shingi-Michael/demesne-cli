@@ -2673,6 +2673,12 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
       ...(typeof value.bytes === "number" ? { bytes: value.bytes } : {}),
     };
   }
+  // A Heartbeat message: who it went to (their face and name) and its id, so
+  // the chat can tie the answer back to it.
+  if (name === "heartbeat" && typeof value.to === "string" && typeof value.id === "string" && typeof value.name === "string") {
+    return { message: JSON.stringify({ id: value.id.slice(0, 80), to: value.to.slice(0, 200), agent: typeof value.agent === "string" ? value.agent.slice(0, 40) : null,
+      name: value.name.slice(0, 80), project: typeof value.project === "string" ? value.project.slice(0, 120) : "" }) };
+  }
   // Wait and watch: what it waited for and how it ended, for the step row.
   if (name === "wait_for" && ["matched", "exited", "timeout"].includes(String(value.status))) {
     return { message: JSON.stringify({ command: typeof value.command === "string" ? value.command.slice(0, 200) : "", status: value.status, afterMs: typeof value.afterMs === "number" ? value.afterMs : 0,

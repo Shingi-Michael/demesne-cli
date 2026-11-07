@@ -164,13 +164,21 @@ function workingLine(line: WorkingLine, run: WorkspaceRun) {
     : latest?.waiting ? `Waiting for your approval${latest.name === "run_command" ? "" : ` · ${verb(latest)}`}`
       : latest?.drafting ? "Writing a command…"
         : latest?.name === "wait_for" && latest.state === "running" ? `Waiting for ${waitingFor(latest.input.pattern)}`
-        : latest?.name === "look_at_page" && latest.state === "running" ? `Looking at ${pageName(latest.input.url)}` : undefined;
+        : latest?.name === "look_at_page" && latest.state === "running" ? `Looking at ${pageName(latest.input.url)}`
+        : latest?.name === "agents" && latest.state === "running" && latest.input.action === "wait" ? `Waiting for ${backgroundNames(run, latest.input.ids)}` : undefined;
   const thinking = run.entries.findLast((entry) => entry.type === "reasoning");
   line.update(workingPhrases({
     fixed,
     thinking: thinking?.type === "reasoning" ? thinking.raw : null,
-    steps: steps.filter((tool) => !tool.drafting).map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running", files: tool.name === "read_files" ? readPaths(tool).length || 1 : 1 })),
+    steps: steps.filter((tool) => !tool.drafting && tool.name !== "agents").map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running", files: tool.name === "read_files" ? readPaths(tool).length || 1 : 1 })),
   }, Date.now()), fixed !== undefined);
+}
+/// Who a wait is for: background sub-agents are a1, a2… in the order the chat started them.
+function backgroundNames(run: WorkspaceRun, ids: unknown): string {
+  const crew = run.entries.filter((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "subagent" && entry.input.background === true);
+  const wanted = Array.isArray(ids) && ids.length ? ids.map((id) => crew[Number(String(id).replace(/\D/g, "")) - 1]).filter((one): one is ToolEntry => Boolean(one)) : crew.filter((one) => one.state === "running" && one.crew === "working");
+  const names = [...new Set(wanted.map((one) => { const agent = cliAgent(one); return agent ? CLI_NAMES[agent] ?? agent : "an agent"; }))];
+  return names.length === 1 ? names[0]! : names.length ? `${names.length} agents` : "the agents";
 }
 /// A step's target in a few words: a file's name, a command's program, a page's title.
 function stepTarget(tool: ToolEntry) {
@@ -2054,15 +2062,16 @@ function crewStep(run: WorkspaceRun, tool: ToolEntry) {
     if (!seen || seen.steps !== steps) { if (crewSeen.size > 400) crewSeen.clear(); crewSeen.set(member.toolCallId, { steps, at: Date.now() }); }
     const last = member.trace?.at(-1)?.text.replace(/^[^·]+ · /, "");
     const at = crewSeen.get(member.toolCallId)!.at;
-    if ((member.state === "running" || member.drafting) && last && (!newest || at > newest.at)) newest = { text: nowWords(last), at };
+    if (((member.state === "running" && !member.crew?.match(/reported|stopped/)) || member.drafting) && last && (!newest || at > newest.at)) newest = { text: nowWords(last), at };
   }
-  const running = members.find((member) => member.state === "running");
+  const running = members.find((member) => member.state === "running" && member.crew !== "reported" && member.crew !== "stopped");
   const slot = running ? run.entries.filter((entry) => entry.type === "tool" && isAgentStep(entry)).indexOf(running) : 0;
   const model = running?.subagentModel ?? state!.model.id;
   return crewRowHTML({
     members: members.map((member) => ({
       runId: run.id, id: member.id, agent: cliAgent(member), task: String(member.input.description ?? member.detail ?? "Sub-agent"),
       state: member.state, drafting: member.drafting, steps: member.trace?.length ?? 0, durationMs: member.durationMs,
+      toolCallId: member.toolCallId, ...(member.crew ? { crew: member.crew } : {}), ...(member.asked?.length ? { asked: member.asked } : {}),
       found: ["failed", "denied", "stopped"].includes(member.state) ? (member.message ?? "").replace(/^Error: (sub-agent failed: )?/, "") : member.report,
       open: stepOpen.has(`${run.id}:${member.id}`), fold: stepOpen.has(`${run.id}:${member.id}`) ? agentFold(run, member) : undefined,
     })),
@@ -2120,8 +2129,9 @@ function askedSignature(run: WorkspaceRun): string {
 /// A step that read or wrote one file a preview can show: its path.
 const stepPreviewPath = (tool: ToolEntry) => ["read_file", "write_file", "edit_file"].includes(tool.name) && typeof tool.input.path === "string" && previewable(tool.input.path) ? tool.input.path : "";
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
-  // The plan is the ribbon; loading tools (tool_search) is plumbing.
-  if (tool.name === UPDATE_PLAN || tool.name === "tool_search") return "";
+  // The plan is the ribbon; loading tools (tool_search) is plumbing; waiting
+  // on, asking or stopping background agents shows on their crew line.
+  if (tool.name === UPDATE_PLAN || tool.name === "tool_search" || tool.name === "agents") return "";
   if (isSend(tool)) return firstSend(run, tool) ? askStep(run) : "";
   // Finding who to ask is part of asking: no row of its own beside the one above.
   if (tool.name === "heartbeat" && tool.input.action === "agents" && run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
@@ -6383,6 +6393,11 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  // Stop on a background sub-agent's line (pass 190 A).
+  if (action === "stop-agent") {
+    void act(() => api("stop-agent", { toolCallId: String(args.toolCallId) }));
+    return;
   }
   if (action === "toggle-crew") {
     const key = String(args.id);

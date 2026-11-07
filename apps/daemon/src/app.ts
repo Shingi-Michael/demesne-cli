@@ -1792,6 +1792,14 @@ export function createDaemonApp(options: {
         } catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
       }
 
+      // Stop on a background sub-agent's line (pass 190 A).
+      if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "agents" && path[4] === "stop") {
+        if (!store.getSession(path[2]!)) return apiError("not_found", "Session not found", 404);
+        const body = await request.json().catch(() => null) as { toolCallId?: unknown } | null;
+        if (typeof body?.toolCallId !== "string") return apiError("invalid_request", "toolCallId is required", 400);
+        return json({ stopped: engine.stopAgent(body.toolCallId) });
+      }
+
       // A file shown in its preview card (pass 188 A).
       if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "preview") {
         const session = store.getSession(path[2]!);

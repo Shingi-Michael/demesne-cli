@@ -559,6 +559,11 @@ export class DemesneClient {
     return this.request<RewindResponse>(`/v1/sessions/${sessionId}/rewind`, { method: "POST", body: JSON.stringify(request) });
   }
 
+  /// Stops a sub-agent working in the background of this chat's turn.
+  async stopAgent(sessionId: string, toolCallId: string): Promise<{ stopped: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/agents/stop`, { method: "POST", body: JSON.stringify({ toolCallId }) });
+  }
+
   async steer(sessionId: string, request: SteerTurnRequest): Promise<{ steerId: string; turnId: string }> {
     return this.request(`/v1/sessions/${sessionId}/steer`, { method: "POST", body: JSON.stringify(request) });
   }

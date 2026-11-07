@@ -1,4 +1,5 @@
 import { moreToolsSection, searchTools, splitTools, TOOL_SEARCH } from "./tool-search.ts";
+import { AGENTS_TOOL, agentsDefinition, Crew, parseAgentsInput } from "./crew.ts";
 import type { CommandMonitor } from "./command-monitor.ts";
 import { isRecord, type NearbyAgent, type PermissionMode, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
 import { DEFAULT_AGENT_LIMITS, type AgentConfig, type SubagentOften } from "@demesne/config";
@@ -211,6 +212,7 @@ export class AgentEngine {
     } finally {
       // Words that arrived too late stay with the window, which sends them next.
       this.running.delete(turnId);
+      this.closeCrew(turnId);
       const late = (this.steers.get(turnId) ?? []).filter((steer) => steer.id.startsWith("answer:"));
       this.steers.delete(turnId);
       if (late.length && sessionId) this.options.lateAnswers?.(sessionId, turnId, late.map((steer) => steer.text));
@@ -279,6 +281,8 @@ export class AgentEngine {
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
         FOUNDRY_TOOL_NAMES.has(definition.name) || WEB_TOOL_NAMES.has(definition.name) || definition.name === UPDATE_PLAN || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+    // Sub-agents that stay: agents waits for, asks or stops the ones in the background.
+    if (definitions.some((definition) => definition.name === SUBAGENT_TOOL)) definitions.push(agentsDefinition);
     // Deep research wherever the web is: the chat plans, agents read, a judge checks.
     if (!themefy && !assistant && definitions.some((definition) => definition.name === "web_search")) definitions.push(researchDefinition);
     // Orchestrate mode: the chat reads, plans and runs threads; the threads change the files.
@@ -532,6 +536,7 @@ export class AgentEngine {
           const firstRetainedMessageId = history[0]?.firstMessageId ?? currentUser.id;
           this.store.trimModelContext(turnId, firstRetainedMessageId, pendingContextDrops.map((entry) => entry.id));
         }
+        this.closeCrew(turnId);
         if (finalizing) this.store.interruptTurn(turnId, `${budgetReason}. Progress saved; send a follow-up to continue. Limits are configurable under [agent].`);
         else this.store.completeTurn(turnId);
         return;
@@ -579,7 +584,7 @@ export class AgentEngine {
       // the model asks again next round instead of the turn failing.
       const runRecords = callRecords.slice(0, TOOLS_PER_ROUND), skippedRecords = callRecords.slice(TOOLS_PER_ROUND);
       const allReadOnly = runRecords.every(({ call }) => {
-        if (call.name === SUBAGENT_TOOL || call.name === RESEARCH_TOOL) return true;
+        if (call.name === SUBAGENT_TOOL || call.name === RESEARCH_TOOL || call.name === AGENTS_TOOL) return true;
         const tool = this.tools.get(call.name);
         if (!tool) return false;
         try {
@@ -600,7 +605,7 @@ export class AgentEngine {
         );
         for (const { call, result, imageArtifactIds } of results) {
           totalToolResultBytes += Buffer.byteLength(result);
-          const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result, ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
+          const toolMessage = { role: "tool" as const, toolCallId: call.id, content: this.withReports(turnId, result), ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
           currentMessages.push(toolMessage);
           this.store.appendModelMessage(turnId, toolMessage);
         }
@@ -609,7 +614,7 @@ export class AgentEngine {
           const imageArtifactIds: string[] = [];
           const result = await this.executeTool(toolCallId, call, turn.permissionMode, session.workspace?.root, turnId, session.id, signal, turn.planOnly === true, imageArtifactIds, inference);
           totalToolResultBytes += Buffer.byteLength(result);
-          const toolMessage = { role: "tool" as const, toolCallId: call.id, content: result, ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
+          const toolMessage = { role: "tool" as const, toolCallId: call.id, content: this.withReports(turnId, result), ...(imageArtifactIds.length ? { imageArtifactIds } : {}) };
           currentMessages.push(toolMessage);
           this.store.appendModelMessage(turnId, toolMessage);
           if(themefy && call.name === "apply_theme" && !result.startsWith("Error:")) {
@@ -718,10 +723,88 @@ export class AgentEngine {
     return go;
   }
 
+  private readonly crews = new Map<string, Crew>();
+  private crewFor(turnId: string, signal: AbortSignal): Crew {
+    let crew = this.crews.get(turnId);
+    if (!crew) {
+      crew = new Crew({ signal,
+        mark: (toolCallId, mark) => this.store.appendToolProgress(turnId, toolCallId, mark),
+        settle: (toolCallId, outcome, text) => { this.store.settleToolCall(toolCallId, outcome, text); } });
+      this.crews.set(turnId, crew);
+    }
+    return crew;
+  }
+  /// Stop on its line: the person stopped one; the chat hears it with its next result.
+  stopAgent(toolCallId: string): boolean {
+    for (const crew of this.crews.values()) if (crew.stopByPerson(toolCallId)) return true;
+    return false;
+  }
+  private closeCrew(turnId: string): void {
+    const crew = this.crews.get(turnId);
+    this.crews.delete(turnId);
+    crew?.close();
+  }
+  /// Reports that came in while the chat worked ride on its next tool result.
+  private withReports(turnId: string, result: string): string {
+    const crew = this.crews.get(turnId);
+    if (!crew?.hasUnread()) return result;
+    return `${result}\n\n${crew.take()}`;
+  }
+
+  /// subagent with background: true. Its row stays running while the chat
+  /// goes on; its report comes back through agents or the next tool result.
+  private startBackground(toolCallId: string, input: Record<string, unknown>, workspaceRoot: string, turnId: string, sessionId: string,
+    inference: TurnInference, signal: AbortSignal): string {
+    let description: string, prompt: string;
+    try { ({ description, prompt } = parseSubagentInput(input)); } catch (error) {
+      const result = `Error: ${error instanceof Error ? error.message : "invalid subagent input"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+    const crew = this.crewFor(turnId, signal);
+    let id: string;
+    try {
+      this.store.startToolCall(toolCallId);
+      id = crew.start(toolCallId, description, prompt, (brief, own) => new Promise<string>((resolve, reject) => {
+        let outcome: { ok: boolean; text: string } | null = null;
+        void this.executeSubagent(toolCallId, { ...input, prompt: brief.slice(0, 16_000), background: false }, workspaceRoot, turnId, sessionId, inference, own,
+          { started: true, settle: (status, text) => { outcome = { ok: status === "completed", text }; } })
+          .then((text) => { const done = outcome ?? { ok: true, text }; if (done.ok) resolve(done.text); else reject(new Error(done.text.replace(/^Error: (sub-agent failed: )?/, ""))); }, reject);
+      }));
+    } catch (error) {
+      const result = `Error: ${error instanceof Error ? error.message : "could not start it"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+    this.store.appendToolProgress(turnId, toolCallId, { crew: "working" });
+    return `Started ${id} in the background: ${description}. Keep working. Its report arrives with a later tool result; call agents with action wait when you need it, message to ask it more, or stop when you no longer need it. Any still working when you write your answer are stopped.`;
+  }
+
+  private async runAgents(toolCallId: string, input: unknown, turnId: string, signal: AbortSignal): Promise<string> {
+    this.store.startToolCall(toolCallId);
+    try {
+      const parsed = parseAgentsInput(input);
+      const crew = this.crews.get(turnId);
+      if (!crew?.size) throw new Error("no sub-agents are running in the background in this turn. Start one with subagent and background: true");
+      const result = await crew.run(parsed, signal);
+      this.store.settleToolCall(toolCallId, "completed", result);
+      return result;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      const result = `Error: ${error instanceof Error ? error.message : "agents failed"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    }
+  }
+
   /// A sub-agent reads and searches only, so it runs without an approval; its
   /// report is the tool result and its steps stream as progress on the card.
   private async executeSubagent(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string,
-    inference: TurnInference, signal: AbortSignal): Promise<string> {
+    inference: TurnInference, signal: AbortSignal,
+    // A background run (crew.ts) owns its row: it reads the result here and
+    // settles the row itself when the turn ends.
+    own: { settle?: (outcome: "completed" | "failed", text: string) => void; started?: boolean } = {}): Promise<string> {
+    const settle = own.settle ?? ((outcome: "completed" | "failed", text: string) => { this.store.settleToolCall(toolCallId, outcome, text); });
     let prompt: string, requested: string | undefined, description: string, givenKind: JobKind | undefined;
     try {
       ({ prompt, model: requested, description, kind: givenKind } = parseSubagentInput(input));
@@ -731,7 +814,7 @@ export class AgentEngine {
     }
     catch (error) {
       const result = `Error: ${error instanceof Error ? error.message : "invalid subagent input"}`;
-      this.store.settleToolCall(toolCallId, "failed", result);
+      settle("failed", result);
       return result;
     }
     // The model the agent named (the user asked for it), else the default
@@ -739,7 +822,7 @@ export class AgentEngine {
     // your agent tools, picked for the job; "same": the turn's own model.
     const setting = this.options.subagentModel;
     const cli = this.options.cliSubagents;
-    let started = false;
+    let started = own.started === true;
     const named = agentIdOf(requested ?? (setting === "auto" || setting === "same" ? undefined : setting));
     if (cli && (named || (!requested && (setting === undefined || setting === "auto")))) {
       // The kind the main model named, else a guess from the label and brief.
@@ -748,12 +831,12 @@ export class AgentEngine {
       const pick = named ? (available.includes(named) ? { agent: named, why: "" } : null) : pickAgent(kind, available, cli.book?.read() ?? { jobs: {}, restUntil: {} });
       if (named && !pick) {
         const result = `Error: ${named} isn't installed on this machine. Available sub-agents: ${(this.options.subagentModels?.() ?? []).map((model) => model.id).join(", ")}`;
-        this.store.settleToolCall(toolCallId, "failed", result);
+        settle("failed", result);
         return result;
       }
       if (pick) {
         const label = `agent:${pick.agent} · `;
-        this.store.startToolCall(toolCallId);
+        if (!started) this.store.startToolCall(toolCallId);
         started = true;
         this.store.appendToolProgress(turnId, toolCallId, { text: `${label}starting`, ...(pick.why ? { why: pick.why } : {}) });
         try {
@@ -762,7 +845,7 @@ export class AgentEngine {
           if (!named) cli.book?.note(pick.agent, kind, grounded(report, workspaceRoot));
           this.store.appendToolProgress(turnId, toolCallId, { report: report.slice(0, 16 * 1024) });
           const result = `${report.slice(0, 16 * 1024)}\n\n(Sub-agent ran on ${pick.agent === "claude" ? "Claude Code" : pick.agent === "codex" ? "Codex" : "Gemini"}.)`;
-          this.store.settleToolCall(toolCallId, "completed", result);
+          settle("completed", result);
           return result;
         } catch (error) {
           if (signal.aborted) throw error;
@@ -772,7 +855,7 @@ export class AgentEngine {
           // to the chat's own model, as a sub-agent ran before.
           if (named) {
             const result = `Error: sub-agent failed: ${message}`;
-            this.store.settleToolCall(toolCallId, "failed", result);
+            settle("failed", result);
             return result;
           }
           this.store.appendToolProgress(turnId, toolCallId, { text: `${label}${message.split("\n")[0]!.slice(0, 160)} · trying the chat's model` });
@@ -789,7 +872,7 @@ export class AgentEngine {
         delegate = this.options.inferenceFor(model, false);
       } catch (error) {
         const result = `Error: sub-agent model ${model} is unavailable (${error instanceof Error ? error.message : "unknown error"}). Choose another with /subagent.`;
-        this.store.settleToolCall(toolCallId, "failed", result);
+        settle("failed", result);
         return result;
       }
     }
@@ -802,12 +885,12 @@ export class AgentEngine {
       const result = await runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate, cacheKey: `${sessionId}:${toolCallId}`,
         scheduler: this.scheduler.for(delegate.providerId), signal, limits: this.options,
         progress: (update) => this.store.appendToolProgress(turnId, toolCallId, update.text === undefined ? update : { ...update, text: label + update.text }) });
-      this.store.settleToolCall(toolCallId, "completed", result);
+      settle("completed", result);
       return result;
     } catch (error) {
       if (signal.aborted) throw error;
       const result = `Error: sub-agent failed: ${error instanceof Error ? error.message : "unknown error"}`;
-      this.store.settleToolCall(toolCallId, "failed", result);
+      settle("failed", result);
       return result;
     }
   }
@@ -1059,7 +1142,10 @@ export class AgentEngine {
       if (planOnly) { const result = "Error: hand_off is not available in plan mode"; this.store.settleToolCall(toolCallId, "denied", result); return result; }
       return this.executeHandoff(toolCallId, input, workspaceRoot, turnId, sessionId, signal);
     }
-    if (call.name === SUBAGENT_TOOL && inference) return this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
+    if (call.name === SUBAGENT_TOOL && inference) return isRecord(input) && input.background === true
+      ? this.startBackground(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal)
+      : this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
+    if (call.name === AGENTS_TOOL) return this.runAgents(toolCallId, input, turnId, signal);
     if (call.name === RESEARCH_TOOL && inference) return this.executeResearch(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
     if (call.name === SESSION_TOOLS) return this.executeSessionTool(toolCallId, call, input, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
     // ls, cat, grep… through run_command: answered by the built-in read tool
@@ -1325,7 +1411,8 @@ export function delegateGuidance({ often, onAgents }: { often: SubagentOften; on
     : "When answering needs reading more than about four files you haven't seen, or looking in more than one area of the code,";
   return `Sub-agents (subagent) keep this conversation's context small${onAgents ? " and run on the person's own Claude Code, Codex or Gemini, so they cost this chat almost nothing" : ""}. `
     + `${when} send sub-agents for that lookup instead of reading it all yourself: one per area or question, all in the same round, each with a complete brief and its kind. `
-    + "Then read only the files they point to before you edit. Read directly when you already know the file, the answer is in one or two files, or you are about to change it.";
+    + "Then read only the files they point to before you edit. Read directly when you already know the file, the answer is in one or two files, or you are about to change it. "
+    + "When you have your own work to do meanwhile, start them with background: true and keep going; use agents to wait for an answer you need, ask one a follow-up, or stop one you no longer need.";
 }
 
 export function agentSystemPrompt(options: { workspaceRoot?: string; definitions: ProviderToolDefinition[]; content?: string;
@@ -1397,13 +1484,13 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "update_plan",
   // Read-only. A literal: subagent.ts imports this module, so its constant
   // may not be initialised yet while this set is built.
-  "subagent",
+  "subagent", "agents",
 ]);
 
 /// Orchestrate mode: reading, planning and the threads. No edits, no commands.
 export const ORCHESTRATE_TOOL_NAMES = new Set([
   "list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history",
-  "session_tools", "ask_user", "subagent", "start_threads", "message_thread", "web_search", "web_fetch", "remember", "update_plan",
+  "session_tools", "ask_user", "subagent", "agents", "start_threads", "message_thread", "web_search", "web_fetch", "remember", "update_plan",
 ]);
 const ORCHESTRATE_GUIDANCE = "Orchestrate mode: you are this project's orchestrator. You never change files or run commands yourself; threads do all the work. Read and plan, then hand the work out with start_threads (each thread a clear brief and the files it may change), pass the person's rules, corrections and answers to a thread with message_thread, and read the reports as they come back. When the person asks for a change, start or message a thread rather than explaining how they could do it. Only the person merges threads.";
 

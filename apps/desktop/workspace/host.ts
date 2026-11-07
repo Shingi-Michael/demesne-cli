@@ -1974,6 +1974,12 @@ export class WorkspaceHost {
       await this.refreshFiles();
       return this.files;
     }
+    // Stop on a background sub-agent's line (pass 190 A).
+    if (method === "stop-agent") {
+      if (!this.current) throw new Error("Choose a session first.");
+      await this.client.stopAgent(this.current.session.id, string(args.toolCallId, "agent", 200));
+      return;
+    }
     // A file for its preview card (pass 188 A).
     if (method === "file-preview") {
       if (!this.current) throw new Error("Choose a session first.");

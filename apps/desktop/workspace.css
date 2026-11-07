@@ -953,36 +953,35 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #question:empty { display: none; }
 .desktop #question .ask-card { max-width: 780px; margin: -30px auto 18px; }
 .desktop .ask-slot { margin: 6px 0 10px; }
-.desktop .ask-card { position: relative; display: flex; flex-direction: column; padding: 14px 16px 12px; border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--t1) 4%, transparent);
-  box-shadow: 0 0 0 1px var(--hair), inset 0 1.5px 0 color-mix(in srgb, var(--warn) 75%, transparent); }
-.desktop .ask-tag { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--t3); font-size: 12px; }
-.desktop .ask-tag i { position: relative; flex: none; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn); }
-.desktop .ask-tag span { margin-left: auto; font-variant-numeric: tabular-nums; }
-.desktop .ask-trail { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; padding: 0 0 0 10px; border-left: 1px solid var(--hair); list-style: none; font-size: 12.5px; color: var(--t3); }
+.desktop .ask-card { position: relative; display: flex; flex-direction: column; gap: 8px; max-width: 560px; }
+.desktop .ask-q { display: flex; align-items: baseline; gap: 9px; padding: 0 2px; }
+.desktop .ask-q i { position: relative; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); transform: translateY(-1px); }
+.desktop .ask-n { margin-left: auto; flex: none; color: var(--t3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.desktop .ask-trail { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0 0 0 10px; border-left: 1px solid var(--hair); list-style: none; font-size: 12.5px; color: var(--t3); }
 .desktop .ask-trail li { display: flex; gap: 8px; min-width: 0; }
 .desktop .ask-trail li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop .ask-trail b { flex: none; font-weight: 500; color: var(--t1); }
-.desktop .ask-text { margin: 0; color: var(--t1); font-size: 16px; line-height: 23px; font-weight: 600; letter-spacing: -0.005em; text-wrap: pretty; }
+.desktop .ask-text { margin: 0; color: var(--t1); font-size: 13.5px; line-height: 20px; font-weight: 500; text-wrap: pretty; }
 .desktop .ask-text .w { display: inline-block; white-space: pre; }
-.desktop .ask-why { margin: 3px 0 0; color: var(--t3); font-size: 13px; line-height: 1.5; }
-.desktop .ask-choices { display: grid; gap: 6px; margin-top: 12px; }
-.desktop .ask-choice { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 12px; border: 0; border-radius: var(--r); background: color-mix(in srgb, var(--t1) 4%, transparent); box-shadow: 0 0 0 1px var(--hair); color: var(--t1); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
-.desktop .ask-choice kbd { flex: none; width: 18px; height: 18px; margin-top: 1px; display: grid; place-items: center; border-radius: var(--r-sm); background: var(--tone); color: var(--t3); font: 500 11px/1 Inter, system-ui, sans-serif; }
+/* The answers: one list with a line between rows (pass 192), as Settings
+   and Checkpoints draw theirs. */
+.desktop .ask-choices { display: flex; flex-direction: column; border-radius: var(--r); box-shadow: inset 0 0 0 1px var(--hair); overflow: hidden; }
+.desktop .ask-choice { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 50px; padding: 6px 12px; border: 0; border-radius: 0; background: none; box-shadow: inset 0 -1px 0 var(--hair); color: var(--t1); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.desktop .ask-choice:last-child { box-shadow: none; }
+.desktop .ask-choice kbd { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: var(--r-sm); background: none; box-shadow: inset 0 0 0 1px var(--hair); color: var(--t3); font: 500 11px/1 Inter, system-ui, sans-serif; }
 .desktop .ask-choice .tx { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.desktop .ask-choice .tx b { font-weight: 500; }
-.desktop .ask-choice .tx span { font-size: 12.5px; color: var(--t3); }
-.desktop .ask-choice .rec { align-self: center; flex: none; font-size: 11.5px; color: var(--warn); }
-.desktop .ask-choice:hover, .desktop .ask-choice:focus-visible { background: color-mix(in srgb, var(--t1) 7%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--t1) 16%, transparent); outline: none; }
-.desktop .ask-choice.on { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 55%, transparent); }
+.desktop .ask-choice .tx b { font-weight: 500; line-height: 20px; }
+.desktop .ask-choice .tx span { font-size: 12.5px; line-height: 18px; color: var(--t3); }
+.desktop .ask-choice .rec { flex: none; font-size: 12px; color: var(--warn); }
+.desktop .ask-choice.first kbd { color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+.desktop .ask-choice:hover, .desktop .ask-choice:focus-visible { background: var(--surface2, color-mix(in srgb, var(--t1) 4.5%, transparent)); outline: none; }
+.desktop .ask-choice.on { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .desktop .ask-choice.on kbd { background: color-mix(in srgb, var(--warn) 24%, transparent); color: var(--t1); }
-.desktop .ask-own { display: flex; gap: 8px; align-items: center; margin-top: 8px; padding: 3px 3px 3px 12px; border-radius: var(--r); background: color-mix(in srgb, var(--t1) 3%, transparent); box-shadow: 0 0 0 1px var(--hair); }
-.desktop .ask-own:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--t1) 22%, transparent); }
-.desktop .ask-own input { flex: 1; min-width: 0; padding: 6px 0; border: 0; outline: 0; background: none; color: var(--t1); font: inherit; font-size: 13.5px; }
-.desktop .ask-own input::placeholder { color: var(--t4); }
-.desktop .ask-send { padding: 4px 10px; border: 0; border-radius: var(--r-sm); background: var(--t1); color: var(--surface, #141414); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
-.desktop .ask-own:not(:focus-within) .ask-send { opacity: .3; }
-.desktop .ask-foot { display: flex; align-items: center; gap: 14px; margin-top: 10px; color: var(--t4); font-size: 12px; }
+.desktop .ask-decide { min-height: 38px; }
+.desktop .ask-decide kbd { box-shadow: none; }
+.desktop .ask-decide .tx b { font-weight: 400; color: var(--t3); }
+.desktop .ask-decide:hover .tx b { color: var(--t1); }
+.desktop .ask-foot { display: flex; align-items: center; gap: 14px; padding: 0 2px; color: var(--t4); font-size: 12px; }
 .desktop .ask-link { padding: 0; border: 0; background: none; color: var(--t3); font: inherit; cursor: pointer; }
 .desktop .ask-link:hover { color: var(--t1); }
 .desktop .ask-done-btn { padding: 4px 10px; border: 0; border-radius: var(--r-sm); background: var(--t1); color: var(--surface, #141414); font: inherit; font-weight: 500; cursor: pointer; }
@@ -1004,8 +1003,8 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #ask-back[hidden] { display: none; }
 .desktop #ask-back i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop .ask-tag i::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn); animation: ask-breathe 2.4s var(--ease) infinite; }
-  .desktop .ask-choice { transition: background 160ms var(--ease), box-shadow 160ms var(--ease); }
+  .desktop .ask-q i::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn); animation: ask-breathe 2.4s var(--ease) infinite; }
+  .desktop .ask-choice { transition: background 140ms var(--ease); }
 }
 @keyframes ask-breathe { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(2); } }
 /* Something broke: Drive's line says it with a red cross and unfolds in
@@ -1725,21 +1724,22 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 
 /* Artifact frames stay mounted beside the changing response text. */
 .turn-content { display: contents; }
-/* What a chat made: a chip per artifact, bare on the text; the one open
-   in the pane wears a tone. */
-.fd-chips { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: 6px 0 4px -6px; }
-.fd-chip { display: flex; align-items: center; gap: 11px; max-width: 100%; padding: 6px 12px 6px 6px; border: 0; border-radius: var(--r-lg); background: none; color: var(--t2); font: inherit; text-align: left; cursor: pointer; transition: background-color 140ms var(--ease), box-shadow 140ms var(--ease); }
-.fd-chip:hover { background: var(--tone); }
+/* What a chat made: a link card per artifact (pass 192 A), its kind's
+   tile, its name and version, and Open. The one open in the
+   pane wears a tone. */
+.fd-chips { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 8px 0 4px; }
+.fd-chip { display: flex; align-items: center; gap: 12px; width: min(440px, 100%); padding: 7px; border: 0; border-radius: var(--r-lg); background: color-mix(in srgb, var(--t1) 3%, transparent); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t2); font: inherit; text-align: left; cursor: pointer; transition: background-color 140ms var(--ease), box-shadow 140ms var(--ease); }
+.fd-chip:hover { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair2); }
 .fd-chip[aria-pressed="true"] { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair2); }
 .fd-chip:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; }
-/* A chip lands as its page finishes assembling in the pane. */
 @media (prefers-reduced-motion: no-preference) { .fd-chip { animation: fd-chip-in 220ms var(--ease) both; } }
 @keyframes fd-chip-in { from { opacity: 0; transform: translateY(6px); } }
-.fd-chip-ic { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 7px; background: var(--tone2); }
-.fd-chip-ic .ico { width: 15px; height: 15px; color: var(--t2); }
-.fd-chip-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.fd-chip-thumb { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 9px; background: var(--tone2); color: var(--t2); }
+.fd-chip-thumb .ico { width: 20px; height: 20px; }
+.fd-chip-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 .fd-chip-text b { overflow: hidden; color: var(--t1); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .fd-chip-text span { color: var(--t3); font-size: 12px; }
+.fd-chip-open { flex: none; margin-right: 6px; padding: 3px 10px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); font-size: 12px; }
 
 /* The pane: the artifact beside the conversation, edge to edge, with one
    line above it and one below. The cards column yields to it. */

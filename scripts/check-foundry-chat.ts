@@ -163,7 +163,7 @@ try {
   await editor.fill("Make it blue"); await editor.press("Enter");
   // The turn that changed it ends with its own chip, a link to the newest version.
   await chips.nth(1).filter({ hasText: "Idea garden" }).filter({ hasText: "Prototype · v2" }).waitFor();
-  assert.equal(await chips.nth(1).locator(".fd-chip-ic").count(), 1, "a change gets a full chip, not a faint line");
+  assert.equal(await chips.nth(1).locator(".fd-chip-thumb").count(), 1, "a change gets a full link card, not a faint line");
   await eventually(async () => (await f.client.foundryGet(artifact.id)).version === 2);
   assert.equal(await chips.nth(1).getAttribute("data-artifact-id"), artifact.id);
   assert.match((await f.client.foundryGet(artifact.id)).source, /#3158ba/);

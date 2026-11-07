@@ -1328,7 +1328,8 @@ try {
   const fading = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#conversation .markdown .md-in")].map((span) => span.textContent ?? "").join(""));
   assert.ok(fading.includes("daemon is still working"), `streamed words fade in: ${fading}`);
   await page.waitForTimeout(500);
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("#conversation .markdown .md-in")!).opacity), "1", "faded words settle at full");
+  // A word that finished fading drops its fade (#560), so none is left part-way.
+  assert.ok(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#conversation .markdown .md-in")].every((span) => getComputedStyle(span).opacity === "1")), "faded words settle at full");
   await until(async () => (await f.client.getSessionState(sessionId)).session.turns.at(-1)?.status === "running", "daemon turn running");
   await close();
   release!();
@@ -1633,15 +1634,17 @@ try {
   await page.evaluate(() => { document.hasFocus = () => true; });
   assert.equal(await page.locator(".tool-row", { hasText: "ask_user" }).count(), 0, "no step row names the tool");
   assert(!(await page.locator("#stage").innerText()).toLowerCase().includes("interview"), "nothing says interview");
-  assert.equal(await ask.locator(".ask-choice").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await ask.locator(".ask-choice:not(.ask-decide)").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await ask.locator(".ask-choice.first .rec").innerText(), "Recommended", "the first answer is the recommended one");
+  assert.equal(await ask.locator(".ask-decide").count(), 1, "Let it decide is the last row");
   assert.equal(await parked.count(), 0, "a finished turn leaves only the card");
   assert.equal(await ask.locator(".ask-prev").count(), 0, "a first question has no Back");
-  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Reply… the question stays in the chat");
+  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Answer in your own words, or pick one above…");
   await page.waitForTimeout(500);
   await capture("13-question");
   assert(await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollWidth <= stage.clientWidth && stage.scrollLeft === 0; }), "the question never pushes the chat sideways");
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
-  // Typing in the composer is a message, not an answer; the card holds still.
+  // Typing in the composer never redraws the card; Enter would answer it.
   await page.evaluate(() => document.querySelector("#stage .ask-card")!.setAttribute("data-held", "1"));
   await page.locator("textarea").pressSequentially("war", { delay: 40 });
   await page.waitForTimeout(300);

@@ -90,7 +90,7 @@ function askUserTool(): AgentTool {
   return {
     definition: {
       name: "ask_user",
-      description: `Ask the user for decisions or preferences. In clarification mode (up to ${MAX_USER_QUESTIONS} questions) the question appears in the chat and you do not wait: keep doing the work that doesn't depend on the answer, never guess the answer, and when only dependent work is left, say what waits on it and end your turn. The answer arrives as the user's next message. Use interview mode for guided conversations: it waits for each typed answer; ask one question, use its answer to choose the next, retain refinements, and do not repeat answered questions. Stop interviewing once you understand the request. Ask only for choices that belong to the user, not facts you can inspect or permission to proceed. Never guess a missing interview preference.`,
+      description: `Ask the user for decisions or preferences. In clarification mode (up to ${MAX_USER_QUESTIONS} questions) the question appears in the chat and you do not wait: keep doing the work that doesn't depend on the answer, never guess the answer, and when only dependent work is left, say what waits on it and end your turn. The answer arrives as the user's next message. Use interview mode for guided conversations: it waits for each typed answer; ask one question, use its answer to choose the next, retain refinements, and do not repeat answered questions. Stop interviewing once you understand the request. Ask only for choices that belong to the user, not facts you can inspect (attached images included) or permission to proceed. Never guess a missing interview preference.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -102,8 +102,8 @@ function askUserTool(): AgentTool {
               properties: {
                 question: { type: "string", description: "One question, one decision." },
                 reason: { type: "string", description: "One short sentence on why it matters or what you would otherwise assume." },
-                suggestions: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Possible answers, recommended first." },
-                details: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Optional, one short line per suggestion in the same order: what choosing it means." },
+                suggestions: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "2 to 4 short answers, the one you recommend first (shown as recommended)." },
+                details: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Always: one short line per suggestion, same order, on what choosing it means." },
                 multiple: { type: "boolean", description: "The user may pick more than one suggestion." },
               },
               required: ["question"],

@@ -1,7 +1,7 @@
-/// What a chat made in Foundry, in the conversation: a chip per artifact,
-/// the way Claude shows an artifact. A kind tile, the title and "Prototype ·
-/// v2"; nothing live runs in the chat. Click opens the page in the pane
-/// beside the conversation (foundry-pane.ts); the open one wears a tone.
+/// What a chat made in Foundry, in the conversation: a link card per
+/// artifact (pass 192 A). Its kind's tile, the title, "Prototype · v2" and
+/// Open; nothing live runs in the chat. Click opens the page in the pane beside the conversation
+/// (foundry-pane.ts); the open one wears a tone.
 /// Every turn that made or changed a page ends with its chip, so the newest
 /// version is always one click away (a quiet "Edited" line was missed).
 import { FOUNDRY_KINDS, type FoundryKind } from "@demesne/protocol";
@@ -51,14 +51,18 @@ function chip(artifact: ChatArtifact, options: ChipOptions) {
 function fill(node: HTMLButtonElement, artifact: ChatArtifact) {
   const title = document.createElement("b");
   title.textContent = artifact.title;
+  // Its kind's tile; nothing live runs in the chat.
   const tile = document.createElement("span");
-  tile.className = "fd-chip-ic";
+  tile.className = "fd-chip-thumb";
   tile.innerHTML = KIND_ICON[artifact.kind];
   const text = document.createElement("span"), words = document.createElement("span");
   text.className = "fd-chip-text";
   words.textContent = chipWords(artifact);
   text.append(title, words);
-  node.replaceChildren(tile, text);
+  const open = document.createElement("span");
+  open.className = "fd-chip-open";
+  open.textContent = "Open";
+  node.replaceChildren(tile, text, open);
   node.setAttribute("aria-label", `Open ${artifact.title}, ${chipWords(artifact)}`);
 }
 

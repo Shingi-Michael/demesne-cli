@@ -1396,7 +1396,7 @@ const FOUNDRY_WHEN = "Decide by what the best answer is, not by the words used: 
   + "Slides, a written report or brief, and a dashboard of numbers are Foundry's ready kinds (deck, doc, dashboard): you write the content and Demesne designs it. "
   + "\"Show me\", \"what would it look like\", \"make me a page\", \"help me pick\" and \"compare them visually\" all mean this. Show options side by side on one page. "
   + "No page for code changes, fixes, explanations, git, or a question answered in a few words; changing the project's own UI is code work, and a mockup is never a file in the project unless they ask for one there.";
-const FOUNDRY_HOW = "The preview opens beside the chat by itself, so describe it in a sentence and never paste the source or a code block instead. To change one, foundry_read it, then foundry_edit "
+const FOUNDRY_HOW = "Work quietly, with no progress notes between steps; end with two or three sentences on what it is. The app links the page, so never paste its source, code or a link. To change one, foundry_read it, then foundry_edit "
   + "(exact find and replace on the version you read); rewrite with foundry_save only when most of it changes. When they point at a part of a page, change that part and leave the rest as it is. Report it saved only after the tool succeeds.";
 export const FOUNDRY_GUIDANCE = `Foundry (foundry_save) is how you show the person something. ${FOUNDRY_WHEN} Make it in this turn rather than offering or asking first: an unwanted page costs them nothing, an offer costs a round trip. ${FOUNDRY_HOW}`;
 /// Drive, routines and mail: nobody is at the window to look at a page.

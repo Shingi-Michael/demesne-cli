@@ -216,12 +216,13 @@ test("System palette errors and paths are safely escaped in Settings",()=>{
   expect(html).not.toContain("<script>");
   expect(html).toContain("&quot;&lt;palette&gt;");
 });
-test("composer shortcuts reserve Tab traversal and describe explicit mode and suggestion actions", () => {
+test("composer shortcuts: Tab takes a suggestion, Shift+Tab moves focus back, Alt+M changes mode", () => {
   for (const mac of [true, false]) {
     const html = settingsPage(view({ section: "keys", mac }));
     expect(html).toContain(mac ? "⌥M" : "Alt+M");
     expect(html).toContain(mac ? "⌥→" : "Alt+→");
     expect(html).toContain("Shift+Tab moves focus backward");
+    expect(html).toMatch(/Accept a suggestion.*?<kbd>Tab<\/kbd>/s);
     expect(html).not.toContain("⇧⇥");
     expect(html).not.toContain("Take Drive&#39;s idea");
   }

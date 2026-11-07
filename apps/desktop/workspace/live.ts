@@ -4204,7 +4204,7 @@ function renderComposer() {
       ? "Reply… the question stays in the chat"
       : state.activeTurnId
       ? "Steer it while it works…"
-      : suggestion ? `${suggestion}   Alt+→` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
+      : suggestion ? `${suggestion}   Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
     : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
@@ -7588,12 +7588,13 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (
-    key === "arrowright" && event.altKey && !ctrl &&
+    (key === "tab" && !event.altKey || key === "arrowright" && event.altKey) && !ctrl &&
     !event.shiftKey &&
     event.target === editor &&
     !editor.value && !pendingQuestion() && !state.approvals.length
   ) {
-    // Accept a visible suggestion explicitly; Tab remains focus navigation.
+    // Tab (or Alt+→) takes the suggested prompt shown in the empty composer.
+    // With nothing suggested, Tab still moves focus as usual.
     const suggestion = nextSuggestion();
     if (suggestion) run(() => setDraft(suggestion));
     return;

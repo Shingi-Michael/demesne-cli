@@ -332,8 +332,20 @@ export class HeartbeatBridge {
     const latest = new Map<string, Envelope>();
     for (const message of asked) if (message.from !== address) latest.set(message.from, message);
     for (const message of latest.values()) {
-      const performative: Performative = text === null ? "fail" : message.performative === "request" ? "done" : "inform";
-      const words = (text ?? "This agent did not finish; its chat in Demesne says why.").slice(0, 1900);
+      let performative: Performative;
+      let words: string;
+      if (text === null) {
+        // INFORM announcements that ask for nothing: stay silent, don't waste tokens
+        if (message.performative === "request") {
+          performative = "fail";
+          words = "This agent did not finish; its chat in Demesne says why.";
+        } else {
+          continue;
+        }
+      } else {
+        performative = message.performative === "request" ? "done" : "inform";
+        words = text.slice(0, 1900);
+      }
       try {
         const { line } = compactLine({ to: message.from, performative, reply_to: message.id, text: words });
         const reply = await this.client.request({ command: "say", line, as: address, owner: false, read: false });

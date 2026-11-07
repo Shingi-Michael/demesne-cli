@@ -88,3 +88,15 @@ test("the agent receives screenshot pixels after a tool call and on replay", asy
     await completed;
   } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test("a model that sees gets window captures and is told it can look, without provider.vision", async () => {
+  const { agentSystemPrompt, seenToolPicture } = await import("../src/engine.ts");
+  expect(seenToolPicture("window-screenshot.png")).toBe(true);
+  expect(seenToolPicture("foundry-look-1280.png")).toBe(true);
+  expect(seenToolPicture("screen.png")).toBe(false);
+  const definitions = [{ name: "view_image", description: "", inputSchema: {} }];
+  const sees = agentSystemPrompt({ definitions, modelSees: true });
+  expect(sees).toContain("capture_window's picture");
+  expect(sees).not.toContain("visual inputs disabled");
+  expect(agentSystemPrompt({ definitions })).toContain("visual inputs disabled");
+});

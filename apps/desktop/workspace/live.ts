@@ -1355,10 +1355,13 @@ function renderCards() {
     const open = cardsOpen.has("where");
     out.push(`<section class="card env${open ? " open" : ""}${where.state ? ` env-${where.state}` : ""}" data-card="where"><button type="button" class="card-head" data-action="card-fold" data-args='{"name":"where"}' aria-expanded="${open}">${where.rows}</button>${where.state === "off" ? btn("start-daemon", "Start", {}, "env-start") : ""}<div class="card-body">${where.more}</div></section>`);
   }
-  // The context card itself (pass 177 C), open, once the chat or the plan
-  // is half used; a short window folds its parts list away first.
+  // The context card itself (pass 177 C) once the chat or the plan is half
+  // used: one line like the others, the whole card when it opens; a short
+  // window folds its parts list away first.
   if (showContext || planHalfUsed) {
-    out.push(`<section class="card ctx" data-card="context"><div class="ctx-card">${contextCardHTML(c, limits, c.percentage != null, planHalfUsed)}</div></section>`);
+    const planWord = planHalfUsed ? ` · <span class="${planTop!.window.usedPercent >= PLAN_LIMIT_AMBER ? "warn" : ""}">plan ${Math.round(planTop!.window.usedPercent)}%</span>` : "";
+    out.push(card("context", `${c.percentage != null ? `${c.percentage}% context` : "Context"}${planWord}`, c.percentage != null ? `<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>` : "",
+      `<div class="ctx-card">${contextCardHTML(c, limits, c.percentage != null, planHalfUsed)}</div>`));
   }
   if (files.length) {
     const shownFiles = files.slice(0, 6);
@@ -5865,10 +5868,16 @@ async function dispatch(
   if (action === "detach") return api("detach", { id: args.id });
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
   if (action === "context-card") {
-    // The card already sits in the column: point at it, never show it twice.
-    const inColumn = columnContextCard();
+    // The card already sits in the column: open it there, never show it twice.
+    let inColumn = columnContextCard();
     if (inColumn) {
       contextCardOpen = false;
+      if (!cardsOpen.has("context")) {
+        cardsOpen.add("context");
+        try { localStorage.setItem("demesne-cards-open", JSON.stringify([...cardsOpen])); } catch {}
+        renderCards();
+        inColumn = columnContextCard()!;
+      }
       inColumn.classList.remove("pointed");
       void inColumn.offsetWidth;
       inColumn.classList.add("pointed");

@@ -1148,22 +1148,29 @@ try {
   await page.locator(`#turn-${editTurn} .rw-redo`).click();
   await until(() => page.locator(`#turn-${editTurn} .request`).count().then(count => count === 1), "Redo brings the turn back");
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n", "Redo puts the edit back");
-  // An agent is one step on the guide, like a read: its task, "✓ 1 step" on
-  // the right, and its own guide unfolding under it with what it found. No
-  // trace box, and nothing the agent thought.
+  // Sub-agents at work (pass 183 A): an agent is one crew line with its
+  // face (the d. on your own model, no light bulb), "Agent found it" and its
+  // steps; it opens to a line for the agent with the first line of what it
+  // found, and that line opens the agent's own steps. No trace box, and
+  // nothing the agent thought.
   await type(agentPrompt);
   await textIncludes(agentDone);
   await page.locator(".receipt-steps", { hasText: "1 step" }).last().click();
-  const agentStep = page.locator(".steps .tool-row", { hasText: agentTask }).last();
-  await until(() => agentStep.locator(".meta").innerText().then(text => /✓ 1 step · /.test(text)), "the agent's row ends in its step count and time");
+  const agentStep = page.locator(".steps .crew-row").last();
+  await until(() => agentStep.innerText().then(text => text.includes("Agent found it") && /1 step/.test(text)), "the agent's line says it found it, with its step count");
+  assert.equal(await agentStep.locator(".ask-d").count(), 1, "an agent on your own model wears the d.");
   assert.equal(await page.locator(".steps details.thinking").count(), 0, "no trace box under the agent");
   assert.equal(await page.locator(".steps .agent-steps").count(), 0, "the agent's guide waits folded");
   await agentStep.click();
+  const agentLine = page.locator(".steps .crew-line", { hasText: agentTask }).last();
+  await agentLine.waitFor();
+  assert((await page.locator(".steps .crew-said").last().innerText()).includes(agentFound), "its line says what it found");
+  await agentLine.click();
   await until(() => page.locator(".steps .agent-steps .tool-row.quiet .target").last().innerText().then(text => text === "hello.ts"), "the agent's own read unfolds as a quiet line");
   assert((await page.locator(".steps .agent-found").last().innerText()).includes(`Found · ${agentFound}`), "the guide ends in what the agent found");
   assert(!(await page.locator("#stage").innerText()).includes(agentThought), "the agent's thinking never reaches the window");
   await capture("02-agent-step");
-  await agentStep.click();
+  await page.locator(".steps .crew-line", { hasText: agentTask }).last().click();
   await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
   // The mode word under the composer: Alt+M steps Ask → Accept edits → Plan → Auto → Orchestrate → Ask.
   await page.locator("textarea").focus();

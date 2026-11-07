@@ -36,6 +36,7 @@ import { waitingFor, waitRow } from "./wait-row.ts";
 import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
 import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
 import { researchRowHTML } from "./research-row.ts";
+import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
@@ -1904,6 +1905,77 @@ function askStep(run: WorkspaceRun) {
     face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood === "focus" ? "focus" : "calm")}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
     working: (agent) => housed.some((item) => item.id === agent && item.state === "working") });
 }
+/// Sub-agents at work (pass 183 A): a round of sub-agents is one line.
+const crewOpen = new Set<string>();
+/// When each sub-agent last took a step, for "the newest step any of them took".
+const crewSeen = new Map<string, { steps: number; at: number }>();
+const isSubagent = (entry: WorkspaceRun["entries"][number]): entry is ToolEntry => entry.type === "tool" && entry.name === "subagent";
+/// The sub-agents sent in one go with this one: the run of them around it.
+function crewOf(run: WorkspaceRun, tool: ToolEntry): ToolEntry[] {
+  const at = run.entries.indexOf(tool);
+  let start = at, end = at;
+  while (start > 0 && isSubagent(run.entries[start - 1]!)) start--;
+  while (end < run.entries.length - 1 && isSubagent(run.entries[end + 1]!)) end++;
+  return run.entries.slice(start, end + 1) as ToolEntry[];
+}
+const crewKey = (run: WorkspaceRun, members: ToolEntry[]) => `${run.id}:${members[0]!.id}`;
+function crewStep(run: WorkspaceRun, tool: ToolEntry) {
+  const members = crewOf(run, tool), key = crewKey(run, members);
+  let newest: { text: string; at: number } | null = null;
+  for (const member of members) {
+    const steps = member.trace?.length ?? 0, seen = crewSeen.get(member.toolCallId);
+    if (!seen || seen.steps !== steps) { if (crewSeen.size > 400) crewSeen.clear(); crewSeen.set(member.toolCallId, { steps, at: Date.now() }); }
+    const last = member.trace?.at(-1)?.text.replace(/^[^·]+ · /, "");
+    const at = crewSeen.get(member.toolCallId)!.at;
+    if ((member.state === "running" || member.drafting) && last && (!newest || at > newest.at)) newest = { text: nowWords(last), at };
+  }
+  const running = members.find((member) => member.state === "running");
+  const slot = running ? run.entries.filter((entry) => entry.type === "tool" && isAgentStep(entry)).indexOf(running) : 0;
+  const model = running?.subagentModel ?? state!.model.id;
+  return crewRowHTML({
+    members: members.map((member) => ({
+      runId: run.id, id: member.id, agent: cliAgent(member), task: String(member.input.description ?? member.detail ?? "Sub-agent"),
+      state: member.state, drafting: member.drafting, steps: member.trace?.length ?? 0, durationMs: member.durationMs,
+      found: ["failed", "denied", "stopped"].includes(member.state) ? (member.message ?? "").replace(/^Error: (sub-agent failed: )?/, "") : member.report,
+      open: stepOpen.has(`${run.id}:${member.id}`), fold: stepOpen.has(`${run.id}:${member.id}`) ? agentFold(run, member) : undefined,
+    })),
+    key, open: crewOpen.has(key), newest: newest?.text,
+    phrase: running ? { slot, model, text: matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model) } : undefined,
+    face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood)}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
+  });
+}
+/// A running crew changes in place: only its parts that changed are swapped.
+function patchCrew(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
+  const members = crewOf(run, tool), key = crewKey(run, members);
+  const was = [...content.querySelectorAll<HTMLElement>("[data-crew]")].find((node) => node.dataset.crew === key);
+  if (!was) return false;
+  const next = document.createElement("template");
+  next.innerHTML = crewStep(run, tool);
+  const now = next.content.firstElementChild as HTMLElement | null;
+  if (!now?.matches("[data-crew]")) return false;
+  const oldHead = was.querySelector<HTMLElement>(":scope > .crew-row"), newHead = now.querySelector<HTMLElement>(":scope > .crew-row");
+  if (!oldHead || !newHead) return false;
+  syncChildren(oldHead, newHead);
+  for (const attr of [...newHead.attributes]) if (oldHead.getAttribute(attr.name) !== attr.value) oldHead.setAttribute(attr.name, attr.value);
+  const oldLines = was.querySelector<HTMLElement>(":scope > .crew-lines"), newLines = now.querySelector<HTMLElement>(":scope > .crew-lines");
+  if (oldLines && newLines) {
+    // A line and an open guide keep their nodes: only what's inside them changes.
+    const old = [...oldLines.children] as HTMLElement[], fresh = [...newLines.children] as HTMLElement[];
+    fresh.forEach((node, i) => {
+      const before = old[i];
+      if (!before) oldLines.append(node);
+      else if (before.className === node.className && (node.matches(".crew-line") || node.matches(".agent-steps"))) {
+        syncChildren(before, node);
+        for (const attr of [...node.attributes]) if (before.getAttribute(attr.name) !== attr.value) before.setAttribute(attr.name, attr.value);
+      }
+      else if (steadyHTML(before) !== steadyHTML(node)) before.replaceWith(node);
+    });
+    for (const node of old.slice(fresh.length)) node.remove();
+  }
+  else if (newLines) was.append(newLines);
+  else oldLines?.remove();
+  return true;
+}
 /// Deep research (pass 182 A): one quiet line; click for who took what.
 const researchOpen = new Set<string>();
 const researchFace = (agent: string | null, mood: "focus" | "calm") => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood)}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`;
@@ -1926,6 +1998,8 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "wait_for") return waitStep(run, tool);
   if (tool.name === "look_at_page") return lookStep(run, tool);
   if (tool.name === "research") return researchStep(run, tool);
+  // A round of sub-agents is one line, drawn at its first.
+  if (tool.name === "subagent") return crewOf(run, tool)[0] === tool ? crewStep(run, tool) : "";
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
   if (tool.name === "ask_user") {
@@ -2613,6 +2687,7 @@ function runningRowOnly(entry: WorkspaceRun["entries"][number], previous: Worksp
     (isAgentStep(entry) || !stepOpen.has(`${runId}:${entry.id}`));
 }
 function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
+  if (tool.name === "subagent" && !tool.drafting) return patchCrew(content, run, tool);
   const args = JSON.stringify({ runId: run.id, id: tool.id });
   const row = [...content.querySelectorAll<HTMLButtonElement>("button.tool-row")].find((node) => node.dataset.args === args);
   if (!row) return !toolRow(run, tool);
@@ -2761,6 +2836,7 @@ function renderConversation() {
       stepsOpen.has(run.id),
       planOpen.has(run.id),
       askedSignature(run),
+      [...crewOpen].filter((key) => key.startsWith(`${run.id}:`)),
       run.entries.flatMap((entry) => entry.type === "tool" && entry.name === "research" ? [JSON.stringify(entry.research ?? null), researchOpen.has(`${run.id}:${entry.id}`)] : []),
       [...fileEditsOpen].filter(key => key.startsWith(`${run.id}:`)),
       // Unfolded steps, and the recorded output a command's fold shows.
@@ -6200,6 +6276,13 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  if (action === "toggle-crew") {
+    const key = String(args.id);
+    crewOpen.has(key) ? crewOpen.delete(key) : crewOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
   }
   if (action === "toggle-research") {
     const key = String(args.id);

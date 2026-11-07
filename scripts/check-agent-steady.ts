@@ -41,37 +41,43 @@ try {
   await page.waitForSelector("#app:not([hidden])", { timeout: 30000 });
   await page.waitForTimeout(1500);
   await page.locator("textarea").fill(prompt); await page.locator("textarea").press("Enter");
-  const row = page.locator(".tool-row", { hasText: task }).last();
+  // Sub-agents at work (pass 183 A): one crew line; open, a line for the
+  // agent; that line opens its guide.
+  const row = page.locator("#conversation .turn:last-of-type .crew-row").last();
   await row.waitFor();
-  await page.waitForFunction(() => /\d step/.test([...document.querySelectorAll(".tool-row")].at(-1)?.querySelector(".meta")?.textContent ?? ""));
+  const newest = () => page.evaluate(() => document.querySelector("#conversation .turn:last-of-type .crew-row .crew-now")?.textContent ?? "");
+  await page.waitForFunction(() => /Read f\d/.test(document.querySelector("#conversation .turn:last-of-type .crew-row .crew-now")?.textContent ?? ""));
   // Folded first, then unfolded to watch its steps: count what leaves the
-  // turn, and whether the row and its guide are the same nodes throughout.
+  // turn, and whether the line and the guide are the same nodes throughout.
   const watch = () => page.evaluate(() => {
     const w = window as any, turn = document.querySelector("#conversation .turn:last-of-type")!;
-    w.removed = []; w.row = [...turn.querySelectorAll("button.tool-row")].find((node) => node.textContent?.includes("Look around")); w.guide = turn.querySelector(".agent-steps");
+    w.removed = []; w.row = turn.querySelector("button.crew-row"); w.guide = turn.querySelector(".agent-steps");
     w.observer?.disconnect();
     w.observer = new MutationObserver((list) => { for (const m of list) for (const n of m.removedNodes) if (n instanceof HTMLElement) w.removed.push(n.className || n.tagName); });
     w.observer.observe(turn, { childList: true, subtree: true });
   });
   const seen = () => page.evaluate(() => { const w = window as any; return { removed: w.removed as string[], row: w.row?.isConnected as boolean, guide: w.guide ? w.guide.isConnected as boolean : null }; });
-  const steps = () => page.evaluate(() => Number(/(\d+) step/.exec([...document.querySelectorAll("#conversation .turn:last-of-type .tool-row")].filter(r => r.textContent?.includes("Look around")).at(-1)?.querySelector(".meta")?.textContent ?? "")?.[1] ?? 0));
+  const steps = () => page.evaluate(() => Number(/(\d+) step/.exec(document.querySelector("#conversation .turn:last-of-type .crew-line .meta")?.textContent ?? "")?.[1] ?? 0));
   await watch();
-  const foldedFrom = await steps();
-  await page.waitForFunction((n) => Number(/(\d+) step/.exec([...document.querySelectorAll(".tool-row")].filter(r => r.textContent?.includes("Look around")).at(-1)?.querySelector(".meta")?.textContent ?? "")?.[1] ?? 0) >= n + 2, foldedFrom);
+  const first = await newest();
+  await page.waitForFunction((was) => { const now = document.querySelector("#conversation .turn:last-of-type .crew-row .crew-now")?.textContent ?? ""; return /Read f\d/.test(now) && now !== was; }, first);
+  const second = await newest();
+  await page.waitForFunction((was) => (document.querySelector("#conversation .turn:last-of-type .crew-row .crew-now")?.textContent ?? "") !== was, second);
   const folded = await seen();
   await row.click();
+  await page.locator(".crew-line", { hasText: task }).last().click();
   await page.locator(".agent-steps").waitFor();
   await page.waitForTimeout(100);
   await watch();
   const openFrom = await steps();
-  await page.waitForFunction((n) => document.querySelectorAll(".agent-steps .tool-row.quiet, .agent-steps details.explored").length > 0 && Number(/(\d+) step/.exec([...document.querySelectorAll(".tool-row")].filter(r => r.textContent?.includes("Look around")).at(-1)?.querySelector(".meta")?.textContent ?? "")?.[1] ?? 0) >= n + 3, openFrom);
+  await page.waitForFunction((n) => document.querySelectorAll(".agent-steps .tool-row.quiet, .agent-steps details.explored").length > 0 && Number(/(\d+) step/.exec(document.querySelector("#conversation .turn:last-of-type .crew-line .meta")?.textContent ?? "")?.[1] ?? 0) >= n + 3, openFrom);
   const open = await seen();
   console.log("folded:", JSON.stringify(folded));
   console.log("open:", JSON.stringify(open));
-  const rebuilt = (removed: string[]) => removed.filter((name) => /\b(tool-row|steps|agent-steps|answer|request)\b/.test(name) && !/\bquiet\b/.test(name));
-  assert.equal(folded.row, true, "while folded, the agent's row is never rebuilt");
+  const rebuilt = (removed: string[]) => removed.filter((name) => /\b(tool-row|steps|agent-steps|crew-line|crew(?!-)|answer|request)\b/.test(name) && !/\bquiet\b/.test(name));
+  assert.equal(folded.row, true, "while folded, the crew line is never rebuilt");
   assert.deepEqual(rebuilt(folded.removed), [], "while folded, nothing in the turn is rebuilt");
-  assert.equal(open.row, true, "while open, the agent's row is never rebuilt");
+  assert.equal(open.row, true, "while open, the crew line is never rebuilt");
   assert.equal(open.guide, true, "while open, the agent's guide is never rebuilt");
   assert.deepEqual(rebuilt(open.removed), [], "while open, nothing in the turn is rebuilt");
   assert.deepEqual(errors, [], "no page errors while the agent works");

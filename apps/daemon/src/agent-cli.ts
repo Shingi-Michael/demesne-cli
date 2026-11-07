@@ -150,14 +150,23 @@ export function subagentArgs(id: AgentId, prompt: string, choice: AgentChoice = 
     const overrides = [...(model ? ["-c", `model="${model}"`] : []), ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : [])];
     return ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", ...overrides, prompt];
   }
-  return ["-p", prompt, "--output-format", "stream-json", ...(root ? ["--settings", JSON.stringify({ permissions: { allow: [`read_file(${root})`] } })] : []), ...(model ? ["--model", model] : [])];
+  return ["-p", prompt, "--output-format", "stream-json", ...(root ? ["--settings", JSON.stringify({ permissions: { allow: [`read_file(${root})`, ...AGY_LOOK_COMMANDS] } })] : []), ...(model ? ["--model", model] : [])];
 }
+
+/// Commands that only look, as Antigravity rules. Since agy 1.5.2 a
+/// headless run starts with `ls -la` even when told to use its read tools,
+/// and one denied command ends the turn with no answer. A bare
+/// command(<name>) allows that command with any arguments; agy denies the
+/// same command chained (&&, ;) with anything else. Nothing here can write:
+/// no find (-delete, -exec), sed (-i) or tee.
+export const AGY_LOOK_COMMANDS: readonly string[] = ["ls", "cat", "head", "tail", "wc", "grep", "rg", "pwd", "tree", "file", "git status", "git diff", "git log", "git show", "git branch", "git ls-files"]
+  .map((command) => `command(${command})`);
 
 /// Antigravity ends its turn with no answer the moment a headless run is
 /// denied anything (a command, a write, a read outside the project), so as
 /// a sub-agent it is pointed at its own read tools and told never to try
 /// the rest. The read_file(<root>) rule alone is what keeps it read-only.
-const AGY_READ_ONLY = "You are a read-only helper working in the current folder. To see what is there, call list_dir on the folder; to search, use grep_search; to read, use view_file. Never run shell commands, never edit or create files, never start subagents, and never search the web. If the request asks for changes, do not attempt them: describe the change in your answer instead. Always finish with a text answer.\n\n";
+const AGY_READ_ONLY = "You are a read-only helper working in the current folder. To see what is there, call list_dir on the folder (or run ls); to search, use grep_search (or grep); to read, use view_file (or cat). Run no other shell commands, never chain commands, never edit or create files, never start subagents, and never search the web. If the request asks for changes, do not attempt them: describe the change in your answer instead. Always finish with a text answer.\n\n";
 
 /// The brief a CLI sub-agent is given around the main agent's own prompt.
 export function subagentBrief(prompt: string, root: string, id?: AgentId): string {
@@ -179,14 +188,15 @@ export function subagentStep(line: string): string {
 
 /// What Antigravity may do in a headless run, where it can't ask: like
 /// Claude Code's accept-edits, read and change files in the project, and
-/// run only the commands your own Antigravity settings already allow.
+/// run only commands that look (AGY_LOOK_COMMANDS) and the ones your own
+/// Antigravity settings already allow.
 /// Rules take the folder's real path (agy checks /private/var, not /var)
 /// and a bare folder covers what's inside it; globs don't work.
 export function agyAllow(root: string, home: string): string[] {
   let own: unknown = [];
   try { own = (JSON.parse(readFileSync(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8")) as { permissions?: { allow?: unknown } }).permissions?.allow ?? []; } catch { /* none */ }
   const yours = Array.isArray(own) ? own.filter((rule): rule is string => typeof rule === "string") : [];
-  return [...new Set([`read_file(${root})`, `write_file(${root})`, ...yours])];
+  return [...new Set([`read_file(${root})`, `write_file(${root})`, ...AGY_LOOK_COMMANDS, ...yours])];
 }
 
 /// The checks Claude Code may run in a hand-off's worktree without asking

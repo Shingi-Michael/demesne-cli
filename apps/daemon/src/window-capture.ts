@@ -17,6 +17,8 @@ export const nativeWindowCapture: WindowCaptureDependencies = {
   capture: (window, signal) => captureWindow(window, { signal, text: true }),
 };
 
+/// A window capture's picture, which a model that sees always gets.
+export const WINDOW_CAPTURE_FILE = "window-screenshot.png";
 /// The model gets this much of a window's text; the picture carries the rest.
 const MODEL_TEXT = 20_000;
 const OWN = ["demesne", "electron"];
@@ -53,7 +55,7 @@ export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindow
     signal.throwIfAborted();
     const text = shot.text ? `\n\nText in the window${shot.text.length > MODEL_TEXT ? " (first part)" : ""}:\n${shot.text.slice(0, MODEL_TEXT)}` : shot.textNote ? `\n(${shot.textNote})` : "";
     return { text: `Captured window ${window.id}: ${window.app} — ${window.title}${text}`,
-      images: [{ data: shot.png, mimeType: "image/png", filename: "window-screenshot.png" }] };
+      images: [{ data: shot.png, mimeType: "image/png", filename: WINDOW_CAPTURE_FILE }] };
   }
   return {
     definition: { name: "capture_window", description: "Capture a visible desktop window as a picture, with the window's text where the system shares it. With no input it takes the window the user is in (besides Demesne): use it when the user says to look at their screen or window. Demesne is a native desktop app: to see Demesne itself use application Demesne; do not search web-server ports for it. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",

@@ -217,6 +217,16 @@ export class MarkdownView {
   private lastUpdate = 0;
   constructor() {
     this.element.className = "markdown";
+    // A word that has faded in is done: it loses its fade, or moving the
+    // answer (each time the turn around it redraws, as on every step) would
+    // play the fade again and the text would blink.
+    this.element.addEventListener("animationend", (event) => {
+      const span = event.target;
+      if (event.animationName !== "md-in" || !(span instanceof HTMLElement) || !span.classList.contains("md-in")) return;
+      span.classList.remove("md-in");
+      span.style.removeProperty("animation-duration");
+      span.style.removeProperty("animation-delay");
+    });
   }
   /// `fade` while the answer streams: new words fade in (see wrapFades).
   update(raw: string, fade = false): boolean {

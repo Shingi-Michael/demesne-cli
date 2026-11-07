@@ -1263,8 +1263,9 @@ try {
   assert.equal(await changesCard.locator(".card-body").isVisible(), true, "an opened line stays open without hover");
   await changesCard.locator(".card-head").click();
   await until(() => page.locator("#cards [data-card=changes].open").count().then(count => count === 0), "a second click closes it");
-  await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
-  // The ring unfolds the context breakdown above it until Esc.
+  await until(() => page.locator("#composer-context").innerText().then(text => text.trim() === `${percentage}%`), "the composer's context word updates");
+  assert.equal(await page.locator("#composer-context .ring, #composer-limit").count(), 0, "no rings under the composer");
+  // The word unfolds the context breakdown above it until Esc.
   await page.locator("#composer-context").click();
   await until(() => page.locator("#context-card").innerText().then(text => text.includes("Instructions") && text.includes("Your messages and replies") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
   if (percentage < 50) assert.equal(await page.locator("#context-card .context-compact").count(), 0, "Compact now waits until the context is half full");
@@ -1313,7 +1314,7 @@ try {
   const preferences = JSON.parse(readFileSync(join(f.home, ".demesne/desktop-ui.json"), "utf8"));
   assert.equal(preferences.lastWorkspace, f.workspace);
   await capture("05-restored");
-  assert(await page.locator("#composer-limit").isHidden(), "no plan word while the plan says nothing");
+  assert.equal(await page.locator("#composer-context .cw-plan").count(), 0, "no plan in the word while the plan says nothing");
   await type(followUp);
   await textIncludes("The daemon is still working.");
   // Words arrive softly: the streaming answer's new words fade in, then settle at full.
@@ -1335,21 +1336,25 @@ try {
   const caughtUp = page.locator("#conversation .catch-up");
   await until(() => caughtUp.isVisible(), "a chat that worked while you were away says what happened since you looked");
   assert.match(await caughtUp.innerText(), /^Since you looked · it finished a turn/, "the line says what happened");
-  // Your plan's mark: the fuller window beside the context ring, amber from 75%.
-  const limitWord = page.locator("#composer-limit");
-  await limitWord.waitFor();
-  assert.equal((await limitWord.textContent())?.trim(), "78%", "the plan's fuller window shows under the composer");
-  assert.match(await limitWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
-  assert.equal(await limitWord.getAttribute("title"), "Test plan: 78% of your 5-hour limit", "the mark names the plan and its window");
-  // It opens the context card, whose lower half gives each window, its reset and Drive's rule.
-  await limitWord.click();
-  const contextCard = page.locator("#context-card");
-  await contextCard.waitFor();
-  const cardText = (await contextCard.innerText()).replace(/\s+/g, " ");
+  // One word beside the model: the context, then the plan's fuller window, amber from 75%.
+  const contextWord = page.locator("#composer-context"), planWord = contextWord.locator(".cw-plan");
+  await planWord.waitFor();
+  assert.equal((await planWord.textContent())?.trim(), "plan 78%", "the plan's fuller window shows in the composer's word");
+  assert.match(await planWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
+  assert.match(await contextWord.getAttribute("title") ?? "", /Test plan: 78% of your 5-hour limit/, "the word's title names the plan and its window");
+  // Past half, the same card also sits in the right column (pass 177 C): one line like the others.
+  const columnContext = page.locator("#cards [data-card=context]"), columnCard = columnContext.locator(".ctx-card");
+  await until(() => columnContext.locator(".card-head").innerText().then(text => /context · plan 78%/.test(text)), "the plan past half puts a context line in the column");
+  assert.equal(await page.locator("#cards > .card").nth(1).getAttribute("data-card"), "context", "the context line comes right after the environment");
+  assert.equal(await columnCard.isVisible(), false, "the context line keeps its card folded like the others");
+  await capture("06-context-folded");
+  // With the card in the column, the word opens it there instead of a second copy.
+  await contextWord.click();
+  await until(() => page.locator("#cards [data-card=context].open.pointed").count().then(count => count === 1), "the word opens the card in the column");
+  const cardText = (await columnCard.innerText()).replace(/\s+/g, " ");
   assert.match(cardText, /Test plan Plus 5-hour window 78% used · resets .+ This week 41% used Drive pauses its own runs at 90%/, `the plan's half of the card: ${cardText}`);
+  assert(await page.locator("#context-card").isHidden(), "the card never shows twice");
   await capture("06-context-and-plan");
-  await page.keyboard.press("Escape");
-  await until(() => contextCard.isHidden(), "Esc closes the context card");
   assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");
   await capture("06-plan-limit");
   await capture("06-work-survived-close");

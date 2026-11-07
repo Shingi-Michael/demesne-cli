@@ -1219,26 +1219,34 @@ function worthCompacting(percentage: number | null | undefined) {
   return (percentage ?? 0) >= 50;
 }
 
-/// The context ring and the plan mark open one card (pass 112 A): what the
-/// chat holds and how long it lasts on top, your plan's windows below.
+/// The context word under the composer opens one card (pass 112 A, 177 C):
+/// what the chat holds and how long it lasts on top, your plan's windows
+/// below. The same card also sits in the right column once either is half
+/// used.
 function renderContextCard() {
-  const card = el("context-card"), ring = el("composer-context"), mark = el("composer-limit");
+  const card = el("context-card"), word = el("composer-context");
   const c = context(), limits = currentPlan();
   const showContext = inSession() && c.percentage != null, showPlan = Boolean(limits && planWindows(limits).length);
-  const open = contextCardOpen && (showContext || showPlan);
-  for (const node of [ring, mark]) {
-    node.setAttribute("aria-expanded", String(open));
-    node.classList.toggle("on", open);
-  }
+  const open = contextCardOpen && (showContext || showPlan) && !columnContextCard();
+  word.setAttribute("aria-expanded", String(open));
+  word.classList.toggle("on", open);
   card.hidden = !open;
   if (!open) return;
-  const compact = worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
-  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
-  const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
-  const html = halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
+  const html = contextCardHTML(c, limits, showContext, showPlan);
   if (html === card.dataset.html) return;
   card.innerHTML = html;
   card.dataset.html = html;
+}
+/// The context card in the right column, when it is on screen there.
+function columnContextCard() {
+  const node = document.querySelector<HTMLElement>("#cards [data-card=context]");
+  return node && node.offsetParent ? node : null;
+}
+function contextCardHTML(c: ReturnType<typeof context>, limits: PlanLimits | undefined, showContext: boolean, showPlan: boolean) {
+  const compact = showContext && worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
+  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
+  const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
+  return halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
 }
 /// What is in the chat, in words first: how many more turns like the last
 /// few fit, then the parts. Compaction's own notes (Keep, the turn lane) and
@@ -1328,16 +1336,18 @@ function renderCards() {
   const here = root && files.length ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
   const servers = chatServers(s.connectors.servers, used.map((t) => t.name));
   const showContext = c.percentage != null && contextInUse(c.percentage);
+  const limits = currentPlan(), planTop = limits && planUsed(limits);
+  const planHalfUsed = Boolean(planTop && planTop.window.usedPercent >= 50);
   // The environment card leads in a project chat; a plain chat only gets it
   // while the daemon isn't fine, so the chat keeps its width otherwise.
   const housed = housedHere(s), workspace = s.session?.workspace;
   const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
-  if (!showWhere && !files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
+  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length) return hide();
   app.classList.add("cards-on");
-  app.classList.toggle("cards-context", showContext);
+  app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1346,16 +1356,13 @@ function renderCards() {
     const open = cardsOpen.has("where");
     out.push(`<section class="card env${open ? " open" : ""}${where.state ? ` env-${where.state}` : ""}" data-card="where"><button type="button" class="card-head" data-action="card-fold" data-args='{"name":"where"}' aria-expanded="${open}">${where.rows}</button>${where.state === "off" ? btn("start-daemon", "Start", {}, "env-start") : ""}<div class="card-body">${where.more}</div></section>`);
   }
-  if (showContext && c.percentage != null) {
-    const capacity = c.capacity ?? 0;
-    const parts = plan
-      ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, ...(c.fresh ? [{ name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : [])]
-      : [{ name: "Chat", tokens: c.used ?? 0, tone: "a" }];
-    const share = (tokens: number) => (capacity ? Math.min(100, (tokens / capacity) * 100) : 0);
-    out.push(card("context", `${c.percentage}% context`, `<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,
-      `<div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
-      `<div class="card-legend">${parts.filter((part) => part.tokens > 0).map((part) => `<span><u class="tone-${part.tone}"></u>${part.name} ${tokensShort(part.tokens)}</span>`).join("")}</div>` +
-      `<div class="card-foot"><span>${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span>${worthCompacting(c.percentage) ? btn("compact", s.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link") : ""}</div>`));
+  // The context card itself (pass 177 C) once the chat or the plan is half
+  // used: one line like the others, the whole card when it opens; a short
+  // window folds its parts list away first.
+  if (showContext || planHalfUsed) {
+    const planWord = planHalfUsed ? ` · <span class="${planTop!.window.usedPercent >= PLAN_LIMIT_AMBER ? "warn" : ""}">plan ${Math.round(planTop!.window.usedPercent)}%</span>` : "";
+    out.push(card("context", `${c.percentage != null ? `${c.percentage}% context` : "Context"}${planWord}`, c.percentage != null ? `<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>` : "",
+      `<div class="ctx-card">${contextCardHTML(c, limits, c.percentage != null, planHalfUsed)}</div>`));
   }
   if (files.length) {
     const shownFiles = files.slice(0, 6);
@@ -1482,7 +1489,7 @@ function renderStatus() {
   renderCards();
   const rim = rimState(phase);
   applyRim(rim);
-  renderPlanLimit();
+  renderContextWord();
   if (signature + JSON.stringify(rim) === statusSignature) return;
   statusSignature = signature + JSON.stringify(rim);
   // A quiet footer: a spinner while working, a word only when the state
@@ -1492,17 +1499,13 @@ function renderStatus() {
   // bar carries its live state, so a session has no status bar.
   el("status").dataset.quiet = String(phase === "ready");
   el("status").hidden = inSession();
-  // The context used, as a small ring; the numbers wait in its tooltip.
-  const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
   const housedAgent = housedHere(), modelChip = el("composer-model");
   // An agent's chat runs that agent: its name, and no model to pick.
   modelChip.toggleAttribute("disabled", Boolean(housedAgent));
   modelChip.title = housedAgent ? `This chat runs ${housedAgent.name}, started by Demesne` : "Change model";
   if (housedAgent) modelChip.textContent = housedAgent.name;
   else el("composer-model").innerHTML = `${h(state.model.id ? modelWords({ id: state.model.id, displayName: state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName }) : "") || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
-  el("composer-context").innerHTML = c2;
-  el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
-  el("composer-context").hidden = !inSession() || !c2;
+  renderContextWord();
   renderContextCard();
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Ctrl+,")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
@@ -1513,15 +1516,15 @@ function renderStatus() {
   renderTabs();
   el("header").innerHTML = inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : "";
 }
-/// Your plan's mark (pass 112 A): a small ring and the fuller window's
-/// percentage beside the context ring, from 0%, amber from 75%. It opens
-/// the context card, whose lower half gives each window and its reset.
-let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null, planLimitSignature = "";
+/// Your plan's limits (pass 112 A): the context word names the fuller
+/// window, and the context card gives each window and its reset.
+let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null;
 async function loadPlanLimits() {
   planLimitsAt = Date.now();
   try { planLimits = await api<PlanLimits[]>("plan-limits") ?? []; } catch { return; }
-  renderPlanLimit();
+  renderContextWord();
   renderContextCard();
+  renderCards();
 }
 const currentPlan = () => (state ? planLimits.find((item) => item.provider === state!.model.provider) : undefined);
 const resetWords = (at: string | null) => {
@@ -1529,21 +1532,26 @@ const resetWords = (at: string | null) => {
   const date = new Date(at), time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `, resets ${date.getTime() - Date.now() < 86_400_000 ? time : `${date.toLocaleDateString([], { weekday: "short" })} ${time}`}`;
 };
-function renderPlanLimit() {
-  const node = document.getElementById("composer-limit");
+/// One dim word beside the model (pass 177 C): the context used, then your
+/// plan's fuller window, amber from 75%. It opens the context card.
+function renderContextWord() {
+  const node = document.getElementById("composer-context");
   if (!node || !state) return;
-  const limits = currentPlan();
-  const top = limits && planUsed(limits);
-  const used = top ? Math.round(top.window.usedPercent) : 0;
-  const signature = JSON.stringify([limits, used, Math.floor(Date.now() / 60_000)]);
-  if (signature === planLimitSignature) return;
-  planLimitSignature = signature;
-  node.hidden = !top;
-  if (!limits || !top) { node.innerHTML = ""; node.removeAttribute("title"); return; }
-  node.classList.toggle("warn", used >= PLAN_LIMIT_AMBER);
-  node.innerHTML = `<span class="ring" style="--usage:${used}%"></span>${used}%`;
-  node.title = `${planName(limits)}: ${used}% of your ${top.name} limit`;
-  node.setAttribute("aria-label", node.title);
+  const c = context(), limits = currentPlan(), top = limits && planUsed(limits);
+  const used = top ? Math.round(top.window.usedPercent) : null;
+  const parts = [
+    c.percentage == null ? "" : `<span class="cw-context">${c.percentage}%</span>`,
+    used == null ? "" : `<span class="cw-plan${used >= PLAN_LIMIT_AMBER ? " warn" : ""}">plan ${used}%</span>`,
+  ].filter(Boolean);
+  const html = inSession() ? parts.join('<span class="cw-dot"> · </span>') : "";
+  if (node.innerHTML !== html) node.innerHTML = html;
+  node.hidden = !html;
+  const title = [
+    c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`,
+    limits && top ? `${planName(limits)}: ${used}% of your ${top.name} limit` : "",
+  ].filter(Boolean).join("\n");
+  node.title = title;
+  node.setAttribute("aria-label", title || "Context used");
 }
 // Each answer brings fresh numbers: look right after a turn ends, every 20
 // seconds while one works, and every minute otherwise.
@@ -5891,7 +5899,21 @@ async function dispatch(
   if (action === "detach") return api("detach", { id: args.id });
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
   if (action === "context-card") {
-    contextCardOpen = !contextCardOpen;
+    // The card already sits in the column: open it there, never show it twice.
+    let inColumn = columnContextCard();
+    if (inColumn) {
+      contextCardOpen = false;
+      if (!cardsOpen.has("context")) {
+        cardsOpen.add("context");
+        try { localStorage.setItem("demesne-cards-open", JSON.stringify([...cardsOpen])); } catch {}
+        renderCards();
+        inColumn = columnContextCard()!;
+      }
+      inColumn.classList.remove("pointed");
+      void inColumn.offsetWidth;
+      inColumn.classList.add("pointed");
+      inColumn.scrollIntoView({ block: "nearest" });
+    } else contextCardOpen = !contextCardOpen;
     renderContextCard();
     return;
   }

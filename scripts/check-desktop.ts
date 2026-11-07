@@ -1342,16 +1342,17 @@ try {
   assert.equal((await planWord.textContent())?.trim(), "plan 78%", "the plan's fuller window shows in the composer's word");
   assert.match(await planWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
   assert.match(await contextWord.getAttribute("title") ?? "", /Test plan: 78% of your 5-hour limit/, "the word's title names the plan and its window");
-  // Past half, the same card also sits open in the right column (pass 177 C).
-  const columnCard = page.locator("#cards [data-card=context] .ctx-card");
-  await until(() => columnCard.innerText().then(text => /5-hour window[\s\S]*78% used/.test(text)), "the plan past half puts the context card in the column");
-  assert.equal(await page.locator("#cards > .card").nth(1).getAttribute("data-card"), "context", "the context card comes right after the environment");
-  // The column card's lower half gives each window, its reset and Drive's rule.
+  // Past half, the same card also sits in the right column (pass 177 C): one line like the others.
+  const columnContext = page.locator("#cards [data-card=context]"), columnCard = columnContext.locator(".ctx-card");
+  await until(() => columnContext.locator(".card-head").innerText().then(text => /context · plan 78%/.test(text)), "the plan past half puts a context line in the column");
+  assert.equal(await page.locator("#cards > .card").nth(1).getAttribute("data-card"), "context", "the context line comes right after the environment");
+  assert.equal(await columnCard.isVisible(), false, "the context line keeps its card folded like the others");
+  await capture("06-context-folded");
+  // With the card in the column, the word opens it there instead of a second copy.
+  await contextWord.click();
+  await until(() => page.locator("#cards [data-card=context].open.pointed").count().then(count => count === 1), "the word opens the card in the column");
   const cardText = (await columnCard.innerText()).replace(/\s+/g, " ");
   assert.match(cardText, /Test plan Plus 5-hour window 78% used · resets .+ This week 41% used Drive pauses its own runs at 90%/, `the plan's half of the card: ${cardText}`);
-  // With the card in the column, the word points at it instead of opening a second copy.
-  await contextWord.click();
-  await until(() => page.locator("#cards [data-card=context].pointed").count().then(count => count === 1), "the word points at the card in the column");
   assert(await page.locator("#context-card").isHidden(), "the card never shows twice");
   await capture("06-context-and-plan");
   assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");

@@ -101,6 +101,9 @@
         "@demesne/protocol": "workspace:*",
       },
     },
+    "packages/screen": {
+      "name": "@demesne/screen",
+    },
     "packages/setup": {
       "name": "@demesne/setup",
       "dependencies": {
@@ -148,6 +151,8 @@
     "@demesne/protocol": ["@demesne/protocol@workspace:packages/protocol"],
 
     "@demesne/providers": ["@demesne/providers@workspace:packages/providers"],
+
+    "@demesne/screen": ["@demesne/screen@workspace:packages/screen"],
 
     "@demesne/setup": ["@demesne/setup@workspace:packages/setup"],
 

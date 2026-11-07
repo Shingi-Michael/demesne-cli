@@ -29,7 +29,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage, type FoundryUi } from "./foundry-page.ts";
-import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
+import { editedIn, FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { waitingFor, waitRow } from "./wait-row.ts";
@@ -44,7 +44,6 @@ import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
 import { FoundryPane, PANE_FRAME, buildRequest } from "./foundry-pane.ts";
-import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
@@ -2936,10 +2935,6 @@ function renderConversation() {
     if (!editKeys.has(key)) { view.dispose(); fileEditViews.delete(key); }
     else if (!view.element.isConnected) view.suspend();
   }
-  // While Foundry writes a page, the pane opens on its title; the page then
-  // assembles in it the moment the save lands.
-  const writing = state.activeTurnId ? state.runs.find((run) => run.id === state!.activeTurnId) : undefined;
-  pane.making(writing && writing.status === "running" ? makingTitle(tools(writing)) : null);
   if (changed) {
     // An artifact keeps its chip in the turn that first showed it; later changes are an "Edited" line.
     const shown = state.runs.flatMap((run) => runNodes.get(run.id) ?? []);
@@ -3365,7 +3360,6 @@ const pane = new FoundryPane(el("pane"), {
     el("app").classList.toggle("pane-on", pane.open);
     runNodes.forEach((item) => item.artifacts.mark());
   },
-  assembleDocument,
   // Point at a part: it lands as a chip in the composer, and the words you type say what to change.
   point: () => { void pointAt("foundry"); },
   // A pick on the page goes to the chat as a message; while a turn works it waits for that turn.

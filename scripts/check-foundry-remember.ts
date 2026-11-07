@@ -24,7 +24,6 @@ document.getElementById("forgot").onclick = async () => { document.getElementByI
 </script></body></html>`;
 
 let asked = "";
-const making = Promise.withResolvers<void>();
 const f = await fixture({
   providerId: "fixture", modelId: "foundry-remember",
   async listModels() { return [{ id: "foundry-remember", provider: "fixture", contextWindow: 262144 }]; },
@@ -36,14 +35,7 @@ const f = await fixture({
     }
     const at = messages.findLastIndex(message => message.role === "user");
     if (messages.slice(at + 1).some(message => message.role === "tool")) { yield { type: "text_delta", delta: "Your checklist remembers what you tick." }; yield { type: "finish", reason: "stop" }; return; }
-    // The title first, then the page once the pane shows it being made: a
-    // new page opens the pane only once the chat has seen it start (as a
-    // real model's seconds of writing allow), so this keeps the check from
-    // racing a fast fixture on a fast Mac.
-    const save = JSON.stringify({ title: "Lisbon checklist", kind: "html", source: checklist }), cut = save.indexOf('"source"');
-    yield { type: "tool_call_delta", index: 0, idDelta: "save-1", nameDelta: "foundry_save", argumentsDelta: save.slice(0, cut) };
-    await making.promise;
-    yield { type: "tool_call_delta", index: 0, idDelta: "", nameDelta: "", argumentsDelta: save.slice(cut) };
+    yield { type: "tool_call_delta", index: 0, idDelta: "save-1", nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Lisbon checklist", kind: "html", source: checklist }) };
     yield { type: "finish", reason: "tool_calls" };
   },
 });
@@ -67,8 +59,8 @@ try {
   await page.locator("textarea").fill("Make me a trip checklist that remembers what I tick");
   await page.locator("textarea").press("Enter");
   const pane = page.locator("#pane"), frame = pane.frameLocator("iframe.pane-frame");
-  await pane.locator(".pane-head").filter({ hasText: "Lisbon checklist" }).waitFor();
-  making.resolve();
+  // The page arrives as its link in the chat; opening it shows the pane.
+  await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
   await frame.locator("body[data-ready='1']").waitFor();
   assert.equal(await frame.locator("#count").textContent(), "0 of 2 done");
   const artifact = (await f.client.foundryList()).artifacts[0]!;
@@ -102,7 +94,6 @@ try {
   if (page) await page.screenshot({ path: join(output, "foundry-remember-failure.png") }).catch(() => {});
   throw error;
 } finally {
-  making.resolve();
   await desktop?.close();
   await f.close();
 }

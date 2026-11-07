@@ -95,6 +95,12 @@ export const LOOK_MEASURE = String.raw`(() => {
     if (ratio > 1.05 && ratio < 3) { faint++; say("Hard to read (" + ratio.toFixed(1) + ":1 contrast): " + label(el)); }
   }
 
+  // Text drawn too small to read: its size times every zoom above it (a part
+  // shrunk to fit reports its own 14px while drawing 7px). Initials in an avatar, and
+  // what's inside something named by its own aria-label (a slide's thumbnail), are pictures, not text.
+  const drawn = (el) => { let size = parseFloat(getComputedStyle(el).fontSize); for (let at = el; at && at !== document.documentElement; at = at.parentElement) { const z = parseFloat(getComputedStyle(at).zoom); if (z > 0 && z !== 1) size *= z; } return size; };
+  let tiny = 0;
+  for (const el of texts) { if (tiny >= 3) break; if (el.closest("d-avatar") || el.parentElement?.closest("[aria-label]")) continue; const size = drawn(el); if (size < 10.5) { tiny++; say("Text drawn at " + size.toFixed(1) + "px, too small to read: " + label(el)); } }
   for (const img of document.images) if (img.complete && !img.naturalWidth) say("Image did not load: " + label(img));
   return { width: W, height: document.documentElement.scrollHeight, issues };
 })()`;

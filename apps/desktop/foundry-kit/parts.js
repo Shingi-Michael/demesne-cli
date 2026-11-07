@@ -49,30 +49,46 @@ d-demesne[theme=light]{--dm-side:linear-gradient(180deg,#e9e9eb,#dfdfe2);--dm-sh
 d-sidebar{display:flex;flex-direction:column;width:var(--side-width,240px);flex:none;background:var(--dm-side);color:rgba(255,255,255,.88);padding:44px 10px 0}
 d-demesne[theme=light] d-sidebar{color:var(--dm-t1)}
 .dm-lights{position:absolute;left:18px;top:16px}
-.dm-nav{display:flex;align-items:center;gap:11px;height:32px;padding:0 10px;border-radius:8px;font-size:14px;white-space:nowrap}
-.dm-nav.on{background:rgba(255,255,255,.12)}
+d-sidebar>button,.dm-tabs>button{all:unset;box-sizing:border-box;cursor:pointer}
+d-sidebar>.dm-nav{display:flex;align-items:center;gap:11px;height:32px;padding:0 10px;border-radius:8px;font-size:14px;white-space:nowrap}
+d-sidebar>.dm-nav:hover,d-sidebar>.dm-chat:hover{background:rgba(255,255,255,.07)}
+d-sidebar>.dm-nav.on{background:rgba(255,255,255,.12)}
 .dm-nav d-icon{opacity:.8}
-.dm-proj{display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;margin-top:10px;font-weight:600;font-size:14px}
+.dm-proj{display:flex;align-items:center;gap:8px;height:30px;white-space:nowrap;overflow:hidden;padding:0 10px;margin-top:10px;font-weight:600;font-size:14px}
 .dm-proj small{margin-left:auto;font-weight:400;font-size:12px;opacity:.55}
-.dm-chat{display:flex;align-items:center;gap:8px;height:30px;margin-left:12px;padding:0 10px;border-radius:8px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.86}
-.dm-chat.on{background:rgba(255,255,255,.12);opacity:1;box-shadow:inset 2px 0 0 var(--dm-blue)}
+d-sidebar>.dm-chat{display:flex;align-items:center;gap:8px;height:30px;margin-left:12px;padding:0 10px;border-radius:8px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.86}
+d-sidebar>.dm-chat.on{background:rgba(255,255,255,.12);opacity:1;box-shadow:inset 2px 0 0 var(--dm-blue)}
 .dm-foot{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding:10px 10px 12px}
-.dm-release{font-size:12px;color:var(--dm-pink)}
+.dm-release{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--dm-pink)}
 .dm-user{display:flex;align-items:center;gap:9px;font-size:14px}
 .dm-right{flex:1;min-width:0;display:flex;flex-direction:column}
 .dm-tabs{display:flex;align-items:flex-end;gap:2px;height:44px;padding:0 12px;flex:none}
-.dm-tab{height:36px;max-width:220px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:10px 10px 0 0;font-size:14px;font-weight:500;color:var(--dm-t2);white-space:nowrap;overflow:hidden}
-.dm-tab.on{background:var(--dm-main);color:var(--dm-t1)}
+.dm-tabs>.dm-tab{height:36px;max-width:220px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:10px 10px 0 0;font-size:14px;font-weight:500;color:var(--dm-t2);white-space:nowrap;overflow:hidden}
+.dm-tabs>.dm-tab:hover{color:var(--dm-t1)}
+.dm-tabs>.dm-tab.on{background:var(--dm-main);color:var(--dm-t1)}
 .dm-card{flex:1;display:flex;margin:0 8px 8px;border-radius:12px;background:var(--dm-main);overflow:hidden}
 .dm-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;padding:24px 32px 16px}
+.dm-main>[data-view],d-message{animation:dp-in .22s ease-out}
+.dm-main>[data-view]{display:flex;flex-direction:column;gap:16px;min-width:0}
+/* The kit's own elements inside Demesne's chat take its colours. */
+d-demesne .dm-card{--ink:#ebecef;--paper:#1c1c1e;--secondary:rgba(235,236,239,.68);--muted:rgba(235,236,239,.46);--hair:rgba(235,236,239,.09);--tone:rgba(235,236,239,.05);--tone-2:rgba(235,236,239,.09);--accent:var(--dm-blue);--on-accent:#121417;color:var(--dm-t1)}
+d-demesne[theme=light] .dm-card{--ink:#16181c;--paper:#ffffff;--secondary:rgba(22,24,28,.68);--muted:rgba(22,24,28,.46);--hair:rgba(22,24,28,.09);--tone:rgba(22,24,28,.04);--tone-2:rgba(22,24,28,.08);--on-accent:#fff}
+@keyframes dp-in{from{opacity:0;transform:translateY(3px)}}
+@media (prefers-reduced-motion:reduce){.dm-main>[data-view],d-message{animation:none}}
 .dm-cards{width:270px;flex:none;display:flex;flex-direction:column;gap:12px;padding:16px 16px 16px 0}
 d-message{display:flex;gap:12px;max-width:100%}
 d-message[from=you]{align-self:flex-end;max-width:78%;padding:8px 12px;border-radius:12px;background:var(--dm-bubble,var(--tone-2))}
 .dm-d{flex:none;width:20px;font-weight:700;font-size:14px;line-height:20px;color:var(--dm-t1,var(--ink))}.dm-d i{font-style:normal;color:var(--dm-pink,#f2b6c8)}
 .dm-said{min-width:0;display:flex;flex-direction:column;gap:8px;color:var(--dm-t1,var(--ink))}
+.dm-said>button{align-self:flex-start}
 .dm-meta{font-size:12px;color:var(--dm-t3,var(--muted))}
 d-composer{display:flex;flex-direction:column;gap:8px;margin-top:auto}
-.dm-box{display:flex;align-items:center;min-height:48px;padding:0 16px;border-radius:12px;background:var(--dm-raised,var(--tone));box-shadow:inset 0 0 0 1px var(--dm-hair,var(--hair));color:var(--dm-t3,var(--muted))}
+.dm-box{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 8px 0 16px;border-radius:12px;background:var(--dm-raised,var(--tone));box-shadow:inset 0 0 0 1px var(--dm-hair,var(--hair));color:var(--dm-t3,var(--muted))}
+d-composer .dm-box>input{all:unset;flex:1;min-width:0;height:46px;color:var(--dm-t1,var(--ink));font-size:14px}
+d-composer .dm-box>input::placeholder{color:var(--dm-t3,var(--muted))}
+d-composer .dm-box>button{all:unset;box-sizing:border-box;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;flex:none;cursor:pointer;background:var(--dm-blue,var(--accent));color:#121417;opacity:.35;transition:opacity .14s}
+d-composer .dm-box>button.on{opacity:1}
+d-composer .dm-box>button svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .dm-under{display:flex;align-items:center;gap:12px;padding:0 4px;font-size:12px;color:var(--dm-t3,var(--muted))}.dm-under span:last-child{margin-left:auto}
 d-card{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:var(--dm-raised,var(--tone));box-shadow:inset 0 0 0 1px var(--dm-hair,var(--hair));font-size:12px;color:var(--dm-t2,var(--secondary))}
 d-card>.dm-ch{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--dm-t1,var(--ink))}
@@ -82,6 +98,27 @@ d-row:last-child{border-bottom:0}
 d-toggle{display:inline-block;position:relative;width:36px;height:20px;border-radius:99px;background:var(--dm-hair,var(--tone-2));box-shadow:inset 0 0 0 1px var(--dm-hair,var(--hair));flex:none;cursor:pointer}
 d-toggle::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .18s}
 d-toggle[on]{background:var(--dm-blue,var(--accent))}d-toggle[on]::after{left:19px}
+[data-view][hidden]{display:none!important}
+/* Narrower than its design width by more than 15%: the part lays out at the room it has instead of shrinking. */
+d-demesne.dp-narrow d-sidebar{--side-width:168px;padding:40px 8px 0}
+d-demesne.dp-narrow d-sidebar>.dm-nav,d-demesne.dp-narrow d-sidebar>.dm-chat,d-demesne.dp-narrow .dm-proj{height:28px;font-size:13px}
+d-demesne.dp-narrow .dm-proj small{display:none}
+d-demesne.dp-narrow .dm-tabs>.dm-tab{padding:0 12px;font-size:13px}
+d-demesne.dp-narrow .dm-main{padding:16px 20px 12px}
+d-demesne.dp-narrow .dm-card{flex-direction:column}
+d-demesne.dp-narrow .dm-cards{width:auto;flex-direction:row;flex-wrap:wrap;padding:0 16px 16px}
+d-demesne.dp-narrow .dm-cards>*{flex:1 1 220px}
+d-demesne.dp-tight d-sidebar,d-demesne.dp-tight .dm-lights{display:none}
+d-demesne.dp-tight .dm-tabs{padding-left:8px}
+/* Options to choose between: a strip on top, one option at a time, at full size. */
+d-compare.dp-switch{display:flex;flex-direction:column;align-items:stretch;gap:16px}
+d-compare.dp-switch>[hidden]{display:none}
+.dp-strip{position:sticky;top:0;z-index:20;display:flex;flex-direction:row;align-items:center;gap:4px;padding:6px;border-radius:12px;background:color-mix(in srgb,var(--paper) 90%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:inset 0 0 0 1px var(--hair);flex-wrap:wrap}
+.dp-strip>button{padding:4px 12px;border-radius:99px;background:transparent;color:var(--secondary);font-size:14px}
+.dp-strip>button.on{background:var(--tone-2);color:var(--ink)}
+.dp-strip>button em{font-style:normal;font-size:12px;color:var(--accent);margin-left:6px}
+.dp-strip>.dp-note{padding:0 8px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.dp-strip>button.dp-pick{margin-left:auto;background:var(--accent);color:var(--on-accent,#fff);font-weight:500}
 d-seg,d-tabs{display:inline-flex;padding:2px;border-radius:9px;background:var(--dm-hair,var(--tone-2));gap:2px;flex:none}
 d-seg button,d-tabs button{all:unset;cursor:pointer;padding:3px 11px;border-radius:7px;font-size:14px;color:var(--dm-t2,var(--secondary))}
 d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:var(--dm-t1,var(--ink));box-shadow:0 1px 2px rgba(0,0,0,.12)}
@@ -120,11 +157,21 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
   var size = function (el, fallback) { var value = el.getAttribute("size"); if (value) el.style.setProperty("--size", /^\d+$/.test(value) ? value + "px" : value); else if (fallback) el.style.setProperty("--size", fallback); };
   /// Move what the author wrote inside into a new container.
   var adopt = function (el, into) { while (el.firstChild) into.appendChild(el.firstChild); };
-  /// A desktop frame keeps its layout at any width: narrower than its design
-  /// width, it scales down whole, like a picture of the app.
+  /// A desktop frame keeps its layout when a little narrower than its design
+  /// width, scaled down to 85% at most. Narrower than that it lays out at the
+  /// room it has (dp-narrow; Demesne's sidebar folds away under 520px, dp-tight):
+  /// shrinking a whole app to fit a pane made 14px text 7px, too small to read
+  /// or use.
+  var MIN_ZOOM = 0.85;
   var fitWidth = function (el, inner, width) {
-    inner.style.width = width + "px";
-    var fit = function () { var room = el.clientWidth, zoom = room && room < width ? String(Math.floor(room / width * 1000) / 1000) : ""; if (inner.style.zoom !== zoom) inner.style.zoom = zoom; };
+    var fit = function () {
+      var room = el.clientWidth, ratio = room && room < width ? room / width : 1, narrow = ratio < MIN_ZOOM;
+      var zoom = ratio < 1 && !narrow ? String(Math.floor(ratio * 1000) / 1000) : "", wide = narrow ? "100%" : width + "px";
+      if (inner.style.zoom !== zoom) inner.style.zoom = zoom;
+      if (inner.style.width !== wide) inner.style.width = wide;
+      el.classList.toggle("dp-narrow", narrow);
+      el.classList.toggle("dp-tight", narrow && room < 520);
+    };
     if (window.ResizeObserver) new ResizeObserver(function () { requestAnimationFrame(fit); }).observe(el);
     fit();
   };
@@ -140,6 +187,35 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
       connectedCallback() { var el = this, job = function () { if (el.isConnected && once(el)) draw(el); }; if (waiting) waiting.push(job); else job(); }
     });
   }
+
+  /// Views: elements marked data-view="Settings" are places in a mockup.
+  /// Showing one hides its sibling views; anything with data-go="Settings",
+  /// and Demesne's tabs, sidebar items and chats of the same name, go there.
+  var same = function (a, b) { return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase(); };
+  var go = function (scope, name) {
+    var views = Array.prototype.filter.call(scope.querySelectorAll("[data-view]"), function (view) { return same(view.getAttribute("data-view"), name); });
+    views.forEach(function (view) {
+      view.parentElement.__went = true;
+      Array.prototype.forEach.call(view.parentElement.children, function (sibling) { if (sibling.hasAttribute("data-view")) sibling.hidden = sibling !== view; });
+    });
+    return views.length > 0;
+  };
+  /// The first view of each group shows until something goes elsewhere.
+  var firstViews = function (scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll("[data-view]"), function (view) {
+      if (view.parentElement.__went) return;
+      var first = Array.prototype.find.call(view.parentElement.children, function (sibling) { return sibling.hasAttribute("data-view"); });
+      view.hidden = view !== first;
+    });
+  };
+  doc.addEventListener("click", function (event) {
+    var link = event.target.closest && event.target.closest("[data-go]");
+    if (!link) return;
+    var name = link.getAttribute("data-go"), shell = link.closest("d-demesne");
+    if (shell && shell.__select) shell.__select(name);
+    else go(doc, name);
+  });
+  if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", function () { firstViews(doc); }); else setTimeout(function () { firstViews(doc); });
 
   define("d-icon", function (el) { size(el); el.innerHTML = icon(el.getAttribute("name")); });
   define("d-avatar", function (el) {
@@ -175,6 +251,7 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
 
   define("d-compare", function (el) {
     var rec = el.getAttribute("recommended");
+    if (el.getAttribute("layout") !== "side") { switcher(el, rec); return; }
     Array.prototype.forEach.call(el.children, function (option) {
       var name = option.getAttribute("data-option") || option.getAttribute("title");
       if (!name) return;
@@ -184,6 +261,40 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
       option.prepend(head); option.removeAttribute("title");
     });
   });
+
+  /// Options as a strip on top: one at a time at full size, a Pick button
+  /// that sends "I pick B · Underline" to the chat (as pick.js does).
+  function switcher(el, rec) {
+    var options = Array.prototype.filter.call(el.children, function (option) { return option.getAttribute("data-option") || option.getAttribute("title"); });
+    if (!options.length) return;
+    el.classList.add("dp-switch");
+    var names = options.map(function (option) { var name = option.getAttribute("data-option") || option.getAttribute("title"); option.setAttribute("data-option", name); option.removeAttribute("title"); return name; });
+    var strip = doc.createElement("div"); strip.className = "dp-strip"; strip.setAttribute("data-chrome", ""); strip.setAttribute("role", "tablist");
+    strip.innerHTML = names.map(function (name, i) { return '<button type="button" role="tab" data-i="' + i + '">' + esc(name) + (rec && name.indexOf(rec) === 0 ? "<em>recommended</em>" : "") + "</button>"; }).join("")
+      + '<span class="dp-note"></span><button type="button" class="dp-pick"></button>';
+    var tabs = strip.querySelectorAll("[data-i]"), note = strip.querySelector(".dp-note"), pick = strip.querySelector(".dp-pick"), at = 0;
+    var letter = function (name) { var first = name.split(/[\s·:.-]/)[0]; return first && first.length <= 2 ? first : ""; };
+    var show = function (i) {
+      at = i;
+      options.forEach(function (option, k) { option.hidden = k !== i; });
+      Array.prototype.forEach.call(tabs, function (tab, k) { tab.classList.toggle("on", k === i); tab.setAttribute("aria-selected", k === i); });
+      note.textContent = options[i].getAttribute("note") || "";
+      pick.textContent = letter(names[i]) ? "Pick " + letter(names[i]) : "Pick this";
+      // A part that sized itself while hidden measures again.
+      window.dispatchEvent(new Event("resize"));
+    };
+    strip.addEventListener("click", function (event) {
+      var tab = event.target.closest("[data-i]");
+      if (tab) { show(Number(tab.getAttribute("data-i"))); return; }
+      if (event.target.closest(".dp-pick") && window.parent && window.parent !== window) {
+        window.parent.postMessage({ demesne: "pick", option: names[at] }, "*");
+        pick.textContent = "Sent";
+      }
+    });
+    el.prepend(strip);
+    var start = rec ? names.findIndex(function (name) { return name.indexOf(rec) === 0; }) : 0;
+    show(start < 0 ? 0 : start);
+  }
 
   define("d-stat", function (el) {
     var delta = el.getAttribute("delta") || "";
@@ -233,8 +344,33 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     }
     el.appendChild(said);
   });
+  /// A composer you can type in: Enter (or the arrow) puts your message above
+  /// it, then an answer from reply="first|second|…" (taken in turn). The page
+  /// can answer itself: listen for "send" (event.detail.text) and call
+  /// event.preventDefault() to skip the reply.
   define("d-composer", function (el) {
-    el.innerHTML = '<div class="dm-box">' + esc(el.getAttribute("placeholder") || "Ask anything") + '</div><div class="dm-under"><span>＋</span><span>' + esc(el.getAttribute("mode") || "Ask") + "</span><span>" + esc(el.getAttribute("model") || "GPT-6.1") + "</span></div>";
+    var placeholder = el.getAttribute("placeholder") || "Ask anything", model = el.getAttribute("model") || "GPT-6.1";
+    var replies = list(el.getAttribute("reply")), turn = 0;
+    el.innerHTML = '<div class="dm-box"><input type="text" aria-label="' + esc(placeholder) + '" placeholder="' + esc(placeholder) + '"><button type="button" aria-label="Send">' + icon("arrow-up") + '</button></div><div class="dm-under"><span>＋</span><span>' + esc(el.getAttribute("mode") || "Ask") + "</span><span>" + esc(model) + "</span></div>";
+    var input = el.querySelector("input"), button = el.querySelector("button");
+    var scroll = function () { for (var at = el.parentElement; at; at = at.parentElement) { if (at.scrollHeight > at.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(at).overflowY)) { at.scrollTop = at.scrollHeight; return; } } };
+    var say = function (from, text) {
+      var message = doc.createElement("d-message");
+      if (from) message.setAttribute("from", from); else message.setAttribute("meta", model + " · " + (1 + text.length % 4) + "s");
+      message.textContent = text; el.before(message); scroll(); return message;
+    };
+    var send = function () {
+      var text = input.value.trim();
+      if (!text) return;
+      input.value = ""; button.classList.remove("on");
+      say("you", text);
+      var event = new CustomEvent("send", { detail: { text: text }, bubbles: true, cancelable: true });
+      if (!el.dispatchEvent(event)) return;
+      setTimeout(function () { say("", replies.length ? replies[turn++ % replies.length] : "Got it."); }, 500);
+    };
+    input.addEventListener("input", function () { button.classList.toggle("on", !!input.value.trim()); });
+    input.addEventListener("keydown", function (event) { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); send(); } });
+    button.addEventListener("click", send);
   });
   define("d-card", function (el) {
     var title = el.getAttribute("title");
@@ -260,11 +396,20 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     var on = el.getAttribute("page") || "", chats = list(el.getAttribute("chats") || "Tidy the sidebar|Drive picks that land"), current = el.getAttribute("chat") || chats[0];
     var nav = [["plus", "New chat"], ["sparkles", "Assistant"], ["search", "Search"], ["clock", "Scheduled"], ["foundry", "Foundry"], ["sliders", "Customize"]];
     var extra = doc.createElement("div"); adopt(el, extra);
-    el.innerHTML = nav.map(function (n) { return '<div class="dm-nav' + (n[1].toLowerCase() === on.toLowerCase() ? " on" : "") + '"><d-icon name="' + n[0] + '"></d-icon>' + n[1] + "</div>"; }).join("")
+    el.innerHTML = nav.map(function (n) { return '<button type="button" class="dm-nav' + (n[1].toLowerCase() === on.toLowerCase() ? " on" : "") + '"><d-icon name="' + n[0] + '"></d-icon>' + n[1] + "</button>"; }).join("")
       + '<div class="dm-proj"><d-icon name="folder"></d-icon>' + esc(el.getAttribute("project") || "demesne-cli") + "<small>main</small></div>"
-      + chats.map(function (chat) { return '<div class="dm-chat' + (chat === current && !on ? " on" : "") + '">' + esc(chat) + "</div>"; }).join("")
+      + chats.map(function (chat) { return '<button type="button" class="dm-chat' + (chat === current && !on ? " on" : "") + '">' + esc(chat) + "</button>"; }).join("")
       + '<div class="dm-foot"><span class="dm-release">Demesne · Cherry Blossom</span><span class="dm-user"><d-avatar name="' + esc(el.getAttribute("user") || "Mike") + '" size="24"></d-avatar>' + esc(el.getAttribute("user") || "Mike") + "</span></div>";
     if (extra.childNodes.length) el.querySelector(".dm-foot").before(extra);
+    // A click picks the item: inside Demesne the shell follows it, on its own the page's views do.
+    el.addEventListener("click", function (event) {
+      var item = event.target.closest(".dm-nav,.dm-chat");
+      if (!item || item.parentElement !== el) return;
+      var name = item.textContent.trim(), shell = el.closest("d-demesne");
+      if (shell && shell.__select) { shell.__select(name, item); return; }
+      Array.prototype.forEach.call(el.querySelectorAll(".dm-nav,.dm-chat"), function (other) { other.classList.toggle("on", other === item); });
+      go(doc, name);
+    });
   });
   define("d-demesne", function (el) {
     var cards = Array.prototype.filter.call(el.children, function (child) { return child.getAttribute("slot") === "cards"; });
@@ -273,11 +418,30 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     var tabs = list(el.getAttribute("tabs") || el.getAttribute("tab") || "New chat");
     var app = doc.createElement("div"); app.className = "dm-app";
     app.innerHTML = '<span class="dp-lights dm-lights" data-chrome><i></i><i></i><i></i></span><d-sidebar data-chrome page="' + esc(el.getAttribute("page") || "") + '" chats="' + esc(el.getAttribute("chats") || "") + '" chat="' + esc(el.getAttribute("chat") || "") + '" project="' + esc(el.getAttribute("project") || "demesne-cli") + '"></d-sidebar>'
-      + '<div class="dm-right"><div class="dm-tabs" data-chrome>' + tabs.map(function (tab, i) { return '<span class="dm-tab' + (i === 0 ? " on" : "") + '">' + esc(tab) + "</span>"; }).join("") + '</div><div class="dm-card"></div></div>';
+      + '<div class="dm-right"><div class="dm-tabs" data-chrome>' + tabs.map(function (tab, i) { return '<button type="button" role="tab" class="dm-tab' + (i === 0 ? " on" : "") + '" aria-selected="' + (i === 0) + '">' + esc(tab) + "</button>"; }).join("") + '</div><div class="dm-card"></div></div>';
     var card = app.querySelector(".dm-card"); card.appendChild(main);
     if (cards.length) { var column = doc.createElement("div"); column.className = "dm-cards"; cards.forEach(function (c) { c.removeAttribute("slot"); column.appendChild(c); }); card.appendChild(column); }
     el.appendChild(app);
     fitWidth(el, app, Number(el.getAttribute("width")) || 1100);
+    // Going somewhere: the tab, sidebar item or chat of that name lights up,
+    // and the view of that name shows. Clicking a sidebar item or chat with no
+    // tab of its name renames the open tab, as Demesne does.
+    el.__select = function (name, from) {
+      var tabs = app.querySelectorAll(".dm-tab"), items = app.querySelectorAll("d-sidebar>.dm-nav,d-sidebar>.dm-chat");
+      var tab = Array.prototype.find.call(tabs, function (t) { return same(t.textContent, name); });
+      var item = from || Array.prototype.find.call(items, function (i) { return same(i.textContent, name); });
+      if (!tab && from && from.classList.contains("dm-chat")) { tab = app.querySelector(".dm-tab.on") || tabs[0]; if (tab) tab.textContent = name; }
+      if (tab) Array.prototype.forEach.call(tabs, function (t) { t.classList.toggle("on", t === tab); t.setAttribute("aria-selected", t === tab); });
+      if (item) Array.prototype.forEach.call(items, function (i) { i.classList.toggle("on", i === item); });
+      go(el, name);
+      el.dispatchEvent(new CustomEvent("go", { detail: { name: name }, bubbles: true }));
+    };
+    app.querySelector(".dm-tabs").addEventListener("click", function (event) {
+      var tab = event.target.closest(".dm-tab");
+      if (tab) el.__select(tab.textContent.trim());
+    });
+    firstViews(el);
+    go(el, tabs[0]) || go(el, el.getAttribute("chat") || "") || go(el, el.getAttribute("page") || "");
   });
 
   // Believable sample data, the same on every run.

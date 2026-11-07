@@ -2120,7 +2120,8 @@ function askedSignature(run: WorkspaceRun): string {
 /// A step that read or wrote one file a preview can show: its path.
 const stepPreviewPath = (tool: ToolEntry) => ["read_file", "write_file", "edit_file"].includes(tool.name) && typeof tool.input.path === "string" && previewable(tool.input.path) ? tool.input.path : "";
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
-  if (tool.name === UPDATE_PLAN) return "";
+  // The plan is the ribbon; loading tools (tool_search) is plumbing.
+  if (tool.name === UPDATE_PLAN || tool.name === "tool_search") return "";
   if (isSend(tool)) return firstSend(run, tool) ? askStep(run) : "";
   // Finding who to ask is part of asking: no row of its own beside the one above.
   if (tool.name === "heartbeat" && tool.input.action === "agents" && run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";

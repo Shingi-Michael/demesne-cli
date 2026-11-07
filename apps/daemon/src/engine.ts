@@ -1,3 +1,4 @@
+import { moreToolsSection, searchTools, splitTools, TOOL_SEARCH } from "./tool-search.ts";
 import type { CommandMonitor } from "./command-monitor.ts";
 import { isRecord, type NearbyAgent, type PermissionMode, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
 import { DEFAULT_AGENT_LIMITS, type AgentConfig, type SubagentOften } from "@demesne/config";
@@ -101,6 +102,9 @@ interface AgentEngineOptions extends AgentConfig {
   hiddenTools?: (sessionId: string) => ReadonlySet<string> | null;
   /// The clock for the assistant's message stamps (tests set it).
   now?: () => Date;
+  /// true sends only the everyday tools whole and lets the model load the
+  /// rest with tool_search (the daemon turns it on; tests opt in).
+  deferTools?: boolean;
 }
 
 /// The files a write tool changes, as the model named them.
@@ -136,6 +140,9 @@ export class AgentEngine {
   /// that has moved on since, while another agent works in the project, was
   /// probably changed by that agent.
   private readonly seenFiles = new Map<string, Map<string, number>>();
+  /// Per chat, the tools tool_search loaded; per turn, the ones it can load.
+  private readonly loadedTools = new Map<string, Set<string>>();
+  private readonly turnDeferrable = new Map<string, ProviderToolDefinition[]>();
 
   /// Words sent to a running turn, waiting for the end of its current step.
   private readonly steers = new Map<string, { id: string; text: string }[]>();
@@ -283,6 +290,11 @@ export class AgentEngine {
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
     // Turns swapped for notes can be brought back whole, one at a time.
     if (!themefy && !assistant && checkpoint?.noteTurnIds?.some(Boolean)) definitions.push(recallTurnDefinition);
+    // Tool search (tool-search.ts): the everyday tools go whole, the rest
+    // wait as one line each until the model loads them for this chat.
+    const deferring = !themefy && !assistant && this.options.deferTools === true;
+    let loadedTools = this.loadedTools.get(session.id);
+    if (!loadedTools) { loadedTools = new Set(); this.loadedTools.set(session.id, loadedTools); }
     // Past NOTES_FROM of the window the model ends each answer with a hidden
     // note, so compacting later swaps old turns for notes with no model call.
     const noting = !themefy && !assistant && Boolean(inference.contextCapacity)
@@ -310,7 +322,10 @@ export class AgentEngine {
       if (round === maxModelRounds) budgetReason ??= `Reached the configured ${maxModelRounds} model-round allowance`;
       if (totalToolCalls >= maxToolCalls) budgetReason ??= `Reached the configured ${maxToolCalls} tool-call allowance`;
       const finalizing = budgetReason !== undefined;
-      const requestDefinitions = finalizing ? [] : definitions;
+      const { sent, deferrable } = deferring ? splitTools(definitions, loadedTools) : { sent: definitions, deferrable: [] };
+      this.turnDeferrable.set(turnId, deferrable);
+      for (const key of this.turnDeferrable.keys()) { if (this.turnDeferrable.size <= 64) break; this.turnDeferrable.delete(key); }
+      const requestDefinitions = finalizing ? [] : sent;
       // A page made in an earlier turn is stored, and a file read then can be
       // read again: neither needs to ride along in full.
       const historyMessages = forgetOldReadsInHistory(history.map((entry) => forgetFoundrySources(entry.messages))).flat();
@@ -318,7 +333,7 @@ export class AgentEngine {
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, orchestrate: orchestrating, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         attended: turn.permissionMode === "ask" && !turn.fromDrive && !turn.fromRoutine,
-        delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available().length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, configured: this.configuredSystemPrompt, sessionContext: this.options.sessionContext?.(session.id) ?? undefined });
+        delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available().length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, configured: this.configuredSystemPrompt, sessionContext: this.options.sessionContext?.(session.id) ?? undefined }) + moreToolsSection(deferrable);
       const unplannedMessages: ProviderMessage[] = [
         { role: "system", content: systemPrompt + (noting ? NOTE_INSTRUCTION : "") + (finalizing
           ? `\n${budgetReason}. Tools are unavailable for this final status request. Report what was actually done, checks and their outcomes, and the specific next steps. Distinguish unfinished work from completed work. The user can send a follow-up to continue from this saved context.` : "") },
@@ -1031,6 +1046,15 @@ export class AgentEngine {
       const result="Error: Themefy questions must use mode=interview";this.store.settleToolCall(toolCallId,"failed",result);return result;
     }
     if (call.name === RECALL_TURN) return this.recallTurn(toolCallId, input, sessionId);
+    if (call.name === TOOL_SEARCH) {
+      this.store.startToolCall(toolCallId);
+      const { found, result } = searchTools(this.turnDeferrable.get(turnId) ?? [], input);
+      let loaded = this.loadedTools.get(sessionId);
+      if (!loaded) { loaded = new Set(); this.loadedTools.set(sessionId, loaded); }
+      for (const definition of found) loaded.add(definition.name);
+      this.store.settleToolCall(toolCallId, "completed", result);
+      return result;
+    }
     if (call.name === HANDOFF_TOOL) {
       if (planOnly) { const result = "Error: hand_off is not available in plan mode"; this.store.settleToolCall(toolCallId, "denied", result); return result; }
       return this.executeHandoff(toolCallId, input, workspaceRoot, turnId, sessionId, signal);

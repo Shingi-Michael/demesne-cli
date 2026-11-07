@@ -202,6 +202,8 @@ export function createDaemonApp(options: {
   /// external GitHub queries from the caller's account and CI environment.
   driveSignals?: typeof collectDriveSignals;
   providerVision?: boolean;
+  /// Tool search (tool-search.ts): rarely used tools wait behind tool_search.
+  deferTools?: boolean;
   /// Renders a saved Foundry page for the model to look at (tests); by default the desktop app does it when present.
   foundryLook?: FoundryLook;
   /// Runs foundry_try's steps (tests pass a fake; otherwise the app that looks).
@@ -474,6 +476,7 @@ export function createDaemonApp(options: {
       providerRequestTimeoutMs: options.providerRequestTimeoutMs,
       providerEventLimit: options.providerEventLimit,
       providerVision: options.providerVision,
+      deferTools: options.deferTools,
       nameChats: options.nameChats,
       questions,
       themes,

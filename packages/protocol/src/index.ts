@@ -84,6 +84,17 @@ export interface RepoFlow { command: "commit" | "merge"; before: RepoSnapshot; a
 /// A hand-off's change card (pass 165 A): what one of your agent tools
 /// changed in its own worktree. `status` is as the turn left it; the card
 /// asks /v1/handoffs/:id for where it is now.
+/// A deep research run as it goes (research tool): each researcher's
+/// question and who has it (agent null: a sub-agent on the chat's model),
+/// then the judge's check. The window draws it as one quiet line.
+export interface ResearchLane { question: string; agent: "claude" | "codex" | "gemini" | null; state: "running" | "done" | "failed"; pages: number }
+export interface ResearchCheck { claim: string; agent: "claude" | "codex" | "gemini" | null; verdict: "running" | "confirmed" | "refuted" | "unclear" }
+export interface ResearchState {
+  topic: string; phase: "researching" | "judging" | "checking" | "done";
+  pages: number; lanes: ResearchLane[]; checks: ResearchCheck[];
+  agree?: number; disagree?: number; judge: "claude" | "codex" | "gemini" | null;
+}
+
 export interface HandoffCard { id: string; agent: string; status: string; files: { path: string; added: number; removed: number }[]; checks: string[]; error?: string }
 
 export interface ToolFileChange {

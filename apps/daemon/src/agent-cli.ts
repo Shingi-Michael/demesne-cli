@@ -153,6 +153,24 @@ export function subagentArgs(id: AgentId, prompt: string, choice: AgentChoice = 
   return ["-p", prompt, "--output-format", "stream-json", ...(root ? ["--settings", JSON.stringify({ permissions: { allow: [`read_file(${root})`, ...AGY_LOOK_COMMANDS] } })] : []), ...(model ? ["--model", model] : [])];
 }
 
+/// A research run (research.ts): read-only as a sub-agent, with the tool's
+/// own web search on. Claude Code may search and fetch pages in plan mode;
+/// Codex gets live web search in its read-only sandbox; Antigravity reads
+/// the project and uses whatever web tools its own settings allow.
+export function researchArgs(id: AgentId, prompt: string, choice: AgentChoice = {}, root = ""): string[] {
+  const model = choice.model && MODEL_NAME.test(choice.model) ? choice.model : null;
+  if (id === "claude") return ["-p", "--allowedTools", "WebSearch,WebFetch", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", ...(model ? ["--model", model] : []), prompt];
+  if (id === "codex") {
+    const effort = choice.effort && AGENT_EFFORTS.includes(choice.effort) ? choice.effort : null;
+    const overrides = [...(model ? ["-c", `model="${model}"`] : []), ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []), "-c", `web_search="live"`];
+    return ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", ...overrides, prompt];
+  }
+  return subagentArgs(id, AGY_RESEARCH + prompt, choice, root);
+}
+
+/// Antigravity as a researcher: like AGY_READ_ONLY, but the web is the point.
+const AGY_RESEARCH = "You are a read-only researcher. Use your web search and page reading tools. Run no shell commands, never edit or create files, never start subagents. Always finish with a text answer.\n\n";
+
 /// Commands that only look, as Antigravity rules. Since agy 1.5.2 a
 /// headless run starts with `ls -la` even when told to use its read tools,
 /// and one denied command ends the turn with no answer. A bare
@@ -503,13 +521,15 @@ export class AgentCli {
   /// One read-only sub-agent run for another chat's turn: its steps go to
   /// `step` as they happen, its last message is the report. Throws when the
   /// tool isn't here, fails, or says nothing.
-  async subagent(id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void): Promise<string> {
+  /// With `web`, a research run: the prompt is the whole brief and the
+  /// tool's web search is on (researchArgs).
+  async subagent(id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void, web = false): Promise<string> {
     const kind = AGENT_KINDS.find((item) => item.id === id)!;
     const path = this.find(kind.command);
     if (!path) throw new Error(`${kind.name} isn't installed on this machine`);
     let root = cwd;
     try { root = realpathSync(cwd); } catch { /* as given */ }
-    const child = this.spawn([path, ...subagentArgs(id, subagentBrief(prompt, cwd, id), this.choice(id), root)], cwd);
+    const child = this.spawn([path, ...(web ? researchArgs(id, prompt, this.choice(id), root) : subagentArgs(id, subagentBrief(prompt, cwd, id), this.choice(id), root))], cwd);
     const stop = () => child.kill();
     signal.addEventListener("abort", stop, { once: true });
     const stderr = tail(child.stderr);

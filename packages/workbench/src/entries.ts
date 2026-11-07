@@ -10,9 +10,12 @@ const TRACE_LIMIT = 64 * 1024;
 /// lines (starting, writing report) and any thinking an old event carries
 /// are dropped. Live updates and history replay share this, so a reopened
 /// session shows the same steps.
-export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string; subagentWhy?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard; research?: import("@demesne/protocol").ResearchState }, payload: Record<string, unknown>): void {
+export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; asked?: string[]; crew?: "working" | "reported" | "stopped"; subagentModel?: string; subagentWhy?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard; research?: import("@demesne/protocol").ResearchState }, payload: Record<string, unknown>): void {
   if (isResearch(payload.research)) { tool.research = payload.research; return; }
   if (typeof payload.report === "string" && payload.report) tool.report = payload.report;
+  // A sub-agent in the background (crew.ts): how it stands, and follow-ups from the chat.
+  if (payload.crew === "working" || payload.crew === "reported" || payload.crew === "stopped") tool.crew = payload.crew;
+  if (typeof payload.asked === "string" && payload.asked) (tool.asked ??= []).push(payload.asked);
   if (isHandoffCard(payload.handoff)) tool.handoff = payload.handoff;
   if (typeof payload.why === "string" && payload.why) tool.subagentWhy = payload.why;
   if (isRepoFlow(payload.repo)) tool.repo = payload.repo;
@@ -65,6 +68,10 @@ export interface ToolEntry {
   trace?: TraceSegment[];
   /// What a sub-agent found: its report, for the end of that guide.
   report?: string;
+  /// A background sub-agent: working, reported (and still there), or stopped.
+  crew?: "working" | "reported" | "stopped";
+  /// Follow-ups the chat sent a background sub-agent, in order.
+  asked?: string[];
   /// The model a sub-agent reported running on, when not the chat's own.
   subagentModel?: string;
   /// Why Auto gave this sub-agent to the agent tool it runs on.

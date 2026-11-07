@@ -13,7 +13,7 @@ export const TOOL_SEARCH = "tool_search";
 /// delegating and searching the web.
 export const CORE_TOOLS = new Set([
   "read_file", "read_files", "list_files", "search_files", "edit_file", "write_file", "run_command",
-  "git_status", "git_diff", "ask_user", "update_plan", "subagent", "web_search", "view_image", "propose_next",
+  "git_status", "git_diff", "ask_user", "update_plan", "subagent", "agents", "web_search", "view_image", "propose_next",
 ]);
 /// Below this, deferring saves less than the list and the search cost.
 const MIN_DEFERRED_CHARS = 3000;

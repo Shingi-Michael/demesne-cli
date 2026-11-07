@@ -35,3 +35,20 @@ test("opened: a line each with its task, steps and first line found; a line open
 test("all stopped", () => {
   expect(view([member({ state: "failed" }), member({ id: 2, state: "stopped" })])).toContain("2 agents stopped");
 });
+
+test("background agents (pass 190 A): reported · still here, follow-ups in pink, Stop, struck through", () => {
+  const working = member({ agent: "codex", toolCallId: "t1", crew: "working" });
+  expect(view([working], true)).toContain('data-action="stop-agent" data-args="{&quot;toolCallId&quot;:&quot;t1&quot;}"');
+  expect(view([working])).toContain("the chat keeps going");
+  const reported = member({ agent: "codex", toolCallId: "t1", crew: "reported", found: "One query takes 1.8 s" });
+  const stopped = member({ id: 2, agent: "claude", toolCallId: "t2", crew: "stopped" });
+  const html = view([reported, stopped], true);
+  expect(html).toContain("Codex reported");
+  expect(html).toContain("reported · still here");
+  expect(html).toContain("One query takes 1.8 s");
+  expect(html).toContain('crew-task struck">Look around');
+  expect(html).not.toContain("stop-agent");
+  // Asked again: what it said, then the question, while it works on it.
+  const asked = view([member({ agent: "codex", toolCallId: "t1", crew: "working", found: "One query takes 1.8 s", asked: ["Is there an index?"] })], true);
+  expect(asked.indexOf("One query takes 1.8 s")).toBeLessThan(asked.indexOf("→ asked:</b> Is there an index?"));
+});

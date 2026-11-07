@@ -30,6 +30,7 @@ export const subagentDefinition: ProviderToolDefinition = {
     properties: {
       description: { type: "string", minLength: 1, maxLength: 80, description: "A 3–6 word label for the user, e.g. \"Find session restore code\"." },
       prompt: { type: "string", minLength: 1, maxLength: 16_000, description: "The complete task: what to find out, where to look, and what the report must contain." },
+      background: { type: "boolean", description: "Start it and return at once, so you keep working while it looks. Its report arrives with a later tool result; use agents to wait for it, ask it a follow-up or stop it. Any still working when you write your answer are stopped." },
       kind: { type: "string", enum: ["find", "trace", "review", "read"], description: "What kind of job this is: find (where something lives), trace (follow a flow across files), review (judge changes or a diff), read (take in a lot of files at once). Picks which of the user's agent tools runs it." },
     },
   },

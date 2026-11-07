@@ -1638,7 +1638,7 @@ export class DemesneStore {
   /// Why Auto gave a sub-agent to the agent tool it runs on (`why`).
   /// A commit or merge step's tree (`repo`): git before and after it.
   /// A hand-off's change card, once its agent is done (`handoff`).
-  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string; why?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard; research?: import("@demesne/protocol").ResearchState }): void {
+  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string; why?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard; research?: import("@demesne/protocol").ResearchState; asked?: string; crew?: "working" | "reported" | "stopped" }): void {
     const turn = this.getTurnOrThrow(turnId);
     if (turn.status !== "running") return;
     const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId,
@@ -1647,7 +1647,9 @@ export class DemesneStore {
       ...(update.why ? { why: update.why.slice(0, 300) } : {}),
       ...(update.repo ? { repo: update.repo } : {}),
       ...(update.handoff ? { handoff: update.handoff } : {}),
-      ...(update.research ? { research: update.research } : {}) }, new Date().toISOString());
+      ...(update.research ? { research: update.research } : {}),
+      ...(update.asked ? { asked: update.asked.slice(0, 1000) } : {}),
+      ...(update.crew ? { crew: update.crew } : {}) }, new Date().toISOString());
     this.eventSink?.(event);
   }
 

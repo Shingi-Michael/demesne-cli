@@ -100,7 +100,7 @@ import { Handoffs } from "./handoff.ts";
 import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
-import { captureWindowTool } from "./window-capture.ts";
+import { captureWindowTool, windowCaptureSupported } from "./window-capture.ts";
 import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
 import { loadConfig, type LoadedConfig } from "@demesne/config";
 import { SUBAGENT_OFTEN, type AgentConfig, type HeartbeatConfig, type ImageGenerationConfig, type SubagentOften } from "@demesne/config";
@@ -345,7 +345,7 @@ export function createDaemonApp(options: {
   });
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
     tools.register(viewImageTool());
-    if (process.platform === "darwin") tools.register(captureWindowTool());
+    if (windowCaptureSupported()) tools.register(captureWindowTool());
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   // Pages are looked at after each save when the desktop app is there to render them.

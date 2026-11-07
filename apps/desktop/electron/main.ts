@@ -10,6 +10,7 @@ import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { isReadyKind } from "./foundry-kinds.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
+import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
@@ -22,6 +23,8 @@ if (lookJob) runFoundryLook(lookJob);
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
+/// Stops the capture keys (capture-keys.ts) when the app quits.
+let stopCaptureKeys: (() => void) | undefined;
 let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
@@ -42,6 +45,7 @@ async function quit() {
   log("exit requested");
   try { unlinkSync(join(homedir(), ".demesne", "desktop.pid")); } catch {}
   updater?.stop();
+  stopCaptureKeys?.();
   await backend?.close();
   exited = true;
   app.quit();
@@ -283,7 +287,13 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
-    if (method === "desktop-ready") { window?.show(); window?.focus(); launchToFront(); if (updater && !readied) { readied = true; updater.started(); updater.schedule(); } return null; }
+    if (method === "desktop-ready") {
+      window?.show(); window?.focus(); launchToFront();
+      if (updater && !readied) { readied = true; updater.started(); updater.schedule(); }
+      // The capture keys start once the page can take a screenshot card.
+      stopCaptureKeys ??= startCaptureKeys({ window: () => window, emit: value => emit("demesne:desktop-action", value), log, cacheDir: join(app.getPath("userData"), "screen") });
+      return null;
+    }
     // The release line and Settings: where an update stands, Restart, and the switch.
     if (method === "desktop-update") {
       const action = (args as Record<string, unknown>).action;

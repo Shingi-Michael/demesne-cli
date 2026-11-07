@@ -171,7 +171,7 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab" | "notify-answer"; sessionId?: string; path?: string; on?: boolean; top?: number; dark?: boolean; key?: string; index?: number; text?: string }>("demesne:desktop-action", (event) => {
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab" | "notify-answer" | "window-shot"; sessionId?: string; path?: string; on?: boolean; top?: number; dark?: boolean; key?: string; index?: number; text?: string }>("demesne:desktop-action", (event) => {
         if(event.payload.action==="appearance")void updateAppearance(event.payload.dark===true).catch(showActionError);
         else if (event.payload.action === "fullscreen") {
           document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
@@ -184,6 +184,8 @@ async function start() {
           document.dispatchEvent(new CustomEvent("demesne:open-chat", { detail: { sessionId: event.payload.sessionId, path: event.payload.path } }));
         else if (event.payload.action === "notify-answer" && mounted && !fatal)
           document.dispatchEvent(new CustomEvent("demesne:notify-answer", { detail: { key: event.payload.key, index: event.payload.index, text: event.payload.text } }));
+        else if (event.payload.action === "window-shot" && mounted && !fatal)
+          document.dispatchEvent(new CustomEvent("demesne:window-shot", { detail: event.payload }));
         else if (event.payload.action === "close-tab" && mounted && !fatal)
           document.dispatchEvent(new Event("demesne:close-tab"));
         else if (event.payload.action === "settings" && mounted && !fatal && !busy)

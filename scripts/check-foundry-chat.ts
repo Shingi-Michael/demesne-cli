@@ -153,18 +153,12 @@ try {
   await page.locator('[data-action="toggle-steps"]').first().click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   console.log("Step folding kept the page's state.");
-  await pane.getByRole("button", { name: "Phone width" }).click();
-  assert.equal(await pane.getByRole("button", { name: "Phone width" }).getAttribute("aria-pressed"), "true");
-  // One line above the page and nothing below it: no foot, no Revise, Copy only in code view.
+  // One line above the page and nothing below it (pass 189): the title, the
+  // version arrows, point and close. No code, phone, copy, export or Revise.
   assert.equal(await pane.locator(".pane-foot").count(), 0, "the pane has no foot");
-  assert.equal(await pane.getByRole("button", { name: "Revise" }).count(), 0, "the composer revises, not the pane");
-  assert.equal(await pane.getByRole("button", { name: "Copy the source" }).count(), 0, "Copy is only in code view");
-  await pane.getByRole("button", { name: "Code", exact: true }).click();
-  await pane.locator(".pane-code").filter({ hasText: "window.plants=0" }).waitFor();
-  await pane.getByRole("button", { name: "Copy the source" }).waitFor();
-  await pane.getByRole("button", { name: "Code", exact: true }).click();
-  await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("PASS: /foundry makes a link that opens the pane; the page's state survives streaming, completion, step folding and the pane's controls.");
+  assert.deepEqual(await pane.locator(".pane-head button").evaluateAll((items) => items.map((item) => item.getAttribute("aria-label") ?? item.textContent)),
+    ["Idea garden", "Earlier version", "Later version", "Point at a part to change it", "Close"], "the pane's line holds only the title, versions, point and close");
+  console.log("PASS: /foundry makes a link that opens the pane; the page's state survives streaming, completion and step folding.");
 
   await editor.fill("Make it blue"); await editor.press("Enter");
   // The artifact keeps its one chip; the turn that changed it says so in a quiet line.
@@ -183,11 +177,10 @@ try {
   assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
   await pane.getByRole("button", { name: "Earlier version" }).click();
-  await pane.getByRole("button", { name: "Make this the latest" }).waitFor();
+  await pane.locator(".pane-v").filter({ hasText: "v1" }).waitFor();
   assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "true");
   await pane.getByRole("button", { name: "Later version" }).click();
   await eventually(async () => (await pane.locator(".pane-v").getAttribute("title"))?.startsWith("Blue") ?? false);
-  assert.equal(await pane.getByRole("button", { name: "Make this the latest" }).count(), 0, "the latest needs no Make this the latest");
   console.log("PASS: a follow-up edits the artifact in place (foundry_edit); the pane moves to v2 and walks the versions.");
   // Point at a part: the crosshair runs the picker in the pane's page; the
   // part clicked lands as a pink chip and goes with the next message.
@@ -210,7 +203,6 @@ try {
   await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
   await chips.nth(2).click();
   await frame.locator("img").waitFor();
-  assert.equal(await pane.getByRole("button", { name: "Phone width" }).count(), 0, "A graphic has no phone width");
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await editor.fill("Make a project brief document"); await editor.press("Enter");
   await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
@@ -241,7 +233,24 @@ try {
   // Build this: a page from Just a chat first asks which project it's for,
   // then the chat moves there and starts on it with the page as its target.
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
-  await pane.getByRole("button", { name: "Build this" }).click();
+  // Foundry is a place of mockups: the title opens the wall's open view, one
+  // line above the page, and Build this is there.
+  await pane.locator(".pane-title").click();
+  const foundry = page.locator('#page[data-kind="foundry"]');
+  await foundry.locator(".fd-line").waitFor();
+  assert.deepEqual(await foundry.locator(".fd-line button").evaluateAll((items) => items.map((item) => (item.getAttribute("aria-label") ?? item.textContent ?? "").trim())),
+    ["Foundry", "Earlier version", "Later version", "Build this"], "the open mockup's line: back, versions, Build this");
+  await foundry.locator(".fd-frame").waitFor();
+  await page.screenshot({ path: join(output, "foundry-open.png") });
+  await foundry.getByRole("button", { name: "Foundry" }).click();
+  await foundry.locator(".fd-wall .fd-card").first().waitFor();
+  assert.equal(await foundry.locator("form, input, .cp-tabs, .cp-lede").count(), 0, "the wall is only mockups: no make box, kinds or lede");
+  await foundry.locator(".fd-card").filter({ hasText: "Idea garden" }).hover();
+  await foundry.getByRole("button", { name: "Delete Idea garden" }).waitFor();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(output, "foundry-wall.png") });
+  await foundry.getByRole("button", { name: "Open Idea garden" }).click();
+  await foundry.getByRole("button", { name: "Build this" }).click();
   const moveTo = page.locator("#plain-line .where-opt").filter({ hasText: basename(f.workspace) });
   await moveTo.first().click();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.some(turn => turn.content.startsWith(`Build this for real: the Foundry page "Idea garden" (id ${artifact.id}`)));

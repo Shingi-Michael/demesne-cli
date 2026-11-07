@@ -28,7 +28,7 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryPage, type FoundryUi } from "./foundry-page.ts";
+import { foundryPage } from "./foundry-page.ts";
 import { editedIn, FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
@@ -3472,20 +3472,13 @@ async function commentOn(id: string, text: string) {
 }
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
 let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
-const foundryUi: FoundryUi = { tab: "all", view: "preview", width: "desktop", edit: null, draft: "", error: "", busy: false };
+const foundryUi = { error: "" };
 /// The pane beside the conversation: one artifact open the way Claude
 /// shows one. Per chat; the chips in the chat open and mark it.
 const pane = new FoundryPane(el("pane"), {
   read: (id, version) => api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id }),
   markdown,
-  copy: (text) => api("copy", { text }),
-  export: async (id, version) => {
-    const result = await api<{ path: string } | null>("desktop-foundry-export", { id, version });
-    if (result?.path) notice(`Exported to ${result.path}`);
-  },
-  restore: (detail) => api<FoundryArtifactDetail>("foundry-save", { id: detail.id, source: detail.source }),
   openFoundry: (id, version) => { void openFoundry(id, version); },
-  notice,
   changed: () => {
     el("app").classList.toggle("pane-on", pane.open);
     runNodes.forEach((item) => item.artifacts.mark());
@@ -3498,21 +3491,22 @@ const pane = new FoundryPane(el("pane"), {
     followLatest();
     void act(() => api("submit", { text: `I pick ${option}`, wait: Boolean(state?.activeTurnId) }));
   },
-  // Build this: in a project the chat starts on it; a page from Just a chat
-  // first asks which project it's for, with the request waiting in the composer.
-  build: (detail, version) => {
-    if (!state?.session) return;
-    const text = buildRequest(detail.title, detail.id, version);
-    if (isPlain()) {
-      buildWaits.write({ sessionId: state.session.id, text, at: Date.now() });
-      toggleWhere("move");
-      notice("Which project is this page for? Once the chat moves there, it starts building.");
-      return;
-    }
-    followLatest();
-    void act(() => api("submit", { text, wait: Boolean(state?.activeTurnId) }));
-  },
 });
+/// Build this (Foundry's open line): in a project the chat starts on it; a
+/// page from Just a chat first asks which project it's for, with the request
+/// waiting in the composer.
+function buildPage(detail: FoundryArtifactDetail, version: number) {
+  if (!state?.session) return;
+  const text = buildRequest(detail.title, detail.id, version);
+  if (isPlain()) {
+    buildWaits.write({ sessionId: state.session.id, text, at: Date.now() });
+    toggleWhere("move");
+    notice("Which project is this page for? Once the chat moves there, it starts building.");
+    return;
+  }
+  followLatest();
+  void act(() => api("submit", { text, wait: Boolean(state?.activeTurnId) }));
+}
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
@@ -3717,13 +3711,12 @@ function openPage(kind: "" | PageKind) {
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
-  if (kind === "foundry") { if (was !== "foundry") Object.assign(foundryUi, { edit: null, error: "" }); foundrySaves = foundrySaveCount(); void loadFoundry(); }
+  if (kind === "foundry") { if (was !== "foundry") foundryUi.error = ""; foundrySaves = foundrySaveCount(); void loadFoundry(); }
   if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
   if (kind === "today") { if (was !== "today") Object.assign(todayUi, { replying: "", error: "", picking: "", profile: null }); todayDot.clear(); void loadSocials(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
-  if (kind === "foundry" && !foundryOpen) document.querySelector<HTMLInputElement>("#foundry-make input")?.focus({ preventScroll: true });
   if (kind === "settings" && was !== "settings") document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
   if (!kind && was === "settings") document.querySelector<HTMLElement>(".sidebar-settings")?.focus({ preventScroll: true });
 }
@@ -3737,7 +3730,7 @@ async function loadFoundry() {
     // The open artifact follows its newest version unless an older one or an edit is on screen.
     const open = foundryOpen, latest = open && foundryList.find((item) => item.id === open.id);
     if (open && !latest) foundryOpen = null;
-    else if (open && latest && foundryUi.edit === null && open.version === open.versions[0]?.version && latest.version !== open.version) await openFoundry(open.id);
+    else if (open && latest && open.version === open.versions[0]?.version && latest.version !== open.version) await openFoundry(open.id);
     foundryUi.error = "";
   } catch (error) {
     foundryList = foundryList ?? [];
@@ -3748,7 +3741,6 @@ async function loadFoundry() {
 async function openFoundry(id: string, version?: number) {
   try {
     const found = await api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id });
-    if (foundryOpen?.id !== found.id) Object.assign(foundryUi, { view: "preview", edit: null });
     foundryOpen = found;
     foundryUi.error = "";
   } catch (error) { foundryUi.error = errorWords(error); }
@@ -3756,15 +3748,6 @@ async function openFoundry(id: string, version?: number) {
   document.getElementById("page")?.scrollTo({ top: 0 });
 }
 const errorWords = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^.*?: /, "");
-async function foundryMake(text: string) {
-  foundryUi.busy = true; renderPage();
-  try {
-    await api("foundry-make", { text });
-    foundryUi.draft = foundryUi.error = "";
-    openPage("");
-  } catch (error) { foundryUi.error = errorWords(error); }
-  finally { foundryUi.busy = false; renderPage(); }
-}
 async function loadArchived() {
   try {
     const result = await api<{ sessions: Array<{ id: string; title: string; archivedAt: string; workspace?: string }> }>("archived-list");
@@ -3800,13 +3783,9 @@ function renderPage() {
     if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
     html = scheduledPage({ routines: routinesHere, auto: isPlain() || inAssistant() ? null : state.breakage.auto, here: isPlain() ? "" : here, assistant: inAssistant(), error: routineUi.error, draft: routineUi.draft });
   } else if (pageOpen === "foundry") {
-    // Source being edited keeps its words through a redraw.
-    const area = root.querySelector<HTMLTextAreaElement>(".fd-source textarea:not([readonly])");
-    if (area && foundryUi.edit !== null) foundryUi.edit = area.value;
-    if (document.activeElement?.closest("#foundry-make")) foundryUi.draft = (document.activeElement as HTMLInputElement).value;
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
-    html = foundryPage({ list: foundryList, open: foundryOpen, ui: foundryUi, here: isPlain() ? "" : here, markdownHtml: markdown });
+    html = foundryPage({ list: foundryList, open: foundryOpen, error: foundryUi.error, markdownHtml: markdown });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
@@ -3861,7 +3840,6 @@ document.getElementById("page")?.addEventListener("paste", (event) => {
 });
 document.getElementById("page")?.addEventListener("change", (event) => {
   const input = event.target as HTMLElement;
-  if (input instanceof HTMLSelectElement && input.matches("[data-foundry-version]") && foundryOpen) return void openFoundry(foundryOpen.id, Number(input.value));
   if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
 });
 // A number in Settings saves on Enter, or when you leave it.
@@ -3950,13 +3928,6 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = form.querySelector("input")?.value.trim() ?? "";
     if (text) void commentOn(form.dataset.id ?? "", text);
-    return;
-  }
-  if (form.id === "foundry-make") {
-    event.preventDefault();
-    const text = form.querySelector("input")?.value.trim() ?? "";
-    foundryUi.draft = text;
-    if (text && !foundryUi.busy) void foundryMake(text);
     return;
   }
   if (form.id !== "routine-new") return;
@@ -5790,7 +5761,6 @@ function followLatest() {
 async function foundryAction(action: string, args: Record<string, any>) {
   const open = foundryOpen;
   const redraw = () => { renderPage(); if (state) renderState({ ...state }); };
-  if (action === "foundry-tab") { foundryUi.tab = args.tab; return renderPage(); }
   if (action === "foundry-open") return openFoundry(String(args.id));
   if (action === "foundry-open-step") {
     // A new artifact's id is in the tool's result; a revision names it in its input.
@@ -5803,42 +5773,27 @@ async function foundryAction(action: string, args: Record<string, any>) {
     if (id) return pane.show(id);
     return openPage("foundry");
   }
-  if (action === "foundry-close") { foundryOpen = null; foundryUi.edit = null; redraw(); void loadFoundry(); return; }
-  if (action === "foundry-view") { foundryUi.view = args.view === "source" ? "source" : "preview"; return renderPage(); }
-  if (action === "foundry-width") { foundryUi.width = args.width; return renderPage(); }
-  if (!open) return;
-  if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
-  if (action === "foundry-reload") { const frame = document.querySelector<HTMLIFrameElement>("#page .fd-frame"); if (frame) frame.src = frame.src; return; }
-  if (action === "foundry-edit") { foundryUi.edit = open.source; foundryUi.view = "source"; renderPage(); document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea")?.focus(); return; }
-  if (action === "foundry-edit-cancel") { foundryUi.edit = null; return renderPage(); }
-  if (action === "foundry-edit-save" || action === "foundry-restore") {
-    const area = document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea:not([readonly])");
-    const source = action === "foundry-restore" ? open.source : area?.value ?? foundryUi.edit ?? "";
-    try {
-      foundryOpen = await api<FoundryArtifactDetail>("foundry-save", { id: open.id, source });
-      Object.assign(foundryUi, { edit: null, view: "preview", error: "" });
-    } catch (error) { foundryUi.error = errorWords(error); }
-    return renderPage();
-  }
-  if (action === "foundry-copy") { await act(() => api("copy", { text: open.source })); return notice("Copied the source"); }
-  if (action === "foundry-export") {
-    const saved = await act(() => api<{ path: string } | null>("desktop-foundry-export", { id: open.id, version: open.version }));
+  if (action === "foundry-close") { foundryOpen = null; redraw(); void loadFoundry(); return; }
+  // Export and delete come from a card on the wall (its id) or the open mockup.
+  const id = typeof args.id === "string" ? args.id : open?.id;
+  if (action === "foundry-export" && id) {
+    const saved = await act(() => api<{ path: string } | null>("desktop-foundry-export", { id, version: open?.id === id ? open.version : undefined }));
     if (saved && typeof saved === "object" && "path" in saved) notice(`Exported to ${saved.path}`);
     return;
   }
-  if (action === "foundry-delete") {
-    if (!confirm(`Delete "${open.title}" and all ${open.versions.length} version${open.versions.length === 1 ? "" : "s"}?`)) return;
-    await act(() => api("foundry-delete", { id: open.id }));
-    pane.forget(open.id);
-    foundryOpen = null;
+  if (action === "foundry-delete" && id) {
+    const item = foundryList?.find((entry) => entry.id === id);
+    const title = item?.title ?? open?.title ?? "this";
+    if (!confirm(`Delete "${title}" and all its versions?`)) return;
+    await act(() => api("foundry-delete", { id }));
+    pane.forget(id);
+    if (foundryOpen?.id === id) foundryOpen = null;
     redraw();
     return loadFoundry();
   }
-  if (action === "foundry-revise") {
-    await act(() => api("foundry-revise", { id: open.id, title: open.title, chat: open.sessionId }));
-    openPage("");
-    editor.focus({ preventScroll: true });
-  }
+  if (!open) return;
+  if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
+  if (action === "foundry-build") { openPage(""); buildPage(open, open.version); }
 }
 // Double-click an artifact's title to rename it; Enter keeps it, Esc puts it back.
 document.getElementById("page")?.addEventListener("dblclick", (event) => {
@@ -7367,10 +7322,10 @@ document.addEventListener("keydown", (event) => {
     else { settingsUi.fold = ""; renderPage(); }
     return;
   }
-  // Esc in an open artifact goes back to Foundry's gallery first.
+  // Esc in an open mockup goes back to Foundry's wall first.
   if (key === "escape" && !ctrl && pageOpen === "foundry" && foundryOpen && !field) {
     event.preventDefault();
-    if (foundryUi.edit !== null) foundryUi.edit = null; else foundryOpen = null;
+    foundryOpen = null;
     renderPage();
     if (state) renderState({ ...state });
     return;

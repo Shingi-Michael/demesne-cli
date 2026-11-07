@@ -1,5 +1,6 @@
-/// Foundry: what the agent made for you — prototypes, graphics, documents —
-/// as a gallery, and one artifact at a time with its versions. HTML and SVG
+/// Foundry: a place of mockups (pass 189 A). The page is your mockups, big,
+/// and one open fills it at real size under a single line; revising happens
+/// in the chat. HTML and SVG
 /// render in a foundry:// frame that has no network, no app access and no
 /// shared origin; Markdown renders through the app's sanitizer.
 import type { FoundryArtifact, FoundryArtifactDetail, FoundryKind } from "@demesne/protocol";
@@ -10,26 +11,11 @@ const h = (value: unknown) =>
 const btn = (action: string, label: string, data: Record<string, unknown> = {}, className = "", extra = "") =>
   `<button type="button" class="${className}" data-action="${action}" data-args="${h(JSON.stringify(data))}"${extra}>${label}</button>`;
 const icon = (paths: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${paths}</svg>`;
-const projectWord = (path: string | null) => path ? path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path : "Just a chat";
 
-export type FoundryTab = "all" | FoundryKind;
-export type FoundryWidth = "desktop" | "tablet" | "phone";
-export interface FoundryUi {
-  tab: FoundryTab;
-  view: "preview" | "source";
-  width: FoundryWidth;
-  /// Source being edited in place, or null.
-  edit: string | null;
-  draft: string;
-  error: string;
-  busy: boolean;
-}
 export interface FoundryView {
   list: FoundryArtifact[] | null;
   open: FoundryArtifactDetail | null;
-  ui: FoundryUi;
-  /// This window's project, to mark artifacts made here.
-  here: string;
+  error: string;
   /// Rendered, sanitized Markdown for an open document.
   markdownHtml: (source: string) => string;
 }
@@ -46,60 +32,47 @@ export const KIND_ICON: Record<FoundryKind, string> = {
 export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", svg: "svg", markdown: "md", deck: "html", doc: "html", dashboard: "html" };
 /// The kinds Demesne draws from content (a deck, a doc, a dashboard).
 export const READY_KIND = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
-/// Which tab an artifact sits under: plain Markdown notes sit with the docs.
-const tabOf = (kind: FoundryKind): FoundryTab => kind === "markdown" ? "doc" : kind;
 export const frameURL = (id: string, version: number) => `foundry://artifact/${encodeURIComponent(id)}?v=${version}`;
 const frame = (artifact: { id: string; version: number; title: string }, className: string, extra = "") =>
   `<iframe class="${className}" src="${h(frameURL(artifact.id, artifact.version))}" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(artifact.title)}"${extra}></iframe>`;
 
-function gallery(view: FoundryView) {
-  const { list, ui } = view;
-  const counts: Record<FoundryTab, number> = { all: list?.length ?? 0, html: 0, svg: 0, markdown: 0, deck: 0, doc: 0, dashboard: 0 };
-  for (const item of list ?? []) counts[tabOf(item.kind)]++;
-  const tab = (id: FoundryTab, word: string) => btn("foundry-tab", `${word}<span class="cp-count"> ${counts[id] || ""}</span>`, { tab: id }, `cp-tab${ui.tab === id ? " on" : ""}`, ` aria-pressed="${ui.tab === id}"`);
-  const shown = (list ?? []).filter((item) => ui.tab === "all" || tabOf(item.kind) === ui.tab);
-  const cards = list === null ? '<p class="cp-empty">Reading Foundry…</p>' : !shown.length
-    ? `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>${list.length ? "Nothing of this kind yet" : "Nothing made yet"}</b><span>Describe something above, or ask for it in any chat. The agent saves it here, and every revision is kept.</span></div>`
-    : `<div class="fd-grid">${shown.map((item) => {
+/// The wall: your mockups, big, newest first, each with its name and when.
+/// Hovering one shows export and delete; clicking it opens it.
+function wall(view: FoundryView) {
+  const { list } = view;
+  const cards = list === null ? '<p class="cp-empty">Reading Foundry…</p>' : !list.length
+    ? `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`
+    : `<div class="fd-wall">${list.map((item) => {
       const thumb = item.kind === "markdown"
         ? `<div class="fd-thumb doc">${KIND_ICON.markdown}</div>`
         : `<div class="fd-thumb${item.kind === "svg" ? " graphic" : ""}">${frame(item, "fd-thumb-frame", ' loading="lazy" tabindex="-1" aria-hidden="true" scrolling="no"')}</div>`;
-      return `<div class="fd-card">${btn("foundry-open", `${thumb}<span class="fd-card-text"><b>${h(item.title)}</b><span>${KIND_ICON[item.kind]}${KIND_WORD[item.kind]} · ${h(dayWord(item.updatedAt))}${item.version > 1 ? ` · v${item.version}` : ""}</span></span>`, { id: item.id }, "fd-card-open")}${item.workspace && item.workspace !== view.here ? `<span class="fd-where" title="${h(item.workspace)}">${h(projectWord(item.workspace))}</span>` : ""}</div>`;
+      return `<div class="fd-card">${btn("foundry-open", thumb, { id: item.id }, "fd-card-open", ` aria-label="Open ${h(item.title)}"`)}`
+        + `<div class="fd-hover">${btn("foundry-export", icon('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>'), { id: item.id }, "fd-ico", ` aria-label="Export ${h(item.title)}" title="Export"`)}${btn("foundry-delete", icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'), { id: item.id }, "fd-ico danger", ` aria-label="Delete ${h(item.title)}" title="Delete"`)}</div>`
+        + `<div class="fd-name"><b>${h(item.title)}</b><span>${h(dayWord(item.updatedAt))}</span></div></div>`;
     }).join("")}</div>`;
-  return `<div class="fd-head"><div><h1 class="cp-title">Foundry</h1><p class="cp-lede">Decks, docs, dashboards, prototypes and graphics made for you. Open one to see it live, revise it, or export it.</p></div></div>`
-    + `<form class="fd-make" id="foundry-make"><span class="fd-make-icon">${icon('<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>')}</span><input name="make" value="${h(ui.draft)}" placeholder="Make a pricing page for a coffee roaster, warm and minimal" aria-label="Describe something to make" autocomplete="off" spellcheck="false"${ui.busy ? " disabled" : ""}><kbd aria-hidden="true">↵</kbd></form>`
-    + (ui.error ? `<p class="sp-error" role="alert">${h(ui.error)}</p>` : `<p class="sp-hint">Starts a chat ${view.here ? `in ${h(projectWord(view.here))}` : "on its own"}; what it makes lands here.</p>`)
-    + `<div class="cp-tabs fd-tabs" role="toolbar" aria-label="Kinds">${tab("all", "All")}${tab("deck", "Decks")}${tab("doc", "Docs")}${tab("dashboard", "Dashboards")}${tab("html", "Prototypes")}${tab("svg", "Graphics")}</div>${cards}`;
+  return `<h1 class="cp-title fd-h">Foundry</h1>` + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + cards;
 }
 
-function detail(view: FoundryView, open: FoundryArtifactDetail) {
-  const { ui } = view;
-  const editing = ui.edit !== null;
-  const showSource = ui.view === "source" || editing;
-  const seg = (action: string, word: string, on: boolean, args: Record<string, unknown>) => btn(action, word, args, `fd-seg${on ? " on" : ""}`, ` aria-pressed="${on}"`);
-  const current = open.versions[0]?.version ?? open.version;
-  const versionNote = open.versions.find((item) => item.version === open.version)?.note;
-  const versions = open.versions.length > 1
-    ? `<label class="fd-versions"><span class="sr-only">Version</span><select data-foundry-version aria-label="Version">${open.versions.map((item) => `<option value="${item.version}"${item.version === open.version ? " selected" : ""}>v${item.version}${item.version === current ? " · latest" : ""}${item.note ? ` · ${h(item.note.slice(0, 40))}` : ""}</option>`).join("")}</select></label>`
-    : "";
-  const stage = showSource
-    ? `<div class="fd-source"><textarea spellcheck="false" aria-label="Source"${editing ? "" : " readonly"}>${h(editing ? ui.edit : open.source)}</textarea>${editing ? `<div class="cz-edit-bar"><span class="cz-path">Saving makes version ${current + 1}</span>${btn("foundry-edit-cancel", "Cancel", {}, "cz-cancel")}${btn("foundry-edit-save", "Save version", {}, "cz-save")}</div>` : ""}</div>`
-    : open.kind === "markdown"
-      ? `<article class="fd-doc markdown">${view.markdownHtml(open.source)}</article>`
-      : `<div class="fd-stage ${open.kind === "svg" ? "graphic" : h(ui.width)}">${frame(open, "fd-frame")}</div>`;
-  const older = open.version !== current ? `<div class="fd-older">You're looking at v${open.version}. ${btn("foundry-version", "Show latest", { version: current }, "link")} ${btn("foundry-restore", "Make this the latest", {}, "link")}</div>` : "";
-  return `<div class="fd-detail">`
-    + `<div class="fd-top">${btn("foundry-close", `${icon('<path d="m15 6-6 6 6 6"/>')}Foundry`, {}, "st-back fd-back")}<span class="sp"></span>`
-    + `${btn("foundry-revise", `${icon('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>')}Revise in chat`, { id: open.id, title: open.title }, "fd-act primary")}`
-    + `${btn("foundry-copy", "Copy", {}, "fd-act")}${btn("foundry-export", "Export", { id: open.id }, "fd-act")}${btn("foundry-delete", "Delete", { id: open.id }, "fd-act danger")}</div>`
-    + `<div class="fd-title"><h1 class="cp-title" title="Double-click to rename" data-foundry-title>${h(open.title)}</h1>`
-    + `<p class="fd-meta">${KIND_ICON[open.kind]}${KIND_WORD[open.kind]} · v${open.version}${versionNote ? ` · ${h(versionNote)}` : ""} · ${h(dayWord(open.updatedAt))} · ${h(projectWord(open.workspace))}</p></div>`
-    + `<div class="fd-bar"><div class="fd-segs" role="group" aria-label="View">${seg("foundry-view", "Preview", !showSource, { view: "preview" })}${seg("foundry-view", "Source", showSource, { view: "source" })}</div>`
-    + ((open.kind === "html" || READY_KIND.has(open.kind)) && !showSource ? `<div class="fd-segs" role="group" aria-label="Width">${seg("foundry-width", "Desktop", ui.width === "desktop", { width: "desktop" })}${seg("foundry-width", "Tablet", ui.width === "tablet", { width: "tablet" })}${seg("foundry-width", "Phone", ui.width === "phone", { width: "phone" })}</div>` : "")
-    + `<span class="sp"></span>${versions}${editing ? "" : btn("foundry-edit", "Edit source", {}, "fd-act")}${open.kind !== "markdown" && !showSource ? btn("foundry-reload", "Reload", {}, "fd-act") : ""}</div>`
-    + older + (ui.error ? `<p class="sp-error" role="alert">${h(ui.error)}</p>` : "") + stage + `</div>`;
+/// One mockup open: it fills the page at real size, with one line above it:
+/// back to Foundry, its name (double-click to rename), ‹ vN › and Build this.
+function opened(view: FoundryView, open: FoundryArtifactDetail) {
+  const numbers = open.versions.map((item) => item.version).sort((a, b) => a - b);
+  const at = numbers.indexOf(open.version);
+  const earlier = at > 0 ? numbers[at - 1] : null, later = at >= 0 && at < numbers.length - 1 ? numbers[at + 1] : null;
+  const note = open.versions.find((item) => item.version === open.version)?.note;
+  const arrow = (to: number | null, label: string, path: string) =>
+    to === null ? `<button type="button" class="fd-arrow" aria-label="${label}" disabled>${icon(path)}</button>` : btn("foundry-version", icon(path), { version: to }, "fd-arrow", ` aria-label="${label}" title="v${to}"`);
+  const stage = open.kind === "markdown"
+    ? `<article class="fd-doc markdown">${view.markdownHtml(open.source)}</article>`
+    : `<div class="fd-stage${open.kind === "svg" ? " graphic" : ""}">${frame(open, "fd-frame")}</div>`;
+  return `<div class="fd-open">`
+    + `<div class="fd-line">${btn("foundry-close", `${icon('<path d="m15 6-6 6 6 6"/>')}Foundry`, {}, "fd-back")}`
+    + `<b class="fd-title" title="Double-click to rename" data-foundry-title>${h(open.title)}</b>`
+    + `<span class="fd-vers">${arrow(earlier, "Earlier version", '<path d="m15 6-6 6 6 6"/>')}<span${note ? ` title="${h(note)}"` : ""}>v${open.version}</span>${arrow(later, "Later version", '<path d="m9 6 6 6-6 6"/>')}</span>`
+    + `<span class="sp"></span>${open.kind === "html" ? btn("foundry-build", "Build this", {}, "fd-word", ' title="Turn this page into real code in a chat"') : ""}</div>`
+    + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + stage + `</div>`;
 }
 
 export function foundryPage(view: FoundryView) {
-  return view.open ? detail(view, view.open) : gallery(view);
+  return view.open ? opened(view, view.open) : wall(view);
 }

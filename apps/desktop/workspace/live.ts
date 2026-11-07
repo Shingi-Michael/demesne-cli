@@ -29,7 +29,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryPage } from "./foundry-page.ts";
-import { editedIn, FoundryChatArtifacts } from "./foundry-inline.ts";
+import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { waitingFor, waitRow } from "./wait-row.ts";
@@ -3067,9 +3067,8 @@ function renderConversation() {
     else if (!view.element.isConnected) view.suspend();
   }
   if (changed) {
-    // An artifact keeps its chip in the turn that first showed it; later changes are an "Edited" line.
+    // Every turn that made or changed a page shows its chip; the pane follows newer versions.
     const shown = state.runs.flatMap((run) => runNodes.get(run.id) ?? []);
-    editedIn(shown.map((item) => item.artifacts.artifacts)).forEach((edited, at) => shown[at]!.artifacts.shape(edited));
     pane.refresh(shown.flatMap((item) => item.artifacts.artifacts));
   }
   if (changed) placeQuestions();

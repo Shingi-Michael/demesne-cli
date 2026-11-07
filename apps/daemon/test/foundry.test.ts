@@ -204,6 +204,23 @@ test("artifact identity reaches live events and old replay without rewriting the
   } finally { store.close(); }
 });
 
+test("a save that came back with the look's pictures still names its artifact (the chat's link)", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const { session } = store.createSession("Foundry pictures");
+    const { turn } = store.createTurn(session.id, "Make a mockup");
+    store.startTurn(turn.id);
+    const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
+    const input = { title: "Mockup", kind: "html", source: "<button>Interact</button>" };
+    const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
+    const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
+    // The engine adds a line per picture after the tool's JSON.
+    const withPictures = `${JSON.stringify({ ...JSON.parse(result), look: { issues: [] } })}\nImage artifact f20e2bf4: foundry-look-1280.png (960×600)\nImage artifact 5bf0f588: foundry-look-390.png (390×844)`;
+    const event = store.settleToolCall(toolCallId, "completed", withPictures);
+    expect(JSON.parse(event.payload.message as string)).toEqual({ id: JSON.parse(result).id, title: "Mockup", kind: "html", version: 1 });
+  } finally { store.close(); }
+});
+
 test("the tools carry the design brief, the kit and the library rules", () => {
   const store = new DemesneStore(":memory:");
   try {

@@ -2644,7 +2644,9 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
   if (name === "look_at_page") return pageLookMetadata(resultText);
   let result: unknown;
   try {
-    result = JSON.parse(resultText);
+    // A result that came with pictures (Foundry's look and try) has a line
+    // per picture after its JSON: "Image artifact <id>: <file> (w×h)".
+    result = JSON.parse(resultText.replace(/(?:\nImage artifact [^\n]*)+$/, ""));
   } catch {
     return {};
   }

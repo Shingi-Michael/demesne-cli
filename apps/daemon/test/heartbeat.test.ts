@@ -466,3 +466,34 @@ async function pollTurns(url: URL, sessionId: string, done: (turns: Session["tur
     await Bun.sleep(25);
   }
 }
+
+describe("answering mail", () => {
+  function answering() {
+    const said: Record<string, unknown>[] = [];
+    const client = { request: async (command: Record<string, unknown>) => { said.push(command); return { status: "ok" }; } };
+    const bridge = new HeartbeatBridge({ client } as unknown as ConstructorParameters<typeof HeartbeatBridge>[0]);
+    (bridge as unknown as { address: () => string }).address = () => "demesne@testnode/demesne-cli-abcde";
+    const mail = (id: string, from: string, performative: string) =>
+      ({ id, in_reply_to: null, from, to: "demesne@testnode/demesne-cli-abcde", performative, payload: "x", authority: "peer", compact: "", english: "" }) as unknown as Parameters<HeartbeatBridge["answer"]>[1][number];
+    return { said, bridge, mail };
+  }
+
+  test("an announcement gets no reply, finished or not", async () => {
+    const { said, bridge, mail } = answering();
+    await bridge.answer("chat", [mail("1", "claude@testnode/heartbeat-k3x9a", "inform")], "Noted.");
+    await bridge.answer("chat", [mail("2", "claude@testnode/heartbeat-k3x9a", "inform")], null);
+    expect(said).toEqual([]);
+  });
+
+  test("a request is answered even when the same sender announced something after it", async () => {
+    const { said, bridge, mail } = answering();
+    const from = "claude@testnode/heartbeat-k3x9a";
+    await bridge.answer("chat", [mail("1", from, "request"), mail("2", from, "inform")], "Done it.");
+    await bridge.answer("chat", [mail("3", from, "request")], null);
+    expect(said.map((command) => String(command.line).split(" why:")[0])).toEqual([
+      `DONE#_ ^1 →${from}`,
+      `FAIL#_ ^3 →${from}`,
+    ]);
+  });
+});
+

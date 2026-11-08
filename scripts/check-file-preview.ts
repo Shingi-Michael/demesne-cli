@@ -178,6 +178,15 @@ try {
   await page.locator("#conversation code.file-link", { hasText: "out/q3-budget.xlsx" }).click();
   await page.waitForTimeout(1500);
   expect(await page.locator("#cards .card.fp").count() === 0, "clicking the same name again closes it");
+  // Looked at: sending your next message puts it away.
+  await page.locator("#conversation code.file-link", { hasText: "guide.docx" }).click();
+  await page.waitForTimeout(3000);
+  expect(await page.locator("#cards .card.fp").count() === 1, "the Word file is open again");
+  await editor.click();
+  await page.keyboard.type("thanks");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(2000);
+  expect(await page.locator("#cards .card.fp").count() === 0, "sending a message puts the preview away");
   expect(errors.length === 0, `no errors on the page${errors.length ? `: ${errors.join(" | ")}` : ""}`);
 } catch (error) {
   failures.push(String(error));

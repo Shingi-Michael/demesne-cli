@@ -1344,8 +1344,10 @@ function renderCards() {
   const housed = housedHere(s), workspace = s.session?.workspace;
   const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
-  // Windows the model captured join yours, each with its picture.
-  const shots = [...chatShots(), ...used.flatMap((tool) => modelShot(tool, s.session?.id ?? ""))];
+  // Windows the model captured join yours, each with its picture: only the
+  // latest turn's, so they don't pile up down the chat.
+  const latest = s.runs.filter((run) => !rewoundBy(run)).at(-1);
+  const shots = [...chatShots(), ...(latest ? tools(latest) : []).flatMap((tool) => modelShot(tool, s.session?.id ?? ""))];
   const filePreview = chatPreview();
   if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !filePreview) return hide();
   app.classList.add("cards-on");
@@ -5584,13 +5586,15 @@ async function submitText(value = editor.value, wait = false) {
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
   // Folded pastes go after the words, whole.
   if (pastes.length && !value.startsWith("/")) { value = withPastes(value, pastes); pastes.length = 0; }
-  // A screenshot's window text goes folded after them; its card folds to one line.
+  // A screenshot's window text goes folded after them. Once sent, its picture
+  // is in your bubble, so its card goes; so does a file preview you looked at.
   const going = value.startsWith("/") || pendingQuestion() ? [] : chatShots().filter((shot) => !shot.sent && state!.attachments.some((image) => image.id === shot.id));
   if (going.length) {
     value = withPastes(value, going.map(shotPaste).filter((paste): paste is Paste => paste !== null));
-    for (const shot of going) shot.sent = Date.now();
+    for (const shot of going) windowShots.splice(windowShots.indexOf(shot), 1);
     renderCards();
   }
+  if (!value.startsWith("/") && !pendingQuestion() && chatPreview()) void closePreview();
   if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;

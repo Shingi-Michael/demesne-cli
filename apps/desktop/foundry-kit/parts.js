@@ -118,7 +118,6 @@ d-compare.dp-switch>[hidden]{display:none}
 .dp-strip>button.on{background:var(--tone-2);color:var(--ink)}
 .dp-strip>button em{font-style:normal;font-size:12px;color:var(--accent);margin-left:6px}
 .dp-strip>.dp-note{padding:0 8px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
-.dp-strip>button.dp-pick{margin-left:auto;background:var(--accent);color:var(--on-accent,#fff);font-weight:500}
 d-seg,d-tabs{display:inline-flex;padding:2px;border-radius:9px;background:var(--dm-hair,var(--tone-2));gap:2px;flex:none}
 d-seg button,d-tabs button{all:unset;cursor:pointer;padding:3px 11px;border-radius:7px;font-size:14px;color:var(--dm-t2,var(--secondary))}
 d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:var(--dm-t1,var(--ink));box-shadow:0 1px 2px rgba(0,0,0,.12)}
@@ -262,8 +261,8 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     });
   });
 
-  /// Options as a strip on top: one at a time at full size, a Pick button
-  /// that sends "I pick B · Underline" to the chat (as pick.js does).
+  /// Options as a strip on top: one at a time at full size. You choose in the
+  /// chat, never on the page.
   function switcher(el, rec) {
     var options = Array.prototype.filter.call(el.children, function (option) { return option.getAttribute("data-option") || option.getAttribute("title"); });
     if (!options.length) return;
@@ -271,25 +270,18 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     var names = options.map(function (option) { var name = option.getAttribute("data-option") || option.getAttribute("title"); option.setAttribute("data-option", name); option.removeAttribute("title"); return name; });
     var strip = doc.createElement("div"); strip.className = "dp-strip"; strip.setAttribute("data-chrome", ""); strip.setAttribute("role", "tablist");
     strip.innerHTML = names.map(function (name, i) { return '<button type="button" role="tab" data-i="' + i + '">' + esc(name) + (rec && name.indexOf(rec) === 0 ? "<em>recommended</em>" : "") + "</button>"; }).join("")
-      + '<span class="dp-note"></span><button type="button" class="dp-pick"></button>';
-    var tabs = strip.querySelectorAll("[data-i]"), note = strip.querySelector(".dp-note"), pick = strip.querySelector(".dp-pick"), at = 0;
-    var letter = function (name) { var first = name.split(/[\s·:.-]/)[0]; return first && first.length <= 2 ? first : ""; };
+      + '<span class="dp-note"></span>';
+    var tabs = strip.querySelectorAll("[data-i]"), note = strip.querySelector(".dp-note");
     var show = function (i) {
-      at = i;
       options.forEach(function (option, k) { option.hidden = k !== i; });
       Array.prototype.forEach.call(tabs, function (tab, k) { tab.classList.toggle("on", k === i); tab.setAttribute("aria-selected", k === i); });
       note.textContent = options[i].getAttribute("note") || "";
-      pick.textContent = letter(names[i]) ? "Pick " + letter(names[i]) : "Pick this";
       // A part that sized itself while hidden measures again.
       window.dispatchEvent(new Event("resize"));
     };
     strip.addEventListener("click", function (event) {
       var tab = event.target.closest("[data-i]");
-      if (tab) { show(Number(tab.getAttribute("data-i"))); return; }
-      if (event.target.closest(".dp-pick") && window.parent && window.parent !== window) {
-        window.parent.postMessage({ demesne: "pick", option: names[at] }, "*");
-        pick.textContent = "Sent";
-      }
+      if (tab) show(Number(tab.getAttribute("data-i")));
     });
     el.prepend(strip);
     var start = rec ? names.findIndex(function (name) { return name.indexOf(rec) === 0; }) : 0;

@@ -1,15 +1,15 @@
-/** Real Electron check: invoke Foundry in chat, open what it made in the
- * pane beside the conversation, and keep that page interactive through
- * streaming, turn completion, revisions and replay. */
+/** Real Electron check: invoke Foundry in chat, and its link opens what it
+ * made on the Foundry page itself: clean, with only back and its versions,
+ * and no split view beside the chat. */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fixture, eventually } from "../apps/desktop/workspace/test/fixture.ts";
 
 const response = Promise.withResolvers<void>();
 /// The first save's arguments arrive in two parts: the title, then the page,
-/// once the pane has opened on the title.
+/// once the turn has started.
 const making = Promise.withResolvers<void>();
 let first = true;
 // The page leans on the kit, as the brief asks: base.css for its look, anime.js for its motion.
@@ -27,8 +27,6 @@ const f = await fixture({
     const at = messages.findLastIndex(message => message.role === "user");
     const request = messages[at]?.content ?? "";
     const current = messages.slice(at + 1).filter(message => message.role === "tool");
-    if (/^Build this for real/.test(request)) { yield { type: "text_delta", delta: "Building it in the project." }; yield { type: "finish", reason: "stop" }; return; }
-    if (/^I pick /.test(request)) { yield { type: "text_delta", delta: "Going with that." }; yield { type: "finish", reason: "stop" }; return; }
     const blue = /blue/i.test(request);
     const previous = messages.slice(0, at).filter(message => message.role === "tool").map(message => {
       try { return JSON.parse(message.content ?? "{}"); } catch { return {}; }
@@ -94,16 +92,31 @@ try {
   await editor.fill("/foundry make me a small interactive mockup");
   await editor.press("Enter");
   const chips = page.locator("#conversation .fd-chip");
-  const pane = page.locator("#pane"), frame = pane.frameLocator("iframe.pane-frame");
-  // While Foundry writes and tries the page, the pane stays shut.
+  const foundry = page.locator('#page[data-kind="foundry"]'), frame = page.frameLocator('#page iframe.fd-frame');
+  const chat = page.locator(`#sidebar-chats [data-action="select-session"][data-args*="${plain.id}"]`);
+  /// Sends once the window knows the last turn is over, so Enter isn't lost.
+  const send = async (text: string) => {
+    await page!.waitForFunction(() => !(window.demesneInspect?.() as { host?: { busy?: boolean } })?.host?.busy);
+    await page!.waitForTimeout(200);
+    await editor.fill(text); await editor.press("Enter");
+  };
+  /// Back to the conversation from the Foundry page.
+  const backToChat = async () => { await chat.first().click(); await eventually(async () => await page!.locator("#page").isHidden()); };
+  // While Foundry writes and tries the page, nothing opens.
   await page.locator("#conversation .turn").first().waitFor();
-  assert(await pane.isHidden(), "nothing opens while Foundry works");
+  assert(await page.locator("#page").isHidden(), "nothing opens while Foundry works");
   making.resolve();
-  // The page arrives as a link (its chip) in the chat; the pane opens only when it's clicked.
+  // The page arrives as a link (its chip) in the chat; it opens only when clicked.
   await chips.first().filter({ hasText: "Idea garden" }).waitFor();
   await page.waitForTimeout(400);
-  assert(await pane.isHidden(), "a new page waits for its link to be opened");
+  assert(await page.locator("#page").isHidden(), "a new page waits for its link to be opened");
+  // Foundry works quietly: its own checks (foundry_try) are never a step row.
+  assert.equal(await page.locator("#conversation .tool-row").filter({ hasText: /^Tried/ }).count(), 0, "no Tried rows");
+  // There is no split view any more: the link opens the Foundry page itself.
+  assert.equal(await page.locator("#pane").count(), 0, "no pane beside the chat");
+  assert.equal(await page.locator("#conversation iframe").count(), 0, "Nothing live runs in the conversation");
   await chips.first().click();
+  await foundry.locator(".fd-open").waitFor();
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
   // The kit reached the page: its stylesheet and its anime.js, and no assembly beside it.
   const served = async (inline: number) => {
@@ -111,56 +124,29 @@ try {
     assert(inner, "the page's frame is reachable");
     await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined));
     assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
-    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "the page is served as written (a revision carries only the what-changed outline)");
+    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "the page is served as written");
     assert.equal(await inner.evaluate(() => "__demesnePrevious" in window), false, "no assembly");
+    assert.equal(await inner.evaluate(() => document.querySelectorAll("button.demesne-pick").length), 0, "no Pick button on the page");
   };
   await served(1);
-  // The page named a motion: the thin line under the page plays, scrubs and replays it.
-  const motion = pane.locator(".pane-motion");
-  await motion.getByRole("button", { name: "Arrive" }).waitFor();
-  await eventually(async () => (await motion.locator(".mo-time").textContent())?.startsWith("0.70s / 0.70s") ?? false);
-  await motion.getByRole("button", { name: "Replay" }).click();
-  await eventually(async () => (await motion.getByRole("button", { name: "Pause", exact: true }).count()) === 1);
-  await motion.getByRole("button", { name: "Pause", exact: true }).click();
-  await eventually(async () => (await motion.getByRole("button", { name: "Play", exact: true }).count()) === 1);
-  await motion.locator(".mo-scrub").fill("500");
-  await eventually(async () => (await motion.locator(".mo-time").textContent())?.startsWith("0.35s") ?? false);
-  console.log("Motion line passed.");
-  assert(await page.locator("#page").isHidden(), "Foundry stays beside the chat");
-  assert.equal(await page.locator("#conversation iframe").count(), 0, "Nothing live runs in the conversation");
-  assert.equal(await chips.first().getAttribute("aria-pressed"), "true", "The open chip is marked");
+  // The page is clean: one line above it holds back, its name and its version. Nothing else.
+  assert.deepEqual(await foundry.locator(".fd-line button").evaluateAll((items) => items.map((item) => (item.getAttribute("aria-label") ?? item.textContent ?? "").trim())),
+    ["Foundry", "Earlier version", "Later version"], "the open mockup's line: back and versions only");
+  assert.equal(await foundry.locator(".fd-line .fd-title").textContent(), "Idea garden");
   const artifact = (await f.client.foundryList()).artifacts[0]!;
   assert.equal(artifact.workspace, null, "No project is required");
   await frame.getByRole("button", { name: "Plant an idea" }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("Initial pane interaction passed.");
-  // A page in place of the chat hides the chat's pane; going back brings it
-  // back as it was, without reloading the page in it.
-  await page.locator(".sidebar-settings").click();
-  await page.locator('#page[data-kind="settings"]').waitFor();
-  await eventually(async () => await pane.isHidden());
-  await page.locator(".sidebar-settings").click();
-  await eventually(async () => await page.locator("#page").isHidden());
-  await eventually(async () => await pane.isVisible());
-  await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("Pane hides behind pages passed.");
-  await frame.getByRole("textbox", { name: "Your idea" }).fill("Keep my idea");
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(output, "foundry-open.png") });
+  console.log("PASS: /foundry makes a link that opens the Foundry page, clean, with the page live.");
+  await backToChat();
   response.resolve();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
-  await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("Streaming completion kept the page's state.");
-  assert.equal(await frame.getByRole("textbox", { name: "Your idea" }).inputValue(), "Keep my idea");
-  await page.locator('[data-action="toggle-steps"]').first().click();
-  await frame.getByRole("button", { name: "Planted 1" }).waitFor();
-  console.log("Step folding kept the page's state.");
-  // One line above the page and nothing below it (pass 189): the title, the
-  // version arrows, point and close. No code, phone, copy, export or Revise.
-  assert.equal(await pane.locator(".pane-foot").count(), 0, "the pane has no foot");
-  assert.deepEqual(await pane.locator(".pane-head button").evaluateAll((items) => items.map((item) => item.getAttribute("aria-label") ?? item.textContent)),
-    ["Idea garden", "Earlier version", "Later version", "Point at a part to change it", "Close"], "the pane's line holds only the title, versions, point and close");
-  console.log("PASS: /foundry makes a link that opens the pane; the page's state survives streaming, completion and step folding.");
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(output, "foundry-chat.png") });
 
-  await editor.fill("Make it blue"); await editor.press("Enter");
+  await send("Make it blue");
   // The turn that changed it ends with its own chip, a link to the newest version.
   await chips.nth(1).filter({ hasText: "Idea garden" }).filter({ hasText: "Prototype · v2" }).waitFor();
   assert.equal(await chips.nth(1).locator(".fd-chip-thumb").count(), 1, "a change gets a full link card, not a faint line");
@@ -168,118 +154,60 @@ try {
   assert.equal(await chips.nth(1).getAttribute("data-artifact-id"), artifact.id);
   assert.match((await f.client.foundryGet(artifact.id)).source, /#3158ba/);
   assert.equal((await f.client.foundryGet(artifact.id)).versions[0]!.note, "Blue");
-  // The pane follows the chat onto the new version; the arrows walk back.
-  await pane.locator(".pane-v").filter({ hasText: "v2" }).waitFor();
+  assert(await page.locator("#page").isHidden(), "a new version doesn't take the window over");
+  await chips.nth(1).click();
+  await foundry.locator(".fd-vers").filter({ hasText: "v2" }).waitFor();
   await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
-  // A revision's first show is the page as written; the previous version rides along only to outline what changed.
-  assert.match((await pane.locator("iframe.pane-frame").getAttribute("src"))!, /[?&]first=1$/, "a new version's first show asks for the what-changed outline");
-  await served(3);
-  assert.equal(await chips.nth(1).getAttribute("aria-pressed"), "true");
-  assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "false");
-  await pane.getByRole("button", { name: "Earlier version" }).click();
-  await pane.locator(".pane-v").filter({ hasText: "v1" }).waitFor();
-  assert.equal(await chips.nth(0).getAttribute("aria-pressed"), "true");
-  await pane.getByRole("button", { name: "Later version" }).click();
-  await eventually(async () => (await pane.locator(".pane-v").getAttribute("title"))?.startsWith("Blue") ?? false);
-  console.log("PASS: a follow-up edits the artifact in place (foundry_edit); the pane moves to v2 and walks the versions.");
-  // Point at a part: the crosshair runs the picker in the pane's page; the
-  // part clicked lands as a pink chip and goes with the next message.
-  await pane.getByRole("button", { name: "Point at a part to change it" }).click();
-  await pane.getByRole("button", { name: "Stop pointing (Esc)" }).waitFor();
-  await frame.getByRole("heading", { name: "A little room to grow" }).hover();
-  await frame.getByRole("heading", { name: "A little room to grow" }).click();
-  const part = page.locator("#mention-chips .point-chip.foundry");
-  await part.filter({ hasText: "A little room to grow" }).waitFor();
-  await pane.getByRole("button", { name: "Point at a part to change it" }).waitFor();
-  assert.match((await part.getAttribute("title"))!, /On Idea garden v2/);
-  await part.click();
-  await eventually(async () => await part.count() === 0);
-  console.log("PASS: pointing at a part of a Foundry page puts it in the composer.");
+  await foundry.getByRole("button", { name: "Earlier version" }).click();
+  await foundry.locator(".fd-vers").filter({ hasText: "v1" }).waitFor();
+  await foundry.getByRole("button", { name: "Later version" }).click();
+  await foundry.locator(".fd-vers").filter({ hasText: "v2" }).waitFor();
+  console.log("PASS: a follow-up edits the artifact in place (foundry_edit); its link opens v2 and the arrows walk the versions.");
+  await backToChat();
 
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
-  await editor.fill("Make an SVG badge graphic"); await editor.press("Enter");
+  await send("Make an SVG badge graphic");
   await chips.nth(2).filter({ hasText: "Graphic · v1" }).waitFor();
-  // Another new artifact doesn't take the pane over: its link opens it.
-  await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
   await chips.nth(2).click();
   await frame.locator("img").waitFor();
+  await backToChat();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
-  await editor.fill("Make a project brief document"); await editor.press("Enter");
+  await send("Make a project brief document");
   await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
   await chips.nth(3).click();
-  await pane.locator(".pane-doc").getByRole("heading", { name: "Project brief" }).waitFor();
-  assert.equal(await pane.locator(".pane-doc script").count(), 0);
+  await foundry.locator(".fd-doc").getByRole("heading", { name: "Project brief" }).waitFor();
+  assert.equal(await foundry.locator(".fd-doc script").count(), 0);
+  await backToChat();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await page.reload();
-  await page.locator(`#sidebar-chats [data-action="select-session"][data-args*="${artifact.sessionId}"]`).click();
+  await chat.first().click();
   await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
   assert.equal(await chips.count(), 4, "Chips return with the conversation history");
-  // The pane remembers what this chat had open; Esc closes it; a chip reopens it.
-  await pane.locator(".pane-doc").getByRole("heading", { name: "Project brief" }).waitFor();
-  await page.screenshot({ path: join(output, "foundry-chat.png") });
-  await page.keyboard.press("Escape");
-  await pane.waitFor({ state: "hidden" });
+  // The wall: only mockups, with nothing to press on them but the mockup itself.
   await chips.first().click();
-  await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
-  // Options the page marked get a Pick button on hover; it sends the choice to the chat.
-  await frame.locator('[data-option="B · Joined"]').hover({ position: { x: 4, y: 4 } });
-  const pick = frame.locator("button.demesne-pick");
-  await pick.waitFor();
-  assert.equal(await pick.textContent(), "Pick B", "the button names the option's letter");
-  await pick.click();
-  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.some(turn => turn.content === "I pick B · Joined"));
-  await page.locator("#conversation .request").filter({ hasText: "I pick B · Joined" }).waitFor();
-  console.log("PASS: Pick on a page's option sends the choice to the chat.");
-  // Build this: a page from Just a chat first asks which project it's for,
-  // then the chat moves there and starts on it with the page as its target.
-  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
-  // Foundry is a place of mockups: the title opens the wall's open view, one
-  // line above the page, and Build this is there.
-  await pane.locator(".pane-title").click();
-  const foundry = page.locator('#page[data-kind="foundry"]');
-  await foundry.locator(".fd-line").waitFor();
-  assert.deepEqual(await foundry.locator(".fd-line button").evaluateAll((items) => items.map((item) => (item.getAttribute("aria-label") ?? item.textContent ?? "").trim())),
-    ["Foundry", "Earlier version", "Later version", "Build this"], "the open mockup's line: back, versions, Build this");
-  await foundry.locator(".fd-frame").waitFor();
-  await page.screenshot({ path: join(output, "foundry-open.png") });
   await foundry.getByRole("button", { name: "Foundry" }).click();
   await foundry.locator(".fd-wall .fd-card").first().waitFor();
   assert.equal(await foundry.locator("form, input, .cp-tabs, .cp-lede").count(), 0, "the wall is only mockups: no make box, kinds or lede");
   await foundry.locator(".fd-card").filter({ hasText: "Idea garden" }).hover();
-  await foundry.getByRole("button", { name: "Delete Idea garden" }).waitFor();
+  assert.equal(await foundry.locator(".fd-card button:not(.fd-card-open)").count(), 0, "no export or delete on the wall");
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-wall.png") });
-  await foundry.getByRole("button", { name: "Open Idea garden" }).click();
-  await foundry.getByRole("button", { name: "Build this" }).click();
-  const moveTo = page.locator("#plain-line .where-opt").filter({ hasText: basename(f.workspace) });
-  await moveTo.first().click();
-  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.some(turn => turn.content.startsWith(`Build this for real: the Foundry page "Idea garden" (id ${artifact.id}`)));
-  assert.equal((await f.client.getSessionState(artifact.sessionId!)).session.workspace?.root, f.workspace, "the chat moved into the project it builds in");
-  console.log("PASS: Build this asks a plain chat for its project, moves it there and starts building.");
-  // A deck is content Demesne draws: slides with a strip, and Play covers the window until Esc.
-  // The move into the project reloads the window and then sends the build;
-  // wait for its answer in the reloaded window, so Enter isn't lost to the reload.
-  await page.locator("#conversation").getByText("Building it in the project.").waitFor();
-  // Wait until the window too knows the turn is over, or Enter would steer the finished turn.
-  await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status !== "running" && !(await page!.locator("#composer.stopping").count()));
-  await editor.fill("Make a slide deck for the launch"); await editor.press("Enter");
+  await backToChat();
+  // A deck is content Demesne draws: slides with a strip.
+  await send("Make a slide deck for the launch");
   await chips.filter({ hasText: "Deck · v1" }).first().waitFor();
   await chips.filter({ hasText: "Deck · v1" }).first().click();
   await eventually(async () => await frame.locator(".deck-stage > .slide").count() === 3 && await frame.locator(".deck-thumb").count() === 3);
   assert.equal(await frame.locator("html").getAttribute("data-look"), "forest");
   assert.equal(await frame.locator(".slide.on").getAttribute("data-layout"), "title");
-  await pane.getByRole("button", { name: "Play the deck" }).click();
-  await eventually(async () => (await pane.getAttribute("class"))?.includes("playing") === true && (await frame.locator("html").getAttribute("class"))?.includes("present") === true);
-  await frame.locator("body").press("ArrowRight");
+  assert.equal(await foundry.getByRole("button", { name: "Play the deck" }).count(), 0, "no Play button");
+  await frame.locator(".deck-thumb").nth(1).click();
   await eventually(async () => await frame.locator(".slide.on").getAttribute("data-layout") === "number");
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: join(output, "foundry-deck-play.png") });
-  await frame.locator("body").press("Escape");
-  await eventually(async () => !(await pane.getAttribute("class"))?.includes("playing"));
-  assert(await pane.isVisible(), "Esc ends play, and the pane stays open");
-  console.log("PASS: a deck is drawn from content, plays over the window and Esc ends it.");
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(output, "foundry-deck.png") });
+  console.log("PASS: a deck is drawn from content and walks with its strip.");
   assert.deepEqual(errors, []);
-  console.log("PASS: graphics and sanitized documents open in the pane; chips and the pane return when the chat is reopened; Esc closes it.");
+  console.log("PASS: graphics, documents and decks open on the Foundry page; chips return when the chat is reopened.");
 } catch (error) {
   if (page) {
     console.error("HOST", await page.evaluate(() => (window.demesneInspect?.() as { host?: unknown })?.host));

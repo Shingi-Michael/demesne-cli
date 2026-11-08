@@ -1,5 +1,5 @@
 /** Real Electron check for pages that remember (pass 164 A): a Foundry page
- * saves what you tick, still has it after the pane closes and the page is
+ * saves what you tick, still has it after the page closes and is
  * shown again, and asks the chat's model a question from a button. */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
@@ -58,8 +58,8 @@ try {
   await page.waitForFunction(id => { const host = (window.demesneInspect?.() as { host?: { session?: string; busy?: boolean } })?.host; return host?.session === id && !host.busy; }, plain.id);
   await page.locator("textarea").fill("Make me a trip checklist that remembers what I tick");
   await page.locator("textarea").press("Enter");
-  const pane = page.locator("#pane"), frame = pane.frameLocator("iframe.pane-frame");
-  // The page arrives as its link in the chat; opening it shows the pane.
+  const frame = page.frameLocator("#page iframe.fd-frame");
+  // The page arrives as its link in the chat; opening it shows the Foundry page.
   await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
   await frame.locator("body[data-ready='1']").waitFor();
   assert.equal(await frame.locator("#count").textContent(), "0 of 2 done");
@@ -69,12 +69,12 @@ try {
   await frame.locator("body[data-saved='1']").waitFor();
   assert.deepEqual((await f.client.foundryData(artifact.id)).data, { done: { flights: false, camera: true } });
   console.log("PASS: a tick is saved with the artifact.");
-  // Close the pane and open the page again from its chip: the tick is back.
-  await pane.locator('[data-pane="close"]').click();
-  await eventually(async () => (await page!.locator("#pane iframe.pane-frame").count()) === 0);
-  await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
+  // Back to the Foundry wall and open the page again: the tick is back.
+  await page.locator("#page .fd-back").click();
+  await eventually(async () => (await page!.locator("#page iframe.fd-frame").count()) === 0);
+  await page.locator("#page .fd-card-open").first().click();
   await frame.locator("body[data-ready='1']").waitFor();
-  assert.equal(await frame.getByLabel("Pack the camera").isChecked(), true, "the tick survives closing the pane");
+  assert.equal(await frame.getByLabel("Pack the camera").isChecked(), true, "the tick survives closing the page");
   assert.equal(await frame.locator("#count").textContent(), "1 of 2 done");
   console.log("PASS: the page remembers after closing.");
   // The page asks the chat's model from a button.

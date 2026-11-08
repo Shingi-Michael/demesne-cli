@@ -1,7 +1,6 @@
 /* Foundry's ready kinds in the page (foundry://kit/kinds.js): a Deck shows
    one slide at a time with a strip of the rest, moves with the arrow keys,
-   a click or the strip, shrinks a slide's words until they fit, and plays
-   full screen when the pane says so ({demesne:"deck", action:"play"|"stop"}).
+   a click or the strip, and shrinks a slide's words until they fit.
    A Doc lights up the contents line you're reading. Without this script a
    deck is its slides one under another, which is also how it prints. */
 (function () {

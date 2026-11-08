@@ -25,7 +25,6 @@ export async function prepareUi(out: string) {
   mkdirSync(join(out, "kit"), { recursive: true });
   cpSync(join(desktop, "foundry-kit/base.css"), join(out, "kit/base.css"));
   cpSync(join(desktop, "foundry-kit/motion.js"), join(out, "kit/motion.js"));
-  cpSync(join(desktop, "foundry-kit/pick.js"), join(out, "kit/pick.js"));
   cpSync(join(desktop, "foundry-kit/parts.js"), join(out, "kit/parts.js"));
   cpSync(join(desktop, "foundry-kit/kinds.css"), join(out, "kit/kinds.css"));
   cpSync(join(desktop, "foundry-kit/kinds.js"), join(out, "kit/kinds.js"));

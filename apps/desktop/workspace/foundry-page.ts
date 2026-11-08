@@ -37,7 +37,7 @@ const frame = (artifact: { id: string; version: number; title: string }, classNa
   `<iframe class="${className}" src="${h(frameURL(artifact.id, artifact.version))}" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(artifact.title)}"${extra}></iframe>`;
 
 /// The wall: your mockups, big, newest first, each with its name and when.
-/// Hovering one shows export and delete; clicking it opens it.
+/// Clicking one opens it. You only look here: what to change goes to the chat.
 function wall(view: FoundryView) {
   const { list } = view;
   const cards = list === null ? '<p class="cp-empty">Reading Foundry…</p>' : !list.length
@@ -47,14 +47,13 @@ function wall(view: FoundryView) {
         ? `<div class="fd-thumb doc">${KIND_ICON.markdown}</div>`
         : `<div class="fd-thumb${item.kind === "svg" ? " graphic" : ""}">${frame(item, "fd-thumb-frame", ' loading="lazy" tabindex="-1" aria-hidden="true" scrolling="no"')}</div>`;
       return `<div class="fd-card">${btn("foundry-open", thumb, { id: item.id }, "fd-card-open", ` aria-label="Open ${h(item.title)}"`)}`
-        + `<div class="fd-hover">${btn("foundry-export", icon('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>'), { id: item.id }, "fd-ico", ` aria-label="Export ${h(item.title)}" title="Export"`)}${btn("foundry-delete", icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'), { id: item.id }, "fd-ico danger", ` aria-label="Delete ${h(item.title)}" title="Delete"`)}</div>`
         + `<div class="fd-name"><b>${h(item.title)}</b><span>${h(dayWord(item.updatedAt))}</span></div></div>`;
     }).join("")}</div>`;
   return `<h1 class="cp-title fd-h">Foundry</h1>` + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + cards;
 }
 
 /// One mockup open: it fills the page at real size, with one line above it:
-/// back to Foundry, its name (double-click to rename), ‹ vN › and Build this.
+/// back to Foundry, its name and ‹ vN ›.
 function opened(view: FoundryView, open: FoundryArtifactDetail) {
   const numbers = open.versions.map((item) => item.version).sort((a, b) => a - b);
   const at = numbers.indexOf(open.version);
@@ -67,9 +66,9 @@ function opened(view: FoundryView, open: FoundryArtifactDetail) {
     : `<div class="fd-stage${open.kind === "svg" ? " graphic" : ""}">${frame(open, "fd-frame")}</div>`;
   return `<div class="fd-open">`
     + `<div class="fd-line">${btn("foundry-close", `${icon('<path d="m15 6-6 6 6 6"/>')}Foundry`, {}, "fd-back")}`
-    + `<b class="fd-title" title="Double-click to rename" data-foundry-title>${h(open.title)}</b>`
+    + `<b class="fd-title">${h(open.title)}</b>`
     + `<span class="fd-vers">${arrow(earlier, "Earlier version", '<path d="m15 6-6 6 6 6"/>')}<span${note ? ` title="${h(note)}"` : ""}>v${open.version}</span>${arrow(later, "Later version", '<path d="m9 6 6 6-6 6"/>')}</span>`
-    + `<span class="sp"></span>${open.kind === "html" ? btn("foundry-build", "Build this", {}, "fd-word", ' title="Turn this page into real code in a chat"') : ""}</div>`
+    + `</div>`
     + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + stage + `</div>`;
 }
 

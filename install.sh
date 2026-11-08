@@ -15,7 +15,12 @@
 #
 # Environment: DEMESNE_VERSION, DEMESNE_FROM_SOURCE=1, DEMESNE_NO_RESTART=1,
 # DEMESNE_HOME (Linux install root, default ~/.local/share/demesne), DEMESNE_REPO,
-# and DEMESNE_RELEASE_URL (a base URL that holds the release assets, for mirrors).
+# DEMESNE_RELEASE_URL (a base URL that holds the release assets, for mirrors),
+# and GH_TOKEN or GITHUB_TOKEN (else a logged-in `gh`) for a private repository.
+#
+# While the repository is private, fetch this script with gh as well:
+#
+#   gh api repos/shingi-michael/demesne-cli/contents/install.sh -H 'Accept: application/vnd.github.raw' | sh
 #
 # Linux installs into $DEMESNE_HOME with a launcher in ~/.local/share/applications
 # and `demesne` in ~/.local/bin. macOS installs Demesne.app into
@@ -45,6 +50,8 @@ Usage: sh install.sh [options]
   --insecure-skip-checksum   explicitly install without checksum verification
   --uninstall                remove the app, launcher and icon; keep ~/.demesne
   -h, --help                 show this help
+
+A private repository needs a GitHub login: GH_TOKEN, GITHUB_TOKEN or gh auth login.
 EOF
 }
 
@@ -105,6 +112,61 @@ release_url() {
   fi
 }
 
+# A private repository's releases need a GitHub login: GH_TOKEN or
+# GITHUB_TOKEN, else the token of a logged-in `gh`. With one, release assets
+# come through the GitHub API, which works for a public repository too. The
+# token goes to curl in a header file, never on a command line.
+TOKEN=""
+if [ -z "${DEMESNE_RELEASE_URL:-}" ]; then
+  TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  if [ -z "$TOKEN" ] && has gh; then TOKEN=$(gh auth token 2>/dev/null || true); fi
+  if [ -n "$TOKEN" ] && ! has curl; then
+    say "a GitHub login needs curl; trying the public download"
+    TOKEN=""
+  fi
+fi
+if [ -n "$TOKEN" ]; then
+  (umask 077; printf 'Authorization: Bearer %s\n' "$TOKEN" >"$TMP/auth-header")
+fi
+API="https://api.github.com/repos/$REPO"
+
+# Like fetch, with the login and an Accept type. curl keeps the login to
+# api.github.com: the redirect to the asset's storage host goes without it.
+fetch_api() {
+  if http_status=$(curl -fsSL --retry 3 -H "@$TMP/auth-header" -H "Accept: $3" \
+      -H "X-GitHub-Api-Version: 2022-11-28" -w '%{http_code}' -o "$2" "$1"); then return 0; fi
+  [ "$http_status" = 404 ] && return 44
+  case "$http_status" in 401|403) say "GitHub refused the login ($http_status); check gh auth status or GH_TOKEN" >&2 ;; esac
+  return 1
+}
+
+# The release's JSON, fetched once. Returns 44 when there is no such release.
+release_json() {
+  [ -s "$TMP/release.json" ] && return 0
+  if [ "$VERSION" = latest ]; then endpoint="$API/releases/latest"
+  else endpoint="$API/releases/tags/$VERSION"
+  fi
+  fetch_api "$endpoint" "$TMP/release.json" application/vnd.github+json
+}
+
+# The API address of the release asset named $1, or nothing. Each asset's
+# JSON starts with its "url" (…/releases/assets/<id>) and then its "name".
+asset_api_url() {
+  tr ',' '\n' <"$TMP/release.json" | awk -v want="$1" '
+    /"url" *: *"[^"]*\/releases\/assets\/[0-9]+"/ { u = $0; sub(/^.*"url" *: *"/, "", u); sub(/".*$/, "", u); next }
+    /"name" *: *"/ { n = $0; sub(/^.*"name" *: *"/, "", n); sub(/".*$/, "", n); if (u != "" && n == want) { print u; exit } u = "" }'
+}
+
+# Downloads release asset $1 to $2: through the API with a login, else from
+# the public release address. Returns 44 when the release has no such asset.
+get_asset() {
+  if [ -z "$TOKEN" ]; then fetch "$(release_url "$1")" "$2"; return; fi
+  release_json || return
+  url=$(asset_api_url "$1")
+  [ -n "$url" ] || return 44
+  fetch_api "$url" "$2" application/octet-stream
+}
+
 sha256() {
   if has sha256sum; then sha256sum "$1" | cut -d' ' -f1
   else shasum -a 256 "$1" | cut -d' ' -f1
@@ -114,17 +176,23 @@ sha256() {
 # Downloads a release asset into $TMP and checks it against its .sha256.
 # Returns 1 when the release does not carry that asset.
 download() {
-  if fetch "$(release_url "$1")" "$TMP/$1"; then :
+  if get_asset "$1" "$TMP/$1"; then :
   else
     fetch_status=$?
-    [ "$fetch_status" = 44 ] && return 1
+    if [ "$fetch_status" = 44 ]; then
+      if [ -z "$TOKEN" ] && [ -z "${DEMESNE_RELEASE_URL:-}" ] && [ -z "${LOGIN_HINT:-}" ]; then
+        LOGIN_HINT=1
+        say "GitHub has no $1 here; if the repository is private, run gh auth login (or set GH_TOKEN) and rerun"
+      fi
+      return 1
+    fi
     die "could not download $1; refusing fallback after a network or server error"
   fi
   if [ "$SKIP_CHECKSUM" = 1 ]; then
     say "WARNING: checksum verification explicitly disabled for $1"
     return 0
   fi
-  fetch "$(release_url "$1.sha256")" "$TMP/$1.sha256" \
+  get_asset "$1.sha256" "$TMP/$1.sha256" \
     || die "could not fetch checksum for $1; refusing unverified install (only for trusted legacy releases, use --insecure-skip-checksum)"
   want=$(cut -d' ' -f1 <"$TMP/$1.sha256")
   got=$(sha256 "$TMP/$1")
@@ -158,7 +226,14 @@ build_from_source() {
   ref=main
   [ "$VERSION" = latest ] || ref="$VERSION"
   say "building $ref from source (a few minutes)"
-  git clone --quiet --depth 1 --branch "$ref" "https://github.com/$REPO.git" "$TMP/src" >&2
+  if [ -n "$TOKEN" ]; then
+    # A private repository clones with the login, given to this one git command.
+    basic=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
+    git -c "http.https://github.com/.extraheader=Authorization: Basic $basic" \
+      clone --quiet --depth 1 --branch "$ref" "https://github.com/$REPO.git" "$TMP/src" >&2
+  else
+    git clone --quiet --depth 1 --branch "$ref" "https://github.com/$REPO.git" "$TMP/src" >&2
+  fi
   (cd "$TMP/src" && bun install --frozen-lockfile >&2 && bun run build:desktop -- --dir >&2)
 }
 

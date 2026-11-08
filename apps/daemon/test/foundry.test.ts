@@ -92,8 +92,9 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
     const { artifacts } = await client.foundryList();
     expect(artifacts).toHaveLength(1);
     const artifact = await client.foundryGet(artifacts[0]!.id);
-    expect(artifact).toMatchObject({ version: 2, source: "<h1>Garden two</h1>", workspace: null, sessionId: session.id });
-    expect((await client.foundryGet(artifact.id, 1)).source).toBe("<h1>Garden one</h1>");
+    // Revised in the same ask, so it is still one version (pass 197 A).
+    expect(artifact).toMatchObject({ version: 1, source: "<h1>Garden two</h1>", workspace: null, sessionId: session.id });
+    expect(artifact.versions).toHaveLength(1);
   });
 }
 
@@ -350,4 +351,44 @@ test("a deck, doc or dashboard is saved as content, and the tool says how to wri
   for (const piece of ["kind deck", "```chart", "```stats", "label | value | delta | note", "theme: paper|ink|forest|ocean|sand|plum", "<!-- layout:"]) expect(words).toContain(piece);
   expect(READY_KINDS_RULES.length).toBeLessThan(1400);
   store.close();
+});
+
+test("one ask, one version: saves in the turn that made the latest version change it in place (pass 197 A)", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store), edit = foundryEditTool(store);
+    const t1 = { ...context, turnId: "t1" }, t2 = { ...context, turnId: "t2" };
+    const made = JSON.parse(await save.execute({ title: "Pricing", kind: "html", source: "<p>one</p>", note: "First take" }, t1));
+    const fixed = JSON.parse(await edit.execute({ id: made.id, base_version: 1, edits: [{ find: "one", replace: "uno" }], note: "Fix button" }, t1));
+    expect(fixed.version).toBe(1);
+    const again = JSON.parse(await save.execute({ id: made.id, base_version: 1, source: "<p>whole</p>" }, t1));
+    expect(again.version).toBe(1);
+    let found = store.getFoundryArtifact(made.id)!;
+    expect(found.source).toBe("<p>whole</p>");
+    expect(found.versions.map((item) => [item.version, item.note])).toEqual([[1, "First take"]]);
+    expect(store.listFoundryVersions()).toHaveLength(1);
+    // The next ask is the next version, and its own fixes fold into it.
+    const asked = JSON.parse(await edit.execute({ id: made.id, base_version: 1, edits: [{ find: "whole", replace: "two" }] }, t2));
+    expect(asked.version).toBe(2);
+    expect(JSON.parse(await edit.execute({ id: made.id, base_version: 2, edits: [{ find: "two", replace: "dos" }] }, t2)).version).toBe(2);
+    found = store.getFoundryArtifact(made.id)!;
+    expect(found.versions.map((item) => item.version)).toEqual([2, 1]);
+    expect(store.getFoundryArtifact(made.id, 1)!.source).toBe("<p>whole</p>");
+    // Without a turn (an outside save) every save is a version, as before.
+    expect(JSON.parse(await edit.execute({ id: made.id, base_version: 2, edits: [{ find: "dos", replace: "tres" }] }, context)).version).toBe(3);
+  } finally { store.close(); }
+});
+
+test("a page holds at most three options", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store), edit = foundryEditTool(store);
+    const option = (name: string) => `<section data-option="${name}">x</section>`;
+    const four = `<d-compare recommended="A">${["A", "B", "C", "D"].map(option).join("")}</d-compare>`;
+    await expect(save.execute({ title: "Too many", kind: "html", source: four }, context)).rejects.toThrow("too_many_options");
+    const three = `<d-compare recommended="A">${["A", "B", "C"].map(option).join("")}</d-compare>`;
+    const made = JSON.parse(await save.execute({ title: "Three", kind: "html", source: three }, context));
+    await expect(edit.execute({ id: made.id, base_version: 1, edits: [{ find: "</d-compare>", replace: `${option("D")}</d-compare>` }] }, context)).rejects.toThrow("at most 3");
+    expect(DESIGN_BRIEF).toContain("never more than three");
+  } finally { store.close(); }
 });

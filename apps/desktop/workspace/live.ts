@@ -3756,17 +3756,18 @@ function watchFoundryDocs(root: HTMLElement) {
   const docs = root.querySelectorAll<HTMLElement>(".fd-doc[data-md]");
   if (!docs.length) return;
   const fill = (element: HTMLElement) => {
-    const key = element.dataset.md!, known = foundryDocs.get(key);
+    // A version changes in place while its ask fixes it, so the cache goes by when.
+    const shelf = element.dataset.md!, key = `${shelf}@${element.dataset.at ?? ""}`, known = foundryDocs.get(key);
     if (known !== undefined) { element.innerHTML = known; return; }
     if (foundryDocsLoading.has(key)) return;
     foundryDocsLoading.add(key);
-    const at = key.lastIndexOf(":"), id = key.slice(0, at), version = Number(key.slice(at + 1));
+    const at = shelf.lastIndexOf(":"), id = shelf.slice(0, at), version = Number(shelf.slice(at + 1));
     void api<FoundryArtifactDetail>("foundry-get", { id, version }).then((found) => {
       foundryDocs.set(key, markdown(found.source));
-      document.querySelectorAll<HTMLElement>(`#page .fd-doc[data-md="${CSS.escape(key)}"]`).forEach((item) => { item.innerHTML = foundryDocs.get(key)!; });
+      document.querySelectorAll<HTMLElement>(`#page .fd-doc[data-md="${CSS.escape(shelf)}"]`).forEach((item) => { item.innerHTML = foundryDocs.get(key)!; });
     }).catch(() => {}).finally(() => foundryDocsLoading.delete(key));
   };
-  docs.forEach((element) => { if (foundryDocs.has(element.dataset.md!)) fill(element); });
+  docs.forEach((element) => { if (foundryDocs.has(`${element.dataset.md!}@${element.dataset.at ?? ""}`)) fill(element); });
   foundryDocWatch = new IntersectionObserver((entries) => entries.forEach((entry) => { if (entry.isIntersecting) fill(entry.target as HTMLElement); }), { rootMargin: "800px 0px" });
   docs.forEach((element) => foundryDocWatch!.observe(element));
 }

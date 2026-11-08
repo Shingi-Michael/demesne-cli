@@ -310,6 +310,16 @@ export class DemesneStore {
         const row = this.database.query("SELECT version FROM foundry_artifacts WHERE id = ?").get(input.id) as { version: number } | null;
         if (!row) throw new NotFoundError("Foundry artifact not found");
         if (input.baseVersion !== undefined && input.baseVersion !== row.version) throw new InvalidStateError(`Foundry artifact is at version ${row.version}, not ${input.baseVersion}`);
+        // One ask, one version (pass 197 A): a save in the turn that made the
+        // latest version (the agent fixing its own page after a look or a
+        // try) changes that version instead of adding another.
+        const last = this.database.query("SELECT turn_id FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(input.id, row.version) as { turn_id: string | null } | null;
+        if (input.turnId && last?.turn_id === input.turnId) {
+          this.database.query("UPDATE foundry_artifacts SET updated_at = ?, title = COALESCE(?, title) WHERE id = ?").run(now, input.title?.trim() || null, input.id);
+          this.database.query("UPDATE foundry_versions SET source = ?, created_at = ?, note = CASE WHEN note = '' THEN ? ELSE note END WHERE artifact_id = ? AND version = ?")
+            .run(input.source, now, input.note ?? "", input.id, row.version);
+          return input.id;
+        }
         const version = row.version + 1;
         this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title) WHERE id = ?").run(version, now, input.title?.trim() || null, input.id);
         this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source) VALUES (?,?,?,?,?,?,?)")

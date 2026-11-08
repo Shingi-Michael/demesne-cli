@@ -360,7 +360,9 @@ async function type(text: string) {
   await page.locator("textarea").fill(text); await page.locator("textarea").press("Enter");
 }
 async function textIncludes(text: string) {
-  return until(() => page.locator("body").innerText().then(body => body.includes(text)), `visible text ${text}`);
+  // A turn scrolled out of view isn't drawn (content-visibility), so its
+  // words count from the conversation's text.
+  return until(() => page.evaluate(text => document.body.innerText.includes(text) || Boolean(document.getElementById("conversation")?.textContent?.includes(text)), text), `visible text ${text}`);
 }
 async function capture(name: string) {
   const bytes = await page.screenshot({ animations: "disabled" }), metadata = await sharp(bytes).metadata(), statistics = await sharp(bytes).stats();
@@ -1234,8 +1236,8 @@ try {
   }
   await page.locator(".header-more").click();
   await page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).click();
-  const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
-  assert(compacted && compacted.afterTokens < compacted.beforeTokens);
+  const compacted = await until(async () => (await f.client.getSessionState(sessionId)).checkpoint, "the chat compacts");
+  assert(compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
   // The cards on the right show only what this chat uses (pass 86 A) and
   // step back (pass 169 A): its own edit brings a dim Changes line with a

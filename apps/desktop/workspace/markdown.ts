@@ -57,8 +57,13 @@ marked.use({
 // From marked's defaults, which carry the math extensions registered above:
 // lexer() and parser() use exactly the options they are given.
 export const options = { ...marked.defaults, async: false as const, gfm: true, renderer };
-function decorate(parsed: string): string {
-  const safe = DOMPurify.sanitize(parsed, {
+// Its own sanitizer, configured once: passing the settings with every call
+// made DOMPurify work them out again for each block of every answer. It
+// hands back nodes, so the answer isn't serialized and parsed again.
+let purify: ReturnType<typeof DOMPurify> | null = null;
+const sanitizer = () => purify ??= configured(DOMPurify(window));
+const configured = (instance: ReturnType<typeof DOMPurify>) => { instance.setConfig({
+    RETURN_DOM_FRAGMENT: true,
     ALLOWED_TAGS: [
       "p",
       "br",
@@ -89,9 +94,10 @@ function decorate(parsed: string): string {
       "input",
     ],
     ALLOWED_ATTR: ["href", "title", "class", "start", "data-math", "data-display", "type", "checked", "disabled", "align"],
-  });
+  }); return instance; };
+function decorate(parsed: string): string {
   const wrapper = document.createElement("div");
-  wrapper.innerHTML = safe;
+  wrapper.append(sanitizer().sanitize(parsed) as unknown as DocumentFragment);
   // Task-list boxes are display-only.
   for (const box of wrapper.querySelectorAll("input"))
     if (box.type !== "checkbox") box.remove();
@@ -137,7 +143,7 @@ export function markdown(raw: string): string {
   const result = decorate(marked.parse(raw, options));
   const size = (raw.length + result.length) * 2;
   if (size <= CACHE_LIMIT) {
-    while (cacheSize + size > CACHE_LIMIT || cache.size >= 64) {
+    while (cacheSize + size > CACHE_LIMIT || cache.size >= 256) {
       const key = cache.keys().next().value!;
       cacheSize -= (key.length + cache.get(key)!.length) * 2;
       cache.delete(key);

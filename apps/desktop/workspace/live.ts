@@ -1,4 +1,5 @@
 import { resolveReasoningLevel } from "@demesne/protocol";
+import { quietDom } from "./quiet-dom.ts";
 import { THEMES } from "../../../packages/brand/src/theme.ts";
 import { matchedRanges, matchesWords } from "./model-search.ts";
 import { modelCardHTML } from "./model-card.ts";
@@ -101,6 +102,7 @@ declare global {
     demesneInspect?: () => unknown;
   }
 }
+quietDom();
 const el = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id)! as T;
 const editor = document.querySelector<HTMLTextAreaElement>("textarea")!;

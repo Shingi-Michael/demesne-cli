@@ -2494,7 +2494,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   // latest trace unless the reader explicitly collapses it.
   // A step serving a live page keeps the trace open so its preview shows.
   const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
-  let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }) : "", steps = "";
+  let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }).replace('<div class="plan-ribbon', `<div style="--pr-phase:-${Math.round(performance.now() % 1400)}ms" class="plan-ribbon`) : "", steps = "";
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
@@ -2886,8 +2886,35 @@ function syncChildren(was: HTMLElement, now: HTMLElement) {
 }
 // Attach the new shell before moving retained answers. Chromium's state-
 // preserving move keeps streaming text animations alive through tool boundaries.
+/// Brings `old` to look like `fresh` while keeping its nodes, so what moves
+/// in it (a transition, a running animation) carries on instead of starting
+/// over. Children are matched by position; a different shape is swapped.
+function morph(old: Element, fresh: Element) {
+  for (const attr of [...old.attributes]) if (!fresh.hasAttribute(attr.name)) old.removeAttribute(attr.name);
+  for (const attr of [...fresh.attributes]) if (old.getAttribute(attr.name) !== attr.value) old.setAttribute(attr.name, attr.value);
+  const was = [...old.childNodes], now = [...fresh.childNodes];
+  const same = was.length === now.length && was.every((node, i) => node.nodeType === now[i]!.nodeType && (node.nodeType !== Node.ELEMENT_NODE || (node as Element).tagName === (now[i] as Element).tagName));
+  if (!same) { old.replaceChildren(...now); return; }
+  was.forEach((node, i) => {
+    const next = now[i]!;
+    if (node.nodeType === Node.ELEMENT_NODE) morph(node as Element, next as Element);
+    else if (node.nodeValue !== next.nodeValue) node.nodeValue = next.nodeValue;
+  });
+}
+/// What an open step shows, keyed by the step it belongs to.
+const foldKey = (fold: Element) => (fold.previousElementSibling as HTMLElement | null)?.dataset.args ?? "";
 function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, retained: Array<[HTMLElement, HTMLElement]>) {
   const old = [...content.childNodes];
+  // The checklist ribbon is the same element from step to step: its segments
+  // fill and its light keeps moving instead of being drawn anew (it stuttered).
+  const ribbon = content.querySelector(".plan-ribbon"), freshRibbon = fragment.querySelector(".plan-ribbon");
+  if (ribbon && freshRibbon && ribbon.classList.contains("ended") === freshRibbon.classList.contains("ended")) {
+    morph(ribbon, freshRibbon);
+    retained = [...retained, [freshRibbon as HTMLElement, ribbon as HTMLElement]];
+  }
+  // A step that was already open doesn't fade in again.
+  const shown = new Set([...content.querySelectorAll(".step-fold")].map(foldKey));
+  for (const fold of fragment.querySelectorAll<HTMLElement>(".step-fold")) if (shown.has(foldKey(fold))) fold.classList.add("steady");
   content.append(fragment);
   for (const [slot, element] of retained) {
     const parent = slot.parentElement!;
@@ -5499,7 +5526,10 @@ function renderCompletion() {
     .querySelector(".selected")
     ?.scrollIntoView({ block: "nearest" });
 }
+/// When you last typed in the composer, and last sent from it.
+let draftTypedAt = 0, draftSentAt = 0;
 function changedDraft() {
+  draftTypedAt = Date.now();
   const question=pendingQuestion();
   if (question) {
     completionDismissed=true;hideCompletion();renderComposer();
@@ -5582,6 +5612,7 @@ async function pointAt(key: string) {
   editor.focus();
 }
 async function submitText(value = editor.value, wait = false) {
+  draftSentAt = Date.now();
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
@@ -6931,7 +6962,10 @@ function renderState(next: Snapshot) {
     lastDraftVersion=next.draftVersion;
   } else if (!question && lastDraftVersion !== next.draftVersion) {
     lastDraftVersion = next.draftVersion;
-    editor.value = next.draft;
+    // The host clearing the message you sent can land after you began the
+    // next one: what you typed since stays (and becomes the draft).
+    if (!next.draft && editor.value.trim() && draftTypedAt > draftSentAt && next.session?.id === composerSession) changedDraft();
+    else editor.value = next.draft;
   }
   composerSession=next.session?.id ?? null;
   applyPalette(next);

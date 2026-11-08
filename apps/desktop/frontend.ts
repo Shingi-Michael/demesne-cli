@@ -1,6 +1,6 @@
 import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
 import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
-import { releaseLine, type AppUpdate } from "./workspace/release-line.ts";
+import { checkResult, releaseLine, type AppUpdate } from "./workspace/release-line.ts";
 
 interface DesktopBootstrap {
   workspace: string | null;
@@ -200,18 +200,38 @@ async function start() {
     await applyBootstrap(await request<DesktopBootstrap>("desktop-bootstrap"));
   } catch (error) { showError(error); }
 }
-/// The release line says where an update stands (pass 153 A), and Settings hears it too.
+/// The release line says where an update stands (pass 153 A), and Settings
+/// hears it too. Clicking it checks now (pass 193 A); what an asked-for
+/// check found stays on the line for a few seconds.
 const releaseEl = document.querySelector<HTMLElement>(".sidebar-release");
+let lastUpdate: AppUpdate | null = null, updateAsked = false, updateSaid: ReturnType<typeof checkResult> = null;
+let saidTimer: ReturnType<typeof setTimeout> | undefined;
 function showAppUpdate(update: AppUpdate) {
+  lastUpdate = update;
+  if (updateAsked && update.state !== "off" && !(update.state === "idle" && update.checking)) {
+    updateAsked = false;
+    updateSaid = checkResult(update);
+    clearTimeout(saidTimer);
+    if (updateSaid) saidTimer = setTimeout(() => { updateSaid = null; if (lastUpdate) showAppUpdate(lastUpdate); }, updateSaid.ok ? 3200 : 5000);
+  }
+  if (update.state !== "idle") updateSaid = null;
   document.dispatchEvent(new CustomEvent("demesne:app-update", { detail: update }));
   if (!releaseEl) return;
-  const line = releaseLine(update);
+  const line = releaseLine(update, updateSaid);
   if (releaseEl.dataset.html !== line.html) { releaseEl.innerHTML = line.html; releaseEl.dataset.html = line.html; }
   releaseEl.title = line.title;
   releaseEl.dataset.state = line.state;
 }
+/// Check for an update now, from the release line or Settings.
+function checkForUpdate() {
+  updateAsked = true; updateSaid = null; clearTimeout(saidTimer);
+  void request<AppUpdate>("desktop-update", { action: "check" }).then(showAppUpdate, (error) => { updateAsked = false; showActionError(error); });
+}
+document.addEventListener("demesne:check-update", checkForUpdate);
 releaseEl?.addEventListener("click", (event) => {
-  if (!(event.target as HTMLElement).closest("[data-update-restart]")) return;
+  const target = event.target as HTMLElement;
+  if (target.closest("[data-update-check]")) { checkForUpdate(); return; }
+  if (!target.closest("[data-update-restart]")) return;
   void request<AppUpdate>("desktop-update", { action: "restart" }).then(showAppUpdate, showActionError);
 });
 setBusy(true);

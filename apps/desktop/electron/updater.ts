@@ -24,7 +24,7 @@ export type InstallKind = "mac" | "linux-portable" | "linux-deb" | "windows";
 export interface Install { kind: InstallKind; root: string }
 export type UpdateStatus =
   | { state: "off"; why: string }
-  | { state: "idle"; version: string; enabled: boolean; checked?: number }
+  | { state: "idle"; version: string; enabled: boolean; checked?: number; checking?: boolean; problem?: string }
   | { state: "downloading"; version: string; to: string; progress: number; enabled: true }
   | { state: "ready"; version: string; to: string; enabled: true; waiting?: boolean }
   | { state: "failed"; version: string; to?: string; error: string; enabled: boolean };
@@ -189,6 +189,20 @@ function defaultSpawnDetached(command: string, args: string[]): void {
   spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
 }
 
+/// Why a check failed, in a few words for the release line and Settings.
+export function checkProblem(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  if (/no GitHub login|gh auth login/.test(text)) return "GitHub needs a login: run gh auth login";
+  const answered = /GitHub answered (\d+)/.exec(text);
+  if (answered) return `GitHub answered ${answered[1]}`;
+  const download = /download answered (\d+)/.exec(text);
+  if (download) return `The download answered ${download[1]}`;
+  if (/no checksum/.test(text)) return "The release has no checksum";
+  if (/didn't match its checksum/.test(text)) return "The download didn't match its checksum";
+  if (/fetch failed|ENOTFOUND|ECONN|ETIMEDOUT|network|getaddrinfo|ERR_/i.test(text)) return "Couldn't reach GitHub";
+  return "The check didn't finish";
+}
+
 export class Updater {
   status: UpdateStatus;
   private busy = false;
@@ -276,22 +290,27 @@ export class Updater {
     return this.status;
   }
 
-  async check(): Promise<UpdateStatus> {
+  /// Looks for a newer release. `asked` is a check you asked for (the release
+  /// line, Settings): it runs even with updates off and says it is looking.
+  async check(asked = false): Promise<UpdateStatus> {
     const { install, current } = this.options;
-    if (this.status.state === "off" || !install || this.checking || !this.enabled) return this.status;
+    if (this.status.state === "idle" && this.checking && asked) { this.set({ ...this.status, checking: true }); return this.status; }
+    if (this.status.state === "off" || !install || this.checking || (!asked && !this.enabled)) return this.status;
     if (this.status.state === "ready" || this.status.state === "downloading") return this.status;
     this.checking = true;
+    const enabled = this.enabled, checked = this.status.state === "idle" ? this.status.checked : undefined;
+    if (asked) this.set({ state: "idle", version: current, enabled, ...(checked ? { checked } : {}), checking: true });
     try {
       const token = await this.token();
       const response = await this.options.fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, { headers: this.headers(token, "application/vnd.github+json") });
       if (!response.ok) throw new Error(response.status === 404 && !token ? "GitHub answered 404 (the repository is private and there is no GitHub login; run `gh auth login`)" : `GitHub answered ${response.status}`);
       const found = pickRelease(await response.json(), install.kind, current);
-      if (!found || found.version === this.failedVersion()) { this.set({ state: "idle", version: current, enabled: true, checked: this.options.now?.() ?? Date.now() }); return this.status; }
+      if (!found || found.version === this.failedVersion()) { this.set({ state: "idle", version: current, enabled, checked: this.options.now?.() ?? Date.now() }); return this.status; }
       await this.download(found, token);
     } catch (error) {
       this.options.log(`Update check failed: ${String(error)}`);
-      // A failed look is quiet: the next one tries again.
-      this.set({ state: "idle", version: current, enabled: true, checked: this.options.now?.() ?? Date.now() });
+      // A failed look keeps its reason for whoever asked; the next one tries again.
+      this.set({ state: "idle", version: current, enabled, checked: this.options.now?.() ?? Date.now(), problem: checkProblem(error) });
     } finally { this.checking = false; }
     return this.status;
   }

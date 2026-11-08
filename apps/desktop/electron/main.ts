@@ -299,7 +299,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (!updater) return { state: "off", why: "starting" };
       if (action === "restart") return updater.restart();
       if (action === "on" || action === "off") return updater.setEnabled(action === "on");
-      if (action === "check") return updater.check();
+      if (action === "check") return updater.check(true);
       return updater.status;
     }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }

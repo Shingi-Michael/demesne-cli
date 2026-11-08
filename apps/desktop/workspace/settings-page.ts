@@ -161,7 +161,7 @@ export interface SettingsView {
   error: string;
   /// The row whose words are unfolded, like "theme" or "subagent".
   fold: string;
-  general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string } };
+  general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string; check: { title: string; line: string; tone: "" | "bad"; can: boolean } } };
   notify: Record<NotifyKind, boolean>;
   appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
@@ -202,7 +202,7 @@ export const GLASS_DEFAULT = 15;
 /// starts more solid so words stay readable over a sharp wallpaper.
 export const GLASS_SHARP_DEFAULT = 70;
 
-export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string }
+export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string; tone?: "" | "bad" }
 /// A hidden group is only for search: its page draws the same things its own way.
 interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string; hidden?: boolean }
 interface Page { id: SettingsSection; title: string; sub: string; groups: Group[]; note?: string; html?: string }
@@ -253,6 +253,7 @@ function pages(view: SettingsView): Page[] {
     ], hint: "Closing the window leaves the daemon running, so Drive, routines and mail carry on." },
     ...(view.general.updates ? [{ name: "Updates", rows: [
       { title: "Update Demesne by itself", line: view.general.updates.line, control: toggle(view.general.updates.on, "settings-local", { key: "updates", value: !view.general.updates.on }, "Update Demesne by itself"), keywords: "update upgrade version release download restart" },
+      { title: view.general.updates.check.title, line: view.general.updates.check.line, tone: view.general.updates.check.tone, control: view.general.updates.check.can ? link("update-check", "Check now") : "", keywords: "update check now version newest latest" },
     ] }] : []),
   ] });
   out.push({ id: "notifications", title: "Notifications", sub: view.desktop ? "System notifications on Linux, macOS and Windows while the app is out of focus. Each kind has its own switch." : "Banners come from the desktop app.", groups: [
@@ -534,7 +535,7 @@ function words(text: string, marks: string[]) {
   }).join("");
 }
 const rowHtml = (row: SettingsRow, marks: string[]) =>
-  `<div class="st-row${row.fold ? " has-fold" : ""}"><div class="st-tx"><b>${words(row.title, marks)}</b>${row.line ? `<small>${words(row.line, marks)}</small>` : ""}</div>${row.control ? `<div class="st-ctl">${row.control}</div>` : ""}</div>${row.fold ? `<div class="st-fold">${row.fold}</div>` : ""}`;
+  `<div class="st-row${row.fold ? " has-fold" : ""}"><div class="st-tx"><b>${words(row.title, marks)}</b>${row.line ? `<small${row.tone ? ` class="${row.tone}"` : ""}>${words(row.line, marks)}</small>` : ""}</div>${row.control ? `<div class="st-ctl">${row.control}</div>` : ""}</div>${row.fold ? `<div class="st-fold">${row.fold}</div>` : ""}`;
 const groupHtml = (group: Group, marks: string[]) =>
   `<div class="st-head"><span>${h(group.name)}</span>${group.right ? `<span>${h(group.right)}</span>` : ""}</div><div class="st-group">${group.rows.map((row) => rowHtml(row, marks)).join("")}</div>${group.hint ? `<p class="st-hint">${h(group.hint)}</p>` : ""}`;
 

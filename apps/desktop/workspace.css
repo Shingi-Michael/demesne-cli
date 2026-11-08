@@ -1216,6 +1216,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .st-tx { flex: 1; min-width: 0; }
 .st-tx b { display: block; overflow: hidden; color: var(--t1); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .st-tx small { display: block; color: var(--t3); font-size: 12px; line-height: 17px; overflow-wrap: anywhere; }
+.st-tx small.bad { color: var(--warn); }
 .st-tx code, .st-fold code { font: 11.5px "JetBrains Mono", ui-monospace, monospace; color: var(--t2); }
 .st-tx mark { background: none; color: var(--t1); box-shadow: inset 0 -1.5px 0 var(--acc); }
 .st-ctl { display: flex; flex: none; align-items: center; gap: 12px; }
@@ -1798,6 +1799,15 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .sidebar-release .rl-restart { flex: none; padding: 2px 9px; border: 0; border-radius: 99px; background: color-mix(in srgb, var(--blossom) 26%, transparent); color: var(--t1); font: 600 11px/1.5 Inter, system-ui, sans-serif; cursor: pointer; }
 .sidebar-release .rl-restart:hover { background: color-mix(in srgb, var(--blossom) 40%, transparent); }
 .sidebar-release .rl-restart:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+/* Clicking the name checks for an update now (pass 193 A). */
+.sidebar-release .rl-check { all: unset; box-sizing: border-box; display: flex; align-items: center; max-width: 100%; margin: 0 -6px; padding: 2px 6px; border-radius: 6px; color: var(--blossom); cursor: pointer; overflow: hidden; text-overflow: ellipsis; transition: background .15s; }
+.sidebar-release .rl-check:hover { background: color-mix(in srgb, var(--blossom) 10%, transparent); }
+.sidebar-release .rl-check:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.sidebar-release .rl-dim { color: var(--t3); }
+.sidebar-release[data-state="checking"] { display: flex; align-items: center; gap: 7px; min-height: 22px; }
+.sidebar-release .rl-spin { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--blossom) 30%, transparent); border-top-color: var(--blossom); animation: rl-spin .8s linear infinite; }
+@keyframes rl-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sidebar-release .rl-spin { animation: none; } .sidebar-release .rl-check { transition: none; } }
 
 /* Menus and small dialogs (#overlay: the ⋯ menu, Chats, Theme, Providers,
    Clean up, Rename, Archive, Commands) in the look of the model picker and

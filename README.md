@@ -15,7 +15,13 @@ Ask for a change and watch it read, edit and check. Let Drive find the next thin
 curl -fsSL https://raw.githubusercontent.com/shingi-michael/demesne-cli/main/install.sh | sh
 ```
 
-macOS (Apple silicon) and Linux. Or download the app from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest). Your model can run on this machine, come from your Codex plan, or be an OpenRouter account; sign in under **Settings › Providers**. Running it again updates; `sh -s -- --uninstall` removes it. The [desktop guide](docs/desktop.md) covers building from source and the installer’s options.
+While the repository is private, fetch the script with a logged-in [GitHub CLI](https://cli.github.com) instead; the installer then downloads the release with that login:
+
+```sh
+gh api repos/shingi-michael/demesne-cli/contents/install.sh -H 'Accept: application/vnd.github.raw' | sh
+```
+
+macOS (Apple silicon) and Linux x86_64, any distribution (Arch included). Or download the app from the [latest release](https://github.com/Shingi-Michael/demesne-cli/releases/latest). Your model can run on this machine, come from your Codex plan, or be an OpenRouter account; sign in under **Settings › Providers**. Running it again updates; `sh -s -- --uninstall` removes it. The [desktop guide](docs/desktop.md) covers building from source and the installer’s options.
 
 <table>
 <tr>

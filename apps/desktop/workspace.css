@@ -830,9 +830,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .card-dot.failed { background: var(--danger, #e5484d); }
 .desktop #cards .counts { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
 /* A screenshot from the capture keys (pass 187 A): its own card after the
-   last one, the picture always showing until it's sent, then one line. */
-.desktop #cards .card.shot:not(.sent) { padding: 0 0 8px; color: var(--t2); }
-.desktop #cards .card.shot:not(.sent):hover { background: none; }
+   last one, the picture always showing until it's sent; then it joins the pile. */
+.desktop #cards .card.shot { padding: 0 0 8px; color: var(--t2); }
+.desktop #cards .card.shot:hover { background: none; }
 .desktop #cards .shot-head { cursor: default; }
 .desktop #cards .shot-head b { font-weight: 500; color: var(--t1); }
 .desktop #cards .shot-x { margin-left: auto; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--t3); font: inherit; line-height: 18px; cursor: pointer; }
@@ -841,13 +841,49 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .shot-pic.big { aspect-ratio: auto; cursor: zoom-out; }
 .desktop #cards .shot-pic img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .desktop #cards .shot-pic.big img { height: auto; }
-.desktop #cards .card-body .shot-pic { width: 100%; margin: 4px 0 0; }
 .desktop #cards .shot-note { display: block; margin: 6px 10px 0; color: var(--t3); font-size: 13px; line-height: 18px; }
+/* The chat's shelf (pass 202 A): what it made and looked at, then every
+   screenshot it has seen in one fanned pile, newest on top. A shade dim until
+   you hover, so the chat stays the focus. */
+.desktop #cards .card.shelf { display: flex; flex-direction: column; gap: 12px; padding: 8px 10px 4px; margin-top: 6px; opacity: .78; transition: opacity 500ms var(--ease); }
+.desktop #cards .card.shelf:is(:hover, :focus-within) { opacity: 1; background: none; }
+.desktop #cards .shelf-list { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.desktop #cards .shelf-title { display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--t3); }
+.desktop #cards .shelf-row { display: flex; align-items: center; gap: 8px; min-height: 24px; min-width: 0; color: var(--t2); white-space: nowrap; }
+.desktop #cards .shelf-row > i { flex: none; width: 15px; text-align: center; font-style: normal; font-size: 11px; color: var(--t3); }
+.desktop #cards .shelf-row > :not(i) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.desktop #cards .shelf-row .file-link { color: var(--t2); text-align: left; }
+.desktop #cards .shelf-more { padding-left: 23px; color: var(--t3); font-size: 12.5px; }
+.desktop #cards .pile-stack { position: relative; display: block; width: 100%; height: 178px; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.desktop #cards .pile-shot { position: absolute; left: calc(50% - 100px); top: 14px; width: 200px; height: 140px; object-fit: cover; object-position: top left; border-radius: 9px; background: var(--tone2); box-shadow: 0 0 0 1px rgba(0, 0, 0, .3), 0 10px 24px -10px rgba(0, 0, 0, .8); transform: var(--rest); transform-origin: 50% 50%; }
+.desktop #cards .pile-stack:is(:hover, :focus-visible) .pile-shot { transform: var(--fan); }
+.desktop #cards .pile-n { position: absolute; right: 8px; top: 2px; z-index: 20; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--surface2); box-shadow: 0 0 0 1px var(--hair); font-size: 11px; font-weight: 600; line-height: 20px; color: var(--t1); }
+.desktop #cards .pile-cap { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--t3); }
+.desktop #cards .pile-cap span:first-child { color: var(--t2); font-weight: 500; }
+.desktop #cards .pile-cap span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #cards .pile-shot { transition: transform 700ms cubic-bezier(.2, .8, .2, 1); }
+  .desktop #cards .pile-shot.landing { animation: pile-land 900ms cubic-bezier(.2, .8, .2, 1); }
+}
+@keyframes pile-land { from { opacity: 0; transform: translate(-60px, 20px) rotate(-8deg) scale(1.15); } }
+.pile-view { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; background: rgba(8, 8, 10, .76); -webkit-app-region: no-drag; animation: pl-in .2s ease-out; }
+.pile-view figure { margin: 0; display: grid; gap: 10px; justify-items: center; min-height: 0; }
+.pile-view figure img { max-width: min(1100px, 100%); max-height: calc(100vh - 200px); border-radius: 10px; background: #fff; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
+.pile-view figcaption { color: rgba(255, 255, 255, .7); font-size: 12.5px; text-align: center; }
+.pile-view button { font: inherit; cursor: pointer; }
+.pile-view .pile-remove { padding: 0; border: 0; background: none; color: #f2b6c8; }
+.pile-view .pile-nav { display: flex; align-items: center; gap: 14px; color: rgba(255, 255, 255, .78); font-size: 13px; font-variant-numeric: tabular-nums; }
+.pile-view .pile-nav button { width: 30px; height: 30px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: #fff; font-size: 16px; }
+.pile-view .pile-strip { display: flex; gap: 6px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.pile-view .pile-thumb { flex: none; width: 44px; height: 31px; padding: 0; border: 0; border-radius: 5px; overflow: hidden; opacity: .45; background: #ddd; }
+.pile-view .pile-thumb.on { opacity: 1; box-shadow: 0 0 0 2px #7eaef0; }
+.pile-view .pile-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+@media (prefers-reduced-motion: reduce) { .pile-view { animation: none; } }
 /* The screenshot card is bigger than the rest (pass 195 D): while one waits
    to be sent, the column widens to 360 and the other cards stay 288 on the right. */
 @media (min-width: 1100px) {
-  .desktop .live-app.cards-on:not(.cards-wide) #cards:not([hidden]):has(.card.shot:not(.sent)) { width: 360px; }
-  .desktop .live-app:not(.cards-wide) #cards:has(.card.shot:not(.sent)) .card:not(.shot) { width: 288px; align-self: flex-end; }
+  .desktop .live-app.cards-on:not(.cards-wide) #cards:not([hidden]):has(.card.shot) { width: 360px; }
+  .desktop .live-app:not(.cards-wide) #cards:has(.card.shot) .card:not(.shot) { width: 288px; align-self: flex-end; }
 }
 .shot-copy { position: fixed; z-index: 60; overflow: hidden; border-radius: 8px; pointer-events: none; background: var(--tone2); }
 .shot-copy img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }

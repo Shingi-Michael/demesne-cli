@@ -1,7 +1,7 @@
 /** Screenshots that land in a card (pass 187 A) against the real Electron app
  * on X11: a browser window in front, Ctrl+Alt+Space, and the window glides
  * into a card after the last card; the next message takes the picture and
- * the card goes. Also takes the window directly with
+ * it joins the chat's pile (pass 202 A). Also takes the window directly with
  * packages/screen, as the model's capture_window does.
  * Needs an X display with a window manager (openbox) plus xprop, xwininfo,
  * xdotool and ImageMagick's import:
@@ -96,6 +96,48 @@ try {
   await page.mouse.move(10, 10);
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "sent.png") });
+  // Sent, it joins the chat's pile (pass 202 A), and stays.
+  const pile = page.locator("#cards .card.shelf");
+  await pile.waitFor({ timeout: 10_000 });
+  expect((await pile.locator(".pile-cap").innerText()).includes("1 screenshot"), "the sent screenshot is on the chat's pile");
+  await page.waitForFunction(() => (document.querySelector<HTMLImageElement>("#cards .pile-shot")?.naturalWidth ?? 0) > 300, null, { timeout: 10_000 }).then(() => expect(true, "the pile shows its picture"), () => expect(false, "the pile shows its picture"));
+  // A second one lands on top.
+  await sh("xdotool", "windowactivate", "--sync", browserWindow);
+  await page.waitForTimeout(400);
+  await sh("xdotool", "key", "--clearmodifiers", "ctrl+alt+space");
+  await page.locator("#cards .card.shot").first().waitFor({ timeout: 20_000 });
+  await page.waitForTimeout(1600);
+  await editor.click();
+  await page.keyboard.type("and again, here it is");
+  await page.keyboard.press("Enter");
+  await page.locator("#cards .pile-n", { hasText: "2" }).waitFor({ timeout: 20_000 });
+  expect(await page.locator("#cards .pile-shot.landing").count() === 1, "the new one drops onto the pile");
+  await page.waitForTimeout(1300);
+  expect((await pile.locator(".pile-cap").innerText()).includes("2 screenshots"), "two screenshots on the pile");
+  const rest = await page.locator("#cards .pile-shot").last().boundingBox();
+  await page.locator("#cards .pile-stack").hover();
+  await page.waitForTimeout(900);
+  const fanned = await page.locator("#cards .pile-shot").last().boundingBox();
+  expect(Boolean(rest && fanned && Math.abs(rest.x - fanned.x) > 20), "hovering fans the pile out");
+  await page.screenshot({ path: join(output, "pile-fanned.png") });
+  await page.locator("#cards .pile-stack").click();
+  const view = page.locator(".pile-view");
+  await view.waitFor({ timeout: 5_000 });
+  expect((await view.locator(".pile-nav").innerText()).includes("2 of 2"), "a click opens the newest, full size");
+  await page.keyboard.press("ArrowLeft");
+  expect((await view.locator(".pile-nav").innerText()).includes("1 of 2"), "the arrow keys flip through");
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: join(output, "pile-view.png") });
+  await view.locator(".pile-remove").click();
+  await page.waitForTimeout(300);
+  expect(await view.locator(".pile-nav").count() === 0, "Remove takes it off the pile");
+  await page.keyboard.press("Escape");
+  expect(await page.locator(".pile-view").count() === 0, "Escape closes it");
+  await page.waitForTimeout(300);
+  expect((await pile.locator(".pile-cap").innerText()).includes("1 screenshot"), "the pile has one left");
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: join(output, "pile.png") });
 } catch (error) {
   failures.push(String(error));
   console.log("FAIL", error);

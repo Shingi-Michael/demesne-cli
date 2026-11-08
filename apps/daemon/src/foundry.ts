@@ -63,7 +63,7 @@ export const DESIGN_BRIEF = "Design brief: make it look designed, never like a t
   + "One strong move per page: an oversized number or headline, a bold colour field, an asymmetric layout, an SVG illustration or a striking chart. "
   + "Write as much CSS of your own as the design needs, on the kit's variables and scales: set --accent (and --ink/--paper for a tinted page) on :root, and a display face from Google Fonts when it fits. "
   + "Depth and detail where they earn it: layered surfaces, soft shadows only on things that float, real data, hover/selected/empty states, small SVG icons. "
-  + "Asked for options or ideas: two or three genuinely different directions side by side, each named, and say which you would pick. "
+  + "Asked for options or ideas: two or three genuinely different directions (never more than three), each named, the one you would pick first with recommended set on the <d-compare>; say in the chat which you would pick and why. "
   + "A mockup is the working thing at real size, not a poster of it: no headline or notes above it (say what it is in the chat), it fills the page, and every control does something: tabs and links go somewhere, inputs take typing, buttons change what shows. Options go in one <d-compare>, one at a time. "
   + "A mockup of an existing app matches that app's look (Demesne: build on <d-demesne>, views for its tabs and chats; no menus or side panels). People open it in a pane about 620px wide: it reads and works there, and at phone width with no horizontal scroll. Real content, never lorem ipsum. "
   + "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce. "
@@ -135,6 +135,14 @@ export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[]
   });
 }
 
+/// At most three options in a page (pass 197 A): best of three, not eight.
+export const MAX_OPTIONS = 3;
+function checkOptions(kind: string | undefined, source: string) {
+  if (kind !== undefined && kind !== "html") return;
+  const count = source.match(/\bdata-option\s*=/g)?.length ?? 0;
+  if (count > MAX_OPTIONS) throw new Error(`[too_many_options] This page has ${count} options; at most ${MAX_OPTIONS}. Hint: keep the best ${MAX_OPTIONS}, recommended first`);
+}
+
 const clean = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : undefined;
 
 function baseVersionOf(input: Record<string, unknown>) {
@@ -180,6 +188,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const kind = typeof input.kind === "string" ? input.kind as FoundryKind : undefined;
       if (!id && (!kind || !FOUNDRY_KINDS.includes(kind))) throw new Error(`[invalid_input] kind must be one of ${FOUNDRY_KINDS.join(", ")} when creating. Hint: deck, doc or dashboard for slides, a report or numbers; html for anything else`);
       if (!id && (typeof input.title !== "string" || !input.title.trim())) throw new Error("[invalid_input] A new artifact needs a title. Hint: name it in a few words");
+      checkOptions(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
@@ -257,6 +266,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       if (current.version !== baseVersion) conflict(new Error(`Foundry artifact is at version ${current.version}, not ${baseVersion}`));
       const source = applyFoundryEdits(current.source, edits);
       if (Buffer.byteLength(source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
+      checkOptions(current.kind, source);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;

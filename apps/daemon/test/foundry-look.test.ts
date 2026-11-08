@@ -50,12 +50,15 @@ test("a saved HTML page comes back with its look, twice per turn at most; SVG go
     const fixed = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan", replace: "plan!" }] }, context("t1")) as StructuredToolResult;
     expect(seen.at(-1)).toBe("<main>plan!</main>");
     expect(String(JSON.parse(fixed.text).look.next)).toContain("last look");
-    const third = await edit.executeWithArtifacts!({ id: saved.id, base_version: 2, edits: [{ find: "plan!", replace: "plan?" }] }, context("t1"));
+    // Its own fixes stay in version 1 (pass 197 A: one ask, one version).
+    expect(JSON.parse(fixed.text).version).toBe(1);
+    const third = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan!", replace: "plan?" }] }, context("t1"));
     expect(typeof third).toBe("string");
     expect(JSON.parse(third as string).look).toBeUndefined();
     // A new turn looks again.
-    const next = await edit.executeWithArtifacts!({ id: saved.id, base_version: 3, edits: [{ find: "plan?", replace: "plan." }] }, context("t2"));
+    const next = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan?", replace: "plan." }] }, context("t2"));
     expect(typeof next).toBe("object");
+    expect(JSON.parse((next as StructuredToolResult).text).version).toBe(2);
     const svg = await save.executeWithArtifacts!({ kind: "svg", title: "Mark", source: "<svg viewBox=\"0 0 1 1\"/>" }, context("t1"));
     expect(typeof svg).toBe("string");
     expect(seen).toHaveLength(3);

@@ -127,7 +127,7 @@ try {
   const served = async (version: number, inline: number) => {
     const inner = page!.frames().find(found => found.url().startsWith(`foundry://artifact/${artifact.id}?v=${version}`));
     assert(inner, "the page's frame is reachable");
-    assert.match(inner.url(), /&stack=1$/, "the long page asks for options stacked");
+    assert.match(inner.url(), /&stack=1&at=\d+$/, "the long page asks for options stacked, at the version's last change");
     await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined));
     assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
     assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "the page is served as written");

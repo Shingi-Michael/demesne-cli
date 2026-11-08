@@ -26,8 +26,10 @@ export const READY_KIND = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
 export const frameURL = (id: string, version: number) => `foundry://artifact/${encodeURIComponent(id)}?v=${version}`;
 /// On the long page a page shows its options stacked (parts.js reads stack=1),
 /// and loads only when it scrolls near the screen.
-const frame = (id: string, version: number, title: string) =>
-  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
+/// `at` is when the version last changed: Foundry's own fixes in the same
+/// ask change it in place (pass 197 A), so the frame loads the fixed page.
+const frame = (id: string, version: number, title: string, at: string) =>
+  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1&at=${Date.parse(at) || 0}`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
 
 export interface FoundryView {
   list: FoundryArtifact[] | null;
@@ -64,8 +66,8 @@ export function foundryPage(view: FoundryView) {
     const line = `<div class="fd-ln"><b>${h(artifact.title)}</b>${chat ? `<span>from “${h(chat)}”</span>` : ""}`
       + `<span class="fd-ln-r"${version.note ? ` title="${h(version.note)}"` : ""}>${h(KIND_WORD[artifact.kind])} · v${version.version} · ${h(clock(version.createdAt))}</span></div>`;
     const body = artifact.kind === "markdown"
-      ? `<article class="fd-doc markdown" data-md="${h(key)}"><p class="cp-empty">Reading…</p></article>`
-      : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`)}</div>`;
+      ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
+      : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt)}</div>`;
     return `<section class="fd-item" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}`)}">${line}${body}</section>`;
   };
   return title + strip + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${day.items.map(item).join("")}`).join("");

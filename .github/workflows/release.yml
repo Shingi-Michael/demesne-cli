@@ -76,11 +76,31 @@ jobs:
             gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" --generate-notes
           fi
 
+  # The build jobs upload straight to a draft release rather than through
+  # workflow artifacts, which count against the account's Actions storage
+  # quota (release assets don't). The release job publishes the draft once
+  # every build has uploaded, so a failed build still publishes nothing.
+  draft:
+    name: Draft Release
+    needs: [version]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="${{ needs.version.outputs.tag }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --target "${{ github.sha }}" --title "$tag" --generate-notes
+          fi
+
   # The desktop app, so installing demesne needs neither Bun nor Rust. Each
   # bundle carries its own daemon, desktop host and native image runtime.
   desktop:
     name: Desktop / ${{ matrix.artifact }}
-    needs: [version]
+    needs: [version, draft]
     if: needs.version.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60

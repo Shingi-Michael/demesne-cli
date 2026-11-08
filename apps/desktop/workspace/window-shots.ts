@@ -18,6 +18,8 @@ export interface WindowShot {
   sent?: number;
   /// The picture shown whole in its card.
   big?: boolean;
+  /// The model captured it (capture_window): its picture loads by id.
+  byModel?: boolean;
 }
 
 export interface Rect { x: number; y: number; width: number; height: number }
@@ -37,9 +39,9 @@ export const shotName = (shot: WindowShot) => shot.title || shot.app || "Window"
 /// picture on hover, like the other cards.
 export function shotCardHTML(shot: WindowShot, open: boolean): string {
   const key = shotKey(shot), name = h(shotName(shot));
-  const picture = `<button type="button" class="shot-pic${shot.big ? " big" : ""}" data-action="shot-big" data-args='${JSON.stringify({ id: shot.id })}' aria-label="${shot.big ? "Show less of" : "Show all of"} the screenshot of ${name}"><img src="${shot.url}" alt="Screenshot of ${name}" draggable="false"></button>`;
+  const picture = `<button type="button" class="shot-pic${shot.big ? " big" : ""}" data-action="shot-big" data-args='${JSON.stringify({ id: shot.id })}' aria-label="${shot.big ? "Show less of" : "Show all of"} the screenshot of ${name}"><img${shot.url ? ` src="${h(shot.url)}"` : ""}${shot.byModel ? ` data-picture="${h(shot.id)}"` : ""} alt="Screenshot of ${name}" draggable="false"></button>`;
   if (shot.sent) {
-    return `<section class="card shot sent${open ? " open" : ""}" data-card="${key}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name: key })}' aria-expanded="${open}">${SHOT_ICON}<span class="card-line">${name}</span><span class="card-sum">sent ${h(time(shot.sent))}</span></button><div class="card-body">${picture}</div></section>`;
+    return `<section class="card shot sent${open ? " open" : ""}" data-card="${key}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name: key })}' aria-expanded="${open}">${SHOT_ICON}<span class="card-line">${name}</span><span class="card-sum">${shot.byModel ? "looked" : "sent"} ${h(time(shot.sent))}</span></button><div class="card-body">${picture}</div></section>`;
   }
   const app = shot.app && shot.app !== shot.title ? `<b>${h(shot.app)}</b>${shot.title ? " · " : ""}` : "";
   return `<section class="card shot" data-card="${key}"><div class="card-head shot-head">${SHOT_ICON}<span class="card-line" title="${h([shot.app, shot.title].filter(Boolean).join(" · "))}">${app}${shot.title ? h(shot.title) : app ? "" : "Window"}</span><button type="button" class="shot-x" data-action="detach" data-args='${JSON.stringify({ id: shot.id })}' aria-label="Remove the screenshot of ${name}">×</button></div>${picture}<small class="shot-note">${shot.text ? "Goes with your next message, with its text" : h(shot.textNote ? `Goes with your next message. ${shot.textNote}` : "Goes with your next message")}</small></section>`;

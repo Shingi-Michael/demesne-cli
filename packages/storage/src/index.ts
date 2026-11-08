@@ -2642,6 +2642,7 @@ function mapEvent(row: EventRow): EventEnvelope {
 
 function toolResultMetadata(name: string, resultText: string): Record<string, unknown> {
   if (name === "look_at_page") return pageLookMetadata(resultText);
+  if (name === "capture_window") return windowCaptureMetadata(resultText);
   let result: unknown;
   try {
     // A result that came with pictures (Foundry's look and try) has a line
@@ -2708,6 +2709,16 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
 /// How steered words read to the model: the person's, mid-task, to act on now.
 export function steerContent(texts: string[]): string {
   return `The user sent this while you were working. Take it into account from your next step on:\n\n${texts.join("\n\n")}`;
+}
+
+/// A window the model captured: its app, title and picture, for the chat's
+/// screenshot card. "Captured window <id>: <app> — <title>" leads the result.
+export function windowCaptureMetadata(resultText: string): Record<string, unknown> {
+  const head = /^Captured window [^:\n]*: ([^\n]*)/.exec(resultText);
+  const picture = /\nImage artifact ([0-9a-f-]{36}): \S+ \((\d+)×(\d+)\)/.exec(resultText);
+  if (!head || !picture) return {};
+  const [app = "", ...title] = head[1]!.split(" — ");
+  return { message: JSON.stringify({ app: app.slice(0, 120), title: title.join(" — ").slice(0, 200), picture: { id: picture[1], width: Number(picture[2]), height: Number(picture[3]) } }) };
 }
 
 /// See the app: where it looked, how each step went and its pictures (the

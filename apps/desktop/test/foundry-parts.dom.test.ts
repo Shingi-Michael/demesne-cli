@@ -40,7 +40,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Foundry parts you can us
 
   test("options are a strip on top, one at a time, recommended first", async () => {
     expect(await page.locator("d-compare > section").evaluateAll((all) => all.map((el) => !(el as HTMLElement).hidden))).toEqual([true, false]);
-    expect(await page.locator(".dp-pick").textContent()).toBe("Pick A");
+    expect(await page.locator(".dp-pick").count()).toBe(0);
     await page.locator(".dp-strip").getByRole("tab", { name: "B · Underline" }).click();
     expect(await page.locator("d-compare > section").evaluateAll((all) => all.map((el) => !(el as HTMLElement).hidden))).toEqual([false, true]);
     await page.locator(".dp-strip").getByRole("tab", { name: /A · Pills/ }).click();

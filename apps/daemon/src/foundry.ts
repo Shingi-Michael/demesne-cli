@@ -32,7 +32,7 @@ Frames (the idea goes inside):
 - <d-browser url="shop.example/orders" width="1100" height="520">…</d-browser> a browser.
 - <d-phone time="9:41">…</d-phone> a phone, 390 wide; its inside scrolls.
 Demesne itself (its real look: glass sidebar, tabs, dark card, pink release line):
-- <d-demesne page="Customize|Foundry|Search|…" tabs="Settings|Fix sidebar" chats="Tidy the sidebar|Drive picks" chat="Tidy the sidebar" project="demesne-cli" theme="dark|light" height="620">main content</d-demesne>; give a child slot="cards" to put it in the right column. Designed at 1100 wide; in the Foundry pane (about 620) it lays out narrower, the sidebar slimmer. Its tabs, sidebar items and chats are buttons: clicking one lights it and shows the child with data-view of the same name (<div data-view="Settings">…</div>), and the open tab takes a clicked chat's name.
+- <d-demesne page="Customize|Foundry|Search|…" tabs="Settings|Fix sidebar" chats="Tidy the sidebar|Drive picks" chat="Tidy the sidebar" project="demesne-cli" theme="dark|light" height="620">main content</d-demesne>; give a child slot="cards" to put it in the right column. Designed at 1100 wide; in a narrow frame (about 620) it lays out narrower, the sidebar slimmer. Its tabs, sidebar items and chats are buttons: clicking one lights it and shows the child with data-view of the same name (<div data-view="Settings">…</div>), and the open tab takes a clicked chat's name.
 Places: any elements marked data-view="Name" are places (siblings; the first shows); anything with data-go="Name" goes there. Give every tab and chat you name a view, so nothing you click is dead.
 - <d-message from="you">text</d-message>, <d-message meta="gpt-6.1 · 4s · 2 steps">answer</d-message> (the d. mark), <d-composer placeholder="Ask anything" mode="Ask" model="GPT-6.1" reply="first answer|second answer">: a real input; Enter puts the message above it, then the next reply (or answer it yourself: on its "send" event, event.detail.text, call event.preventDefault()).
 - <d-card title="Changes" icon="git-branch">…</d-card>, <d-row title="Keep awake" note="While it works"><d-toggle on></d-toggle></d-row> (a settings row; group rows in a box), <d-seg options="Home|Last chat" value="Home">, <d-tabs items="Week|Month">.
@@ -41,16 +41,15 @@ Anywhere:
 - <d-avatar name="Amara Okafor" size="28"> initials on a steady colour. demesne.sample.people(n) gives 12 names; demesne.sample.series(n, start, drift, seed) a believable number series.
 - <d-chart type="line|area|bar|donut" values="4,6,5,8" labels="Mon,Tue,Wed,Thu" height="200"> in --accent.
 - <d-stat label="This week" value="32.4 km" delta="+12%">.
-- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: a strip on top names them, one shows at a time at full size, Pick sends the choice to the chat. layout="side" puts small options (a button, a card) side by side instead.
+- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: a strip on top names them, one shows at a time at full size; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
 The parts are the frame; the idea inside is yours to design.`;
 
 const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet" href="${FOUNDRY_KIT_STYLE}"> (the kit: light and dark from the system, Inter at 14px, `
   + "one ink with --secondary/--muted/--hair/--tone tints, --accent, radii 8 and 12; plain elements styled; classes .container(.narrow) .card(.outlined/.raised) .row(.between) .stack .grid(.two/.three) "
-  + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime; name each motion with demesne.motion("Arrive", timeline) so the person can play and scrub it under the page). `
+  + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime). `
   + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
   + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>); foundry_read id "kit:parts" lists them. `
-  + "When a page shows options to choose between, mark each option's element with data-option=\"B · Joined\" (its letter and name): the person gets a Pick button on it that sends their choice to the chat. "
   + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
 /// The design brief every artifact follows. The kit is the floor, not the

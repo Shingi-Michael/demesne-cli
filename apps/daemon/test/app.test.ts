@@ -1688,7 +1688,7 @@ describe("Demesne daemon", () => {
       providerId: "llama.cpp",
       modelId: "cache-aware-model",
       // Its soft-band window was tuned before update_plan and research; the margin is a fixture, not a rule.
-      contextCapacity: 2_750 + plainChatToolOverhead(false),
+      contextCapacity: 2_745 + plainChatToolOverhead(false),
       maxOutputTokens: 128,
       preservesPromptCache: true,
       async listModels() { return []; },

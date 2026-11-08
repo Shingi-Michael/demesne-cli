@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, exportedSource, foundryPageCall, usesRemember, withRemember, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, usesRemember, withRemember, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -87,12 +87,11 @@ test("a page is served as written, with no assembly", () => {
   expect(foundryDocument("svg", svg, "Logo")).not.toContain("@keyframes");
 });
 
-test("a page that marks options gets the Pick runtime, and only that page", () => {
+test("a page with options gets no Pick button: you choose in the chat", () => {
   const options = '<div data-option="A · Pills">A</div><div data-option="B · Joined">B</div>';
-  expect(foundryDocument("html", options, "Tabs")).toBe(`${options}\n<script src="foundry://kit/pick.js"></script>`);
-  expect(foundryDocument("html", "<p>no options</p>", "Plain")).toBe("<p>no options</p>");
-  expect(FOUNDRY_KIT["pick.js"]).toEqual({ path: "kit/pick.js", type: "application/javascript; charset=utf-8" });
-  expect(foundryKitFile("foundry://kit/pick.js")).toBe("pick.js");
+  expect(foundryDocument("html", options, "Tabs")).toBe(options);
+  expect(FOUNDRY_KIT["pick.js"]).toBeUndefined();
+  expect(foundryKitFile("foundry://kit/pick.js")).toBeNull();
 });
 
 test("the Mac's blur is hud unless DEMESNE_VIBRANCY names a real material", () => {
@@ -120,7 +119,7 @@ test("simple full screen starts below the camera notch, and only where there is 
   expect(notchInset(screen(1512, 982, 0, false))).toBe(0);
 });
 
-test("the kit is served at foundry://kit/<file>, only the files it has, and inlined on export", () => {
+test("the kit is served at foundry://kit/<file>, only the files it has", () => {
   expect(foundryKitFile("foundry://kit/base.css")).toBe("base.css");
   expect(foundryKitFile("foundry://kit/anime.js")).toBe("anime.js");
   expect(foundryKitFile("foundry://kit/fonts/inter-latin-500-normal.woff2")).toBe("fonts/inter-latin-500-normal.woff2");
@@ -131,21 +130,7 @@ test("the kit is served at foundry://kit/<file>, only the files it has, and inli
   expect(foundryKitFile("foundry://artifact/base.css")).toBeNull();
   expect(foundryKitFile("foundry://user:pw@kit/base.css")).toBeNull();
   expect(foundryURL("foundry://kit/base.css")).toBe(false);
-  const kit = { style: '@font-face{font-family:Inter;src:url(foundry://kit/fonts/inter-latin-400-normal.woff2) format("woff2")}\n:root{--ink:#111}\nbody{color:var(--ink)}\n', script: 'window.anime={};if(1<2){}//</script>' };
-  const source = '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="foundry://kit/base.css">\n<script src="foundry://kit/anime.js"></script><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces"></head><body><h1>Garden</h1></body></html>';
-  const out = exportedSource(source, kit);
-  expect(out).not.toContain("foundry://");
-  expect(out).toContain("<style>\n:root{--ink:#111}\nbody{color:var(--ink)}\n</style>");
-  expect(out).toContain("<script>window.anime={};if(1<2){}//<\\/script></script>");
-  expect(out).toContain("fonts.googleapis.com/css2?family=Fraunces");
-  expect(out).toContain("<h1>Garden</h1>");
-  // Parts are inlined too; without their text the tag stays as it was.
-  const withParts = '<link rel="stylesheet" href="foundry://kit/base.css"><d-icon name="x"></d-icon><script src="foundry://kit/parts.js"></script>';
-  expect(exportedSource(withParts, { ...kit, parts: "customElements.define('d-x',class{})" })).toContain("<script>customElements.define('d-x',class{})</script>");
-  expect(exportedSource(withParts, kit)).toContain('<script src="foundry://kit/parts.js"></script>');
   expect(foundryKitFile("foundry://kit/parts.js")).toBe("parts.js");
-  // A page without the kit is exported as it is.
-  expect(exportedSource("<p>plain</p>", kit)).toBe("<p>plain</p>");
 });
 
 test("pages that remember: only a page's own data and ask addresses, and the runtime goes in first", () => {
@@ -159,8 +144,5 @@ test("pages that remember: only a page's own data and ask addresses, and the run
   // Straight after the doctype, so the page stays in standards mode and the runtime runs before the page's own script.
   expect(page.startsWith("<!DOCTYPE html><script>window.__demesnePage={\"id\":\"a1\",\"key\":\"k\\u003c\"};</script><script>window.demesne={}<\\/script></script><html>")).toBe(true);
   expect(withRemember("<p>x</p>", "R")).toBe("<script>R</script><p>x</p>");
-  const kit = { style: "", script: "" };
-  expect(exportedSource("<p>demesne.save('a', 1)</p>", { ...kit, remember: "R" })).toBe("<script>R</script><p>demesne.save('a', 1)</p>");
-  expect(exportedSource("<p>plain</p>", { ...kit, remember: "R" })).toBe("<p>plain</p>");
   expect(FOUNDRY_KIT["remember.js"]?.path).toBe("kit/remember.js");
 });

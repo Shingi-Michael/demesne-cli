@@ -46,7 +46,6 @@ import { previewable, type FilePreview } from "@demesne/protocol";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
-import { FoundryPane, PANE_FRAME, buildRequest } from "./foundry-pane.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
@@ -109,23 +108,6 @@ const editor = document.querySelector<HTMLTextAreaElement>("textarea")!;
 el("composer-talk").hidden = !(window.demesne.mode === "desktop" && /Mac/i.test(navigator.platform));
 /// Big pastes waiting in the composer, as chips.
 const pastes: Paste[] = [];
-/// Build this from Just a chat: the request waits (across the move to
-/// another project's window) until the chat is in a project, for ten minutes.
-const buildWaits = {
-  read: (): { sessionId: string; text: string; at: number } | null => {
-    try { const value = JSON.parse(localStorage.getItem("demesne-build-waits") ?? "null"); return value && Date.now() - value.at < 600_000 ? value : null; } catch { return null; }
-  },
-  write: (value: { sessionId: string; text: string; at: number } | null) => {
-    try { if (value) localStorage.setItem("demesne-build-waits", JSON.stringify(value)); else localStorage.removeItem("demesne-build-waits"); } catch {}
-  },
-};
-function sendWaitingBuild() {
-  const waiting = buildWaits.read();
-  if (!waiting || !state?.session || state.session.id !== waiting.sessionId || isPlain() || state.activeTurnId) return;
-  buildWaits.write(null);
-  followLatest();
-  void act(() => api("submit", { text: waiting.text }));
-}
 const h = (value: unknown) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -305,15 +287,8 @@ const verb = (tool: ToolEntry) =>
     foundry_save: "Made",
     foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
-    foundry_try: "Tried",
     use_skill: "Using skill",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
-/// A try's steps in a few words, for its step row.
-function trySteps(steps: Record<string, unknown>[]) {
-  const one = (step: Record<string, unknown>) => "click" in step ? `click “${step.click}”` : "type" in step ? `type “${step.type}”` : "key" in step ? `press ${step.key}` : "scroll" in step ? "scroll" : "hover" in step ? `hover “${step.hover}”` : "wait";
-  const words = steps.slice(0, 3).map(one).join(", ");
-  return steps.length > 3 ? `${words} and ${steps.length - 3} more` : words || "the page";
-}
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: WorkspaceRun) =>
@@ -1364,7 +1339,8 @@ function renderCards() {
   const housed = housedHere(s), workspace = s.session?.workspace;
   const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
-  const shots = chatShots();
+  // Windows the model captured join yours, each with its picture.
+  const shots = [...chatShots(), ...used.flatMap((tool) => modelShot(tool, s.session?.id ?? ""))];
   const filePreview = chatPreview();
   if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !filePreview) return hide();
   app.classList.add("cards-on");
@@ -1889,7 +1865,6 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
   // A try names its steps: click “Add”, type “Milk”, press Enter.
-  if (tool.name === "foundry_try") { const steps = Array.isArray(tool.input.steps) ? tool.input.steps as Record<string, unknown>[] : []; return h(trySteps(steps) + (tool.input.width === "phone" ? " · phone" : "")); }
   if (tool.name === "use_skill") return `<span class="step-skill">${h(String(tool.input.name ?? ""))}</span>`;
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
@@ -2003,6 +1978,19 @@ function waitStep(run: WorkspaceRun, tool: ToolEntry) {
   const row = waitRow({ state: tool.drafting ? "running" : tool.state, pattern: tool.input.pattern, command: started ? stepTarget(started) : "", message: tool.message, durationMs: tool.durationMs, icon: "" });
   return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
     { runId: run.id, id: tool.id }, `tool-row wait-row ${row.tone}`) + row.tail;
+}
+/// The model's screenshots shown whole in their card.
+const bigModelShots = new Set<string>();
+/// A window the model captured (capture_window), as a screenshot card.
+function modelShot(tool: ToolEntry, sessionId: string): WindowShot[] {
+  if (tool.name !== "capture_window" || tool.state !== "done" || !tool.message) return [];
+  try {
+    const value = JSON.parse(tool.message) as { app?: string; title?: string; picture?: { id?: string } };
+    const id = value.picture?.id;
+    if (typeof id !== "string") return [];
+    const at = tool.startedAt + (tool.durationMs ?? 0);
+    return [{ id, sessionId, app: String(value.app ?? ""), title: String(value.title ?? ""), url: lookPicture(id) ?? "", text: "", at, sent: at, byModel: true, big: bigModelShots.has(id) }];
+  } catch { return []; }
 }
 /// See the app: its pictures, fetched once from the chat's images and kept.
 const lookPictures = new Map<string, string>(), lookLoading = new Set<string>();
@@ -2476,7 +2464,14 @@ function runHTML(run: WorkspaceRun, index: number) {
   }
   // The plan is the ribbon at the top, never a step row of its own.
   const plan = planOf(tools(run));
-  run = { ...run, entries: run.entries.filter((entry) => entry.type !== "tool" || entry.name !== UPDATE_PLAN) };
+  // Foundry works quietly (pass 192 A): once a page is being made, words
+  // between its steps are progress talk, and only the answer after the last
+  // step shows. The working line says what it is on meanwhile.
+  const making = run.entries.findIndex((entry) => entry.type === "tool" && FOUNDRY_WORK.has(entry.name));
+  const lastStep = run.entries.findLastIndex((entry) => entry.type === "tool");
+  const quiet = new Set(making < 0 ? [] : run.entries.flatMap((entry, at) => entry.type === "assistant" && at > making && at < lastStep ? [entry.id] : []));
+  // Foundry trying its own page is its business, never a step row.
+  run = { ...run, entries: run.entries.filter((entry) => entry.type !== "tool" || (entry.name !== UPDATE_PLAN && entry.name !== "foundry_try")) };
   const items = tools(run),
     files = new Set(
       items
@@ -2494,17 +2489,11 @@ function runHTML(run: WorkspaceRun, index: number) {
   const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
   let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }) : "", steps = "";
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
-  // Foundry works quietly (pass 192 A): once a page is being made, words
-  // between its steps are progress talk, and only the answer after the last
-  // step shows. The working line says what it is on meanwhile.
-  const isTool = (entry: WorkspaceRun["entries"][number]) => entry.type === "tool";
-  const making = run.entries.findIndex((entry) => entry.type === "tool" && FOUNDRY_WORK.has(entry.name));
-  const lastStep = run.entries.findLastIndex(isTool);
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
       key = `${run.id}:${entry.id}`;
     if (entry.type === "assistant") {
-      if (making >= 0 && i > making && i < lastStep) continue;
+      if (quiet.has(entry.id)) continue;
       flush();
       body += `<div class="answer"><span class="answer-mark" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
     }
@@ -3018,8 +3007,8 @@ function renderConversation() {
       const content = document.createElement("div");
       content.className = "turn-content";
       const artifacts = new FoundryChatArtifacts({
-        open: (artifact) => pane.show(artifact.id, artifact.version),
-        isOpen: (artifact) => pane.isOpen(artifact.id, artifact.version),
+        // The link takes you to the page in Foundry itself.
+        open: (artifact) => openFoundry(artifact.id, artifact.version),
       });
       // The working line stays out of the turn's repaints, so streaming never restarts it.
       const working = new WorkingLine(spinner);
@@ -3084,11 +3073,6 @@ function renderConversation() {
   for (const [key, view] of fileEditViews) {
     if (!editKeys.has(key)) { view.dispose(); fileEditViews.delete(key); }
     else if (!view.element.isConnected) view.suspend();
-  }
-  if (changed) {
-    // Every turn that made or changed a page shows its chip; the pane follows newer versions.
-    const shown = state.runs.flatMap((run) => runNodes.get(run.id) ?? []);
-    pane.refresh(shown.flatMap((item) => item.artifacts.artifacts));
   }
   if (changed) placeQuestions();
   if (changed) fillThreadLists();
@@ -3492,40 +3476,6 @@ async function commentOn(id: string, text: string) {
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
 let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
 const foundryUi = { error: "" };
-/// The pane beside the conversation: one artifact open the way Claude
-/// shows one. Per chat; the chips in the chat open and mark it.
-const pane = new FoundryPane(el("pane"), {
-  read: (id, version) => api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id }),
-  markdown,
-  openFoundry: (id, version) => { void openFoundry(id, version); },
-  changed: () => {
-    el("app").classList.toggle("pane-on", pane.open);
-    runNodes.forEach((item) => item.artifacts.mark());
-  },
-  // Point at a part: it lands as a chip in the composer, and the words you type say what to change.
-  point: () => { void pointAt("foundry"); },
-  // A pick on the page goes to the chat as a message; while a turn works it waits for that turn.
-  pick: (option) => {
-    if (!state?.session) return;
-    followLatest();
-    void act(() => api("submit", { text: `I pick ${option}`, wait: Boolean(state?.activeTurnId) }));
-  },
-});
-/// Build this (Foundry's open line): in a project the chat starts on it; a
-/// page from Just a chat first asks which project it's for, with the request
-/// waiting in the composer.
-function buildPage(detail: FoundryArtifactDetail, version: number) {
-  if (!state?.session) return;
-  const text = buildRequest(detail.title, detail.id, version);
-  if (isPlain()) {
-    buildWaits.write({ sessionId: state.session.id, text, at: Date.now() });
-    toggleWhere("move");
-    notice("Which project is this page for? Once the chat moves there, it starts building.");
-    return;
-  }
-  followLatest();
-  void act(() => api("submit", { text, wait: Boolean(state?.activeTurnId) }));
-}
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
@@ -5529,7 +5479,6 @@ async function chooseCompletion(index = completionIndex) {
 /// element, the host finds the code behind it, and it lands as a chip.
 /// The Point button changes in place, so the page in the frame keeps its state.
 function pointButton(key: string) {
-  if (key === "foundry") return pane.setPointing(pointing === key);
   const button = document.querySelector<HTMLElement>(`[data-preview="${CSS.escape(key)}"] .pv-btn[data-action="preview-point"]`);
   if (!button) return;
   button.classList.toggle("on", pointing === key);
@@ -5542,15 +5491,12 @@ async function pointAt(key: string) {
   pointing = key;
   pointButton(key);
   let pick: PointPick | null = null;
-  // The pane's Foundry page: the artifact and version shown when it was picked.
-  const foundry = key === "foundry" && pane.state && pane.detail ? { id: pane.detail.id, title: pane.detail.title, version: pane.state.version, kind: pane.detail.kind } : undefined;
-  try { pick = await api<PointPick | null>("desktop-point", { frame: foundry ? PANE_FRAME : `pv-${key}` }); }
+  try { pick = await api<PointPick | null>("desktop-point", { frame: `pv-${key}` }); }
   catch (error) { notice(error instanceof Error ? error.message : String(error)); }
   finally { if (pointing === key) pointing = null; pointButton(key); }
   if (!pick) return;
   let source: PointSource | null = null;
-  if (foundry) pick = { ...pick, foundry };
-  else try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
+  try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
   pointed.push({ ...pick, id: `${Date.now()}:${pointed.length}`, source });
   renderComposer();
   editor.focus();
@@ -5781,7 +5727,7 @@ function followLatest() {
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
-/// Foundry's buttons: the gallery, one artifact, and handing it to a chat.
+/// Foundry: the wall, one mockup open, and its versions. You only look here.
 async function foundryAction(action: string, args: Record<string, any>) {
   const open = foundryOpen;
   const redraw = () => { renderPage(); if (state) renderState({ ...state }); };
@@ -5794,54 +5740,13 @@ async function foundryAction(action: string, args: Record<string, any>) {
       const list = await api<FoundryArtifact[]>("foundry-list").catch(() => [] as FoundryArtifact[]);
       id = list.find((item) => item.title === args.title)?.id ?? "";
     }
-    if (id) return pane.show(id);
+    if (id) return openFoundry(id);
     return openPage("foundry");
   }
   if (action === "foundry-close") { foundryOpen = null; redraw(); void loadFoundry(); return; }
-  // Export and delete come from a card on the wall (its id) or the open mockup.
-  const id = typeof args.id === "string" ? args.id : open?.id;
-  if (action === "foundry-export" && id) {
-    const saved = await act(() => api<{ path: string } | null>("desktop-foundry-export", { id, version: open?.id === id ? open.version : undefined }));
-    if (saved && typeof saved === "object" && "path" in saved) notice(`Exported to ${saved.path}`);
-    return;
-  }
-  if (action === "foundry-delete" && id) {
-    const item = foundryList?.find((entry) => entry.id === id);
-    const title = item?.title ?? open?.title ?? "this";
-    if (!confirm(`Delete "${title}" and all its versions?`)) return;
-    await act(() => api("foundry-delete", { id }));
-    pane.forget(id);
-    if (foundryOpen?.id === id) foundryOpen = null;
-    redraw();
-    return loadFoundry();
-  }
   if (!open) return;
   if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
-  if (action === "foundry-build") { openPage(""); buildPage(open, open.version); }
 }
-// Double-click an artifact's title to rename it; Enter keeps it, Esc puts it back.
-document.getElementById("page")?.addEventListener("dblclick", (event) => {
-  const title = (event.target as HTMLElement).closest<HTMLElement>("[data-foundry-title]");
-  if (!title || !foundryOpen || title.isContentEditable) return;
-  const before = foundryOpen.title, id = foundryOpen.id;
-  title.contentEditable = "plaintext-only";
-  title.focus();
-  getSelection()?.selectAllChildren(title);
-  const finish = async (keep: boolean) => {
-    title.removeEventListener("keydown", keys);
-    title.contentEditable = "false";
-    const next = (title.textContent ?? "").trim();
-    if (!keep || !next || next === before) { title.textContent = before; return; }
-    try { await api("foundry-rename", { id, title: next }); if (foundryOpen?.id === id) foundryOpen = { ...foundryOpen, title: next }; void loadFoundry(); }
-    catch (error) { title.textContent = before; notice(errorWords(error)); }
-  };
-  const keys = (key: KeyboardEvent) => {
-    if (key.key === "Enter") { key.preventDefault(); title.blur(); }
-    if (key.key === "Escape") { key.preventDefault(); key.stopPropagation(); void finish(false); }
-  };
-  title.addEventListener("keydown", keys);
-  title.addEventListener("blur", () => void finish(true), { once: true });
-});
 async function dispatch(
   action: string,
   args: Record<string, any>,
@@ -6113,7 +6018,9 @@ async function dispatch(
   }
   if (action === "shot-big") {
     const shot = windowShots.find((one) => one.id === args.id);
-    if (shot) { shot.big = !shot.big; renderCards(); }
+    if (shot) shot.big = !shot.big;
+    else if (typeof args.id === "string" && !bigModelShots.delete(args.id)) bigModelShots.add(args.id);
+    renderCards();
     return;
   }
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
@@ -6925,7 +6832,6 @@ function renderState(next: Snapshot) {
     runNodes.clear();
     mountFrom = null; cancelIdleCallback(mountIdle); mountIdle = 0;
     heroSignature = overlaySignature = sidebarSignature = "";
-    pane.switchSession(next.session?.id ?? "");
   }
   const question=next.questions.find((q) => !q.open), slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
   if (slot !== composerSlot) {
@@ -6985,7 +6891,6 @@ function renderState(next: Snapshot) {
   renderSetup();
   renderNotifications();
   rebuildWhenIdle();
-  sendWaitingBuild();
   if (
     !editor.disabled &&
     !overlay &&

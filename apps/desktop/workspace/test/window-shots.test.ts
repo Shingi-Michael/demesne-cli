@@ -40,3 +40,11 @@ test("a window's place on screen becomes the page's pixels", () => {
   expect(onPage({ x: 300, y: 200, width: 800, height: 600 }, { x: 100, y: 50, width: 1200, height: 900 }, 1)).toEqual({ x: 200, y: 150, width: 800, height: 600 });
   expect(onPage({ x: 300, y: 250, width: 800, height: 600 }, { x: 100, y: 50, width: 1200, height: 900 }, 2)).toEqual({ x: 100, y: 100, width: 400, height: 300 });
 });
+
+test("a window the model looked at is a folded card whose picture loads by id", () => {
+  const html = shotCardHTML({ ...shot, id: "6b1d2c3e-0000-4000-8000-000000000001", url: "", text: "", sent: 1, byModel: true }, false);
+  expect(html).toContain('<span class="card-sum">looked ');
+  expect(html).toContain('data-picture="6b1d2c3e-0000-4000-8000-000000000001"');
+  expect(html).not.toContain("src=");
+  expect(html).not.toContain('data-action="detach"');
+});

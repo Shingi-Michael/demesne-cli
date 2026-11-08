@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { chartSVG, compact, fillRows, frontMatter, parseChart, renderDashboard, renderDeck, renderDoc, slideLayout, splitSlides, statsHTML } from "../electron/foundry-kinds.ts";
-import { exportedSource, FOUNDRY_KIT, foundryDocument } from "../electron/policy.ts";
+import { FOUNDRY_KIT, foundryDocument } from "../electron/policy.ts";
 import { CHANGED_SCRIPT, withChanges } from "../electron/foundry-changed.ts";
 
 test("front matter is read from the top only, and the rest is the body", () => {
@@ -81,16 +81,11 @@ test("a dashboard groups cards under its headings, and a card left alone takes t
   expect(fillRows(['<div class="k-card span-half">', '<div class="k-card span-all">', '<div class="k-card span-third">'])).toEqual(['<div class="k-card span-all">', '<div class="k-card span-all">', '<div class="k-card span-all">']);
 });
 
-test("the frame draws the ready kinds, and Export inlines their kit files", () => {
+test("the frame draws the ready kinds", () => {
   expect(FOUNDRY_KIT["kinds.css"]!.path).toBe("kit/kinds.css");
   expect(FOUNDRY_KIT["kinds.js"]!.path).toBe("kit/kinds.js");
   const page = foundryDocument("deck", "# Hello", "Hello");
   expect(page).toContain('data-kind="deck"');
-  const out = exportedSource(page, { style: "body{}", script: "anime", kinds: { style: ".slide{}", script: "deck()</script>" } });
-  expect(out).toContain("<style>\n.slide{}</style>");
-  expect(out).toContain("<script>deck()<\\/script></script>");
-  expect(out).not.toContain("foundry://kit/kinds");
-  expect(out).not.toContain("foundry://kit/base.css");
 });
 
 test("a new version's first show carries the previous one, for outlining what changed", () => {

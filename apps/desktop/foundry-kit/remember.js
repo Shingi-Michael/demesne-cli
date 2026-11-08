@@ -8,7 +8,7 @@
      await demesne.pick({ accept: "image/*" }) a file you choose: { name, type, size, text | dataURL }
 
    What a page saves stays with the artifact in Demesne: it survives closing
-   the pane, reloads and new versions, and goes when the artifact is deleted.
+   the page, reloads and new versions, and goes when the artifact is deleted.
    Inside Demesne the frame's origin is opaque (no localStorage), so saves go
    to foundry://data/<id> with the key Demesne gave this page. In an exported
    file they fall back to the browser's localStorage, and where neither works

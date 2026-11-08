@@ -7,12 +7,11 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
-import { isReadyKind } from "./foundry-kinds.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -400,26 +399,6 @@ if (!lookJob) void app.whenReady().then(async () => {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { ...args as Record<string, unknown>, path: selected.filePaths[0] });
     }
-    // Foundry › Export: the artifact's source, saved where you choose. A
-    // page leaves with the kit inlined; a deck, doc or dashboard leaves as
-    // the drawn page, or as a PDF when that's the file type picked.
-    if (method === "desktop-foundry-export") {
-      const { id, version } = args as Record<string, unknown>;
-      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" ? { version } : {}) }) as { kind: string; source: string; title: string; version: number };
-      const ready = isReadyKind(found.kind);
-      const extension = ready ? "html" : ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
-      const name = `${found.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim().slice(0, 80) || "artifact"}`;
-      const selected = await dialog.showSaveDialog(window!, { title: "Export from Foundry", defaultPath: join(app.getPath("downloads"), `${name}.${ready && found.kind === "deck" ? "pdf" : extension}`),
-        ...(ready ? { filters: found.kind === "deck" ? [{ name: "PDF", extensions: ["pdf"] }, { name: "Web page", extensions: ["html"] }] : [{ name: "Web page", extensions: ["html"] }, { name: "PDF", extensions: ["pdf"] }] } : {}) });
-      if (selected.canceled || !selected.filePath) return null;
-      if (ready && /\.pdf$/i.test(selected.filePath)) {
-        await writeFile(selected.filePath, await foundryPDF(session, String(id), found.version, found.kind));
-        return { path: selected.filePath };
-      }
-      const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
-      await writeFile(selected.filePath, found.kind === "html" ? exportedSource(found.source, kit) : ready ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit) : found.source, "utf8");
-      return { path: selected.filePath };
-    }
     // Today › Save video: the Friday reel's clip, saved where you choose.
     if (method === "desktop-save-reel") {
       const { id, week } = args as Record<string, unknown>;
@@ -496,17 +475,3 @@ if (!lookJob) void app.whenReady().then(async () => {
   window.show();
 }).catch(error => { log(String(error)); dialog.showErrorBox("Demesne could not start", String(error)); void quit(); });
 
-/// A deck, doc or dashboard as a PDF: drawn off screen in the window's own
-/// session (so foundry:// and the kit load as in the pane), then printed. A
-/// deck prints a slide a page at 16:9 (kinds.css @page); the others on A4.
-async function foundryPDF(session: Electron.Session, id: string, version: number, kind: string) {
-  const win = new BrowserWindow({ show: false, width: 1280, height: 800, webPreferences: { session, sandbox: true, contextIsolation: true, nodeIntegration: false } });
-  try {
-    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    win.webContents.on("will-navigate", (event) => event.preventDefault());
-    await win.loadURL(`foundry://artifact/${encodeURIComponent(id)}?v=${version}`);
-    await Promise.race([win.webContents.executeJavaScript("document.fonts.ready.then(() => true)"), new Promise((done) => setTimeout(done, 3000))]);
-    await new Promise((done) => setTimeout(done, 300));
-    return await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: kind === "deck", ...(kind === "deck" ? {} : { pageSize: "A4" as const, margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } }) });
-  } finally { win.destroy(); }
-}

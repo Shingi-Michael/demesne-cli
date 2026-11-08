@@ -1,7 +1,6 @@
 /// What a chat made in Foundry, in the conversation: a link card per
 /// artifact (pass 192 A). Its kind's tile, the title, "Prototype · v2" and
-/// Open; nothing live runs in the chat. Click opens the page in the pane beside the conversation
-/// (foundry-pane.ts); the open one wears a tone.
+/// Open; nothing live runs in the chat. Click opens the page in Foundry.
 /// Every turn that made or changed a page ends with its chip, so the newest
 /// version is always one click away (a quiet "Edited" line was missed).
 import { FOUNDRY_KINDS, type FoundryKind } from "@demesne/protocol";
@@ -30,8 +29,6 @@ export function chatArtifacts(entries: readonly Pick<ToolEntry, "name" | "state"
 
 interface ChipOptions {
   open(artifact: ChatArtifact): void | Promise<unknown>;
-  /// Whether the pane shows this artifact at this version.
-  isOpen(artifact: ChatArtifact): boolean;
 }
 
 /** The chip's words: what it is and which version. */
@@ -90,12 +87,7 @@ export class FoundryChatArtifacts {
     });
     this.artifacts = artifacts;
     this.element.hidden = !artifacts.length;
-    this.mark();
     return artifacts;
-  }
-  /// The chip whose artifact the pane shows wears a tone.
-  mark() {
-    for (const item of this.chips.values()) item.node.setAttribute("aria-pressed", String(this.options.isOpen(item.artifact)));
   }
   dispose() { for (const item of this.chips.values()) item.node.remove(); this.chips.clear(); this.element.remove(); }
 }

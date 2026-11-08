@@ -210,6 +210,10 @@
 }
 .turn {
   margin-bottom: 20px;
+  /* Turns out of view skip style, layout and paint (a long chat costs what
+     shows, not what it holds); each keeps the size it last had on screen. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
 }
 .request {
   background: var(--surface);

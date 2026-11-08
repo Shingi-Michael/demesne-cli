@@ -778,12 +778,13 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #drive-reply.open .bf-row:nth-child(n+3), .desktop #drive-reply.open .bf-foot { transition-delay: 140ms, 140ms, 0ms; }
 }
 /* The cards on the right (pass 169 A): they step back so the chat leads.
+   Sizes from pass 194 A: 13.5px text in a 288px column.
    No boxes: the environment card's three dim facts (pass 173 A), then one dim
    line per card. A line brightens and unfolds on hover, or stays open after a
    click; the only colour is a pink dot on what needs you. */
 #cards { display: none; }
 @media (min-width: 1100px) {
-  .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 2px; flex: none; width: 236px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
+  .desktop .live-app.cards-on #cards:not([hidden]) { display: flex; flex-direction: column; gap: 2px; flex: none; width: 288px; padding: 14px 14px 14px 0; overflow-y: auto; scrollbar-width: none; }
 }
 @keyframes card-arrive { from { opacity: 0; transform: translateX(8px); } }
 @keyframes card-unfold { from { opacity: 0; transform: translateY(-3px); } }
@@ -793,21 +794,21 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #cards .card { transition: color 160ms var(--ease), background-color 160ms var(--ease); }
   .desktop #cards .card-act { transition: opacity 140ms var(--ease); }
 }
-.desktop #cards .card { position: relative; border-radius: var(--r-sm); font-size: 12px; color: var(--t3); }
+.desktop #cards .card { position: relative; border-radius: var(--r-sm); font-size: 13.5px; color: var(--t3); }
 .desktop #cards .card:is(:hover, :focus-within, .open) { color: var(--t2); background: var(--hair); }
-.desktop #cards .card-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 4px 8px; text-align: left; color: inherit; font: inherit; border-radius: var(--r-sm); }
-.desktop #cards .card-head .ico { width: 13px; height: 13px; flex: none; opacity: 0.85; }
+.desktop #cards .card-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 6px 10px; text-align: left; color: inherit; font: inherit; border-radius: var(--r-sm); }
+.desktop #cards .card-head .ico { width: 15px; height: 15px; flex: none; opacity: 0.85; }
 .desktop #cards .card-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desktop #cards .card-sum { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.desktop #cards .card-sum { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 13px; font-variant-numeric: tabular-nums; }
 .desktop #cards .card-sum .counts { opacity: 0.8; }
 .desktop #cards .card-need { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--blossom); }
-.desktop #cards .card-body { display: none; padding: 0 8px 8px 29px; flex-direction: column; gap: 1px; color: var(--t2); }
+.desktop #cards .card-body { display: none; padding: 0 10px 10px 35px; flex-direction: column; gap: 1px; color: var(--t2); }
 .desktop #cards .card:is(:hover, :focus-within, .open) .card-body { display: flex; }
-.desktop #cards .card-row { position: relative; display: flex; align-items: center; gap: 8px; min-height: 22px; min-width: 0; }
-.desktop #cards .card-row .ico { width: 13px; height: 13px; flex: none; color: var(--t3); }
+.desktop #cards .card-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: 26px; min-width: 0; }
+.desktop #cards .card-row .ico { width: 15px; height: 15px; flex: none; color: var(--t3); }
 .desktop #cards .card-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); }
 .desktop #cards .card-label em { font-style: normal; color: var(--t3); }
-.desktop #cards .card-right { flex: none; color: var(--t3); font-size: 11.5px; }
+.desktop #cards .card-right { flex: none; color: var(--t3); font-size: 13px; }
 .desktop #cards .card-meter { display: inline-block; width: 24px; height: 3px; border-radius: 2px; background: var(--tone2); overflow: hidden; }
 .desktop #cards .card-meter i { display: block; height: 100%; background: currentColor; }
 .desktop #cards .context-bar { display: flex; height: 4px; margin: 4px 0 6px; border-radius: 2px; overflow: hidden; background: var(--tone2); }
@@ -815,13 +816,13 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .tone-a { background: var(--acc, #7eaef0); }
 .desktop #cards .tone-b { background: #a58cf0; }
 .desktop #cards .tone-c { background: var(--t4); }
-.desktop #cards .card-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--t3); font-size: 11.5px; }
+.desktop #cards .card-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--t3); font-size: 13px; }
 .desktop #cards .card-legend u { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; }
-.desktop #cards .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; color: var(--t3); font-size: 11.5px; }
-.desktop #cards .link { flex: none; color: var(--t1); font-size: 12px; text-decoration: underline; text-decoration-color: var(--t4); text-underline-offset: 3px; }
+.desktop #cards .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; color: var(--t3); font-size: 13px; }
+.desktop #cards .link { flex: none; color: var(--t1); font-size: 13.5px; text-decoration: underline; text-decoration-color: var(--t4); text-underline-offset: 3px; }
 .desktop #cards .link:hover { text-decoration-color: var(--t1); }
 .desktop #cards .need .card-foot .link { color: var(--blossom); text-decoration-color: color-mix(in srgb, var(--blossom) 45%, transparent); }
-.desktop #cards .card-act { position: absolute; right: 0; padding: 2px 8px; border-radius: var(--r-sm); background: var(--surface2); color: var(--t1); font-size: 12px; opacity: 0; pointer-events: none; }
+.desktop #cards .card-act { position: absolute; right: 0; padding: 2px 8px; border-radius: var(--r-sm); background: var(--surface2); color: var(--t1); font-size: 13.5px; opacity: 0; pointer-events: none; }
 .desktop #cards .card-hover:hover .card-act, .desktop #cards .card-act:focus-visible { opacity: 1; pointer-events: auto; }
 .desktop #cards .card-dot { width: 6px; height: 6px; margin: 0 3.5px; border-radius: 50%; flex: none; background: var(--t4); }
 .desktop #cards .card-dot.ready { background: var(--ok); }
@@ -835,12 +836,18 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .shot-head b { font-weight: 500; color: var(--t1); }
 .desktop #cards .shot-x { margin-left: auto; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--t3); font: inherit; line-height: 18px; cursor: pointer; }
 .desktop #cards .shot-x:hover, .desktop #cards .shot-x:focus-visible { color: var(--t1); background: var(--hair); }
-.desktop #cards .shot-pic { display: block; width: calc(100% - 16px); margin: 0 8px; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: var(--tone2); box-shadow: 0 0 0 1px var(--hair); aspect-ratio: 1.55; cursor: zoom-in; }
+.desktop #cards .shot-pic { display: block; width: calc(100% - 20px); margin: 2px 10px 0; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: var(--tone2); box-shadow: 0 0 0 1px var(--hair); aspect-ratio: 4 / 3; cursor: zoom-in; }
 .desktop #cards .shot-pic.big { aspect-ratio: auto; cursor: zoom-out; }
 .desktop #cards .shot-pic img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .desktop #cards .shot-pic.big img { height: auto; }
 .desktop #cards .card-body .shot-pic { width: 100%; margin: 4px 0 0; }
-.desktop #cards .shot-note { display: block; margin: 5px 8px 0; color: var(--t3); font-size: 11px; line-height: 15px; }
+.desktop #cards .shot-note { display: block; margin: 6px 10px 0; color: var(--t3); font-size: 13px; line-height: 18px; }
+/* The screenshot card is bigger than the rest (pass 195 D): while one waits
+   to be sent, the column widens to 360 and the other cards stay 288 on the right. */
+@media (min-width: 1100px) {
+  .desktop .live-app.cards-on:not(.cards-wide) #cards:not([hidden]):has(.card.shot:not(.sent)) { width: 360px; }
+  .desktop .live-app:not(.cards-wide) #cards:has(.card.shot:not(.sent)) .card:not(.shot) { width: 288px; align-self: flex-end; }
+}
 .shot-copy { position: fixed; z-index: 60; overflow: hidden; border-radius: 8px; pointer-events: none; background: var(--tone2); }
 .shot-copy img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .desktop #attach-row .att.shot-note-att { gap: 6px; height: 32px; padding: 0 10px; max-width: 260px; font-size: 12px; color: var(--t3); background: none; box-shadow: none; }
@@ -915,13 +922,13 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .tool-row code.target[data-preview-path]:hover { color: var(--t1); }
 /* The environment card (pass 173 A): where this chat runs, no greeting. */
 .desktop #cards .env { margin-bottom: 6px; }
-.desktop #cards .env::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -4px; height: 1px; background: var(--hair); }
-.desktop #cards .env .card-head { flex-direction: column; align-items: stretch; gap: 1px; padding: 6px 8px; }
-.desktop #cards .env-row { display: flex; align-items: center; gap: 8px; min-height: 20px; min-width: 0; white-space: nowrap; }
-.desktop #cards .env-row .ico { width: 13px; height: 13px; flex: none; opacity: 0.85; }
+.desktop #cards .env::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -4px; height: 1px; background: var(--hair); }
+.desktop #cards .env .card-head { flex-direction: column; align-items: stretch; gap: 3px; padding: 9px 10px; }
+.desktop #cards .env-row { display: flex; align-items: center; gap: 10px; min-height: 26px; min-width: 0; white-space: nowrap; }
+.desktop #cards .env-row .ico { width: 15px; height: 15px; flex: none; opacity: 0.85; }
 .desktop #cards .env-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .desktop #cards .env-v em { font-style: normal; }
-.desktop #cards .env-r { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
+.desktop #cards .env-r { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .desktop #cards .env-dot { display: inline-block; width: 6px; height: 6px; margin: 0 3.5px; border-radius: 50%; flex: none; }
 .desktop #cards .env-dot.on { background: var(--ok); opacity: 0.8; }
 .desktop #cards .env-dot.wait { background: var(--warn); }
@@ -930,9 +937,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .env-eff { display: inline-flex; gap: 2px; align-items: center; }
 .desktop #cards .env-eff i { width: 4px; height: 4px; border-radius: 50%; background: var(--t4); }
 .desktop #cards .env-eff i.on { background: currentColor; }
-.desktop #cards .env-start { position: absolute; top: 7px; right: 8px; color: var(--blossom); font-size: 12px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--blossom) 45%, transparent); text-underline-offset: 3px; }
-.desktop #cards .env .card-body { padding-left: 8px; }
-.desktop #cards .env-more { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; font-size: 11.5px; }
+.desktop #cards .env-start { position: absolute; top: 10px; right: 10px; color: var(--blossom); font-size: 13.5px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--blossom) 45%, transparent); text-underline-offset: 3px; }
+.desktop #cards .env .card-body { padding-left: 10px; }
+.desktop #cards .env-more { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; font-size: 13px; }
 .desktop #cards .env-k { color: var(--t3); }
 .desktop #cards .env-m { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
 /* Work in progress: the working cube (working-cube.ts draws it as one SVG
@@ -2623,10 +2630,10 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 /* The same card in the right column (pass 177 C): one line like the others
    that opens to the whole card; a short window folds its parts list away first so the
    cards below it still fit. */
-.desktop #cards .card[data-card=context] .card-body { padding: 4px 8px 10px; }
+.desktop #cards .card[data-card=context] .card-body { padding: 4px 10px 10px; }
 .desktop #cards .card[data-card=context] .card-line .warn { color: var(--warn); }
-.desktop #cards .ctx-card { font-size: 12px; }
-.desktop #cards .ctx-card .context-divider { margin: 10px -8px; }
+.desktop #cards .ctx-card { font-size: 13px; }
+.desktop #cards .ctx-card .context-divider { margin: 10px -10px; }
 .desktop #cards .ctx-card .context-compact { margin-top: 0; }
 @media (max-height: 760px) {
   .desktop #cards .ctx-card :is(.context-legend, .context-say) { display: none; }

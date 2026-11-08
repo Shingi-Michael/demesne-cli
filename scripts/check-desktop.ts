@@ -1428,19 +1428,24 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
   await capture("07-project-groups");
-  // Drive has no page: it speaks from a line at the foot of the sidebar.
-  const line = page.locator("#briefing");
+  // Drive has no page: its pill sits on the top bar, and drops a sheet with its line (pass 198 A).
+  const line = page.locator("#briefing"), pill = page.locator("#drive-pill");
+  const openDrive = async () => { if (await page.locator("#drive-sheet").isHidden()) await pill.click(); await page.locator("#drive-sheet").waitFor(); };
   const pressAction = (action: string) => evaluate(`const b = document.createElement("button"); b.dataset.action = ${JSON.stringify(action)}; document.body.append(b); b.click(); b.remove();`);
   failSuggestions = true;
   await pressAction("next-refresh");
   await until(() => line.innerText().then(text => text.includes("Drive couldn't look for ideas")), "idea failures show on Drive's line");
   failSuggestions = false;
+  await openDrive();
   await line.getByRole("button", { name: "look again", exact: true }).click();
-  await until(() => line.isHidden(), "look again recovers, and the line goes quiet with nothing to offer");
+  await until(() => pill.isHidden(), "look again recovers, and the line goes quiet with nothing to offer");
   await page.locator("textarea").fill("/drive --bounded Verify the Drive controls");
   await page.locator("textarea").press("Enter");
   const control = (name: string) => page.locator('[data-action="drive-control"]').filter({ hasText: new RegExp(`^${name}$`, "i") }).first();
   await control("pause").waitFor();
+  assert(await pill.isVisible() && await page.evaluate(() => Boolean(document.querySelector("#desktop-toolbar #bar-drive > #drive-pill"))), "Drive's pill sits on the top bar");
+  assert((await pill.innerText()).includes("Drive"), "the pill names Drive");
+  assert.equal(await page.locator("#drive-pill .bf-ring.work").count(), 1, "the pill carries Drive's ring");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");
   assert.equal(await page.locator(".sidebar-project.active").getAttribute("data-project"), f.workspace);
   await capture("08-drive-working");
@@ -1459,8 +1464,14 @@ try {
   await page.locator("textarea").press("Enter");
   await until(async () => (await f.client.listSessions()).length > 0 && (await page.locator("textarea").inputValue()) === "", "the note is sent");
   await capture("08-drive-tell");
-  // Drive has no tab of its own on the bar (it lives at the sidebar's foot).
+  // Drive has no tab of its own on the bar (it is a pill before ⋯).
   assert.equal(await page.locator(".header-drive").count(), 0, "no pinned Drive tab");
+  // A level top bar (pass 199 A): the sidebar button, +, Drive's pill and ⋯ sit on the tab names' line.
+  const levels = await page.evaluate(() => {
+    const mid = (selector: string) => { const box = document.querySelector(selector)?.getBoundingClientRect(); return box && box.height ? box.top + box.height / 2 : null; };
+    return { tab: mid("#workspace-tabs .bar-tab.on .bar-tab-name"), toggle: mid("#desktop-toggle-sidebar"), plus: mid("#workspace-new-tab"), drive: mid("#drive-pill"), more: mid("#desktop-toolbar .header-more") };
+  });
+  for (const [name, y] of Object.entries(levels)) if (y !== null && levels.tab !== null) assert(Math.abs(y - levels.tab) <= 1.5, `the top bar is level: ${name} at ${y} vs tab names at ${levels.tab}`);
   // Its own chat opens as a tab; your chat's tab goes back.
   const chatTab = (name: string) => page.locator("#workspace-tabs .bar-tab[data-tab]", { hasText: name });
   await page.locator('#briefing [data-action="select-session"]', { hasText: "Watch" }).click();
@@ -1474,6 +1485,7 @@ try {
   await chatTab("Drive mission").locator(".bar-tab-close").click();
   await until(() => chatTab("Drive mission").count().then(count => count === 0), "the mission's tab closes");
   assert.equal(await page.locator(".header-drive").count(), 0, "and no Drive tab takes its place");
+  await openDrive();
   await control("pause").click();
   await control("resume").waitFor();
   await until(() => page.locator("#briefing .bf-ring.pause").count().then(count => count === 1), "a paused mission's ring holds still");
@@ -1518,10 +1530,12 @@ try {
   await until(() => page.locator("#branch-done").innerText().then(text => text.includes("Discarded Verify the Drive controls")), "what Discard did is its own quiet line");
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
-  assert(await page.evaluate(() => Boolean(document.querySelector("#sidebar-drive > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing")), "Drive's line sits at the sidebar's foot, not over the composer");
+  assert(await page.evaluate(() => Boolean(document.querySelector("#desktop-toolbar #drive-sheet > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing, #desktop-sidebar #briefing")), "Drive's line sits in its sheet on the top bar, not over the composer or in the sidebar");
+  assert((await pill.innerText()).includes("3 ideas"), "the pill counts Drive's ideas");
   // Drive is on by default: the line says when it starts on its own, and one word turns it off.
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes")), "Drive's line says it starts on its own");
   await capture("10-drive-auto");
+  await openDrive();
   await page.locator("#briefing").getByRole("button", { name: "Turn off", exact: true }).click();
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive is off here") && text.includes("3 ideas")), "Turn off says Drive is off here");
   await capture("10-drive-off");
@@ -1532,13 +1546,15 @@ try {
   await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas unfold under its line");
   assert(await page.locator("#drive-reply .bf-row .bf-meta").first().innerText().then(text => text.includes("check bun test")), "each idea names the check that proves it");
   await page.waitForTimeout(400);
-  assert(await page.evaluate(() => { const reply = document.getElementById("drive-reply")!.getBoundingClientRect(), foot = document.querySelector(".sidebar-foot")!.getBoundingClientRect(); return reply.top >= 0 && reply.bottom <= foot.top + 1; }), "the reply unfolds in the sidebar, above you and Settings");
+  assert(await page.evaluate(() => { const reply = document.getElementById("drive-reply")!.getBoundingClientRect(), bar = document.getElementById("desktop-toolbar")!.getBoundingClientRect(); return reply.top >= bar.bottom && reply.bottom <= innerHeight && reply.right <= innerWidth; }), "the reply unfolds in the sheet under the top bar, inside the window");
   await page.locator("#drive-reply .bf-row").first().hover();
   await capture("10-drive-reply");
   await page.keyboard.press("Escape");
   await until(() => page.locator("#drive-reply.open").count().then(count => count === 0), "Escape folds the reply away");
   await page.waitForTimeout(400);
   await capture("10-drive-line");
+  await until(() => page.locator("#drive-sheet").isHidden(), "Escape puts the sheet away");
+  await openDrive();
   await page.locator("#briefing .bf-word").click();
   await until(() => page.locator("#drive-reply.open").count().then(count => count === 1), "the chip's word opens it again");
   await page.locator("#briefing .bf-chev").click();
@@ -1703,7 +1719,9 @@ try {
   await click("permission", { decision: "allow_once" });
   await textIncludes("The check fails now.");
   const broke = page.locator("#briefing .bf-word.bad");
-  await until(() => broke.isVisible(), "Drive's line says the check broke", 30_000);
+  await until(() => page.locator("#drive-pill .dp-word.bad").isVisible(), "Drive's pill says the check broke", 30_000);
+  await openDrive();
+  await until(() => broke.isVisible(), "Drive's line says the check broke");
   assert.equal(await page.locator("#breakage, .breakage-card").count(), 0, "Drive's branches never float as cards");
   await broke.click();
   await until(() => page.locator("#drive-reply.open button", { hasText: "Fix in a worktree" }).isVisible(), "it unfolds with the fix");

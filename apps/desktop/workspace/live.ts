@@ -354,9 +354,12 @@ const expanded = new Set<string>(),
       artifacts: FoundryChatArtifacts;
       working: WorkingLine;
       run?: WorkspaceRun;
+      index?: number;
       views: Map<number, MarkdownView>;
     }
   >();
+/// What every turn's look shares, as of the last conversation draw.
+let conversationShared = "", conversationHoused: unknown = null, conversationProcesses: unknown = null;
 /// The briefing line's unfolded parts above the composer (on the start
 /// screen, Drive's ideas under it); turns whose steps are open.
 let driveShown = false,
@@ -2964,9 +2967,22 @@ function renderConversation() {
   const mountedAt = visible.findIndex((item) => runNodes.has(item.run.id));
   const prepending = !liveBefore && mountedAt > Math.max(0, first);
   const heightBefore = prepending ? stage.scrollHeight : 0;
+  // Everything a turn's look depends on besides the turn itself: while none
+  // of it changes, a turn whose record is the same object is left alone
+  // without working out its signature (a long chat streams far cheaper).
+  const shared = JSON.stringify([state.runs.length, [...expanded], [...stepsOpen], [...planOpen], [...askedOpen], [...crewOpen], [...researchOpen], [...fileEditsOpen], [...stepOpen], [...previewOutput], [...detailsOpen], [...reviewOpen], reviewVersion,
+    state.questions.length > 0, state.queue, state.steers, state.activeTurnId, Boolean(state.assistant?.phone), inAssistant(), state.rewinds, state.versions, lastAsk()?.id ?? null, state.model.id]);
+  const sharedSame = shared === conversationShared && state.housed === conversationHoused && state.processes === conversationProcesses;
+  conversationShared = shared; conversationHoused = state.housed; conversationProcesses = state.processes;
   for (const [place, { run, index, versions }] of visible.entries()) {
     if (place < first) continue;
     ids.add(run.id);
+    const kept = runNodes.get(run.id);
+    if (sharedSame && kept && kept.run === run && kept.index === index) {
+      if (root.children[position] !== kept.node) root.insertBefore(kept.node, root.children[position] ?? null);
+      position++;
+      continue;
+    }
     for (const entry of run.entries) if (entry.type === "tool" && entry.state === "running" && !entry.drafting) stepsSeenRunning.add(entry.toolCallId);
     const signature = JSON.stringify([
       index === state.runs.length - 1,
@@ -3058,6 +3074,7 @@ function renderConversation() {
     workingLine(saved.working, run);
     saved.signature = signature;
     saved.run = run;
+    saved.index = index;
     changed = true;
   }
   for (const [id, saved] of runNodes)
@@ -4102,8 +4119,16 @@ function renderPlainLine() {
 function renderComposer() {
   if (!state) return;
   const width = editor.clientWidth;
+  composerFrame(width);
+  composerDraft(width);
+}
+/// What the composer looks like around the text: rebuilt only when something
+/// other than the words changes, so a keystroke never redraws the whole box
+/// (that was most of a key's cost on a slow CPU).
+function composerFrame(width: number) {
+  if (!state) return;
   const signature = JSON.stringify([
-    editor.value,
+    Boolean(editor.value.trim()),
     Boolean(state.activeTurnId),
     state.queue,
     state.restored,
@@ -4214,18 +4239,32 @@ function renderComposer() {
   form.querySelector<HTMLElement>(".send>kbd")!.hidden = Boolean(
     state.activeTurnId && !question,
   );
-  el("tokens").textContent =
-    `~${num(Math.ceil(new TextEncoder().encode(editor.value).length / 3))} tok`;
-  editor.style.height = "20px";
-  editor.style.height = `${Math.min(132, Math.max(20, editor.scrollHeight))}px`;
+  composerDraftKey = "";
+}
+let composerDraftKey = "", composerChipsHTML = "";
+/// What follows the words themselves: the token count, the box's height and
+/// the @file chips. Each keystroke only does this.
+function composerDraft(width: number) {
+  if (!state) return;
+  const question = pendingQuestion(), key = `${editor.value}\u0000${width}\u0000${Boolean(question)}`;
+  if (key === composerDraftKey) return;
+  // Typing on at the end only ever grows the box: measure without shrinking it first.
+  const [before, ...rest] = composerDraftKey.split("\u0000"), sized = rest.length > 0 && rest.join() === key.split("\u0000").slice(1).join() && editor.value.startsWith(before!);
+  composerDraftKey = key;
+  const tokens = `~${num(Math.ceil(new TextEncoder().encode(editor.value).length / 3))} tok`, count = el("tokens");
+  if (count.textContent !== tokens) count.textContent = tokens;
+  if (!sized) editor.style.height = "20px";
+  const height = `${Math.min(132, Math.max(20, editor.scrollHeight))}px`;
+  if (editor.style.height !== height) editor.style.height = height;
   const mentions = [...editor.value.matchAll(/(?:^|\s)@([^\s]+)/g)]
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
   const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
-  el("mention-chips").innerHTML = points + notes + [...new Set(mentions)]
+  const chips = points + notes + [...new Set(mentions)]
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
     .join("");
+  if (chips !== composerChipsHTML) el("mention-chips").innerHTML = composerChipsHTML = chips;
 }
 /// An approval is one amber row above the composer: what the model wants
 /// ("Run bun run check", "Edit hello.ts"), a short note, then Allow /
@@ -7656,9 +7695,21 @@ function resyncState() {
       if (received && stateReceiver.needsReset) resyncState();
     });
 }
+// Updates arrive up to 40 times a second while a turn streams: the window
+// draws the newest once per frame, so typing and clicks get the time between
+// (a hidden window, which gets no frames, still draws within 100ms).
+let pendingState: Snapshot | null = null, stateFrame = 0, stateTimer: ReturnType<typeof setTimeout> | undefined;
+function drawPendingState() {
+  cancelAnimationFrame(stateFrame); clearTimeout(stateTimer); stateFrame = 0; stateTimer = undefined;
+  const next = pendingState; pendingState = null;
+  if (next) renderState(next);
+}
 window.demesne.subscribe((update) => {
   const next = stateReceiver.apply(update);
-  if (next) renderState(next);
+  if (next) {
+    pendingState = next;
+    if (!stateFrame) { stateFrame = requestAnimationFrame(drawPendingState); stateTimer = setTimeout(drawPendingState, 100); }
+  }
   if (stateReceiver.needsReset) resyncState();
 });
 void window.demesne
@@ -7680,13 +7731,18 @@ void window.demesne
 // only while marks are on the page (each new one wakes it): a loop that never
 // stops keeps the window drawing frames when nothing changes.
 function wakeCubes() { if (!cubeFrame) cubeFrame = requestAnimationFrame(drawCubes); }
+let cubeDrawn = 0;
 function drawCubes(now: number) {
   cubeFrame = 0;
   if (!cubeMarks.length || reducedMotion()) return;
   cubeFrame = requestAnimationFrame(drawCubes);
   const marks = [...cubeMarks];
+  // 30 frames a second is plenty for a mark this small; a 120Hz screen
+  // otherwise rebuilds its picture 120 times a second.
+  if (now - cubeDrawn < 33) return;
   cube = advance(cube, now);
   if (!moving(cube, now) && marks[0]!.dataset.at === String(cube.beatAt)) return;
+  cubeDrawn = now;
   const frame = cubeSvg(cube, now);
   for (const mark of marks) { mark.innerHTML = frame; mark.dataset.at = String(cube.beatAt); }
 }

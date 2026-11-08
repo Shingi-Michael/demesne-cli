@@ -1316,7 +1316,8 @@ try {
   await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Reopening starts with compacted history collapsed");
   await page.getByRole("button", { name: "Expand full history", exact: true }).click();
-  await textIncludes(completed);
+  // The earlier turns mount above the view (off screen, so not drawn yet).
+  await until(() => page.locator(`#turn-${firstTurnId}`).count().then(async n => n > 0 && Boolean((await page.locator("#conversation").textContent())?.includes(completed))), "Expanding mounts the earlier turns");
   await page.getByRole("button", { name: "Collapse older conversation", exact: true }).click();
   const preferences = JSON.parse(readFileSync(join(f.home, ".demesne/desktop-ui.json"), "utf8"));
   assert.equal(preferences.lastWorkspace, f.workspace);

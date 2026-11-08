@@ -65,7 +65,7 @@ import { whereCard } from "./where-card.ts";
 import { OpenTabs } from "./tabs.ts";
 import { GoogleAIForm } from "./google-ai-form.ts";
 import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
-import type { AppUpdate } from "./release-line.ts";
+import { updateCheckLine, type AppUpdate } from "./release-line.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -3531,13 +3531,15 @@ document.addEventListener("demesne:app-update", (event) => {
   appUpdate = (event as CustomEvent<AppUpdate>).detail;
   if (pageOpen === "settings") renderPage();
 });
-/// The Updates row: only on a release build, with the version and where it stands.
-function updatesSetting(): { on: boolean; line: string } | undefined {
+/// The Updates rows: only on a release build. The switch, then the version
+/// with when it last looked and Check now (pass 193 A).
+function updatesSetting(): { on: boolean; line: string; check: NonNullable<ReturnType<typeof updateCheckLine>> } | undefined {
   const update = appUpdate;
   if (!update || update.state === "off") return undefined;
+  const check = updateCheckLine(update);
+  if (!check) return undefined;
   const on = update.state !== "idle" || update.enabled;
-  const where = update.state === "downloading" ? `downloading ${update.to}` : update.state === "ready" ? `${update.to} is ready, it goes in when you restart` : update.state === "failed" ? update.error : on ? "up to date" : "off";
-  return { on, line: `Demesne ${update.version}, ${where}. It never restarts while something works.` };
+  return { on, line: on ? "Looks every 4 hours and downloads in the background. It never restarts while something works." : "Off: it only looks when you check", check };
 }
 try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
 /// Settings › Appearance › Glass and Ink, kept on this device.
@@ -5843,6 +5845,7 @@ async function dispatch(
     const path=args.enabled===true ? document.querySelector<HTMLInputElement>('#system-theme-source [name="path"]')?.value.trim() ?? source.path : source.path;
     return saveSystemThemeSource(args.enabled===true,path);
   }
+  if (action === "update-check") { document.dispatchEvent(new Event("demesne:check-update")); return; }
   if (action === "settings-local") {
     if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
     if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }

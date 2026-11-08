@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ghCandidates, githubToken, installFor, newerVersion, parseChecksum, pickRelease, swapScript, Updater, UPDATE_REPO, type UpdateStatus } from "../electron/updater.ts";
-import { releaseLine } from "../workspace/release-line.ts";
+import { checkProblem, ghCandidates, githubToken, installFor, newerVersion, parseChecksum, pickRelease, swapScript, Updater, UPDATE_REPO, type UpdateStatus } from "../electron/updater.ts";
+import { checkResult, releaseLine, updateCheckLine } from "../workspace/release-line.ts";
 
 const temp = () => mkdtempSync(join(tmpdir(), "demesne-update-"));
 
@@ -109,6 +109,36 @@ test("a source build, or updates switched off, never looks", async () => {
   it.setEnabled(false);
   expect(await it.check()).toMatchObject({ state: "idle", enabled: false });
   expect(github.calls.filter((url) => url.endsWith("/latest"))).toEqual([]);
+});
+
+test("a check you ask for runs even with updates off, says it's looking, and keeps why it failed", async () => {
+  const dir = temp(), github = fakeGitHub(new Uint8Array([1]));
+  const { it, seen } = updater(dir, async () => { throw new TypeError("fetch failed"); });
+  expect(await it.check(true)).toMatchObject({ state: "idle", problem: "Couldn't reach GitHub" });
+  expect(seen[0]).toMatchObject({ state: "idle", checking: true });
+  const off = updater(temp(), github.fetch);
+  off.it.setEnabled(false);
+  await off.it.check(true);
+  expect(github.calls.filter((url) => url.endsWith("/latest")).length).toBe(1);
+  expect(checkProblem(new Error("GitHub answered 404 (the repository is private and there is no GitHub login; run `gh auth login`)"))).toBe("GitHub needs a login: run gh auth login");
+  expect(checkProblem(new Error("GitHub answered 503"))).toBe("GitHub answered 503");
+  expect(checkProblem(new Error("the download didn't match its checksum"))).toBe("The download didn't match its checksum");
+});
+
+test("the release line checks when clicked, and says what it found", () => {
+  const idle = { state: "idle" as const, version: "0.8.8", enabled: true };
+  expect(releaseLine(idle).html).toContain("data-update-check");
+  expect(releaseLine({ ...idle, checking: true })).toMatchObject({ state: "checking" });
+  expect(releaseLine({ ...idle, checking: true }).html).toContain("Checking for updates…");
+  expect(checkResult({ ...idle, checking: true })).toBeNull();
+  expect(checkResult(idle)).toEqual({ text: "Up to date · 0.8.8", ok: true });
+  expect(checkResult({ ...idle, problem: "Couldn't reach GitHub" })).toEqual({ text: "Couldn't reach GitHub", ok: false });
+  expect(releaseLine(idle, { text: "Up to date · 0.8.8", ok: true }).html).toContain("Up to date · 0.8.8");
+  expect(releaseLine({ state: "off", why: "built from source" }).html).not.toContain("button");
+  // Settings: the version, when it last looked, and Check now.
+  expect(updateCheckLine({ ...idle, checked: 1_000 }, 1_000 + 12 * 60_000)).toEqual({ title: "Demesne 0.8.8", line: "Checked 12 min ago · this is the newest", tone: "", can: true });
+  expect(updateCheckLine({ ...idle, problem: "Couldn't reach GitHub" })).toMatchObject({ tone: "bad", can: true });
+  expect(updateCheckLine({ state: "downloading", version: "0.8.8", to: "0.8.9", progress: 0.2 })).toMatchObject({ can: false });
 });
 
 test("a finished download goes in the next time it opens, unless that version failed", async () => {

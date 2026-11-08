@@ -722,11 +722,11 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #briefing .bf-chev:hover { background: var(--tone2); color: var(--t1); }
 .desktop #briefing .bf-chev .ico { width: 14px; height: 14px; }
 .desktop #briefing.open .bf-chev .ico { transform: rotate(180deg); }
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.idea { background: var(--acc); }
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.ok { background: var(--ok); }
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.amber { background: var(--warn); }
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--t4); }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.idea { background: var(--acc); }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.ok { background: var(--ok); }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.amber { background: var(--warn); }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--t4); }
 .desktop #briefing .bf-progress { position: absolute; left: 32px; width: 160px; bottom: -3px; height: 1.5px; overflow: hidden; border-radius: 1px; background: var(--tone); }
 .desktop #briefing .bf-progress i { display: block; height: 100%; background: linear-gradient(90deg, transparent, var(--acc)); }
 .desktop :is(#briefing, #drive-reply, #hero) .bf-rows { display: flex; flex-direction: column; }
@@ -762,7 +762,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #drive-reply .bf-foot { box-shadow: none; }
 @keyframes bf-breathe { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop :is(#briefing, #drive-reply, #hero) .bf-dot.idea { animation: bf-breathe 2.4s ease-in-out infinite; }
+  .desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.idea { animation: bf-breathe 2.4s ease-in-out infinite; }
   .desktop #briefing .bf-lead { transition: background-color 200ms var(--ease), box-shadow 200ms var(--ease), color 200ms var(--ease); }
   .desktop #briefing .bf-word { transition: color 140ms var(--ease); }
   .desktop #briefing .bf-chev { transition: opacity 140ms var(--ease); }
@@ -1016,9 +1016,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes ask-breathe { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(2); } }
 /* Something broke: Drive's line says it with a red cross and unfolds in
    place with what failed and the offer to fix it in a worktree. */
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad { position: relative; border-radius: 0; background: none; }
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad::before, .desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 1.6px; border-radius: 1px; background: var(--bad); transform: translate(-50%, -50%) rotate(45deg); }
-.desktop :is(#briefing, #drive-reply, #hero) .bf-dot.bad::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.bad { position: relative; border-radius: 0; background: none; }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.bad::before, .desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.bad::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 1.6px; border-radius: 1px; background: var(--bad); transform: translate(-50%, -50%) rotate(45deg); }
+.desktop :is(#briefing, #drive-reply, #hero, #drive-pill) .bf-dot.bad::after { transform: translate(-50%, -50%) rotate(-45deg); }
 .desktop #briefing .bf-lead.bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 30%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
 .desktop #briefing .bf-word.bad { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t2); }
 .desktop #briefing .bf-chip:has(.bf-word.bad) { max-width: calc(100% - 32px); }
@@ -2022,29 +2022,41 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 /* Drive lives at the foot of the sidebar, above you and Settings (pass 132 C):
    the composer has nothing above it. The line wraps to the sidebar's width and
    its rows unfold under it, scrolling on their own when long. */
-#sidebar-drive { display: flex; flex-direction: column; gap: 2px; margin: 0 -2px 8px; padding: 6px 8px; border-radius: var(--r-sm); }
-#sidebar-drive:has(#briefing[hidden]) { display: none; }
-#sidebar-drive:hover { background: var(--tone); }
-#sidebar-drive + .sidebar-foot { margin-top: 0; }
-#desktop-shell.sidebar-collapsed #sidebar-drive { display: none; }
-.desktop #sidebar-drive #briefing { max-width: none; min-height: 24px; margin: 0; gap: 8px; align-items: flex-start; }
-.desktop #sidebar-drive #briefing .bf-lead { margin-top: 2px; }
-.desktop #sidebar-drive #briefing .bf-chip { flex-wrap: wrap; row-gap: 2px; white-space: normal; font-size: 12.5px; line-height: 20px; }
-.desktop #sidebar-drive #briefing .bf-part { flex-wrap: wrap; max-width: 100%; }
-.desktop #sidebar-drive #briefing .bf-about { display: block; flex-basis: 100%; max-width: 100%; white-space: nowrap; }
-.desktop #sidebar-drive #briefing.open .bf-word { font-size: 12.5px; }
-.desktop #sidebar-drive #briefing .bf-chev { opacity: 1; }
-.desktop #sidebar-drive #briefing .bf-progress { left: 28px; right: 0; width: auto; }
-.desktop #sidebar-drive #drive-reply { max-width: none; max-height: 46vh; overflow: auto; scrollbar-width: none; margin: 0; }
-.desktop #sidebar-drive .bf-row { height: 30px; padding: 0 6px; font-size: 12.5px; }
-.desktop #sidebar-drive #briefing .bf-sep { display: none; }
-.desktop #sidebar-drive #briefing .bf-chip { column-gap: 10px; }
-.desktop #sidebar-drive .bf-title { flex: 1 1 auto; }
-.desktop #sidebar-drive .bf-r { white-space: nowrap; font-size: 11.5px; }
-.desktop #sidebar-drive .bf-act { right: 2px; padding-left: 6px; background: var(--surface2); }
-.desktop #sidebar-drive .bf-act button { height: 22px; padding: 0 7px; font-size: 11.5px; }
-.desktop #sidebar-drive .bf-foot { flex-wrap: wrap; gap: 2px 8px; padding: 6px 6px 2px; white-space: nowrap; }
-.desktop #sidebar-drive .bf-foot .bf-sep { display: none; }
+/* Drive on the top bar (pass 198 A): a pill before ⋯; it drops a sheet with Drive's line, its controls and its rows. */
+#bar-drive { position: relative; flex: none; margin-left: auto; display: none; align-items: center; }
+#bar-drive:has(> #drive-pill:not([hidden])) { display: flex; }
+#bar-drive:has(> #drive-pill:not([hidden])) + header { margin-left: 0 !important; }
+#desktop-toolbar.thread-split #bar-drive { margin-left: 0; }
+#drive-pill { display: flex; align-items: center; gap: 7px; height: 28px; max-width: 220px; padding: 0 11px 0 8px; border: 0; border-radius: 99px; background: none; box-shadow: inset 0 0 0 1px var(--hair, var(--tone2)); color: var(--t2); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; }
+#drive-pill[hidden] { display: none; }
+#drive-pill:hover, #drive-pill[aria-expanded="true"] { background: var(--surface2); color: var(--t1); }
+#drive-pill .dp-word { font-weight: 500; color: var(--t1); }
+#drive-pill .dp-word.amber { color: var(--warn); }
+#drive-pill .dp-word.bad { color: var(--bad); }
+#drive-pill .dp-about { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t3); }
+#drive-pill .bf-ring { width: 16px; height: 16px; }
+#drive-pill .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin: 0 4px; }
+#drive-sheet { position: absolute; top: calc(100% + 8px); right: 0; z-index: 95; display: flex; flex-direction: column; gap: 2px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 10px 8px; border-radius: 12px; background: var(--surface2); box-shadow: 0 0 0 1px var(--line2, var(--hair)), 0 18px 40px -12px rgb(0 0 0 / .55); -webkit-app-region: no-drag; }
+#drive-sheet[hidden] { display: none; }
+html.mac-chrome #desktop-toolbar #drive-sheet * { -webkit-app-region: no-drag; }
+.desktop #drive-sheet #briefing { max-width: none; min-height: 24px; margin: 0; gap: 8px; align-items: flex-start; }
+.desktop #drive-sheet #briefing .bf-lead { margin-top: 2px; }
+.desktop #drive-sheet #briefing .bf-chip { flex-wrap: wrap; row-gap: 2px; white-space: normal; font-size: 12.5px; line-height: 20px; }
+.desktop #drive-sheet #briefing .bf-part { flex-wrap: wrap; max-width: 100%; }
+.desktop #drive-sheet #briefing .bf-about { display: block; flex-basis: 100%; max-width: 100%; white-space: nowrap; }
+.desktop #drive-sheet #briefing.open .bf-word { font-size: 12.5px; }
+.desktop #drive-sheet #briefing .bf-chev { opacity: 1; }
+.desktop #drive-sheet #briefing .bf-progress { left: 28px; right: 0; width: auto; }
+.desktop #drive-sheet #drive-reply { max-width: none; max-height: 46vh; overflow: auto; scrollbar-width: none; margin: 0; }
+.desktop #drive-sheet .bf-row { height: 30px; padding: 0 6px; font-size: 12.5px; }
+.desktop #drive-sheet #briefing .bf-sep { display: none; }
+.desktop #drive-sheet #briefing .bf-chip { column-gap: 10px; }
+.desktop #drive-sheet .bf-title { flex: 1 1 auto; }
+.desktop #drive-sheet .bf-r { white-space: nowrap; font-size: 11.5px; }
+.desktop #drive-sheet .bf-act { right: 2px; padding-left: 6px; background: var(--surface2); }
+.desktop #drive-sheet .bf-act button { height: 22px; padding: 0 7px; font-size: 11.5px; }
+.desktop #drive-sheet .bf-foot { flex-wrap: wrap; gap: 2px 8px; padding: 6px 6px 2px; white-space: nowrap; }
+.desktop #drive-sheet .bf-foot .bf-sep { display: none; }
 
 /* Agents that live in Demesne (agent-cli.ts): under the open project's chats,
    one row per agent tool Demesne runs itself. Its tile, its name, how it is. */
@@ -2467,10 +2479,10 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop :is(#briefing, #drive-reply, #hero) .bf-idea .bf-act { top: auto; bottom: 3px; }
 .desktop :is(#briefing, #drive-reply, #hero) .bf-row:hover .bf-lands, .desktop :is(#briefing, #drive-reply, #hero) .bf-row:focus-within .bf-lands { opacity: 0; }
 .desktop :is(#briefing, #drive-reply, #hero) .bf-group { margin: 6px 0 2px; padding: 0 10px; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--t4); }
-.desktop #sidebar-drive .bf-row.bf-idea { height: auto; min-height: 30px; padding: 4px 6px; }
-.desktop #sidebar-drive .bf-group { padding: 0 6px; }
+.desktop #drive-sheet .bf-row.bf-idea { height: auto; min-height: 30px; padding: 4px 6px; }
+.desktop #drive-sheet .bf-group { padding: 0 6px; }
 /* Pass 159 A: a mission at the sidebar foot is one line and its choices. */
-.desktop #sidebar-drive #briefing .bf-acts { display: flex; flex-basis: 100%; gap: 6px; padding-top: 2px; }
+.desktop #drive-sheet #briefing .bf-acts { display: flex; flex-basis: 100%; gap: 6px; padding-top: 2px; }
 .desktop #briefing .bf-pill { height: 22px; padding: 0 10px; border: 0; border-radius: 99px; background: none; box-shadow: inset 0 0 0 1px var(--tone2); color: var(--t2); font: inherit; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
 .desktop #briefing .bf-pill:hover:not(:disabled) { background: var(--tone); color: var(--t1); }
 .desktop #briefing .bf-pill.primary { background: var(--t1); box-shadow: none; color: var(--surface, #1c1c1e); font-weight: 500; }
@@ -2479,19 +2491,19 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 
 /* Drive's own mark (pass 161 A): a ring that fills with the mission's steps. */
 .desktop #briefing .bf-lead.has-ring { box-shadow: none; background: none; }
-.desktop #briefing .bf-ring { display: block; width: 18px; height: 18px; flex: none; }
-.desktop #briefing .bf-ring svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.desktop #briefing .bf-ring .tr { fill: none; stroke: color-mix(in srgb, var(--acc) 28%, transparent); stroke-width: 2.4; }
-.desktop #briefing .bf-ring .fl { fill: none; stroke: var(--acc); stroke-width: 2.4; stroke-linecap: round; transition: stroke-dashoffset 700ms cubic-bezier(.2,.7,.2,1), stroke 300ms var(--ease); }
-.desktop #briefing .bf-ring .ck { fill: none; stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 10; stroke-dashoffset: 10; }
-.desktop #briefing .bf-ring.pause .fl { opacity: .7; }
-.desktop #briefing .bf-ring.amber .tr { stroke: color-mix(in srgb, var(--warn) 22%, transparent); }
-.desktop #briefing .bf-ring.amber .fl { stroke: var(--warn); }
-.desktop #briefing .bf-ring.done .tr { stroke: color-mix(in srgb, var(--ok) 22%, transparent); }
-.desktop #briefing .bf-ring.done .fl { stroke: var(--ok); }
-.desktop #briefing .bf-ring.done .ck { stroke-dashoffset: 0; transition: stroke-dashoffset 400ms 300ms var(--ease); }
+.desktop :is(#briefing, #drive-pill) .bf-ring { display: block; width: 18px; height: 18px; flex: none; }
+.desktop :is(#briefing, #drive-pill) .bf-ring svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.desktop :is(#briefing, #drive-pill) .bf-ring .tr { fill: none; stroke: color-mix(in srgb, var(--acc) 28%, transparent); stroke-width: 2.4; }
+.desktop :is(#briefing, #drive-pill) .bf-ring .fl { fill: none; stroke: var(--acc); stroke-width: 2.4; stroke-linecap: round; transition: stroke-dashoffset 700ms cubic-bezier(.2,.7,.2,1), stroke 300ms var(--ease); }
+.desktop :is(#briefing, #drive-pill) .bf-ring .ck { fill: none; stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 10; stroke-dashoffset: 10; }
+.desktop :is(#briefing, #drive-pill) .bf-ring.pause .fl { opacity: .7; }
+.desktop :is(#briefing, #drive-pill) .bf-ring.amber .tr { stroke: color-mix(in srgb, var(--warn) 22%, transparent); }
+.desktop :is(#briefing, #drive-pill) .bf-ring.amber .fl { stroke: var(--warn); }
+.desktop :is(#briefing, #drive-pill) .bf-ring.done .tr { stroke: color-mix(in srgb, var(--ok) 22%, transparent); }
+.desktop :is(#briefing, #drive-pill) .bf-ring.done .fl { stroke: var(--ok); }
+.desktop :is(#briefing, #drive-pill) .bf-ring.done .ck { stroke-dashoffset: 0; transition: stroke-dashoffset 400ms 300ms var(--ease); }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop #briefing .bf-ring.work .fl { animation: bf-ring-breathe 2.4s ease-in-out infinite; }
+  .desktop :is(#briefing, #drive-pill) .bf-ring.work .fl { animation: bf-ring-breathe 2.4s ease-in-out infinite; }
 }
 @keyframes bf-ring-breathe { 50% { stroke: color-mix(in srgb, var(--acc) 60%, white); } }
 /* The plan checklist (pass 172): a ribbon at the top of the turn while it
@@ -2625,3 +2637,6 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 }
 @keyframes ctx-pointed { 0%, 30% { box-shadow: inset 0 0 0 1px var(--acc); } 100% { box-shadow: inset 0 0 0 1px transparent; } }
 .desktop #cards .card[data-card=context].pointed { animation: ctx-pointed 900ms var(--ease); }
+/* A level top bar (pass 199 A): the tabs hang 40px from the bar's foot, so their names sit 4px below its middle;
+   the sidebar button, +, the needs-you call, Drive's pill and ⋯ move down onto that line. */
+#desktop-toggle-sidebar, #workspace-new-tab, #workspace-call, #bar-drive, #desktop-toolbar > header { transform: translateY(4px); }

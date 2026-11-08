@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import {
   type FoundryArtifact,
   type FoundryArtifactDetail,
+  type FoundryShelfVersion,
   type FoundryKind,
   FOUNDRY_KINDS,
   FOUNDRY_MAX_DATA_BYTES,
@@ -331,6 +332,13 @@ export class DemesneStore {
   listFoundryArtifacts(): FoundryArtifact[] {
     const rows = this.database.query("SELECT * FROM foundry_artifacts ORDER BY updated_at DESC LIMIT 500").all() as FoundryRow[];
     return rows.map(foundryArtifact);
+  }
+
+  /// Every version of every artifact, newest first, for Foundry's long page.
+  listFoundryVersions(limit = 400): FoundryShelfVersion[] {
+    const rows = this.database.query("SELECT artifact_id, version, created_at, session_id, note FROM foundry_versions ORDER BY created_at DESC, version DESC LIMIT ?")
+      .all(limit) as { artifact_id: string; version: number; created_at: string; session_id: string | null; note: string }[];
+    return rows.map((row) => ({ artifactId: row.artifact_id, version: row.version, createdAt: row.created_at, sessionId: row.session_id, note: row.note }));
   }
 
   getFoundryArtifact(id: string, version?: number): FoundryArtifactDetail | null {

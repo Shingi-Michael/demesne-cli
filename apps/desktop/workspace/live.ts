@@ -29,7 +29,7 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryPage } from "./foundry-page.ts";
+import { foundryPage, shelfKey } from "./foundry-page.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
@@ -52,7 +52,7 @@ import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
@@ -1771,7 +1771,7 @@ function renderTabs() {
   if (chatOpen && current!.id !== tabClosed && tabs.open(current!.id, tabOn)) tabsSignature = "";
   if (chatOpen) tabOn = current!.id;
   const call = waitingElsewhere();
-  const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen === "today" ? "Today" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
+  const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen === "today" ? "Today" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
   const shown = tabs.ids.filter((id) => byId.has(id));
   const tones = shown.map((id) => chatTone(byId.get(id)!));
   const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
@@ -3493,7 +3493,11 @@ async function commentOn(id: string, text: string) {
   finally { todayUi.sending = todayUi.sending.filter((item) => item !== id); renderPage(); }
 }
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
-let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
+let foundryList: FoundryArtifact[] | null = null, foundryVersions: FoundryShelfVersion[] | null = null, foundrySaves = -1;
+/// The version a chat link asked for: the long page scrolls to it once drawn.
+let foundryFocus: { id: string; version?: number } | null = null;
+/// Documents on the long page, rendered once they scroll near ("id:version").
+const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
 const foundryUi = { error: "" };
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
@@ -3716,26 +3720,55 @@ function foundrySaveCount() {
 }
 async function loadFoundry() {
   try {
-    foundryList = await api<FoundryArtifact[]>("foundry-list");
-    // The open artifact follows its newest version unless an older one or an edit is on screen.
-    const open = foundryOpen, latest = open && foundryList.find((item) => item.id === open.id);
-    if (open && !latest) foundryOpen = null;
-    else if (open && latest && open.version === open.versions[0]?.version && latest.version !== open.version) await openFoundry(open.id);
+    const shelf = await api<FoundryListResponse>("foundry-shelf");
+    foundryList = shelf.artifacts;
+    foundryVersions = shelf.versions ?? shelf.artifacts.map((item) => ({ artifactId: item.id, version: item.version, createdAt: item.updatedAt, sessionId: item.sessionId, note: "" }));
     foundryUi.error = "";
   } catch (error) {
     foundryList = foundryList ?? [];
+    foundryVersions = foundryVersions ?? [];
     foundryUi.error = errorWords(error);
   }
   renderPage();
+  showFoundryFocus();
 }
-async function openFoundry(id: string, version?: number) {
-  try {
-    const found = await api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id });
-    foundryOpen = found;
-    foundryUi.error = "";
-  } catch (error) { foundryUi.error = errorWords(error); }
-  if (pageOpen !== "foundry") openPage("foundry"); else { renderPage(); if (state) renderState({ ...state }); }
-  document.getElementById("page")?.scrollTo({ top: 0 });
+/// A chat link opens Foundry's long page at that mockup (its newest version
+/// unless the link names one).
+function openFoundry(id: string, version?: number) {
+  foundryFocus = { id, ...(version ? { version } : {}) };
+  if (pageOpen !== "foundry") openPage("foundry"); else { renderPage(); showFoundryFocus(); }
+}
+function showFoundryFocus() {
+  const focus = foundryFocus, root = document.getElementById("page");
+  if (!focus || pageOpen !== "foundry" || !root || !foundryVersions) return;
+  const version = focus.version ?? foundryVersions.find((item) => item.artifactId === focus.id)?.version;
+  const target = version ? root.querySelector<HTMLElement>(`[data-fd="${CSS.escape(shelfKey(focus.id, version))}"]`) : null;
+  if (!target) return;
+  foundryFocus = null;
+  target.scrollIntoView({ block: "start" });
+  target.classList.add("fd-here");
+  setTimeout(() => target.classList.remove("fd-here"), 1600);
+}
+/// Documents render through the app's sanitizer when they scroll near.
+let foundryDocWatch: IntersectionObserver | null = null;
+function watchFoundryDocs(root: HTMLElement) {
+  foundryDocWatch?.disconnect();
+  const docs = root.querySelectorAll<HTMLElement>(".fd-doc[data-md]");
+  if (!docs.length) return;
+  const fill = (element: HTMLElement) => {
+    const key = element.dataset.md!, known = foundryDocs.get(key);
+    if (known !== undefined) { element.innerHTML = known; return; }
+    if (foundryDocsLoading.has(key)) return;
+    foundryDocsLoading.add(key);
+    const at = key.lastIndexOf(":"), id = key.slice(0, at), version = Number(key.slice(at + 1));
+    void api<FoundryArtifactDetail>("foundry-get", { id, version }).then((found) => {
+      foundryDocs.set(key, markdown(found.source));
+      document.querySelectorAll<HTMLElement>(`#page .fd-doc[data-md="${CSS.escape(key)}"]`).forEach((item) => { item.innerHTML = foundryDocs.get(key)!; });
+    }).catch(() => {}).finally(() => foundryDocsLoading.delete(key));
+  };
+  docs.forEach((element) => { if (foundryDocs.has(element.dataset.md!)) fill(element); });
+  foundryDocWatch = new IntersectionObserver((entries) => entries.forEach((entry) => { if (entry.isIntersecting) fill(entry.target as HTMLElement); }), { rootMargin: "800px 0px" });
+  docs.forEach((element) => foundryDocWatch!.observe(element));
 }
 const errorWords = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^.*?: /, "");
 async function loadArchived() {
@@ -3775,7 +3808,7 @@ function renderPage() {
   } else if (pageOpen === "foundry") {
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
-    html = foundryPage({ list: foundryList, open: foundryOpen, error: foundryUi.error, markdownHtml: markdown });
+    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
@@ -3799,6 +3832,7 @@ function renderPage() {
   root.innerHTML = html;
   root.dataset.html = html;
   if (pageOpen === "today") mountReel(root);
+  if (pageOpen === "foundry") watchFoundryDocs(root);
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.googleProvider!;
@@ -5770,10 +5804,8 @@ function followLatest() {
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
-/// Foundry: the wall, one mockup open, and its versions. You only look here.
+/// Foundry's long page: links from the chat, and the day strip. You only look here.
 async function foundryAction(action: string, args: Record<string, any>) {
-  const open = foundryOpen;
-  const redraw = () => { renderPage(); if (state) renderState({ ...state }); };
   if (action === "foundry-open") return openFoundry(String(args.id));
   if (action === "foundry-open-step") {
     // A new artifact's id is in the tool's result; a revision names it in its input.
@@ -5786,9 +5818,7 @@ async function foundryAction(action: string, args: Record<string, any>) {
     if (id) return openFoundry(id);
     return openPage("foundry");
   }
-  if (action === "foundry-close") { foundryOpen = null; redraw(); void loadFoundry(); return; }
-  if (!open) return;
-  if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
+  if (action === "foundry-day") document.getElementById(`fd-day-${String(args.day)}`)?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 async function dispatch(
   action: string,
@@ -7293,14 +7323,6 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (settingsUi.query) settingsSection(settingsUi.section);
     else { settingsUi.fold = ""; renderPage(); }
-    return;
-  }
-  // Esc in an open mockup goes back to Foundry's wall first.
-  if (key === "escape" && !ctrl && pageOpen === "foundry" && foundryOpen && !field) {
-    event.preventDefault();
-    foundryOpen = null;
-    renderPage();
-    if (state) renderState({ ...state });
     return;
   }
   // Esc over a picture or a story on Today closes that, not the page.

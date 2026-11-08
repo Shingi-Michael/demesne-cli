@@ -1,24 +1,15 @@
-/// Foundry: a place of mockups (pass 189 A). The page is your mockups, big,
-/// and one open fills it at real size under a single line; revising happens
-/// in the chat. HTML and SVG
+/// Foundry: one long page of mockups (pass 196 A). Every version of every
+/// mockup, newest first, grouped by day, each at real size under one quiet
+/// line; options stack one under another. You only look here: what to change
+/// goes to the chat. HTML and SVG
 /// render in a foundry:// frame that has no network, no app access and no
 /// shared origin; Markdown renders through the app's sanitizer.
-import type { FoundryArtifact, FoundryArtifactDetail, FoundryKind } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryKind, FoundryShelfVersion } from "@demesne/protocol";
 import { dayWord } from "./chats-page.ts";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
-const btn = (action: string, label: string, data: Record<string, unknown> = {}, className = "", extra = "") =>
-  `<button type="button" class="${className}" data-action="${action}" data-args="${h(JSON.stringify(data))}"${extra}>${label}</button>`;
 const icon = (paths: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${paths}</svg>`;
-
-export interface FoundryView {
-  list: FoundryArtifact[] | null;
-  open: FoundryArtifactDetail | null;
-  error: string;
-  /// Rendered, sanitized Markdown for an open document.
-  markdownHtml: (source: string) => string;
-}
 
 export const KIND_WORD: Record<FoundryKind, string> = { html: "Prototype", svg: "Graphic", markdown: "Document", deck: "Deck", doc: "Doc", dashboard: "Dashboard" };
 export const KIND_ICON: Record<FoundryKind, string> = {
@@ -33,45 +24,49 @@ export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", sv
 /// The kinds Demesne draws from content (a deck, a doc, a dashboard).
 export const READY_KIND = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
 export const frameURL = (id: string, version: number) => `foundry://artifact/${encodeURIComponent(id)}?v=${version}`;
-const frame = (artifact: { id: string; version: number; title: string }, className: string, extra = "") =>
-  `<iframe class="${className}" src="${h(frameURL(artifact.id, artifact.version))}" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(artifact.title)}"${extra}></iframe>`;
+/// On the long page a page shows its options stacked (parts.js reads stack=1),
+/// and loads only when it scrolls near the screen.
+const frame = (id: string, version: number, title: string) =>
+  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
 
-/// The wall: your mockups, big, newest first, each with its name and when.
-/// Clicking one opens it. You only look here: what to change goes to the chat.
-function wall(view: FoundryView) {
-  const { list } = view;
-  const cards = list === null ? '<p class="cp-empty">Reading Foundry…</p>' : !list.length
-    ? `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`
-    : `<div class="fd-wall">${list.map((item) => {
-      const thumb = item.kind === "markdown"
-        ? `<div class="fd-thumb doc">${KIND_ICON.markdown}</div>`
-        : `<div class="fd-thumb${item.kind === "svg" ? " graphic" : ""}">${frame(item, "fd-thumb-frame", ' loading="lazy" tabindex="-1" aria-hidden="true" scrolling="no"')}</div>`;
-      return `<div class="fd-card">${btn("foundry-open", thumb, { id: item.id }, "fd-card-open", ` aria-label="Open ${h(item.title)}"`)}`
-        + `<div class="fd-name"><b>${h(item.title)}</b><span>${h(dayWord(item.updatedAt))}</span></div></div>`;
-    }).join("")}</div>`;
-  return `<h1 class="cp-title fd-h">Foundry</h1>` + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + cards;
+export interface FoundryView {
+  list: FoundryArtifact[] | null;
+  versions: FoundryShelfVersion[] | null;
+  error: string;
+  /// The chat a version came from, by its id.
+  chatTitle: (id: string) => string | null;
 }
 
-/// One mockup open: it fills the page at real size, with one line above it:
-/// back to Foundry, its name and ‹ vN ›.
-function opened(view: FoundryView, open: FoundryArtifactDetail) {
-  const numbers = open.versions.map((item) => item.version).sort((a, b) => a - b);
-  const at = numbers.indexOf(open.version);
-  const earlier = at > 0 ? numbers[at - 1] : null, later = at >= 0 && at < numbers.length - 1 ? numbers[at + 1] : null;
-  const note = open.versions.find((item) => item.version === open.version)?.note;
-  const arrow = (to: number | null, label: string, path: string) =>
-    to === null ? `<button type="button" class="fd-arrow" aria-label="${label}" disabled>${icon(path)}</button>` : btn("foundry-version", icon(path), { version: to }, "fd-arrow", ` aria-label="${label}" title="v${to}"`);
-  const stage = open.kind === "markdown"
-    ? `<article class="fd-doc markdown">${view.markdownHtml(open.source)}</article>`
-    : `<div class="fd-stage${open.kind === "svg" ? " graphic" : ""}">${frame(open, "fd-frame")}</div>`;
-  return `<div class="fd-open">`
-    + `<div class="fd-line">${btn("foundry-close", `${icon('<path d="m15 6-6 6 6 6"/>')}Foundry`, {}, "fd-back")}`
-    + `<b class="fd-title">${h(open.title)}</b>`
-    + `<span class="fd-vers">${arrow(earlier, "Earlier version", '<path d="m15 6-6 6 6 6"/>')}<span${note ? ` title="${h(note)}"` : ""}>v${open.version}</span>${arrow(later, "Later version", '<path d="m9 6 6 6-6 6"/>')}</span>`
-    + `</div>`
-    + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + stage + `</div>`;
-}
+/// One version on the long page: its address, for links from the chat.
+export const shelfKey = (id: string, version: number) => `${id}:${version}`;
+const dayKey = (date: string) => { const at = new Date(date); return `${at.getFullYear()}-${at.getMonth() + 1}-${at.getDate()}`; };
+const clock = (date: string) => new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+/// The long page: days on a strip at the top, then every version, newest
+/// first, under the day it was made. The day stays at the top as you scroll.
 export function foundryPage(view: FoundryView) {
-  return view.open ? opened(view, view.open) : wall(view);
+  const { list, versions } = view;
+  const title = `<h1 class="cp-title fd-h">Foundry</h1>` + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "");
+  if (list === null || versions === null) return title + '<p class="cp-empty">Reading Foundry…</p>';
+  const byId = new Map(list.map((item) => [item.id, item]));
+  const shown = versions.filter((item) => byId.has(item.artifactId));
+  if (!shown.length) return title + `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
+  const days: { key: string; word: string; items: FoundryShelfVersion[] }[] = [];
+  for (const item of shown) {
+    const key = dayKey(item.createdAt);
+    const day = days.at(-1)?.key === key ? days.at(-1)! : (days.push({ key, word: dayWord(item.createdAt), items: [] }), days.at(-1)!);
+    day.items.push(item);
+  }
+  const strip = days.length > 1 ? `<nav class="fd-days" aria-label="Days">${days.map((day) => `<button type="button" data-action="foundry-day" data-args="${h(JSON.stringify({ day: day.key }))}">${h(day.word)}</button>`).join("")}</nav>` : "";
+  const item = (version: FoundryShelfVersion) => {
+    const artifact = byId.get(version.artifactId)!, key = shelfKey(artifact.id, version.version);
+    const chat = version.sessionId ? view.chatTitle(version.sessionId) : null;
+    const line = `<div class="fd-ln"><b>${h(artifact.title)}</b>${chat ? `<span>from “${h(chat)}”</span>` : ""}`
+      + `<span class="fd-ln-r"${version.note ? ` title="${h(version.note)}"` : ""}>${h(KIND_WORD[artifact.kind])} · v${version.version} · ${h(clock(version.createdAt))}</span></div>`;
+    const body = artifact.kind === "markdown"
+      ? `<article class="fd-doc markdown" data-md="${h(key)}"><p class="cp-empty">Reading…</p></article>`
+      : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`)}</div>`;
+    return `<section class="fd-item" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}`)}">${line}${body}</section>`;
+  };
+  return title + strip + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${day.items.map(item).join("")}`).join("");
 }

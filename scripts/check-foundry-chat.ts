@@ -1,6 +1,6 @@
-/** Real Electron check: invoke Foundry in chat, and its link opens what it
- * made on the Foundry page itself: clean, with only back and its versions,
- * and no split view beside the chat. */
+/** Real Electron check: invoke Foundry in chat, and its link opens Foundry's
+ * long page (pass 196 A) at what it made: every version newest first, at
+ * real size, nothing to press, and no split view beside the chat. */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -92,7 +92,7 @@ try {
   await editor.fill("/foundry make me a small interactive mockup");
   await editor.press("Enter");
   const chips = page.locator("#conversation .fd-chip");
-  const foundry = page.locator('#page[data-kind="foundry"]'), frame = page.frameLocator('#page iframe.fd-frame');
+  const foundry = page.locator('#page[data-kind="foundry"]');
   const chat = page.locator(`#sidebar-chats [data-action="select-session"][data-args*="${plain.id}"]`);
   /// Sends once the window knows the last turn is over, so Enter isn't lost.
   const send = async (text: string) => {
@@ -115,31 +115,34 @@ try {
   // There is no split view any more: the link opens the Foundry page itself.
   assert.equal(await page.locator("#pane").count(), 0, "no pane beside the chat");
   assert.equal(await page.locator("#conversation iframe").count(), 0, "Nothing live runs in the conversation");
+  const item = (id: string, version: number) => foundry.locator(`[data-fd="${id}:${version}"]`);
+  const frameOf = (id: string, version: number) => page!.frameLocator(`#page [data-fd="${id}:${version}"] iframe.fd-frame`);
   await chips.first().click();
-  await foundry.locator(".fd-open").waitFor();
+  const artifact = (await f.client.foundryList()).artifacts[0]!;
+  assert.equal(artifact.workspace, null, "No project is required");
+  const frame = frameOf(artifact.id, 1);
+  await item(artifact.id, 1).waitFor();
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
   // The kit reached the page: its stylesheet and its anime.js, and no assembly beside it.
-  const served = async (inline: number) => {
-    const inner = page!.frames().find(item => item.url().startsWith("foundry://artifact/"));
+  const served = async (version: number, inline: number) => {
+    const inner = page!.frames().find(found => found.url().startsWith(`foundry://artifact/${artifact.id}?v=${version}`));
     assert(inner, "the page's frame is reachable");
+    assert.match(inner.url(), /&stack=1$/, "the long page asks for options stacked");
     await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined));
     assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
     assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "the page is served as written");
     assert.equal(await inner.evaluate(() => "__demesnePrevious" in window), false, "no assembly");
     assert.equal(await inner.evaluate(() => document.querySelectorAll("button.demesne-pick").length), 0, "no Pick button on the page");
   };
-  await served(1);
-  // The page is clean: one line above it holds back, its name and its version. Nothing else.
-  assert.deepEqual(await foundry.locator(".fd-line button").evaluateAll((items) => items.map((item) => (item.getAttribute("aria-label") ?? item.textContent ?? "").trim())),
-    ["Foundry", "Earlier version", "Later version"], "the open mockup's line: back and versions only");
-  assert.equal(await foundry.locator(".fd-line .fd-title").textContent(), "Idea garden");
-  const artifact = (await f.client.foundryList()).artifacts[0]!;
-  assert.equal(artifact.workspace, null, "No project is required");
+  await served(1, 1);
+  // One long page: the mockup at real size under one quiet line, and nothing to press.
+  assert.match((await item(artifact.id, 1).locator(".fd-ln").textContent())!, /Idea garden.*Prototype · v1/);
+  assert.equal(await foundry.locator("button:not([data-action=foundry-day]), form, input, .cp-tabs").count(), 0, "nothing to press on Foundry but the day strip");
   await frame.getByRole("button", { name: "Plant an idea" }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-open.png") });
-  console.log("PASS: /foundry makes a link that opens the Foundry page, clean, with the page live.");
+  console.log("PASS: /foundry makes a link that opens Foundry's long page at that mockup, live.");
   await backToChat();
   response.resolve();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
@@ -156,26 +159,29 @@ try {
   assert.equal((await f.client.foundryGet(artifact.id)).versions[0]!.note, "Blue");
   assert(await page.locator("#page").isHidden(), "a new version doesn't take the window over");
   await chips.nth(1).click();
-  await foundry.locator(".fd-vers").filter({ hasText: "v2" }).waitFor();
-  await frame.getByRole("heading", { name: "A little room to grow" }).waitFor();
-  await foundry.getByRole("button", { name: "Earlier version" }).click();
-  await foundry.locator(".fd-vers").filter({ hasText: "v1" }).waitFor();
-  await foundry.getByRole("button", { name: "Later version" }).click();
-  await foundry.locator(".fd-vers").filter({ hasText: "v2" }).waitFor();
-  console.log("PASS: a follow-up edits the artifact in place (foundry_edit); its link opens v2 and the arrows walk the versions.");
+  // Both versions are on the page, the newest first, and the link scrolled to v2.
+  await frameOf(artifact.id, 2).getByRole("heading", { name: "A little room to grow" }).waitFor();
+  await item(artifact.id, 1).waitFor({ state: "attached" });
+  const order = await foundry.locator(".fd-item").evaluateAll((items) => items.map((node) => (node as HTMLElement).dataset.fd));
+  assert.deepEqual(order, [`${artifact.id}:2`, `${artifact.id}:1`], "every version, newest first");
+  assert.equal(await item(artifact.id, 2).locator(".fd-ln-r").getAttribute("title"), "Blue");
+  await served(2, 1);
+  console.log("PASS: a follow-up edits the artifact in place (foundry_edit); both versions sit on the long page, newest first.");
   await backToChat();
 
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await send("Make an SVG badge graphic");
   await chips.nth(2).filter({ hasText: "Graphic · v1" }).waitFor();
   await chips.nth(2).click();
-  await frame.locator("img").waitFor();
+  const badge = (await f.client.foundryList()).artifacts.find(found => found.title === "A simple badge")!;
+  await frameOf(badge.id, 1).locator("img").waitFor();
   await backToChat();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await send("Make a project brief document");
   await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
   await chips.nth(3).click();
-  await foundry.locator(".fd-doc").getByRole("heading", { name: "Project brief" }).waitFor();
+  const brief = (await f.client.foundryList()).artifacts.find(found => found.title === "Project brief")!;
+  await item(brief.id, 1).locator(".fd-doc").getByRole("heading", { name: "Project brief" }).waitFor();
   assert.equal(await foundry.locator(".fd-doc script").count(), 0);
   await backToChat();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
@@ -183,13 +189,10 @@ try {
   await chat.first().click();
   await chips.nth(3).filter({ hasText: "Document · v1" }).waitFor();
   assert.equal(await chips.count(), 4, "Chips return with the conversation history");
-  // The wall: only mockups, with nothing to press on them but the mockup itself.
+  // The first link still lands on its own version, far down the page.
   await chips.first().click();
-  await foundry.getByRole("button", { name: "Foundry" }).click();
-  await foundry.locator(".fd-wall .fd-card").first().waitFor();
-  assert.equal(await foundry.locator("form, input, .cp-tabs, .cp-lede").count(), 0, "the wall is only mockups: no make box, kinds or lede");
-  await foundry.locator(".fd-card").filter({ hasText: "Idea garden" }).hover();
-  assert.equal(await foundry.locator(".fd-card button:not(.fd-card-open)").count(), 0, "no export or delete on the wall");
+  await frameOf(artifact.id, 1).getByRole("heading", { name: "A little room to grow" }).waitFor();
+  await eventually(async () => { const box = await item(artifact.id, 1).boundingBox(); return !!box && box.y < 300 && box.y > -50; });
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-wall.png") });
   await backToChat();
@@ -197,17 +200,19 @@ try {
   await send("Make a slide deck for the launch");
   await chips.filter({ hasText: "Deck · v1" }).first().waitFor();
   await chips.filter({ hasText: "Deck · v1" }).first().click();
-  await eventually(async () => await frame.locator(".deck-stage > .slide").count() === 3 && await frame.locator(".deck-thumb").count() === 3);
-  assert.equal(await frame.locator("html").getAttribute("data-look"), "forest");
-  assert.equal(await frame.locator(".slide.on").getAttribute("data-layout"), "title");
+  const deck = (await f.client.foundryList()).artifacts.find(found => found.title === "Q1 launch")!;
+  const deckFrame = frameOf(deck.id, 1);
+  await eventually(async () => await deckFrame.locator(".deck-stage > .slide").count() === 3 && await deckFrame.locator(".deck-thumb").count() === 3);
+  assert.equal(await deckFrame.locator("html").getAttribute("data-look"), "forest");
+  assert.equal(await deckFrame.locator(".slide.on").getAttribute("data-layout"), "title");
   assert.equal(await foundry.getByRole("button", { name: "Play the deck" }).count(), 0, "no Play button");
-  await frame.locator(".deck-thumb").nth(1).click();
-  await eventually(async () => await frame.locator(".slide.on").getAttribute("data-layout") === "number");
+  await deckFrame.locator(".deck-thumb").nth(1).click();
+  await eventually(async () => await deckFrame.locator(".slide.on").getAttribute("data-layout") === "number");
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-deck.png") });
   console.log("PASS: a deck is drawn from content and walks with its strip.");
   assert.deepEqual(errors, []);
-  console.log("PASS: graphics, documents and decks open on the Foundry page; chips return when the chat is reopened.");
+  console.log("PASS: graphics, documents and decks sit on Foundry's long page; chips return when the chat is reopened.");
 } catch (error) {
   if (page) {
     console.error("HOST", await page.evaluate(() => (window.demesneInspect?.() as { host?: unknown })?.host));

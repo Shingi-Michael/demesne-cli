@@ -1205,8 +1205,19 @@ export interface FoundryArtifactDetail extends FoundryArtifact {
   versions: FoundryVersion[];
 }
 
+/// One saved version, for Foundry's long page (pass 196 A): every version
+/// of every mockup, newest first.
+export interface FoundryShelfVersion {
+  artifactId: string;
+  version: number;
+  createdAt: string;
+  sessionId: string | null;
+  note: string;
+}
+
 export interface FoundryListResponse {
   artifacts: FoundryArtifact[];
+  versions?: FoundryShelfVersion[];
 }
 
 /// Medium wherever supported; never invent an effort for a model without one.

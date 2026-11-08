@@ -112,6 +112,7 @@ d-demesne.dp-tight d-sidebar,d-demesne.dp-tight .dm-lights{display:none}
 d-demesne.dp-tight .dm-tabs{padding-left:8px}
 /* Options to choose between: a strip on top, one option at a time, at full size. */
 d-compare.dp-switch{display:flex;flex-direction:column;align-items:stretch;gap:16px}
+d-compare.dp-stack{display:flex;flex-direction:column;align-items:stretch;gap:40px}
 d-compare.dp-switch>[hidden]{display:none}
 .dp-strip{position:sticky;top:0;z-index:20;display:flex;flex-direction:row;align-items:center;gap:4px;padding:6px;border-radius:12px;background:color-mix(in srgb,var(--paper) 90%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:inset 0 0 0 1px var(--hair);flex-wrap:wrap}
 .dp-strip>button{padding:4px 12px;border-radius:99px;background:transparent;color:var(--secondary);font-size:14px}
@@ -248,9 +249,13 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     phone.firstChild.appendChild(body); el.appendChild(phone);
   });
 
+  /// On Foundry's long page (?stack=1) options stack one under another, each
+  /// named, so you compare them by scrolling (pass 196 A).
+  var STACK = /[?&]stack=1(&|$)/.test(location.search);
   define("d-compare", function (el) {
     var rec = el.getAttribute("recommended");
-    if (el.getAttribute("layout") !== "side") { switcher(el, rec); return; }
+    if (STACK) el.classList.add("dp-stack");
+    else if (el.getAttribute("layout") !== "side") { switcher(el, rec); return; }
     Array.prototype.forEach.call(el.children, function (option) {
       var name = option.getAttribute("data-option") || option.getAttribute("title");
       if (!name) return;

@@ -1689,7 +1689,7 @@ export function createDaemonApp(options: {
 
       // Foundry: artifacts the agent made, with every version kept.
       if (path[0] === "v1" && path[1] === "foundry") {
-        if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts() });
+        if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts(), versions: store.listFoundryVersions() });
         const id = path[2];
         if (request.method === "POST" && path.length === 2) {
           const body = await readJson(request);

@@ -58,7 +58,7 @@ try {
   await page.waitForFunction(id => { const host = (window.demesneInspect?.() as { host?: { session?: string; busy?: boolean } })?.host; return host?.session === id && !host.busy; }, plain.id);
   await page.locator("textarea").fill("Make me a trip checklist that remembers what I tick");
   await page.locator("textarea").press("Enter");
-  const frame = page.frameLocator("#page iframe.fd-frame");
+  const frame = page.frameLocator("#page .fd-item iframe.fd-frame").first();
   // The page arrives as its link in the chat; opening it shows the Foundry page.
   await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
   await frame.locator("body[data-ready='1']").waitFor();
@@ -69,10 +69,10 @@ try {
   await frame.locator("body[data-saved='1']").waitFor();
   assert.deepEqual((await f.client.foundryData(artifact.id)).data, { done: { flights: false, camera: true } });
   console.log("PASS: a tick is saved with the artifact.");
-  // Back to the Foundry wall and open the page again: the tick is back.
-  await page.locator("#page .fd-back").click();
-  await eventually(async () => (await page!.locator("#page iframe.fd-frame").count()) === 0);
-  await page.locator("#page .fd-card-open").first().click();
+  // Back to the chat and open the page again from its link: the tick is back.
+  await page.locator(`#sidebar-chats [data-action="select-session"][data-args*="${plain.id}"]`).first().click();
+  await eventually(async () => await page!.locator("#page").isHidden());
+  await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
   await frame.locator("body[data-ready='1']").waitFor();
   assert.equal(await frame.getByLabel("Pack the camera").isChecked(), true, "the tick survives closing the page");
   assert.equal(await frame.locator("#count").textContent(), "1 of 2 done");

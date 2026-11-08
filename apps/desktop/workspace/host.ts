@@ -1555,6 +1555,7 @@ export class WorkspaceHost {
       "setup",
       "setup-action",
       "foundry-list",
+      "foundry-shelf",
       "foundry-get",
       // A page's own saves and asks (pages that remember), from the foundry: handler.
       "foundry-data",
@@ -2187,6 +2188,7 @@ export class WorkspaceHost {
     // Foundry: what the agent made. The list and a source are read by the
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
+    if (method === "foundry-shelf") return await this.client.foundryList();
     // A picture a tool took this chat (look_at_page), for its step in the turn.
     if (method === "tool-picture") {
       const id = string(args.id, "picture", 64);

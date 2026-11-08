@@ -1,7 +1,7 @@
 /** Screenshots that land in a card (pass 187 A) against the real Electron app
  * on X11: a browser window in front, Ctrl+Alt+Space, and the window glides
  * into a card after the last card; the next message takes the picture and
- * the card folds to one line. Also takes the window directly with
+ * the card goes. Also takes the window directly with
  * packages/screen, as the model's capture_window does.
  * Needs an X display with a window manager (openbox) plus xprop, xwininfo,
  * xdotool and ImageMagick's import:
@@ -90,8 +90,8 @@ try {
   expect(/image/i.test(lastAsk), "the model got the picture with the message");
   expect(lastAsk.includes("here it is"), "and the words");
   await page.waitForTimeout(400);
-  const folded = await page.locator("#cards .card.shot").first().innerText();
-  expect(/sent \d/.test(folded), `the card folds to one line: ${folded.replace(/\s+/g, " ")}`);
+  // Used: the picture is in your bubble now, so its card goes.
+  expect(await page.locator("#cards .card.shot").count() === 0, "the card goes once it's sent");
   expect(await page.locator("#attach-row .shot-note-att").count() === 0, "the composer note is gone");
   await page.mouse.move(10, 10);
   await page.waitForTimeout(300);

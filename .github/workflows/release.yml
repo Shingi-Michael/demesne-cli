@@ -59,6 +59,22 @@ jobs:
           else
             bun run scripts/version.ts --github
           fi
+      # Each build uploads its files straight to this draft, since Actions
+      # artifact storage has a quota that, once full, fails every upload.
+      # The updater reads releases/latest, which never names a draft, so
+      # the release appears only once every build is in.
+      - name: Open draft release
+        if: steps.step_version.outputs.should_release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.step_version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+          else
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          fi
 
   # The build jobs upload straight to a draft release rather than through
   # workflow artifacts, which count against the account's Actions storage
@@ -178,18 +194,17 @@ jobs:
             bun -e 'const p=process.argv[1]; const bytes=await Bun.file(p).arrayBuffer(); await Bun.write(p+".sha256",new Bun.CryptoHasher("sha256").update(bytes).digest("hex")+"  "+p+"\n")' "$p"
           done
 
-      - name: Upload to the draft release
+      - name: Upload to draft release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          files=()
-          for p in "${{ matrix.artifact }}" demesne-linux-x64.tar.gz demesne-desktop-linux-x64.tar.gz demesne-desktop-darwin-arm64.zip; do
-            [ -f "$p" ] || continue
-            files+=("$p" "$p.sha256")
-          done
-          gh release upload "${{ needs.version.outputs.tag }}" "${files[@]}" --clobber
+          shopt -s nullglob
+          files=("${{ matrix.artifact }}" "${{ matrix.artifact }}.sha256" demesne-linux-x64.tar.gz* demesne-desktop-linux-x64.tar.gz* demesne-desktop-darwin-arm64.zip*)
+          existing=()
+          for f in "${files[@]}"; do [ -f "$f" ] && existing+=("$f"); done
+          gh release upload "$TAG" "${existing[@]}" --clobber --repo "$GITHUB_REPOSITORY"
 
   release:
     needs: [version, desktop]
@@ -209,12 +224,9 @@ jobs:
             git tag "$tag" "${{ github.sha }}"
             git push origin "$tag" || true
           fi
-      - name: Publish the draft release
+      - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release edit "${{ needs.version.outputs.tag }}" --draft=false --latest
-
-  # Signed public releases remain blocked: see docs/macos-release-signing.md
-  # for the signing-path assessment, required credentials and acceptance checks.
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"

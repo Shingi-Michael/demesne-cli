@@ -488,7 +488,7 @@ try {
   await click("toggle-steps");
   assert.equal(await page.locator("#conversation .thinking").count(), 0, "opened steps show no thinking either");
   await click("toggle-steps");
-  // A project chat that uses no other card has only Where on the right (pass 121 E).
+  // A project chat that uses no other card has only the environment card on the right (pass 173 A).
   assert.deepEqual(await evaluate<string[]>("return [...document.querySelectorAll('#cards > .card')].map(card => card.dataset.card);"), ["where"], "a chat that uses no card has only Where on the right");
   // Native notifications: record them in the main process, and look away from the window.
   // The Dock's working bar: record what the window sets.
@@ -1148,22 +1148,29 @@ try {
   await page.locator(`#turn-${editTurn} .rw-redo`).click();
   await until(() => page.locator(`#turn-${editTurn} .request`).count().then(count => count === 1), "Redo brings the turn back");
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n", "Redo puts the edit back");
-  // An agent is one step on the guide, like a read: its task, "✓ 1 step" on
-  // the right, and its own guide unfolding under it with what it found. No
-  // trace box, and nothing the agent thought.
+  // Sub-agents at work (pass 183 A): an agent is one crew line with its
+  // face (the d. on your own model, no light bulb), "Agent found it" and its
+  // steps; it opens to a line for the agent with the first line of what it
+  // found, and that line opens the agent's own steps. No trace box, and
+  // nothing the agent thought.
   await type(agentPrompt);
   await textIncludes(agentDone);
   await page.locator(".receipt-steps", { hasText: "1 step" }).last().click();
-  const agentStep = page.locator(".steps .tool-row", { hasText: agentTask }).last();
-  await until(() => agentStep.locator(".meta").innerText().then(text => /✓ 1 step · /.test(text)), "the agent's row ends in its step count and time");
+  const agentStep = page.locator(".steps .crew-row").last();
+  await until(() => agentStep.innerText().then(text => text.includes("Agent found it") && /1 step/.test(text)), "the agent's line says it found it, with its step count");
+  assert.equal(await agentStep.locator(".ask-d").count(), 1, "an agent on your own model wears the d.");
   assert.equal(await page.locator(".steps details.thinking").count(), 0, "no trace box under the agent");
   assert.equal(await page.locator(".steps .agent-steps").count(), 0, "the agent's guide waits folded");
   await agentStep.click();
+  const agentLine = page.locator(".steps .crew-line", { hasText: agentTask }).last();
+  await agentLine.waitFor();
+  assert((await page.locator(".steps .crew-said").last().innerText()).includes(agentFound), "its line says what it found");
+  await agentLine.click();
   await until(() => page.locator(".steps .agent-steps .tool-row.quiet .target").last().innerText().then(text => text === "hello.ts"), "the agent's own read unfolds as a quiet line");
   assert((await page.locator(".steps .agent-found").last().innerText()).includes(`Found · ${agentFound}`), "the guide ends in what the agent found");
   assert(!(await page.locator("#stage").innerText()).includes(agentThought), "the agent's thinking never reaches the window");
   await capture("02-agent-step");
-  await agentStep.click();
+  await page.locator(".steps .crew-line", { hasText: agentTask }).last().click();
   await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
   // The mode word under the composer: Alt+M steps Ask → Accept edits → Plan → Auto → Orchestrate → Ask.
   await page.locator("textarea").focus();
@@ -1177,7 +1184,8 @@ try {
     }, `daemon policy for ${word}`);
     if (word === "Plan") {
       assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the five modes");
-      assert.equal(await page.locator("#composer-mode .mode-opt:visible").count(), 5, "all five modes are in the bar of a project chat");
+      // The words widen in over 240ms, so wait for them rather than sample mid-way.
+      await until(() => page.locator("#composer-mode .mode-opt:visible").count().then(count => count === 5), "all five modes are in the bar of a project chat");
       await capture("03-mode-plan");
     }
   }
@@ -1229,18 +1237,23 @@ try {
   const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
   assert(compacted && compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
-  // The cards on the right show only what this chat uses (pass 86 A): its
-  // own edit brings Changes in; Where leads in a project chat (pass 121 E),
-  // there is no switch, and Context waits until half full, so the composer's
-  // ring stays.
-  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what this chat changed");
+  // The cards on the right show only what this chat uses (pass 86 A) and
+  // step back (pass 169 A): its own edit brings a dim Changes line with a
+  // pink dot; the environment card leads in a project chat (pass 173 A),
+  // and Context waits until half full, so the composer's ring stays.
+  const changesCard = page.locator("#cards [data-card=changes]");
+  await until(() => changesCard.locator(".card-head").innerText().then(text => text.includes("1 file changed") && text.includes("+1") && text.includes("−1")), "the Changes line says what this chat changed");
+  assert.equal(await changesCard.locator(".card-need").count(), 1, "uncommitted changes carry the pink dot");
+  assert.equal(await changesCard.locator(".card-body").isVisible(), false, "a line keeps its details until you hover it");
+  await changesCard.hover();
+  await until(() => changesCard.locator(".card-body").innerText().then(text => text.includes("Commit & PR")), "hover unfolds the line with Commit & PR");
   assert.equal(await page.locator("#cards [data-card=environment]").count(), 0, "there is no Environment card");
   const where = page.locator("#cards [data-card=where]");
-  assert.equal(await page.locator("#cards > .card").first().getAttribute("data-card"), "where", "Where is the first card");
-  assert.equal(await where.locator(".wh-tile").innerText(), "W", "the monogram is the project's letter");
-  assert.equal(await where.locator(".wh-who .wh-name").innerText(), "workspace", "the project's name");
-  assert.match(await where.locator(".wh-lines").innerText(), /Branch[\s\S]*1 changed[\s\S]*Runs on\s*This computer\s*online/, "the branch with what this chat changed, and where it runs");
-  assert.equal(await where.locator(".wh-note").count(), 0, "the daemon says nothing while it's fine");
+  assert.equal(await page.locator("#cards > .card").first().getAttribute("data-card"), "where", "the environment card is first");
+  assert.equal(await where.locator(".wh-tile").count(), 0, "no monogram tile: it doesn't greet you");
+  assert.match(await where.locator(".card-head").innerText(), /This computer[\s\S]*master[\s\S]*uncommitted/, "where it runs and the branch with what's uncommitted");
+  assert.equal(await where.locator(".env-dot.on").count(), 1, "the daemon is a quiet dot while it's fine");
+  assert.equal(await where.locator(".env-start").count(), 0, "Start shows only when the daemon is off");
   await capture("02-where");
   assert.equal(await page.locator(".header-cards").count(), 0, "the top bar has no cards switch");
   if (percentage < 50) assert.equal(await page.locator("#cards [data-card=context]").count(), 0, "Context waits until the chat is half full");
@@ -1251,12 +1264,15 @@ try {
   });
   assert.equal(cardInsets.top, cardInsets.right, "the cards have matching top and right insets");
   await capture("04-cards");
-  await page.locator("#cards [data-card=changes] .card-head").click();
-  await until(() => page.locator("#cards [data-card=changes].folded").count().then(count => count === 1), "a card folds to one line");
-  await page.locator("#cards [data-card=changes] .card-head").click();
-  await page.locator("#cards [data-card=changes] .card-body").waitFor();
-  await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
-  // The ring unfolds the context breakdown above it until Esc.
+  await changesCard.locator(".card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].open").count().then(count => count === 1), "a click keeps a line open");
+  await page.mouse.move(5, 5);
+  assert.equal(await changesCard.locator(".card-body").isVisible(), true, "an opened line stays open without hover");
+  await changesCard.locator(".card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].open").count().then(count => count === 0), "a second click closes it");
+  await until(() => page.locator("#composer-context").innerText().then(text => text.trim() === `${percentage}%`), "the composer's context word updates");
+  assert.equal(await page.locator("#composer-context .ring, #composer-limit").count(), 0, "no rings under the composer");
+  // The word unfolds the context breakdown above it until Esc.
   await page.locator("#composer-context").click();
   await until(() => page.locator("#context-card").innerText().then(text => text.includes("Instructions") && text.includes("Your messages and replies") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
   if (percentage < 50) assert.equal(await page.locator("#context-card .context-compact").count(), 0, "Compact now waits until the context is half full");
@@ -1305,14 +1321,15 @@ try {
   const preferences = JSON.parse(readFileSync(join(f.home, ".demesne/desktop-ui.json"), "utf8"));
   assert.equal(preferences.lastWorkspace, f.workspace);
   await capture("05-restored");
-  assert(await page.locator("#composer-limit").isHidden(), "no plan word while the plan says nothing");
+  assert.equal(await page.locator("#composer-context .cw-plan").count(), 0, "no plan in the word while the plan says nothing");
   await type(followUp);
   await textIncludes("The daemon is still working.");
   // Words arrive softly: the streaming answer's new words fade in, then settle at full.
   const fading = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#conversation .markdown .md-in")].map((span) => span.textContent ?? "").join(""));
   assert.ok(fading.includes("daemon is still working"), `streamed words fade in: ${fading}`);
   await page.waitForTimeout(500);
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("#conversation .markdown .md-in")!).opacity), "1", "faded words settle at full");
+  // A word that finished fading drops its fade (#560), so none is left part-way.
+  assert.ok(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#conversation .markdown .md-in")].every((span) => getComputedStyle(span).opacity === "1")), "faded words settle at full");
   await until(async () => (await f.client.getSessionState(sessionId)).session.turns.at(-1)?.status === "running", "daemon turn running");
   await close();
   release!();
@@ -1327,21 +1344,25 @@ try {
   const caughtUp = page.locator("#conversation .catch-up");
   await until(() => caughtUp.isVisible(), "a chat that worked while you were away says what happened since you looked");
   assert.match(await caughtUp.innerText(), /^Since you looked · it finished a turn/, "the line says what happened");
-  // Your plan's mark: the fuller window beside the context ring, amber from 75%.
-  const limitWord = page.locator("#composer-limit");
-  await limitWord.waitFor();
-  assert.equal((await limitWord.textContent())?.trim(), "78%", "the plan's fuller window shows under the composer");
-  assert.match(await limitWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
-  assert.equal(await limitWord.getAttribute("title"), "Test plan: 78% of your 5-hour limit", "the mark names the plan and its window");
-  // It opens the context card, whose lower half gives each window, its reset and Drive's rule.
-  await limitWord.click();
-  const contextCard = page.locator("#context-card");
-  await contextCard.waitFor();
-  const cardText = (await contextCard.innerText()).replace(/\s+/g, " ");
+  // One word beside the model: the context, then the plan's fuller window, amber from 75%.
+  const contextWord = page.locator("#composer-context"), planWord = contextWord.locator(".cw-plan");
+  await planWord.waitFor();
+  assert.equal((await planWord.textContent())?.trim(), "plan 78%", "the plan's fuller window shows in the composer's word");
+  assert.match(await planWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
+  assert.match(await contextWord.getAttribute("title") ?? "", /Test plan: 78% of your 5-hour limit/, "the word's title names the plan and its window");
+  // Past half, the same card also sits in the right column (pass 177 C): one line like the others.
+  const columnContext = page.locator("#cards [data-card=context]"), columnCard = columnContext.locator(".ctx-card");
+  await until(() => columnContext.locator(".card-head").innerText().then(text => /context · plan 78%/.test(text)), "the plan past half puts a context line in the column");
+  assert.equal(await page.locator("#cards > .card").nth(1).getAttribute("data-card"), "context", "the context line comes right after the environment");
+  assert.equal(await columnCard.isVisible(), false, "the context line keeps its card folded like the others");
+  await capture("06-context-folded");
+  // With the card in the column, the word opens it there instead of a second copy.
+  await contextWord.click();
+  await until(() => page.locator("#cards [data-card=context].open.pointed").count().then(count => count === 1), "the word opens the card in the column");
+  const cardText = (await columnCard.innerText()).replace(/\s+/g, " ");
   assert.match(cardText, /Test plan Plus 5-hour window 78% used · resets .+ This week 41% used Drive pauses its own runs at 90%/, `the plan's half of the card: ${cardText}`);
+  assert(await page.locator("#context-card").isHidden(), "the card never shows twice");
   await capture("06-context-and-plan");
-  await page.keyboard.press("Escape");
-  await until(() => contextCard.isHidden(), "Esc closes the context card");
   assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");
   await capture("06-plan-limit");
   await capture("06-work-survived-close");
@@ -1613,15 +1634,17 @@ try {
   await page.evaluate(() => { document.hasFocus = () => true; });
   assert.equal(await page.locator(".tool-row", { hasText: "ask_user" }).count(), 0, "no step row names the tool");
   assert(!(await page.locator("#stage").innerText()).toLowerCase().includes("interview"), "nothing says interview");
-  assert.equal(await ask.locator(".ask-choice").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await ask.locator(".ask-choice:not(.ask-decide)").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await ask.locator(".ask-choice.first .rec").innerText(), "Recommended", "the first answer is the recommended one");
+  assert.equal(await ask.locator(".ask-decide").count(), 1, "Let it decide is the last row");
   assert.equal(await parked.count(), 0, "a finished turn leaves only the card");
   assert.equal(await ask.locator(".ask-prev").count(), 0, "a first question has no Back");
-  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Reply… the question stays in the chat");
+  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Answer in your own words, or pick one above…");
   await page.waitForTimeout(500);
   await capture("13-question");
   assert(await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollWidth <= stage.clientWidth && stage.scrollLeft === 0; }), "the question never pushes the chat sideways");
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
-  // Typing in the composer is a message, not an answer; the card holds still.
+  // Typing in the composer never redraws the card; Enter would answer it.
   await page.evaluate(() => document.querySelector("#stage .ask-card")!.setAttribute("data-held", "1"));
   await page.locator("textarea").pressSequentially("war", { delay: 40 });
   await page.waitForTimeout(300);

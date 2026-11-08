@@ -1,3 +1,4 @@
+import { documentText, readable } from "./documents.ts";
 import type { CommandReporter } from "./command-monitor.ts";
 import { createHash } from "node:crypto";
 import {
@@ -19,7 +20,7 @@ import { isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import type { ProviderToolDefinition } from "@demesne/providers";
 import { isRecord, MAX_QUESTION_SUGGESTIONS, MAX_USER_QUESTIONS, parseUserQuestions, parseAnswerQuestionsRequest, type UserAnswer, type UserQuestion, type QuestionMode } from "@demesne/protocol";
 import { applyEdits, EditApplyError, type EditHunk } from "./edit-engine.ts";
-import { backgroundProcesses } from "./background.ts";
+import { backgroundProcesses, waitPattern } from "./background.ts";
 import { checkTypes } from "./type-check.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
 
@@ -89,7 +90,7 @@ function askUserTool(): AgentTool {
   return {
     definition: {
       name: "ask_user",
-      description: `Ask the user for decisions or preferences. In clarification mode (up to ${MAX_USER_QUESTIONS} questions) the question appears in the chat and you do not wait: keep doing the work that doesn't depend on the answer, never guess the answer, and when only dependent work is left, say what waits on it and end your turn. The answer arrives as the user's next message. Use interview mode for guided conversations: it waits for each typed answer; ask one question, use its answer to choose the next, retain refinements, and do not repeat answered questions. Stop interviewing once you understand the request. Ask only for choices that belong to the user, not facts you can inspect or permission to proceed. Never guess a missing interview preference.`,
+      description: `Ask the user for decisions or preferences. In clarification mode (up to ${MAX_USER_QUESTIONS} questions) the question appears in the chat and you do not wait: keep doing the work that doesn't depend on the answer, never guess the answer, and when only dependent work is left, say what waits on it and end your turn. The answer arrives as the user's next message. Use interview mode for guided conversations: it waits for each typed answer; ask one question, use its answer to choose the next, retain refinements, and do not repeat answered questions. Stop interviewing once you understand the request. Ask only for choices that belong to the user, not facts you can inspect (attached images included) or permission to proceed. Never guess a missing interview preference.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -101,8 +102,8 @@ function askUserTool(): AgentTool {
               properties: {
                 question: { type: "string", description: "One question, one decision." },
                 reason: { type: "string", description: "One short sentence on why it matters or what you would otherwise assume." },
-                suggestions: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Possible answers, recommended first." },
-                details: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Optional, one short line per suggestion in the same order: what choosing it means." },
+                suggestions: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "2 to 4 short answers, the one you recommend first (shown as recommended)." },
+                details: { type: "array", items: { type: "string" }, maxItems: MAX_QUESTION_SUGGESTIONS, description: "Always: one short line per suggestion, same order, on what choosing it means." },
                 multiple: { type: "boolean", description: "The user may pick more than one suggestion." },
               },
               required: ["question"],
@@ -154,6 +155,7 @@ function builtInTools(): AgentTool[] {
     deletePathTool(),
     runCommandTool(),
     commandLogsTool(),
+    commandWaitTool(),
     commandStopTool(),
   ];
 }
@@ -265,7 +267,7 @@ function readFileTool(): AgentTool {
   return {
     definition: {
       name: "read_file",
-      description: "Read numbered UTF-8 lines. Files up to 600 lines come back whole; longer ones return at least 200 lines from offset (default limit 400, max 500). Read once; do not page in small slices.",
+      description: "Read numbered UTF-8 lines. Files up to 600 lines come back whole; longer ones return at least 200 lines from offset (default limit 400, max 500). PDFs, spreadsheets (.xlsx), Word files (.docx) and decks (.pptx) come back as their text. Read once; do not page in small slices.",
       inputSchema: {
         type: "object",
         properties: {
@@ -433,14 +435,21 @@ async function readSingleFile(
     throw toolError("NOT_FOUND", `no file at ${path}`, "run list_files to inspect the tree");
   }
   if (!stat.isFile() || stat.nlink > 1) throw toolError("NOT_A_FILE", `${path} is not a regular file`, "read_file requires a regular file");
-  if (stat.size > 8 * 1024 * 1024) throw toolError("TOO_LARGE", `${path} exceeds the 8 MiB read limit`, "read a narrower file or use search_files");
-  const bytes = readFileSync(absolute);
-  if (bytes.includes(0)) throw toolError("BINARY_FILE", `${path} is binary`, "use run_command for binary inspection");
   let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw toolError("NOT_UTF8", `${path} is not valid UTF-8`, "use run_command with an appropriate decoder");
+  // PDFs, spreadsheets, Word files and decks come back as their text.
+  const kind = readable(absolute);
+  if (kind === "pdf" || kind === "office") {
+    try { text = await documentText(absolute, stat.size); }
+    catch (error) { throw toolError("UNREADABLE", `${path} is ${error instanceof Error ? error.message : "unreadable"}`, "use run_command for other ways to inspect it"); }
+  } else {
+    if (stat.size > 8 * 1024 * 1024) throw toolError("TOO_LARGE", `${path} exceeds the 8 MiB read limit`, "read a narrower file or use search_files");
+    const bytes = readFileSync(absolute);
+    if (bytes.includes(0)) throw toolError("BINARY_FILE", `${path} is binary`, "use run_command for binary inspection");
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw toolError("NOT_UTF8", `${path} is not valid UTF-8`, "use run_command with an appropriate decoder");
+    }
   }
   const lines = text.split("\n");
   const totalLines = lines.length - (lines.at(-1) === "" ? 1 : 0);
@@ -467,11 +476,14 @@ function searchFilesTool(): AgentTool {
   return {
     definition: {
       name: "search_files",
-      description: "Literal case-insensitive search; include globs relative to path (*.ts matches any depth). Default 50; max 500 matching lines. Returns workspace-relative path:line:text.",
+      description: "Search file contents. Literal and case-insensitive by default; regex:true takes a regular expression, caseSensitive:true matches case. context:N adds N lines before and after each match, often enough to skip reading the file. include globs are relative to path (*.ts matches any depth). Default 50; max 500 matching lines. Returns workspace-relative path:line:text; with context, one block per stretch, context lines as path-line-text.",
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string" },
+          regex: { type: "boolean" },
+          caseSensitive: { type: "boolean" },
+          context: { type: "integer", minimum: 0, maximum: 10 },
           path: { type: "string" },
           include: { type: "string" },
           limit: { type: "integer", minimum: 1, maximum: 500 },
@@ -487,6 +499,41 @@ function searchFilesTool(): AgentTool {
       if (query.length > 4096) throw toolError("QUERY_TOO_LARGE", "query exceeds 4096 characters", "search a narrower literal");
       const path = optionalString(value.path, "path") ?? ".";
       const include = optionalString(value.include, "include");
+      const regex = value.regex === true, caseSensitive = value.caseSensitive === true;
+      const contextLines = boundedInteger(value.context, "context", 0, 10, 0);
+      let matcher: (line: string) => boolean;
+      if (regex) {
+        let compiled: RegExp;
+        try { compiled = new RegExp(query, caseSensitive ? "u" : "iu"); } catch (error) {
+          throw toolError("BAD_REGEX", `invalid regular expression: ${error instanceof Error ? error.message : String(error)}`, "fix the pattern, or search a literal without regex");
+        }
+        matcher = (line) => compiled.test(line);
+      } else if (caseSensitive) matcher = (line) => line.includes(query);
+      else { const lower = query.toLocaleLowerCase("en-US"); matcher = (line) => line.toLocaleLowerCase("en-US").includes(lower); }
+      // Each match with the lines around it, overlapping blocks joined.
+      const withContext = (matches: string[]): string[] => {
+        if (!contextLines) return matches;
+        const byFile = new Map<string, number[]>();
+        for (const match of matches) {
+          const at = /^(.*?):(\d+):/.exec(match);
+          if (at) byFile.set(at[1]!, [...byFile.get(at[1]!) ?? [], Number(at[2])]);
+        }
+        const blocks: string[] = [];
+        for (const [file, lines] of byFile) {
+          let text: string[];
+          try { text = readFileSync(resolveWorkspacePath(context.workspaceRoot, file, false), "utf8").split("\n"); } catch { continue; }
+          const hits = new Set(lines);
+          let block: string[] = [], last = -Infinity;
+          for (const line of [...hits].sort((a, b) => a - b)) {
+            const from = Math.max(1, line - contextLines), to = Math.min(text.length, line + contextLines);
+            if (from > last + 1 && block.length) { blocks.push(block.join("\n")); block = []; }
+            for (let n = Math.max(from, last + 1); n <= to; n++) block.push(`${file}${hits.has(n) ? ":" : "-"}${n}${hits.has(n) ? ":" : "-"}${(text[n - 1] ?? "").slice(0, 2000)}`);
+            last = Math.max(last, to);
+          }
+          if (block.length) blocks.push(block.join("\n"));
+        }
+        return blocks;
+      };
       let pattern: RegExp | undefined;
       if (include) {
         try {
@@ -514,6 +561,8 @@ function searchFilesTool(): AgentTool {
             rgPath: ripgrepPaths,
             cwd: start,
             query,
+            regex,
+            caseSensitive,
             accepts,
             limit,
             signal: context.signal,
@@ -526,7 +575,7 @@ function searchFilesTool(): AgentTool {
               .sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line)
               .slice(0, limit)
               .map((entry) => `${prefixLines(entry.path)}:${entry.line}:${entry.text}`);
-            return JSON.stringify({ matches, truncated: result.hadMore });
+            return JSON.stringify({ matches: withContext(matches), truncated: result.hadMore });
           }
         } catch (error) {
           if (context.signal.aborted) throw error;
@@ -548,13 +597,13 @@ function searchFilesTool(): AgentTool {
           return;
         }
         for (const [index, line] of text.split("\n").entries()) {
-          if (line.toLocaleLowerCase("en-US").includes(query.toLocaleLowerCase("en-US"))) {
+          if (matcher(line)) {
             if (matches.length === limit) { truncated = true; return; }
             matches.push(`${relativePath}:${index + 1}:${line.slice(0, 2000)}`);
           }
         }
       }, limit * 4, () => truncated);
-      return JSON.stringify({ matches, truncated });
+      return JSON.stringify({ matches: withContext(matches), truncated });
     },
   };
 }
@@ -563,6 +612,8 @@ async function ripgrepSearch(options: {
   rgPath: string;
   cwd: string;
   query: string;
+  regex?: boolean;
+  caseSensitive?: boolean;
   accepts: (path: string) => boolean;
   limit: number;
   signal: AbortSignal;
@@ -571,8 +622,8 @@ async function ripgrepSearch(options: {
     "--no-heading",
     "--color",
     "never",
-    "--fixed-strings",
-    "--ignore-case",
+    ...(options.regex ? [] : ["--fixed-strings"]),
+    ...(options.caseSensitive ? ["--case-sensitive"] : ["--ignore-case"]),
     "--line-number",
     "--with-filename",
     "--sort", "path",
@@ -1297,6 +1348,38 @@ function commandLogsTool(): AgentTool {
         outOffset: Math.min(entry.outOffset, fromOut + stdout.length),
         errOffset: Math.min(entry.errOffset, fromErr + stderr.length),
       });
+    },
+  };
+}
+
+/// Wait and watch (pass 174): sleep until a background command prints what
+/// you're waiting for ("ready", "Local:", a test summary), exits, or the time
+/// runs out, instead of reading its logs over and over.
+function commandWaitTool(): AgentTool {
+  return {
+    definition: {
+      name: "wait_for",
+      description: "Wait for a backgrounded command (run_command with background: true) to print a line matching `pattern` (a case-insensitive regex or plain words, e.g. \"ready|Local:\" for a dev server, \"\\d+ (pass|fail)\" for tests), or to exit when no pattern is given. Output it already printed counts. Returns status matched, exited or timeout, the matching line, the exit code and the last lines. Use instead of polling command_logs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          handle: { type: "string" },
+          pattern: { type: "string", minLength: 1, maxLength: 200 },
+          timeoutSeconds: { type: "integer", minimum: 1, maximum: 600 },
+        },
+        required: ["handle"],
+        additionalProperties: false,
+      },
+    },
+    permission: () => null,
+    async execute(input, context) {
+      const value = objectInput(input);
+      const handle = requiredString(value.handle, "handle");
+      const pattern = optionalString(value.pattern, "pattern");
+      const timeoutMs = boundedInteger(value.timeoutSeconds, "timeoutSeconds", 1, 600, 60) * 1000;
+      const result = await backgroundProcesses.waitFor(handle, pattern ? waitPattern(pattern) : null, timeoutMs, context.signal);
+      if (!result) throw toolError("NOT_FOUND", `no background process ${handle}`, "use the handle run_command returned");
+      return JSON.stringify({ ...result, ...(pattern ? { pattern } : {}) });
     },
   };
 }

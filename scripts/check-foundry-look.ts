@@ -48,7 +48,7 @@ const parts = `<html data-theme="dark"><link rel="stylesheet" href="foundry://ki
 <script src="foundry://kit/parts.js"></script>`;
 const partsLook = await electronLook(command)({ kind: "html", title: "Parts", source: parts }, new AbortController().signal);
 assert(partsLook, "the app rendered the parts page");
-for (const shot of partsLook.pages) assert.deepEqual(shot.issues, [], `parts at ${shot.width}px`);
+for (const shot of partsLook.pages) { if (shot.issues.length) console.error(shot.width, shot.issues); assert.deepEqual(shot.issues, [], `parts at ${shot.width}px`); }
 assert.deepEqual(partsLook.errors, [], "parts log no console errors");
 assert(partsLook.pages[0]!.design!.surface > 0.2, `parts paint the screen: ${JSON.stringify(partsLook.pages[0]!.design)}`);
 // The ready kinds: a deck, a doc and a dashboard, drawn by the app from content alone, render with no faults or errors.
@@ -56,7 +56,7 @@ const READY = { deck: "---\ntitle: Q1 launch\nauthor: Growth team\ndate: April 2
 for (const [kind, source] of Object.entries(READY)) {
   const ready = await electronLook(command)({ kind, title: kind, source }, new AbortController().signal);
   assert(ready, `the app drew the ${kind}`);
-  for (const shot of ready.pages) assert.deepEqual(shot.issues, [], `${kind} at ${shot.width}px`);
+  for (const shot of ready.pages) { if (shot.issues.length) console.error(kind, shot.width, shot.issues); assert.deepEqual(shot.issues, [], `${kind} at ${shot.width}px`); }
   assert.deepEqual(ready.errors, [], `${kind} logs no console errors`);
   if (process.env.FOUNDRY_LOOK_SHOTS) for (const shot of ready.pages) await Bun.write(join(process.env.FOUNDRY_LOOK_SHOTS, `${kind}-${shot.width}.png`), Buffer.from(shot.png, "base64"));
   console.log(kind, JSON.stringify(ready.pages.map(({ width, design }) => ({ width, design }))));

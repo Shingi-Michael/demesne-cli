@@ -10,8 +10,13 @@ const TRACE_LIMIT = 64 * 1024;
 /// lines (starting, writing report) and any thinking an old event carries
 /// are dropped. Live updates and history replay share this, so a reopened
 /// session shows the same steps.
-export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; subagentModel?: string; subagentWhy?: string; repo?: import("@demesne/protocol").RepoFlow }, payload: Record<string, unknown>): void {
+export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: string; asked?: string[]; crew?: "working" | "reported" | "stopped"; subagentModel?: string; subagentWhy?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard; research?: import("@demesne/protocol").ResearchState }, payload: Record<string, unknown>): void {
+  if (isResearch(payload.research)) { tool.research = payload.research; return; }
   if (typeof payload.report === "string" && payload.report) tool.report = payload.report;
+  // A sub-agent in the background (crew.ts): how it stands, and follow-ups from the chat.
+  if (payload.crew === "working" || payload.crew === "reported" || payload.crew === "stopped") tool.crew = payload.crew;
+  if (typeof payload.asked === "string" && payload.asked) (tool.asked ??= []).push(payload.asked);
+  if (isHandoffCard(payload.handoff)) tool.handoff = payload.handoff;
   if (typeof payload.why === "string" && payload.why) tool.subagentWhy = payload.why;
   if (isRepoFlow(payload.repo)) tool.repo = payload.repo;
   if (typeof payload.text !== "string" || !payload.text) return;
@@ -21,6 +26,19 @@ export function applyToolProgress(tool: { trace?: TraceSegment[]; report?: strin
   const size = trace.reduce((sum, segment) => sum + segment.text.length, 0);
   if (size >= TRACE_LIMIT) return;
   trace.push({ kind: "step", text: payload.text.slice(0, TRACE_LIMIT - size) });
+}
+
+/// A research run's state, as the daemon sent it (the newest one wins).
+function isResearch(value: unknown): value is import("@demesne/protocol").ResearchState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Record<string, unknown>;
+  return typeof state.topic === "string" && typeof state.phase === "string" && typeof state.pages === "number" && Array.isArray(state.lanes) && Array.isArray(state.checks);
+}
+
+function isHandoffCard(value: unknown): value is import("@demesne/protocol").HandoffCard {
+  if (!value || typeof value !== "object") return false;
+  const card = value as Record<string, unknown>;
+  return typeof card.id === "string" && typeof card.agent === "string" && typeof card.status === "string" && Array.isArray(card.files) && Array.isArray(card.checks);
 }
 
 /// A commit or merge step's tree, as the daemon recorded it.
@@ -44,14 +62,22 @@ export interface ToolEntry {
   waiting?: boolean; phase: ToolPhaseName;
   draftId?: string; draftArguments?: string; drafting?: boolean;
   changes?: import("@demesne/protocol").ToolFileChange[];
+  /// A research run's newest state, for its one quiet line.
+  research?: import("@demesne/protocol").ResearchState;
   /// A sub-agent's steps, in order, for the guide that unfolds under its row.
   trace?: TraceSegment[];
   /// What a sub-agent found: its report, for the end of that guide.
   report?: string;
+  /// A background sub-agent: working, reported (and still there), or stopped.
+  crew?: "working" | "reported" | "stopped";
+  /// Follow-ups the chat sent a background sub-agent, in order.
+  asked?: string[];
   /// The model a sub-agent reported running on, when not the chat's own.
   subagentModel?: string;
   /// Why Auto gave this sub-agent to the agent tool it runs on.
   subagentWhy?: string;
+  /// A hand-off's change card: what the agent changed in its own copy.
+  handoff?: import("@demesne/protocol").HandoffCard;
   /// A `git commit` or `git merge` step's tree, drawn under its row.
   repo?: import("@demesne/protocol").RepoFlow;
 }

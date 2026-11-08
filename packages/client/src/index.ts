@@ -1,4 +1,4 @@
-import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent} from "@demesne/protocol";
+import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent, FilePreview} from "@demesne/protocol";
 import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
@@ -169,6 +169,13 @@ export class DemesneClient {
   /// The model sub-agents run on (null: the chat's own), and the ones they may.
   async setSubagentOften(often: "less" | "usual" | "more"): Promise<{ model: string | null; often: string; saved: boolean }> {
     return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ often }) });
+  }
+  /// A hand-off (pass 165 A): its record and its diff, or act on it.
+  async handoff(id: string): Promise<{ handoff: { id: string; agent: string; status: string; files: { path: string; added: number; removed: number }[]; checks: string[]; error?: string; root: string }; patch: string }> {
+    return this.request(`/v1/handoffs/${encodeURIComponent(id)}`);
+  }
+  async handoffAct(id: string, action: "apply" | "undo" | "discard"): Promise<{ handoff: { id: string; status: string; error?: string } }> {
+    return this.request(`/v1/handoffs/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ action }) });
   }
   async subagentModel(): Promise<{ model: string | null; often?: string; models: { id: string; provider: string }[] }> {
     return this.request("/v1/subagent-model");
@@ -364,6 +371,10 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/replay?after=${after}&through=${through}`, { signal });
   }
 
+  /// A file for its preview card: relative to the chat's folder, or absolute.
+  async preview(sessionId: string, path: string): Promise<FilePreview> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/preview?${new URLSearchParams({ path })}`);
+  }
   async review(sessionId:string,scope:ReviewScope,turnId?:string):Promise<ReviewResponse>{
     const query=new URLSearchParams({scope});if(turnId)query.set("turn",turnId);
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/review?${query}`);
@@ -546,6 +557,11 @@ export class DemesneClient {
 
   async rewind(sessionId: string, request: RewindSessionRequest): Promise<RewindResponse> {
     return this.request<RewindResponse>(`/v1/sessions/${sessionId}/rewind`, { method: "POST", body: JSON.stringify(request) });
+  }
+
+  /// Stops a sub-agent working in the background of this chat's turn.
+  async stopAgent(sessionId: string, toolCallId: string): Promise<{ stopped: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/agents/stop`, { method: "POST", body: JSON.stringify({ toolCallId }) });
   }
 
   async steer(sessionId: string, request: SteerTurnRequest): Promise<{ steerId: string; turnId: string }> {

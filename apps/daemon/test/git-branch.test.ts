@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   clearGitBranchCache,
+  clearGitSyncCache,
+  detectGitSync,
   detectGitBranch,
   GIT_BRANCH_CACHE_TTL_MS,
   type GitBranchDependencies,
@@ -71,5 +73,25 @@ describe("detectGitBranch", () => {
     state.stdout = "next\n";
     expect(await detectGitBranch("/workspace", state.deps)).toBe("next");
     expect(state.calls).toHaveLength(2);
+  });
+});
+
+describe("detectGitSync", () => {
+  afterEach(() => clearGitSyncCache());
+  test("reads ahead and behind from the upstream count", async () => {
+    const state = fake({ stdout: "1\t3\n" });
+    expect(await detectGitSync("/repo", state.deps)).toEqual({ ahead: 3, behind: 1 });
+    expect(state.calls[0]).toEqual(["git", "-C", "/repo", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"]);
+  });
+  test("is null without an upstream", async () => {
+    const state = fake({ code: 128, stdout: "" });
+    expect(await detectGitSync("/repo", state.deps)).toBeNull();
+  });
+  test("caches briefly", async () => {
+    const state = fake({ stdout: "0\t2" });
+    await detectGitSync("/repo", state.deps);
+    state.now += GIT_BRANCH_CACHE_TTL_MS - 1;
+    await detectGitSync("/repo", state.deps);
+    expect(state.calls.length).toBe(1);
   });
 });

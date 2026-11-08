@@ -11,7 +11,7 @@ export function toolArguments(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 export function toolTarget(name: string, input: Record<string, unknown>): string | undefined {
-  if (name === "subagent") return typeof input.description === "string" ? input.description : undefined;
+  if (name === "subagent" || name === "hand_off") return typeof input.description === "string" ? input.description : undefined;
   // heartbeat: the address a message goes to, or the machine a pairing answers.
   if (name === "heartbeat") return [input.to, input.node_id].find((part): part is string => typeof part === "string" && part.length > 0) ?? (typeof input.action === "string" ? input.action : undefined);
   // session_tools: "run find_definition", "define ts_search".
@@ -27,6 +27,8 @@ export function toolTarget(name: string, input: Record<string, unknown>): string
   if (Array.isArray(input.argv) && input.argv.every((value) => typeof value === "string"))
     return `$ ${[String(input.argv[0] ?? "").split("/").pop(), ...input.argv.slice(1)].join(" ")}`;
   if (typeof input.query === "string") return `"${input.query}"`;
+  // web_fetch: the page's address, without the scheme.
+  if (typeof input.url === "string") return input.url.replace(/^https?:\/\//, "");
   return undefined;
 }
 

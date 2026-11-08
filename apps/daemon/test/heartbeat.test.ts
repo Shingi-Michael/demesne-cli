@@ -173,6 +173,18 @@ describe("HeartbeatBridge", () => {
     return { bridge, turns, release: () => idleWaiters.splice(0).forEach((resolve) => resolve()) };
   }
 
+  test("names who a message goes to: the agent chat behind a local address, or the client", async () => {
+    const daemon = fakeDaemon();
+    const bridge = new HeartbeatBridge({ client: new HeartbeatClient(daemon.path), startTurn: () => {}, waitForIdle: () => Promise.resolve(),
+      agentOf: (sessionId) => sessionId === "codex-chat" ? "codex" : null });
+    const codex = (await bridge.attach("codex-chat", "/tmp/demesne-cli"))!;
+    const plain = (await bridge.attach("plain-chat", "/tmp/demesne-cli"))!;
+    expect(bridge.recipient(codex)).toEqual({ agent: "codex", name: "Codex", project: "demesne-cli" });
+    expect(bridge.recipient(plain)).toEqual({ agent: null, name: "a Demesne chat", project: "demesne-cli" });
+    expect(bridge.recipient("gemini@othernode/garden")).toEqual({ agent: "gemini", name: "Gemini", project: "garden" });
+    bridge.stop();
+  });
+
   test("claims an address, delivers mail as a turn and releases on detach", async () => {
     const daemon = fakeDaemon();
     const { bridge, turns } = bridgeFor(daemon);
@@ -264,7 +276,7 @@ describe("heartbeat tool", () => {
     expect(() => tool.permission({ action: "send", to: "x", performative: "shout" })).toThrow("performative must be");
 
     const sent = JSON.parse(await tool.execute({ action: "send", to: "claude@testnode/heartbeat-k3x9a", performative: "inform", text: "tests \"pass\"\nnow", reply_to: "41" }, context));
-    expect(sent).toMatchObject({ id: "1", result: "sent" });
+    expect(sent).toMatchObject({ id: "1", result: "sent", to: "claude@testnode/heartbeat-k3x9a", agent: "claude", name: "Claude Code", project: "heartbeat" });
     const say = daemon.requests.find((request) => request.command === "say")!;
     expect(say.line).toBe("INFORM#_ ^41 →claude@testnode/heartbeat-k3x9a why:\"tests pass now\"");
     // The default performative is a request, spelled REQ in the daemon's grammar.

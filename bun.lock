@@ -51,6 +51,7 @@
         "highlight.js": "11.12.0",
         "katex": "0.19.0",
         "marked": "18.0.14",
+        "unpdf": "1.8.1",
       },
     },
     "packages/brand": {
@@ -101,6 +102,9 @@
         "@demesne/protocol": "workspace:*",
       },
     },
+    "packages/screen": {
+      "name": "@demesne/screen",
+    },
     "packages/setup": {
       "name": "@demesne/setup",
       "dependencies": {
@@ -148,6 +152,8 @@
     "@demesne/protocol": ["@demesne/protocol@workspace:packages/protocol"],
 
     "@demesne/providers": ["@demesne/providers@workspace:packages/providers"],
+
+    "@demesne/screen": ["@demesne/screen@workspace:packages/screen"],
 
     "@demesne/setup": ["@demesne/setup@workspace:packages/setup"],
 

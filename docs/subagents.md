@@ -6,7 +6,7 @@
 
 The coding agent calls the `subagent` tool with a task label, a self-contained prompt, and optionally a configured model ID. Each invocation gets a fresh context. The parent receives its final report. In the app a sub-agent is one step on the turn's guide, like a read or a command: "Agent · task" with its step count on the right, and clicking it unfolds the sub-agent's own steps one level in (reads folded as Explored, searches and lists as lines) and what it found. Sub-agents run with thinking off, and no thinking of theirs is shown.
 
-Allowed tools are `list_files`, `read_file`, `read_files`, `search_files`, `git_status`, `git_diff`, and `git_history`. Subagents cannot edit files, run commands, ask the human, or spawn more subagents. They are useful for independent investigations, not parallel code changes. [Implementation](../apps/daemon/src/subagent.ts) · [tests](../apps/daemon/test/subagent.test.ts).
+Allowed tools are `list_files`, `read_file`, `read_files`, `search_files`, `git_status`, `git_diff`, `git_history`, `web_search` and `web_fetch`. Subagents cannot edit files, run commands, ask the human, or spawn more subagents. They are useful for independent investigations, not parallel code changes. [Implementation](../apps/daemon/src/subagent.ts) · [tests](../apps/daemon/test/subagent.test.ts).
 
 ```text
 /subagent qwen3.8-27b
@@ -23,6 +23,18 @@ Your agent tools run read-only as sub-agents: Claude Code in plan mode, Codex in
 ## How often
 
 The chat's instructions say when to send sub-agents instead of reading everything itself: once an answer needs more than about four files it hasn't seen, or more than one area of the code, it sends one sub-agent per area in the same round and then reads only the files they point to. When they run on your agent tools, the instructions also say they cost the chat almost nothing. Settings › Models › How often (`[agent] subagent_often`, `DEMESNE_SUBAGENT_OFTEN`) sets it: `less` leaves it to the tool's description (how it used to be), `usual` is the default, `more` delegates past one or two unseen files. `POST /v1/subagent-model` with `{"often": "more"}` changes it live and saves it. To see whether it helps, `bun scripts/delegation-stats.ts <data>/demesne.sqlite --split <time you changed it>` compares sub-agents per turn, files the chat read itself, and input tokens per turn before and after.
+
+## Hand-offs: agents that make changes
+
+Sub-agents only look. A hand-off (`hand_off`) gives a whole change to one of your agent tools instead: Claude Code, Codex or Gemini makes it in its own git worktree beside Drive's, under `.demesne-worktrees`, so your checkout and other agents are untouched. The worktree starts from your project as it is, including uncommitted changes to tracked files, and the project's `node_modules` folders are linked in so checks run at once.
+
+- Claude Code runs in accept-edits mode. It may also run tests, type checks and linters (`HANDOFF_CHECKS` in `agent-cli.ts`) on top of what your own Claude Code settings allow. Codex runs in its workspace-write sandbox. Gemini runs with read and write access to its copy and only the commands your Antigravity settings allow.
+- When the agent finishes, a change card appears under the step. It shows the files with their +/− lines and the checks it ran, and you can open a file to see its diff. The chat gets the report and the diff, and reviews them for you in a few sentences.
+- **Bring it in** applies the change to your working tree. Nothing is committed, and **Undo** takes it back out as long as those files haven't changed since. If your files changed where the change goes, it's refused: ask for changes or discard it.
+- **Ask for changes** puts "Ask … to change hand-off <id>:" in the box. The chat sends your note back with `continue`, to the same agent, its own session and its own copy.
+- **Discard** deletes the worktree.
+
+Auto picks the agent for a change the way it picks sub-agents, with the job kind `fix`, and naming one wins. Hand-offs aren't offered in plan or orchestrate mode, in threads, in Drive's worktrees or outside a git project. An agent never commits, pushes or hands work on. Records live in `<data>/handoffs.json`, and each change's patch is in `<data>/handoffs/<id>.patch`. `GET /v1/handoffs/:id` returns one with its patch, and `POST {action: apply|undo|discard}` acts on it.
 
 ## Choosing the default
 

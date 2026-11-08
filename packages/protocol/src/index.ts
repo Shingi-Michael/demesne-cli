@@ -2,6 +2,7 @@ export const PROTOCOL_VERSION = 1 as const;
 export * from "./drive.ts";
 export * from "./panels.ts";
 export * from "./plan-limits.ts";
+export * from "./file-preview.ts";
 import { isPullRequestUrl } from "./pull-requests.ts";
 
 export type EventType =
@@ -81,6 +82,21 @@ export interface RepoResult {
   totals: { added: number; removed: number };
 }
 export interface RepoFlow { command: "commit" | "merge"; before: RepoSnapshot; after: RepoSnapshot; result?: RepoResult }
+/// A hand-off's change card (pass 165 A): what one of your agent tools
+/// changed in its own worktree. `status` is as the turn left it; the card
+/// asks /v1/handoffs/:id for where it is now.
+/// A deep research run as it goes (research tool): each researcher's
+/// question and who has it (agent null: a sub-agent on the chat's model),
+/// then the judge's check. The window draws it as one quiet line.
+export interface ResearchLane { question: string; agent: "claude" | "codex" | "gemini" | null; state: "running" | "done" | "failed"; pages: number }
+export interface ResearchCheck { claim: string; agent: "claude" | "codex" | "gemini" | null; verdict: "running" | "confirmed" | "refuted" | "unclear" }
+export interface ResearchState {
+  topic: string; phase: "researching" | "judging" | "checking" | "done";
+  pages: number; lanes: ResearchLane[]; checks: ResearchCheck[];
+  agree?: number; disagree?: number; judge: "claude" | "codex" | "gemini" | null;
+}
+
+export interface HandoffCard { id: string; agent: string; status: string; files: { path: string; added: number; removed: number }[]; checks: string[]; error?: string }
 
 export interface ToolFileChange {
   path: string;
@@ -378,6 +394,20 @@ export interface Turn {
 
 export interface TurnAttachment { id: string; filename: string; width: number; height: number }
 
+/// A current file that a completed read in this turn actually returned.
+/// IDs are scoped to the session/turn; the content route never accepts paths.
+export interface SourceDocument {
+  id: string;
+  filename: string;
+  path: string;
+  mimeType: "application/pdf" | "text/plain";
+  byteLength: number | null;
+  revision: string | null;
+  issue: "missing" | "unavailable" | "unsupported" | "too_large" | null;
+}
+
+export interface SourceDocumentList { documents: SourceDocument[] }
+
 export interface SessionCheckpoint {
   id: string;
   sessionId: string;
@@ -416,6 +446,9 @@ export interface Workspace {
   /// checkout. Populated by the daemon when session state is read; absent for
   /// non-repositories and detached HEADs.
   gitBranch?: string;
+  /// Commits the branch is ahead of and behind its upstream; absent without one.
+  gitAhead?: number;
+  gitBehind?: number;
 }
 
 export interface PendingPermissionSnapshot {
@@ -617,6 +650,9 @@ export interface SubmitTurnRequest {
   content: string;
   /// Images uploaded to this session's artifacts first (at most 6).
   attachmentIds?: string[];
+  /// Opt in to requiring actual pixel input, rather than attachment names.
+  /// The daemon rechecks the turn's effective provider before consuming uploads.
+  requireImageInput?: boolean;
   permissionMode?: PermissionMode;
   thinkingEnabled?: boolean;
   planOnly?: boolean;
@@ -627,6 +663,18 @@ export interface SubmitTurnRequest {
 export interface SubmitTurnResponse {
   turn: Turn;
   eventId: number;
+}
+
+export interface SessionInputCapabilities {
+  sessionId: string;
+  provider: string;
+  model: string;
+  images: {
+    enabled: boolean;
+    mimeTypes: string[];
+    maxBytes: number;
+    maxCount: number;
+  };
 }
 
 export interface CancelTurnResponse {
@@ -872,6 +920,9 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
   if (!Array.isArray(attachmentIds) || attachmentIds.length > 6 || attachmentIds.some((id) => typeof id !== "string" || !id || id.length > 64)) {
     throw new ProtocolValidationError("attachmentIds must be at most 6 artifact ids");
   }
+  if (value.requireImageInput !== undefined && typeof value.requireImageInput !== "boolean") {
+    throw new ProtocolValidationError("requireImageInput must be a boolean");
+  }
   return {
     content,
     ...(value.permissionMode ? { permissionMode: value.permissionMode } : {}),
@@ -879,6 +930,7 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
     ...(value.planOnly !== undefined ? { planOnly: value.planOnly } : {}),
     ...(value.fromDrive ? { fromDrive: true } : {}),
     ...(attachmentIds.length ? { attachmentIds } : {}),
+    ...(value.requireImageInput !== undefined ? { requireImageInput: value.requireImageInput } : {}),
   };
 }
 
@@ -1071,6 +1123,7 @@ export * from "./next-prompt.ts";
 export * from "./heartbeat-mail.ts";
 export * from "./drive-report.ts";
 export * from "./thread-report.ts";
+export * from "./foundry-try.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 

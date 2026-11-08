@@ -59,6 +59,8 @@ try {
   await page.locator("textarea").fill("Make me a trip checklist that remembers what I tick");
   await page.locator("textarea").press("Enter");
   const pane = page.locator("#pane"), frame = pane.frameLocator("iframe.pane-frame");
+  // The page arrives as its link in the chat; opening it shows the pane.
+  await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
   await frame.locator("body[data-ready='1']").waitFor();
   assert.equal(await frame.locator("#count").textContent(), "0 of 2 done");
   const artifact = (await f.client.foundryList()).artifacts[0]!;

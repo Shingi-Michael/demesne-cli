@@ -1,10 +1,9 @@
 /// The pane: one Foundry artifact open beside the conversation, the way
 /// Claude shows an artifact. The window splits, the page fills the right
-/// side edge to edge, and one line above it carries everything: the title
-/// (it opens the page in Foundry), the version arrows, and icons for code,
-/// phone width, export and ×. Copy is there only in code view, and "Make
-/// this the latest" only on an older version; revising is the composer's
-/// job. The pane is per chat and remembers whether it was open. A page that named
+/// side edge to edge, and one line above it carries only the title (it opens
+/// the page in Foundry), the version arrows, point at a part, Play for a deck
+/// and ×. Export and Build this live on the Foundry page; revising is the
+/// composer's job (pass 189). The pane is per chat and remembers whether it was open. A page that named
 /// its motions (demesne.motion, the kit's runtime) gets one more thin line
 /// under the page: play or pause, a scrubber, the motions by name, half
 /// speed and Replay; the frame and the pane talk by postMessage.
@@ -12,36 +11,26 @@ import type { FoundryArtifactDetail } from "@demesne/protocol";
 import { frameURL, KIND_WORD, READY_KIND } from "./foundry-page.ts";
 import { dayWord } from "./chats-page.ts";
 
-export interface PaneState { id: string; version: number; view: "preview" | "code"; phone: boolean }
+export interface PaneState { id: string; version: number }
 
 export interface PaneOptions {
   read(id: string, version?: number): Promise<FoundryArtifactDetail>;
   markdown(source: string): string;
-  copy(text: string): Promise<unknown>;
-  export(id: string, version: number): Promise<unknown>;
-  /// Make this the latest: an older version saved again as the newest.
-  restore(detail: FoundryArtifactDetail): Promise<FoundryArtifactDetail>;
   openFoundry(id: string, version: number): void;
-  notice(text: string): void;
   /// The pane opened, closed or moved to another version.
   changed(): void;
-  /// A document drawn in the pane assembles on its first show (assemble.ts);
-  /// `previousHTML` is the version before it, for a revision.
-  assembleDocument?(root: HTMLElement, previousHTML: string | null): void;
   /// The page's Pick button chose one of its options ("B · Joined").
   pick?(option: string): void;
   /// Point at a part: the picker runs in the pane's frame (named
   /// "pane-foundry"); what's clicked rides with the next message.
   point?(): void;
-  /// Build this: the chat makes the page real code.
-  build?(detail: FoundryArtifactDetail, version: number): void;
 }
 
 /** The pane's frame, by name, so Point at it can find it. */
 export const PANE_FRAME = "pane-foundry";
 
-/** The frame's address; the first show of a version asks for the assembly. */
-export const frameSource = (id: string, version: number, assemble: boolean) => `${frameURL(id, version)}${assemble ? "&assemble=1" : ""}`;
+/** The frame's address; a new version's first show asks for what changed to be outlined. */
+export const frameSource = (id: string, version: number, first: boolean) => `${frameURL(id, version)}${first ? "&first=1" : ""}`;
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -55,16 +44,9 @@ export function neighbours(versions: readonly { version: number }[], current: nu
   return { earlier: at > 0 ? numbers[at - 1] : null, later: at >= 0 && at < numbers.length - 1 ? numbers[at + 1] : null, latest: numbers.at(-1) ?? current };
 }
 
-/// The one line above the page while Foundry is still writing it: the title
-/// alone, and ×.
-export function paneMakingHead(title: string) {
-  return `<b class="pane-title" title="${h(title)}">${h(title)}</b><span class="pane-making">making…</span><span class="sp"></span>`
-    + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)" class="pane-ico"');
-}
-
 /// The one line above the page: the title, the version and its arrows (the
-/// version's note on hover), and the icons. An error takes the middle.
-export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState, error = "", build = false, pointing: boolean | null = null) {
+/// version's note on hover), point, Play for a deck and ×. An error takes the middle.
+export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState, error = "", pointing: boolean | null = null) {
   const title = detail?.title ?? (error ? "Couldn't open it" : "Loading…");
   const near = detail ? neighbours(detail.versions, state.version) : { earlier: null, later: null, latest: state.version };
   const version = detail?.versions.find((item) => item.version === state.version);
@@ -72,19 +54,12 @@ export function paneHead(detail: FoundryArtifactDetail | null, state: PaneState,
   const arrow = (action: string, to: number | null, label: string, path: string) =>
     button(action, icon(path), ` aria-label="${label}"${to === null ? " disabled" : ` title="v${to}"`}`);
   const tool = (action: string, label: string, path: string, extra = "") => button(action, icon(path), ` aria-label="${label}" title="${label}"${extra} class="pane-ico"`);
-  const code = state.view === "code";
   return (detail ? button("foundry", h(title), ` class="pane-title" title="Open in Foundry"`) : `<b class="pane-title">${h(title)}</b>`)
     + `<span class="pane-vers">${arrow("earlier", near.earlier, "Earlier version", '<path d="m15 6-6 6 6 6"/>')}<span class="pane-v"${words ? ` title="${h(words)}"` : ""}>v${state.version}</span>${arrow("later", near.later, "Later version", '<path d="m9 6 6 6-6 6"/>')}</span>`
     + (error ? `<span class="bad" role="alert" title="${h(error)}">${h(error)}</span>` : "")
     + `<span class="sp"></span>`
-    + (detail && state.version !== near.latest ? button("restore", "Make this the latest", ' class="pane-word"') : "")
-    + (detail?.kind === "html" && build ? button("build", "Build this", ' class="pane-word pane-build" title="Turn this page into real code in the chat\'s project"') : "")
-    + (detail && code ? tool("copy", "Copy the source", '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/>') : "")
-    + (detail && pointing !== null && !code && (detail.kind === "html" || READY_KIND.has(detail.kind)) ? tool("point", pointing ? "Stop pointing (Esc)" : "Point at a part to change it", '<circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.5"/>', ` aria-pressed="${pointing}"`) : "")
-    + (detail?.kind === "deck" && !code ? tool("play", "Play the deck", '<path d="M8 5v14l11-7z"/>') : "")
-    + (detail ? tool("code", "Code", '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', ` aria-pressed="${code}"`) : "")
-    + (detail && (detail.kind === "html" || READY_KIND.has(detail.kind)) ? tool("phone", "Phone width", '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>', ` aria-pressed="${state.phone}"`) : "")
-    + (detail ? tool("export", "Export the file", '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>') : "")
+    + (detail && pointing !== null && (detail.kind === "html" || READY_KIND.has(detail.kind)) ? tool("point", pointing ? "Stop pointing (Esc)" : "Point at a part to change it", '<circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.5"/>', ` aria-pressed="${pointing}"`) : "")
+    + (detail?.kind === "deck" ? tool("play", "Play the deck", '<path d="M8 5v14l11-7z"/>') : "")
     + button("close", icon('<path d="M6 6l12 12M18 6 6 18"/>'), ' aria-label="Close" title="Close (Esc)" class="pane-ico"');
 }
 
@@ -153,16 +128,8 @@ export class FoundryPane {
   private session = "";
   private frameKey = "";
   private loading = 0;
-  /// The version whose first show assembles the page, until its frame is made.
-  private assembleKey = "";
-  /// A document's last rendered HTML, so a revision can settle only what changed.
-  private lastDocument: { id: string; html: string } | null = null;
-  /// What Foundry is writing right now, shown while the pane has nothing open.
-  private makingTitle: string | null = null;
-  /// Artifacts this chat has shown chips for; a new one opens the pane,
-  /// the way Claude opens an artifact as it is made. History never does.
-  private readonly seen = new Set<string>();
-  private primed = false;
+  /// A new version's first show, until its frame is made: what changed gets outlined.
+  private firstKey = "";
   /// The motions the open page named, the last one that moved, and whether
   /// the line runs them at half speed.
   private motions: PaneMotion[] = [];
@@ -171,14 +138,12 @@ export class FoundryPane {
   private slow = false;
   private readonly head: HTMLElement;
   private readonly stage: HTMLElement;
-  private readonly code: HTMLPreElement;
   private readonly motion: HTMLElement;
 
   constructor(readonly root: HTMLElement, private readonly options: PaneOptions) {
-    root.innerHTML = '<div class="pane-head"></div><div class="pane-body"><div class="pane-stage"></div><pre class="pane-code" tabindex="0" aria-label="Source" hidden></pre></div><div class="pane-motion" hidden></div>';
+    root.innerHTML = '<div class="pane-head"></div><div class="pane-body"><div class="pane-stage"></div></div><div class="pane-motion" hidden></div>';
     this.head = root.querySelector(".pane-head")!;
     this.stage = root.querySelector(".pane-stage")!;
-    this.code = root.querySelector(".pane-code")!;
     this.motion = root.querySelector(".pane-motion")!;
     root.addEventListener("click", (event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>("[data-pane]");
@@ -216,40 +181,26 @@ export class FoundryPane {
     });
   }
 
-  get open() { return this.state !== null || this.makingTitle !== null; }
+  get open() { return this.state !== null; }
   isOpen(id: string, version?: number) { return !!this.state && this.state.id === id && (version === undefined || this.state.version === version); }
-
-  /// Foundry is writing a page: the pane opens on its title while the words
-  /// arrive, so the page can assemble in front of you when they're done. With
-  /// nothing being written, a pane that was only waiting closes again. A pane
-  /// already showing an artifact keeps it.
-  making(title: string | null) {
-    if (this.state) { this.makingTitle = null; return; }
-    if (title === this.makingTitle) return;
-    this.makingTitle = title;
-    this.render();
-    this.options.changed();
-  }
 
   /// Each chat keeps its own pane; switching chats puts the other one back.
   switchSession(id: string) {
     if (id === this.session) return;
     this.session = id;
-    this.state = null; this.detail = null; this.error = ""; this.frameKey = ""; this.assembleKey = ""; this.lastDocument = null; this.makingTitle = null;
-    this.seen.clear(); this.primed = false;
+    this.state = null; this.detail = null; this.error = ""; this.frameKey = ""; this.firstKey = "";
     let saved: PaneState | null = null;
     try { saved = id ? JSON.parse(localStorage.getItem(`demesne-pane:${id}`) ?? "null") : null; } catch {}
-    if (saved && typeof saved.id === "string" && Number.isSafeInteger(saved.version)) void this.show(saved.id, saved.version, saved);
+    if (saved && typeof saved.id === "string" && Number.isSafeInteger(saved.version)) void this.show(saved.id, saved.version);
     else this.render();
   }
 
-  /// `assemble`: this is the version's first show, so the page puts itself together.
-  async show(id: string, version?: number, keep?: Partial<PaneState>, assemble = false) {
+  /// `first`: this is the version's first show, so what changed is outlined.
+  async show(id: string, version?: number, first = false) {
     const same = this.state?.id === id;
-    this.state = { id, version: version ?? this.state?.version ?? 0, view: keep?.view ?? (same ? this.state!.view : "preview"), phone: keep?.phone ?? (same ? this.state!.phone : false) };
+    this.state = { id, version: version ?? this.state?.version ?? 0 };
     if (!same) { this.detail = null; this.error = ""; }
-    this.makingTitle = null;
-    if (assemble && version !== undefined) this.assembleKey = `${id}:${version}`;
+    if (first && version !== undefined) this.firstKey = `${id}:${version}`;
     this.render();
     const turn = ++this.loading;
     try {
@@ -269,26 +220,22 @@ export class FoundryPane {
 
   close() {
     this.play(false);
-    if (!this.state && this.makingTitle === null) return;
-    this.state = null; this.detail = null; this.error = ""; this.frameKey = ""; this.assembleKey = ""; this.makingTitle = null;
+    if (!this.state) return;
+    this.state = null; this.detail = null; this.error = ""; this.frameKey = ""; this.firstKey = "";
     this.remember();
     this.render();
     this.options.changed();
   }
 
-  /// Something new made in this chat opens the pane on it; a newer version of
-  /// the open artifact moves the pane onto it, as long as it was on the latest.
+  /// The pane opens only when you open a page (its link in the chat): Foundry
+  /// makes and tries it out of sight. A newer version of the open artifact
+  /// moves the pane onto it, as long as it was on the latest.
   refresh(artifacts: readonly { id: string; version: number }[]) {
-    const fresh = artifacts.filter((item) => this.primed && !this.seen.has(`${item.id}:${item.version}`));
-    for (const item of artifacts) this.seen.add(`${item.id}:${item.version}`);
-    this.primed = true;
-    const open = this.state, made = fresh.at(-1);
-    if (!open) { if (made) void this.show(made.id, made.version, undefined, true); return; }
-    if (!this.detail) return;
+    const open = this.state;
+    if (!open || !this.detail) return;
     const latest = neighbours(this.detail.versions, open.version).latest;
     const newer = artifacts.find((item) => item.id === open.id && item.version > latest);
-    if (newer && open.version === latest) void this.show(open.id, newer.version, undefined, true);
-    else if (made && made.id !== open.id) void this.show(made.id, made.version, undefined, true);
+    if (newer && open.version === latest) void this.show(open.id, newer.version, true);
   }
 
   /// The pane after a delete elsewhere: gone with the artifact.
@@ -318,22 +265,11 @@ export class FoundryPane {
     if (action === "mo-speed") { this.slow = !this.slow; this.renderMotion(); return this.tell({ action: "speed", value: this.slow ? 0.5 : 1 }); }
     if (action === "play") return this.play(true);
     if (action === "point") return this.options.point?.();
-    if (action === "code") { state.view = state.view === "code" ? "preview" : "code"; this.remember(); return this.render(); }
-    if (action === "phone") { state.phone = !state.phone; this.remember(); return this.render(); }
     if (!detail) return;
     const near = neighbours(detail.versions, state.version);
     if (action === "earlier" && near.earlier !== null) return this.show(state.id, near.earlier);
     if (action === "later" && near.later !== null) return this.show(state.id, near.later);
-    try {
-      if (action === "copy") { await this.options.copy(detail.source); this.options.notice("Copied the source"); }
-      else if (action === "export") await this.options.export(state.id, state.version);
-      else if (action === "foundry") this.options.openFoundry(state.id, state.version);
-      else if (action === "build") this.options.build?.(detail, state.version);
-      else if (action === "restore") { const saved = await this.options.restore(detail); await this.show(saved.id, saved.version); }
-    } catch (reason) {
-      this.error = reason instanceof Error ? reason.message : String(reason);
-      this.render();
-    }
+    if (action === "foundry") this.options.openFoundry(state.id, state.version);
   }
 
   /// The picker is running in the frame: the crosshair shows pressed.
@@ -341,7 +277,7 @@ export class FoundryPane {
   setPointing(on: boolean) {
     if (on === this.pointing) return;
     this.pointing = on;
-    if (this.state) this.head.innerHTML = paneHead(this.detail, this.state, this.error, Boolean(this.options.build), this.options.point ? on : null);
+    if (this.state) this.head.innerHTML = paneHead(this.detail, this.state, this.error, this.options.point ? on : null);
   }
 
   /// Play a deck: the pane covers the whole window and the deck shows one
@@ -361,7 +297,7 @@ export class FoundryPane {
   /// The motion line as last built, with its time and scrubber at zero.
   private motionShape = "";
   private renderMotion() {
-    const line = this.state && this.state.view === "preview" ? motionLine(this.motions, this.motionState, this.motionCurrent, this.slow) : "";
+    const line = this.state ? motionLine(this.motions, this.motionState, this.motionCurrent, this.slow) : "";
     // The scrubber is redrawn only when it isn't being held, so a drag isn't fought.
     const held = this.motion.querySelector<HTMLInputElement>(".mo-scrub:active");
     if (held && line) { const time = this.motion.querySelector(".mo-time"); if (time && this.motionState) time.textContent = `${seconds(this.motionState.currentTime)} / ${seconds(this.motionState.duration)}`; return; }
@@ -386,21 +322,10 @@ export class FoundryPane {
 
   private render() {
     const state = this.state, detail = this.detail;
-    this.root.hidden = !state && this.makingTitle === null;
-    if (!state) {
-      this.stage.replaceChildren(); this.frameKey = ""; this.forgetMotions();
-      if (this.makingTitle !== null) {
-        this.head.innerHTML = paneMakingHead(this.makingTitle);
-        this.code.hidden = true; this.stage.hidden = false; this.stage.className = "pane-stage";
-      }
-      return;
-    }
-    this.head.innerHTML = paneHead(detail, state, this.error, Boolean(this.options.build), this.options.point ? this.pointing : null);
-    const code = state.view === "code";
-    this.code.hidden = !code;
-    this.stage.hidden = code;
-    this.stage.className = `pane-stage${detail?.kind === "svg" ? " graphic" : ""}${detail && (detail.kind === "html" || READY_KIND.has(detail.kind)) && state.phone ? " phone" : ""}`;
-    if (code) this.code.textContent = detail?.source ?? "";
+    this.root.hidden = !state;
+    if (!state) { this.stage.replaceChildren(); this.frameKey = ""; this.forgetMotions(); return; }
+    this.head.innerHTML = paneHead(detail, state, this.error, this.options.point ? this.pointing : null);
+    this.stage.className = `pane-stage${detail?.kind === "svg" ? " graphic" : ""}`;
     this.renderMotion();
     if (!detail) { this.stage.replaceChildren(); this.frameKey = ""; this.forgetMotions(); return; }
     const key = `${detail.kind}:${detail.id}:${state.version}`;
@@ -408,23 +333,20 @@ export class FoundryPane {
     this.frameKey = key;
     this.play(false);
     this.forgetMotions();
-    const assemble = this.assembleKey === `${detail.id}:${state.version}`;
-    this.assembleKey = "";
+    const first = this.firstKey === `${detail.id}:${state.version}`;
+    this.firstKey = "";
     if (detail.kind === "markdown") {
       const article = document.createElement("article");
       article.className = "pane-doc markdown";
       article.innerHTML = this.options.markdown(detail.source);
       this.stage.replaceChildren(article);
-      const previous = this.lastDocument?.id === detail.id ? this.lastDocument.html : null;
-      this.lastDocument = { id: detail.id, html: article.innerHTML };
-      if (assemble) this.options.assembleDocument?.(article, previous);
       return;
     }
     // The frame is made once per version: remaking it would reset the page.
     const frame = document.createElement("iframe");
     frame.className = "pane-frame";
     frame.name = PANE_FRAME;
-    frame.src = frameSource(detail.id, state.version, assemble);
+    frame.src = frameSource(detail.id, state.version, first);
     frame.title = `${detail.title} ${KIND_WORD[detail.kind].toLowerCase()}`;
     frame.setAttribute("sandbox", "allow-scripts allow-forms allow-modals");
     frame.referrerPolicy = "no-referrer";

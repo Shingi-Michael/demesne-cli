@@ -1,7 +1,7 @@
 /** Sub-agents on your agent tools (pass 162 A) against the real Electron app:
  * a turn sends two sub-agents, Auto runs them on Claude Code and Codex, and
- * each shows as a row with the tool's face, "auto", and what it's on now;
- * the sidebar shows both helping. bun scripts/check-cli-subagents.ts [dir];
+ * the round shows as one crew line with both faces and the newest step
+ * (pass 183 A); the sidebar shows both helping. bun scripts/check-cli-subagents.ts [dir];
  * run bun scripts/prepare-desktop.ts first. */
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -68,24 +68,31 @@ try {
   await editor.click();
   await page.keyboard.type("Why does the Foundry pane flash when I switch chats?");
   await page.keyboard.press("Enter");
-  await page.locator(".agent-now").first().waitFor({ timeout: 20_000 });
+  // Sub-agents at work (pass 183 A): the round is one crew line with both faces.
+  const crew = page.locator(".crew-row").last();
+  await crew.waitFor({ timeout: 20_000 });
   await page.waitForTimeout(2200);
-  const faces = await page.locator(".tool-row .step-face").evaluateAll((items) => items.map((item) => item.getAttribute("data-provider")));
-  expect(faces.includes("claude") && faces.includes("codex"), `rows wear Claude Code's and Codex's faces (${faces.join(", ")})`);
-  expect(await page.locator(".tool-row .auto-chip").count() === 2, "both say auto");
-  expect(await page.locator(".agent-now").count() === 2, "each running row says what it's on now");
+  const faces = await crew.locator(".agent-face").evaluateAll((items) => items.map((item) => item.getAttribute("data-provider")));
+  expect(faces.includes("claude") && faces.includes("codex"), `the line wears Claude Code's and Codex's faces (${faces.join(", ")})`);
+  expect((await crew.innerText()).includes("2 agents working"), "it says 2 agents working");
+  expect(await page.locator(".crew-row").count() === 1, "one line for both");
+  expect(/Read|Ran|Searched/.test(await crew.locator(".crew-now").innerText()), "it says the newest step either took");
   const helping = await page.locator(".sidebar-housed-row", { hasText: "helping" }).count();
   expect(helping === 2, `the sidebar shows both helping (${helping})`);
   await page.screenshot({ path: join(output, "running.png") });
   await page.getByText("so it reloads").first().waitFor({ timeout: 30_000 });
   await page.waitForTimeout(500);
-  expect(await page.locator(".agent-now").count() === 0, "the now lines go when they finish");
   expect(await page.locator(".sidebar-housed-row", { hasText: "helping" }).count() === 0, "the sidebar stops saying helping");
   await page.locator(".receipt-steps").last().click();
-  await page.locator(".steps .tool-row", { hasText: "Codex" }).first().click();
-  await page.locator(".agent-why").first().waitFor({ timeout: 5_000 });
-  expect((await page.locator(".agent-why").first().innerText()).startsWith("Why Codex:"), "unfolding says why Codex");
+  const done = page.locator(".steps .crew-row").last();
+  expect((await done.innerText()).includes("2 agents found it"), "done: 2 agents found it");
+  await done.click();
+  await page.locator(".steps .crew-line", { hasText: "Trace a chat switch" }).first().waitFor({ timeout: 5_000 });
+  expect(await page.locator(".steps .crew-said").count() === 2, "a line each says what it found");
   await page.screenshot({ path: join(output, "done-open.png") });
+  await page.locator(".steps .crew-line", { hasText: "Trace a chat switch" }).first().click();
+  await page.locator(".agent-why").first().waitFor({ timeout: 5_000 });
+  expect((await page.locator(".agent-why").first().innerText()).startsWith("Why Codex:"), "opening Codex's line says why Codex");
 } catch (error) {
   failures.push(String(error));
   console.log("FAIL", error);

@@ -264,6 +264,8 @@ export class WorkspaceHost {
   verificationFingerprint: WorkspaceFingerprint | null = null;
   processesError: string | null = null;
   reviewRevision = 0;
+  /// Files a preview card showed, which Open may hand to their own app.
+  private previewed = new Set<string>();
   private reviewCache = new Map<
     string,
     import("@demesne/protocol").ReviewResponse
@@ -1691,7 +1693,7 @@ export class WorkspaceHost {
     // kept for callers that take over explicitly; typing no longer sends it).
     // Clicking, navigating, opening panels and reading leave it running.
     // A mission in the background keeps going while you talk in your own chat.
-    if (method === "manual" || (["submit", "plan-submit", "themefy", "foundry-create", "foundry-make"].includes(method) && (!this.driveSession || this.inDriveHome))) {
+    if (method === "manual" || (["submit", "plan-submit", "themefy", "foundry-create"].includes(method) && (!this.driveSession || this.inDriveHome))) {
       this.onManual?.();
       this.drive?.agent.intervene();
     }
@@ -1972,6 +1974,27 @@ export class WorkspaceHost {
       await this.refreshFiles();
       return this.files;
     }
+    // Stop on a background sub-agent's line (pass 190 A).
+    if (method === "stop-agent") {
+      if (!this.current) throw new Error("Choose a session first.");
+      await this.client.stopAgent(this.current.session.id, string(args.toolCallId, "agent", 200));
+      return;
+    }
+    // A file for its preview card (pass 188 A).
+    if (method === "file-preview") {
+      if (!this.current) throw new Error("Choose a session first.");
+      const preview = await this.client.preview(this.current.session.id, string(args.path, "path", 4000));
+      this.previewed.add(preview.absolute);
+      return preview;
+    }
+    // Opens a previewed file in its own app: only a file the daemon just
+    // previewed, so a page can't open anything else.
+    if (method === "open-preview") {
+      const absolute = string(args.absolute, "file", 4000);
+      if (!this.previewed.has(absolute)) throw new Error("Preview the file first");
+      await this.open(absolute);
+      return;
+    }
     if (method === "file-edit-details") {
       const turnId = string(args.turnId, "turn id", 200);
       const toolCallId = string(args.toolCallId, "tool call id", 200);
@@ -2164,6 +2187,14 @@ export class WorkspaceHost {
     // Foundry: what the agent made. The list and a source are read by the
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
+    // A picture a tool took this chat (look_at_page), for its step in the turn.
+    if (method === "tool-picture") {
+      const id = string(args.id, "picture", 64);
+      if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("Invalid picture");
+      const artifact = await this.client.getArtifact(String(args.sessionId), id);
+      const bytes = await this.client.artifactContent(artifact, "original");
+      return `data:${/^image\/(png|jpeg|webp|gif)$/.test(artifact.mimeType) ? artifact.mimeType : "image/png"};base64,${Buffer.from(bytes).toString("base64")}`;
+    }
     if (method === "foundry-get") return this.client.foundryGet(string(args.id, "artifact", 200), typeof args.version === "number" && Number.isSafeInteger(args.version) && args.version > 0 ? args.version : undefined);
     if (method === "foundry-data") return this.client.foundryData(string(args.id, "artifact", 200));
     if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);
@@ -2175,20 +2206,6 @@ export class WorkspaceHost {
       const text = string(args.text, "request", 4000).trim();
       if (!text) throw new Error("Describe what to make");
       return this.submit(`Foundry: ${text}`);
-    }
-    // Make something: a new chat in this window's place, asked to use Foundry.
-    if (method === "foundry-make") {
-      const text = string(args.text, "request", 4000).trim();
-      if (!text) throw new Error("Describe what to make");
-      const plain = Boolean(this.current && !this.current.session.workspace);
-      await this.newSession(undefined, { plain, reuse: true });
-      await this.submit(`Create in Foundry: ${text}`, false, "ask");
-      return this.snapshot();
-    }
-    // Revise: the composer of the open chat gets a line naming the artifact.
-    if (method === "foundry-revise") {
-      this.carryDraft(`Revise the Foundry artifact "${string(args.title, "title", 200)}" (id ${string(args.id, "artifact", 200)}): `);
-      return;
     }
     // Customize: this project's instructions, commands and workflows, read
     // and written in place; a plain chat has only yours.
@@ -2315,6 +2332,14 @@ export class WorkspaceHost {
       this.reloadSettings();
       if (spec.restart) this.restartFor.add(key);
       return this.settingsInfo();
+    }
+    if (method === "handoff" || method === "handoff-act") {
+      const id = typeof args.id === "string" && /^[a-z0-9-]{1,40}$/.test(args.id) ? args.id : null;
+      if (!id) throw new Error("Invalid hand-off");
+      if (method === "handoff") return this.client.handoff(id);
+      const action = args.action;
+      if (action !== "apply" && action !== "undo" && action !== "discard") throw new Error("Invalid value");
+      return this.client.handoffAct(id, action);
     }
     if (method === "subagent-often") {
       const often = args.often;

@@ -10,8 +10,9 @@ import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { isReadyKind } from "./foundry-kinds.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { startCaptureKeys } from "./capture-keys.ts";
+import { githubToken, installFor, Updater } from "./updater.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -22,6 +23,8 @@ if (lookJob) runFoundryLook(lookJob);
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
+/// Stops the capture keys (capture-keys.ts) when the app quits.
+let stopCaptureKeys: (() => void) | undefined;
 let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
@@ -42,6 +45,7 @@ async function quit() {
   log("exit requested");
   try { unlinkSync(join(homedir(), ".demesne", "desktop.pid")); } catch {}
   updater?.stop();
+  stopCaptureKeys?.();
   await backend?.close();
   exited = true;
   app.quit();
@@ -73,7 +77,11 @@ if (!lookJob) void app.whenReady().then(async () => {
     install: installFor(process.platform, process.arch, process.execPath), current: app.getVersion(), release: releaseBuild,
     dir: join(app.getPath("userData"), "updates"), pid: process.pid,
     relaunch: [process.execPath, ...(app.commandLine.hasSwitch("no-sandbox") ? ["--no-sandbox"] : []), ...(userData && isAbsolute(userData) ? [`--user-data-dir=${userData}`] : [])],
-    fetch: (url, init) => net.fetch(url, init), emit: status => emit("demesne:app-update", status), log, quit: () => void quit(),
+    // A request with the GitHub token goes through Node's fetch, which drops
+    // the token when GitHub redirects a download to its signed file link;
+    // Electron's keeps it, and can't follow a redirect by hand.
+    fetch: (url, init) => init?.headers?.Authorization ? fetch(url, init) : net.fetch(url, init), emit: status => emit("demesne:app-update", status), log, quit: () => void quit(),
+    token: () => githubToken(),
   });
   if (updater.status.state === "off") log(`Updates off: ${updater.status.why}.`);
   // A download finished last time: it goes in before the window opens.
@@ -182,13 +190,8 @@ if (!lookJob) void app.whenReady().then(async () => {
   // Foundry: an artifact renders in its own frame, served here with a policy
   // that allows only pinned libraries and fonts from a short list of hosts;
   // the frame is sandboxed without the app's origin.
-  // The first show of a version carries ?assemble=1: the page is served with
-  // anime.js (bundled with the app, never fetched) and the assembly script,
-  // and a revision gets the version before it to find what changed. A page
-  // that loads the kit's anime.js moves by itself and is served plain: the
-  // assembly animating the same pieces would cancel the page's own motion
-  // and leave it faded.
-  let assembleLibrary: string | undefined;
+  // The first show of a version carries ?first=1: a revision gets the
+  // version before it, to outline what changed.
   const kitFile = (name: string) => { const file = FOUNDRY_KIT[name]!; return Buffer.concat([readFileSync(join(base, "ui", file.path)), ...(file.then ? [Buffer.from("\n"), readFileSync(join(base, "ui", file.then))] : [])]); };
   // Pages that remember: each page Demesne shows gets a key made from its id
   // and a secret that lives only as long as the app, so a page can reach its
@@ -218,19 +221,13 @@ if (!lookJob) void app.whenReady().then(async () => {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
       const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
       const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number };
-      // A new version's first show: the previous version rides along, for the
-      // assembly (a page that doesn't move by itself) and for outlining what changed.
-      const first = url.searchParams.get("assemble") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
+      // A new version's first show: the previous version rides along, for outlining what changed.
+      const first = url.searchParams.get("first") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
       let before: { kind: string; source: string; title: string } | null = null;
       if (first && drawn && found.version > 1) {
         try { before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string; title: string }; } catch {}
       }
-      let assembly: FoundryAssembly | undefined;
-      if (first && !(found.kind === "html" && found.source.includes(FOUNDRY_KIT_SCRIPT)) && !isReadyKind(found.kind)) {
-        assembleLibrary ??= readFileSync(join(base, "ui", "vendor", "anime.umd.min.js"), "utf8");
-        assembly = { library: assembleLibrary, previous: found.kind === "html" && before?.kind === "html" ? before.source : null };
-      }
-      let page = foundryDocument(found.kind, found.source, found.title, assembly);
+      let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
       if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
@@ -290,7 +287,13 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
-    if (method === "desktop-ready") { window?.show(); window?.focus(); launchToFront(); if (updater && !readied) { readied = true; updater.started(); updater.schedule(); } return null; }
+    if (method === "desktop-ready") {
+      window?.show(); window?.focus(); launchToFront();
+      if (updater && !readied) { readied = true; updater.started(); updater.schedule(); }
+      // The capture keys start once the page can take a screenshot card.
+      stopCaptureKeys ??= startCaptureKeys({ window: () => window, emit: value => emit("demesne:desktop-action", value), log, cacheDir: join(app.getPath("userData"), "screen") });
+      return null;
+    }
     // The release line and Settings: where an update stands, Restart, and the switch.
     if (method === "desktop-update") {
       const action = (args as Record<string, unknown>).action;

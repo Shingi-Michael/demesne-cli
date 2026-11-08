@@ -28,17 +28,25 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryPage, type FoundryUi } from "./foundry-page.ts";
-import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
+import { foundryPage } from "./foundry-page.ts";
+import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
+import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
+import { waitingFor, waitRow } from "./wait-row.ts";
+import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
+import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
+import { researchRowHTML } from "./research-row.ts";
+import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
+import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
+import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
+import { previewable, type FilePreview } from "@demesne/protocol";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
 import { FoundryPane, PANE_FRAME, buildRequest } from "./foundry-pane.ts";
-import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
@@ -154,21 +162,36 @@ function workingLine(line: WorkingLine, run: WorkspaceRun) {
   const steps = tools(run), latest = steps.findLast((tool) => tool.state === "running" || tool.waiting);
   const fixed = pendingQuestion() ? "Waiting for your answer"
     : latest?.waiting ? `Waiting for your approval${latest.name === "run_command" ? "" : ` · ${verb(latest)}`}`
-      : latest?.drafting ? "Writing a command…" : undefined;
+      : latest?.drafting ? "Writing a command…"
+        : latest?.name === "wait_for" && latest.state === "running" ? `Waiting for ${waitingFor(latest.input.pattern)}`
+        : latest?.name === "look_at_page" && latest.state === "running" ? `Looking at ${pageName(latest.input.url)}`
+        : latest?.name === "agents" && latest.state === "running" && latest.input.action === "wait" ? `Waiting for ${backgroundNames(run, latest.input.ids)}` : undefined;
   const thinking = run.entries.findLast((entry) => entry.type === "reasoning");
   line.update(workingPhrases({
     fixed,
     thinking: thinking?.type === "reasoning" ? thinking.raw : null,
-    steps: steps.filter((tool) => !tool.drafting).map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running", files: tool.name === "read_files" ? readPaths(tool).length || 1 : 1 })),
+    steps: steps.filter((tool) => !tool.drafting && tool.name !== "agents").map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running", files: tool.name === "read_files" ? readPaths(tool).length || 1 : 1 })),
   }, Date.now()), fixed !== undefined);
+}
+/// Who a wait is for: background sub-agents are a1, a2… in the order the chat started them.
+function backgroundNames(run: WorkspaceRun, ids: unknown): string {
+  const crew = run.entries.filter((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "subagent" && entry.input.background === true);
+  const wanted = Array.isArray(ids) && ids.length ? ids.map((id) => crew[Number(String(id).replace(/\D/g, "")) - 1]).filter((one): one is ToolEntry => Boolean(one)) : crew.filter((one) => one.state === "running" && one.crew === "working");
+  const names = [...new Set(wanted.map((one) => { const agent = cliAgent(one); return agent ? CLI_NAMES[agent] ?? agent : "an agent"; }))];
+  return names.length === 1 ? names[0]! : names.length ? `${names.length} agents` : "the agents";
 }
 /// A step's target in a few words: a file's name, a command's program, a page's title.
 function stepTarget(tool: ToolEntry) {
   if (tool.name === "run_command") return (tool.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "");
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
+  if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
+  if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
+  if (tool.name === "look_at_page") return pageName(tool.input.url);
+  if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
+  if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   const path = String(tool.input.path ?? tool.detail ?? "");
-  return tool.name === "subagent" ? "" : path.split("/").at(-1) ?? path;
+  return isAgentStep(tool) ? "" : path.split("/").at(-1) ?? path;
 }
 /// The thinking level each /model row would switch to: picked with ←→,
 /// else the current choice for the current model, else the model's default.
@@ -264,6 +287,12 @@ const verb = (tool: ToolEntry) =>
     write_file: "Write",
     edit_file: "Edit",
     search_files: "Search",
+    web_search: "Searched the web",
+    web_fetch: "Read",
+    remember: "Remembered",
+    update_plan: "Planned",
+    wait_for: "Waited for",
+    look_at_page: "Opened",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",
@@ -276,8 +305,15 @@ const verb = (tool: ToolEntry) =>
     foundry_save: "Made",
     foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
+    foundry_try: "Tried",
     use_skill: "Using skill",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
+/// A try's steps in a few words, for its step row.
+function trySteps(steps: Record<string, unknown>[]) {
+  const one = (step: Record<string, unknown>) => "click" in step ? `click “${step.click}”` : "type" in step ? `type “${step.type}”` : "key" in step ? `press ${step.key}` : "scroll" in step ? "scroll" : "hover" in step ? `hover “${step.hover}”` : "wait";
+  const words = steps.slice(0, 3).map(one).join(", ");
+  return steps.length > 3 ? `${words} and ${steps.length - 3} more` : words || "the page";
+}
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: WorkspaceRun) =>
@@ -329,6 +365,8 @@ let follow = true,
   noticeTimer: ReturnType<typeof setTimeout> | undefined,
   lastDraftVersion = -1,
   lastSession = "";
+/// Turns whose plan checklist is open; closed until you click Checklist.
+const planOpen = new Set<string>();
 const expanded = new Set<string>(),
   detailsOpen = new Set<string>(),
   detailsClosed = new Set<string>(),
@@ -1193,26 +1231,34 @@ function worthCompacting(percentage: number | null | undefined) {
   return (percentage ?? 0) >= 50;
 }
 
-/// The context ring and the plan mark open one card (pass 112 A): what the
-/// chat holds and how long it lasts on top, your plan's windows below.
+/// The context word under the composer opens one card (pass 112 A, 177 C):
+/// what the chat holds and how long it lasts on top, your plan's windows
+/// below. The same card also sits in the right column once either is half
+/// used.
 function renderContextCard() {
-  const card = el("context-card"), ring = el("composer-context"), mark = el("composer-limit");
+  const card = el("context-card"), word = el("composer-context");
   const c = context(), limits = currentPlan();
   const showContext = inSession() && c.percentage != null, showPlan = Boolean(limits && planWindows(limits).length);
-  const open = contextCardOpen && (showContext || showPlan);
-  for (const node of [ring, mark]) {
-    node.setAttribute("aria-expanded", String(open));
-    node.classList.toggle("on", open);
-  }
+  const open = contextCardOpen && (showContext || showPlan) && !columnContextCard();
+  word.setAttribute("aria-expanded", String(open));
+  word.classList.toggle("on", open);
   card.hidden = !open;
   if (!open) return;
-  const compact = worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
-  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
-  const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
-  const html = halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
+  const html = contextCardHTML(c, limits, showContext, showPlan);
   if (html === card.dataset.html) return;
   card.innerHTML = html;
   card.dataset.html = html;
+}
+/// The context card in the right column, when it is on screen there.
+function columnContextCard() {
+  const node = document.querySelector<HTMLElement>("#cards [data-card=context]");
+  return node && node.offsetParent ? node : null;
+}
+function contextCardHTML(c: ReturnType<typeof context>, limits: PlanLimits | undefined, showContext: boolean, showPlan: boolean) {
+  const compact = showContext && worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
+  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
+  const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
+  return halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
 }
 /// What is in the chat, in words first: how many more turns like the last
 /// few fit, then the parts. Compaction's own notes (Keep, the turn lane) and
@@ -1264,18 +1310,34 @@ function planHalf(limits: PlanLimits) {
 }
 const capital = (word: string) => `${word[0]!.toUpperCase()}${word.slice(1)}`;
 const planName = (limits: PlanLimits) => `${capital(limits.provider)} plan`;
-/// The cards on the right: what this chat changed, its preview, its context
-/// once half full, the agents near its edits and the connectors it called.
-/// A card shows only while the chat uses it, and a chat that uses none has
-/// no column (pass 86 A); its header folds it to one line.
-const ICON_CHEVRON = '<svg class="ico card-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
-const cardsFolded = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-folded") ?? "[]") as string[]; } catch { return []; } })());
+/// The cards on the right (pass 169 A): they step back so the chat leads.
+/// The environment card says where this chat runs (pass 173 A); every other
+/// card is one dim line (what this chat changed, its preview, its context
+/// once half full, the agents near its edits, the connectors it called) that
+/// unfolds on hover, or stays open after a click. A card shows only while the
+/// chat uses it, and a chat that uses none has no column (pass 86 A). The
+/// only colour is a pink dot on what needs you.
+const CARD_ICON = {
+  context: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 7.6 10.5L12 12z"/></svg>',
+  changes: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14h6M12 11v6"/></svg>',
+  agents: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+  preview: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg>',
+  connectors: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>',
+} as const;
+const cardsOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-open") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
-/// The card whose body is unfolding now; only it animates.
-let cardUnfolding = "";
-function card(name: string, title: string, summary: string, body: string) {
-  const folded = cardsFolded.has(name);
-  return `<section class="card${folded ? " folded" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${!folded}"><span class="card-title">${title}</span>${ICON_CHEVRON}<span class="card-sum">${summary}</span></button>${folded ? "" : `<div class="card-body">${body}</div>`}</section>`;
+/// Screenshots from the capture keys (window-shots.ts), each its own card
+/// after the last card; the ones still to land, with where their window was.
+const windowShots: WindowShot[] = [];
+const shotsLanding = new Map<string, Rect | undefined>();
+const chatShots = () => windowShots.filter((shot) => shot.sessionId === state?.session?.id);
+/// The file open in its preview card (file-preview.ts), in the chat it was
+/// opened from.
+let preview: OpenPreview | null = null;
+const chatPreview = () => preview && preview.sessionId === state?.session?.id ? preview : null;
+function card(name: keyof typeof CARD_ICON, line: string, right: string, body: string, need = false) {
+  const open = cardsOpen.has(name);
+  return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
 }
 function renderCards() {
   // A page in place of the chat (Settings, Customize…) hides the chat's cards.
@@ -1295,49 +1357,60 @@ function renderCards() {
   const here = root && files.length ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
   const servers = chatServers(s.connectors.servers, used.map((t) => t.name));
   const showContext = c.percentage != null && contextInUse(c.percentage);
-  // Where (pass 121 E) leads in a project chat; a plain chat only gets it
+  const limits = currentPlan(), planTop = limits && planUsed(limits);
+  const planHalfUsed = Boolean(planTop && planTop.window.usedPercent >= 50);
+  // The environment card leads in a project chat; a plain chat only gets it
   // while the daemon isn't fine, so the chat keeps its width otherwise.
-  const where = whereCard({ root, branch: s.session?.workspace?.gitBranch, model: housedHere(s) ? { id: housedHere(s)!.model, displayName: housedHere(s)!.name, provider: "run by Demesne" } : s.model, reasoning: housedHere(s) ? null : s.reasoning, connection: s.connection, server: s.server, changed: files.length, context: !showContext && c.percentage != null && c.used != null && c.capacity ? { percentage: c.percentage, used: c.used, capacity: c.capacity } : null });
+  const housed = housedHere(s), workspace = s.session?.workspace;
+  const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
-  if (!showWhere && !files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
+  const shots = chatShots();
+  const filePreview = chatPreview();
+  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !filePreview) return hide();
   app.classList.add("cards-on");
-  app.classList.toggle("cards-context", showContext);
+  app.classList.toggle("cards-wide", Boolean(filePreview?.wide));
+  app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsFolded], showWhere && where]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, shots.map((shot) => [shot.id, shot.sent, shot.big]), filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
   const out: string[] = [];
-  if (showWhere) out.push(card("where", where.head, where.summary, where.body).replace('<section class="card', `<section title="${h(where.title)}" class="card${where.state ? ` wh-${where.state}` : ""}`));
-  if (showContext && c.percentage != null) {
-    const capacity = c.capacity ?? 0;
-    const parts = plan
-      ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, ...(c.fresh ? [{ name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : [])]
-      : [{ name: "Chat", tokens: c.used ?? 0, tone: "a" }];
-    const share = (tokens: number) => (capacity ? Math.min(100, (tokens / capacity) * 100) : 0);
-    out.push(card("context", "Context", `${c.percentage}%<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,
-      `<div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
-      `<div class="card-legend">${parts.filter((part) => part.tokens > 0).map((part) => `<span><u class="tone-${part.tone}"></u>${part.name} ${tokensShort(part.tokens)}</span>`).join("")}</div>` +
-      `<div class="card-foot"><span>${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span>${worthCompacting(c.percentage) ? btn("compact", s.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link") : ""}</div>`));
+  if (showWhere) {
+    const open = cardsOpen.has("where");
+    out.push(`<section class="card env${open ? " open" : ""}${where.state ? ` env-${where.state}` : ""}" data-card="where"><button type="button" class="card-head" data-action="card-fold" data-args='{"name":"where"}' aria-expanded="${open}">${where.rows}</button>${where.state === "off" ? btn("start-daemon", "Start", {}, "env-start") : ""}<div class="card-body">${where.more}</div></section>`);
+  }
+  // The context card itself (pass 177 C) once the chat or the plan is half
+  // used: one line like the others, the whole card when it opens; a short
+  // window folds its parts list away first.
+  if (showContext || planHalfUsed) {
+    const planWord = planHalfUsed ? ` · <span class="${planTop!.window.usedPercent >= PLAN_LIMIT_AMBER ? "warn" : ""}">plan ${Math.round(planTop!.window.usedPercent)}%</span>` : "";
+    out.push(card("context", `${c.percentage != null ? `${c.percentage}% context` : "Context"}${planWord}`, c.percentage != null ? `<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>` : "",
+      `<div class="ctx-card">${contextCardHTML(c, limits, c.percentage != null, planHalfUsed)}</div>`));
   }
   if (files.length) {
     const shownFiles = files.slice(0, 6);
-    out.push(card("changes", "Changes", counts(changes),
-      shownFiles.map((file) => row("", h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
-      `<div class="card-foot"><span>${files.length === 1 ? "1 file" : `${files.length} files`}${files.length > shownFiles.length ? ` · ${files.length - shownFiles.length} more` : ""} · not committed</span>${btn("ship", "Commit & PR", {}, "card-btn")}</div>`));
+    out.push(card("changes", files.length === 1 ? "1 file changed" : `${files.length} files changed`, counts(changes),
+      shownFiles.map((file) => row("", previewable(file.path) ? fileLink(file.path, file.path.split("/").at(-1) ?? file.path) : h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
+      `<div class="card-foot"><span>${files.length > shownFiles.length ? `${files.length - shownFiles.length} more · ` : ""}not committed</span>${btn("ship", "Commit & PR", {}, "link")}</div>`, true));
   }
   if (here.length)
-    out.push(card("agents", "Agents", here.slice(0, 3).map(agentMark).join(""),
+    out.push(card("agents", here.length === 1 ? `${h(here[0]!.name)} ${h(agentPlace(here[0]!))}` : `${here.length} agents here`, here.slice(0, 3).map(agentMark).join(""),
       here.map((agent) => `<div class="card-row card-hover" title="${h(agent.address)}">${agentMark(agent)}<span class="card-label">${h(agent.name)}<em> · ${h(agentPlace(agent).replace(/^on /, ""))}</em></span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "card-act")}</div>`).join("")));
   if (previews.length)
-    out.push(card("preview", "Preview", h(new URL(previews[0]!.serves!).host),
-      previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "card-btn")}</div>`).join("")));
+    out.push(card("preview", h(new URL(previews[0]!.serves!).host), previews.length > 1 ? `${previews.length}` : '<span class="pv-live" aria-hidden="true"></span>',
+      previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "link")}</div>`).join("")));
   if (servers.length)
-    out.push(card("connectors", "Connectors", h(servers.map((server) => server.name).join(", ")),
+    out.push(card("connectors", h(servers.map((server) => server.name).join(", ")), servers.some((server) => server.state === "failed") ? '<span class="card-dot failed"></span>' : "",
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
+  // Screenshots come last, in the order they were taken.
+  for (const shot of shots) out.push(shotCardHTML(shot, cardsOpen.has(shotKey(shot))));
+  // A file you opened comes last of all (pass 188 A).
+  if (filePreview) out.push(previewCardHTML(filePreview));
   // Only the cards that changed are replaced, so the others keep their
   // hover and never repaint while the chat streams.
-  const next = new Map(out.map((html) => [/data-card="([a-z]+)"/.exec(html)![1]!, html]));
+  const next = new Map(out.map((html) => [/data-card="([a-z0-9-]+)"/.exec(html)![1]!, html]));
+  const landing: [HTMLElement, WindowShot][] = [];
   for (const node of [...aside.children] as HTMLElement[]) if (!next.has(node.dataset.card ?? "")) node.remove();
   let index = 0;
   for (const [key, html] of next) {
@@ -1347,15 +1420,18 @@ function renderCards() {
       fresh.innerHTML = html;
       const replacement = fresh.content.firstElementChild as HTMLElement;
       replacement.dataset.html = html;
+      const shot = shots.find((one) => shotKey(one) === key);
+      // A screenshot glides in from its window (window-shots.ts).
+      if (!node && shot && shotsLanding.has(shot.id)) landing.push([replacement, shot]);
       // A card the chat just started using slides in.
-      if (!node) {
+      else if (!node && key !== PREVIEW_CARD) {
         replacement.classList.add("arriving");
         replacement.addEventListener("animationend", () => replacement.classList.remove("arriving"), { once: true });
       }
-      if (key === cardUnfolding) {
-        replacement.classList.add("unfolding");
-        replacement.addEventListener("animationend", () => replacement.classList.remove("unfolding"), { once: true });
-      }
+      // A redrawn preview keeps its PDF pages until they're drawn again.
+      const pages = node?.querySelector("[data-pdf]"), into = replacement.querySelector("[data-pdf]");
+      if (pages && into) into.replaceChildren(...pages.childNodes);
+      if (!node && key === PREVIEW_CARD && filePreview?.landing) arrivingPreview = replacement;
       if (node) node.replaceWith(replacement);
       node = replacement;
     }
@@ -1363,8 +1439,108 @@ function renderCards() {
     if (node !== at) aside.insertBefore(node, at);
     index++;
   }
-  cardUnfolding = "";
+  for (const [node, shot] of landing) landWhenSeen(node, shot);
+  if (arrivingPreview) void landPreview(arrivingPreview);
+  else if (filePreview?.data?.kind === "pdf") { const pages = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"] [data-pdf]`); if (pages) void drawPdf(pages, filePreview.data.data, filePreview.wide ? 30 : 3).catch(() => {}); }
 }
+
+// File previews (pass 188 A) ------------------------------------------------
+
+/// A file name a click previews: in answers (markdown.ts marks them), in
+/// the steps and in the Changes card.
+const fileLink = (path: string, label: string) => `<button type="button" class="file-link" data-action="preview-file" data-args="${h(JSON.stringify({ path }))}" data-preview-path="${h(path)}">${h(label)}</button>`;
+/// The name a preview came from, still on screen if it is.
+function previewName(path: string): HTMLElement | null {
+  const names = [...document.querySelectorAll<HTMLElement>("[data-preview-path]")].filter((name) => name.dataset.previewPath === path && name.offsetParent && !name.closest("#cards"));
+  const seen = names.filter((name) => { const r = name.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; });
+  return seen.at(-1) ?? names.at(-1) ?? null;
+}
+const wideEnough = () => matchMedia("(min-width: 1100px)").matches;
+async function openPreview(path: string, source?: Element) {
+  if (!state?.session) return;
+  const sessionId = state.session.id, from = source ? rectOfElement(source) : undefined;
+  if (preview?.sessionId === sessionId && preview.path === path) return closePreview();
+  // No room for the column: the file opens in its own app.
+  if (!wideEnough()) {
+    const data = await api<FilePreview>("file-preview", { path });
+    if (data?.absolute) await api("open-preview", { absolute: data.absolute });
+    return;
+  }
+  const loading = api<FilePreview>("file-preview", { path }).then((data) => ({ data }), (error: unknown) => ({ error: error instanceof Error ? error.message.replace(/^.*?:\s*(?=[A-Z])/, "") : String(error) }));
+  if (chatPreview()) await closePreview();
+  const got = await loading;
+  if (state?.session?.id !== sessionId) return;
+  preview = { sessionId, path, name: previewFileName(path), ...got, wide: false, sheet: 0, slide: 0, from, landing: true };
+  renderCards();
+}
+let arrivingPreview: HTMLElement | null = null;
+async function landPreview(card: HTMLElement) {
+  arrivingPreview = null;
+  const open = preview;
+  if (!open) return;
+  open.landing = false;
+  card.style.visibility = "hidden";
+  const pages = card.querySelector<HTMLElement>("[data-pdf]");
+  if (pages && open.data?.kind === "pdf") await drawPdf(pages, open.data.data, 3).catch(() => { pages.innerHTML = '<div class="fp-empty">This PDF couldn\u2019t be drawn. Open it to read it.</div>'; });
+  card.style.visibility = "";
+  if (!card.isConnected || !card.offsetParent) return;
+  const name = previewName(open.path);
+  await growPreview(card, name ? rectOfElement(name) : open.from, name);
+}
+async function closePreview() {
+  const open = chatPreview();
+  if (!open) return;
+  const aside = el("cards"), card = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"]`), width = aside.offsetWidth;
+  const name = previewName(open.path);
+  if (card) await foldPreview(card, name ? rectOfElement(name) : open.from, name);
+  if (preview === open) preview = null;
+  renderCards();
+  if (open.wide && !aside.hidden) resizePreview(aside, width, null, undefined);
+}
+function widenPreview() {
+  const open = chatPreview();
+  if (!open || !open.data) return;
+  const aside = el("cards"), width = aside.offsetWidth;
+  const height = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"] .fp-box`)?.offsetHeight;
+  open.wide = !open.wide;
+  renderCards();
+  resizePreview(aside, width, aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"]`), height);
+}
+/// A screenshot lands when the window can be seen: at once, or when you
+/// come back to Demesne if it was hidden.
+function landWhenSeen(node: HTMLElement, shot: WindowShot) {
+  const from = shotsLanding.get(shot.id);
+  shotsLanding.delete(shot.id);
+  const go = () => { if (node.isConnected && node.offsetParent) void landShot(node, from); };
+  if (document.visibilityState !== "hidden") { go(); return; }
+  node.style.visibility = "hidden";
+  document.addEventListener("visibilitychange", function seen() {
+    if (document.visibilityState === "hidden") return;
+    document.removeEventListener("visibilitychange", seen);
+    node.style.visibility = "";
+    requestAnimationFrame(go);
+  });
+}
+/// The capture keys took a window (electron/capture-keys.ts).
+document.addEventListener("demesne:window-shot", (event) => {
+  const shot = (event as CustomEvent<{ app?: string; title?: string; data?: string; text?: string; textNote?: string; from?: Rect; error?: string }>).detail;
+  if (shot.error) { notice(shot.error); return; }
+  if (!state?.session || !shot.data) { notice("Open a chat, then press the keys again to add the window."); return; }
+  const sessionId = state.session.id;
+  void act(async () => {
+    const bytes = Uint8Array.from(atob(shot.data!), (char) => char.charCodeAt(0));
+    const fitted = await fitImage(new Blob([bytes], { type: "image/png" }), { side: 4096, bytes: 15 * 1024 * 1024 });
+    const name = `${(shot.app || "window").replace(/[^\w .-]+/g, "").trim() || "window"}.png`;
+    const image = await api("attach", { name, mimeType: fitted.type, data: fitted.url.slice(fitted.url.indexOf(",") + 1) }) as { id: string } | undefined;
+    if (!image?.id) return;
+    attachmentPreviews.set(image.id, fitted.url);
+    windowShots.push({ id: image.id, sessionId, app: shot.app ?? "", title: shot.title ?? "", url: fitted.url, text: shot.text ?? "", textNote: shot.textNote, at: Date.now() });
+    shotsLanding.set(image.id, shot.from);
+    composerSignature = "";
+    renderComposer();
+    renderCards();
+  });
+});
 /// The sidebar's foot: who you are and what pays for the models, the theme
 /// switch, and Settings.
 const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
@@ -1450,7 +1626,7 @@ function renderStatus() {
   renderCards();
   const rim = rimState(phase);
   applyRim(rim);
-  renderPlanLimit();
+  renderContextWord();
   if (signature + JSON.stringify(rim) === statusSignature) return;
   statusSignature = signature + JSON.stringify(rim);
   // A quiet footer: a spinner while working, a word only when the state
@@ -1460,17 +1636,13 @@ function renderStatus() {
   // bar carries its live state, so a session has no status bar.
   el("status").dataset.quiet = String(phase === "ready");
   el("status").hidden = inSession();
-  // The context used, as a small ring; the numbers wait in its tooltip.
-  const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
   const housedAgent = housedHere(), modelChip = el("composer-model");
   // An agent's chat runs that agent: its name, and no model to pick.
   modelChip.toggleAttribute("disabled", Boolean(housedAgent));
   modelChip.title = housedAgent ? `This chat runs ${housedAgent.name}, started by Demesne` : "Change model";
   if (housedAgent) modelChip.textContent = housedAgent.name;
   else el("composer-model").innerHTML = `${h(state.model.id ? modelWords({ id: state.model.id, displayName: state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName }) : "") || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
-  el("composer-context").innerHTML = c2;
-  el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
-  el("composer-context").hidden = !inSession() || !c2;
+  renderContextWord();
   renderContextCard();
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Ctrl+,")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
@@ -1481,15 +1653,15 @@ function renderStatus() {
   renderTabs();
   el("header").innerHTML = inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : "";
 }
-/// Your plan's mark (pass 112 A): a small ring and the fuller window's
-/// percentage beside the context ring, from 0%, amber from 75%. It opens
-/// the context card, whose lower half gives each window and its reset.
-let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null, planLimitSignature = "";
+/// Your plan's limits (pass 112 A): the context word names the fuller
+/// window, and the context card gives each window and its reset.
+let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null;
 async function loadPlanLimits() {
   planLimitsAt = Date.now();
   try { planLimits = await api<PlanLimits[]>("plan-limits") ?? []; } catch { return; }
-  renderPlanLimit();
+  renderContextWord();
   renderContextCard();
+  renderCards();
 }
 const currentPlan = () => (state ? planLimits.find((item) => item.provider === state!.model.provider) : undefined);
 const resetWords = (at: string | null) => {
@@ -1497,21 +1669,26 @@ const resetWords = (at: string | null) => {
   const date = new Date(at), time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `, resets ${date.getTime() - Date.now() < 86_400_000 ? time : `${date.toLocaleDateString([], { weekday: "short" })} ${time}`}`;
 };
-function renderPlanLimit() {
-  const node = document.getElementById("composer-limit");
+/// One dim word beside the model (pass 177 C): the context used, then your
+/// plan's fuller window, amber from 75%. It opens the context card.
+function renderContextWord() {
+  const node = document.getElementById("composer-context");
   if (!node || !state) return;
-  const limits = currentPlan();
-  const top = limits && planUsed(limits);
-  const used = top ? Math.round(top.window.usedPercent) : 0;
-  const signature = JSON.stringify([limits, used, Math.floor(Date.now() / 60_000)]);
-  if (signature === planLimitSignature) return;
-  planLimitSignature = signature;
-  node.hidden = !top;
-  if (!limits || !top) { node.innerHTML = ""; node.removeAttribute("title"); return; }
-  node.classList.toggle("warn", used >= PLAN_LIMIT_AMBER);
-  node.innerHTML = `<span class="ring" style="--usage:${used}%"></span>${used}%`;
-  node.title = `${planName(limits)}: ${used}% of your ${top.name} limit`;
-  node.setAttribute("aria-label", node.title);
+  const c = context(), limits = currentPlan(), top = limits && planUsed(limits);
+  const used = top ? Math.round(top.window.usedPercent) : null;
+  const parts = [
+    c.percentage == null ? "" : `<span class="cw-context">${c.percentage}%</span>`,
+    used == null ? "" : `<span class="cw-plan${used >= PLAN_LIMIT_AMBER ? " warn" : ""}">plan ${used}%</span>`,
+  ].filter(Boolean);
+  const html = inSession() ? parts.join('<span class="cw-dot"> · </span>') : "";
+  if (node.innerHTML !== html) node.innerHTML = html;
+  node.hidden = !html;
+  const title = [
+    c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`,
+    limits && top ? `${planName(limits)}: ${used}% of your ${top.name} limit` : "",
+  ].filter(Boolean).join("\n");
+  node.title = title;
+  node.setAttribute("aria-label", title || "Context used");
 }
 // Each answer brings fresh numbers: look right after a turn ends, every 20
 // seconds while one works, and every minute otherwise.
@@ -1711,6 +1888,8 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
   if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
+  // A try names its steps: click “Add”, type “Milk”, press Enter.
+  if (tool.name === "foundry_try") { const steps = Array.isArray(tool.input.steps) ? tool.input.steps as Record<string, unknown>[] : []; return h(trySteps(steps) + (tool.input.width === "phone" ? " · phone" : "")); }
   if (tool.name === "use_skill") return `<span class="step-skill">${h(String(tool.input.name ?? ""))}</span>`;
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
@@ -1719,10 +1898,10 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   // files names each one. The full paths are on hover.
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? paths.map((path) => `<span class="name">${h(fileName(path))}</span>`).join(", ") : paths[0] ? fileFirst(paths[0]) : h(base); }
   if (FILE_TOOLS.has(tool.name) && !tool.drafting && base && !/\s/.test(base)) return fileFirst(base);
-  if (tool.name !== "subagent" || tool.state !== "running") return h(base);
+  if (!isAgentStep(tool) || tool.state !== "running") return h(base);
   // Still being written by the model: not running yet.
   if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
-  const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
+  const slot = run.entries.filter((entry) => entry.type === "tool" && isAgentStep(entry)).indexOf(tool);
   const model = tool.subagentModel ?? state!.model.id;
   const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model);
   return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
@@ -1737,8 +1916,10 @@ function fileFirst(path: string) {
 /// A sub-agent running on one of your agent tools (Claude Code, Codex,
 /// Gemini): its id, from the "agent:<id> · " its progress lines carry.
 const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
+/// A sub-agent, or a hand-off (an agent tool making a change in its own copy).
+function isAgentStep(tool: ToolEntry) { return tool.name === "subagent" || tool.name === "hand_off"; }
 function cliAgent(tool: ToolEntry): string | null {
-  const id = tool.name === "subagent" && tool.subagentModel?.startsWith("agent:") ? tool.subagentModel.slice(6) : "";
+  const id = isAgentStep(tool) && tool.subagentModel?.startsWith("agent:") ? tool.subagentModel.slice(6) : "";
   return id && Object.hasOwn(CLI_NAMES, id) ? id : null;
 }
 /// "read live.ts" → "Read live.ts": a sub-agent's step as a line of words.
@@ -1750,7 +1931,7 @@ function helpingAgents(): Set<string> {
 }
 /// "3 steps": how far a sub-agent has got, on the right of its row.
 function subagentSteps(tool: ToolEntry) {
-  const steps = tool.name === "subagent" ? (tool.trace ?? []).length : 0;
+  const steps = isAgentStep(tool) ? (tool.trace ?? []).length : 0;
   return steps ? `${steps} step${steps === 1 ? "" : "s"}` : "";
 }
 /// One quiet line per step: an icon for the kind of work, the verb, the
@@ -1771,12 +1952,12 @@ const stepIconFor = (kind: string) => `<svg class="ico" viewBox="0 0 24 24" aria
 const stepIcon = (tool: ToolEntry) => {
   const kind = tool.name === "run_command" ? "run"
     : tool.phase === "change" ? "edit"
-    : tool.name === "search_files" ? "search"
+    : tool.name === "search_files" || tool.name === "web_search" ? "search"
     : tool.name === "list_files" ? "list"
-    : tool.name === "subagent" ? "agent"
+    : isAgentStep(tool) ? "agent"
     : tool.name === "ask_user" ? "ask"
     : tool.name === "heartbeat" ? "mail"
-    : ["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
+    : ["read_file", "read_files", "web_fetch", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
     : "other";
   return stepIconFor(kind);
 };
@@ -1791,7 +1972,7 @@ const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><p
 const foldable = (tool: ToolEntry) =>
   (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
   (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId)) ||
-  (tool.name === "subagent" && !tool.drafting && Boolean(tool.toolCallId));
+  (isAgentStep(tool) && !tool.drafting && Boolean(tool.toolCallId));
 /// A turn the answer to an open question started reads as that answer,
 /// not as a message you typed.
 function answerAsked(run: WorkspaceRun) {
@@ -1815,7 +1996,150 @@ function parkedLines(run: WorkspaceRun) {
   return (state?.questions ?? []).filter((q) => q.open && q.turnId === run.id && (q.answers?.length ?? 0) < q.questions.length && asked.indexOf(q.toolCallId) >= 0 && asked.indexOf(q.toolCallId) < last)
     .map((q) => btn("question-back", `<span class="ask-park" aria-hidden="true"></span><b>Waits for your answer</b><span class="ask-q-was">${h(q.questions[q.answers?.length ?? 0]!.question)}</span>`, { id: q.id }, "tool-row ask-parked")).join("");
 }
+/// Wait and watch: "Waiting for “ready” · bun run dev", then how it ended (wait-row.ts).
+function waitStep(run: WorkspaceRun, tool: ToolEntry) {
+  const at = run.entries.indexOf(tool);
+  const started = run.entries.slice(0, at < 0 ? undefined : at).findLast((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "run_command" && entry.input.background === true);
+  const row = waitRow({ state: tool.drafting ? "running" : tool.state, pattern: tool.input.pattern, command: started ? stepTarget(started) : "", message: tool.message, durationMs: tool.durationMs, icon: "" });
+  return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
+    { runId: run.id, id: tool.id }, `tool-row wait-row ${row.tone}`) + row.tail;
+}
+/// See the app: its pictures, fetched once from the chat's images and kept.
+const lookPictures = new Map<string, string>(), lookLoading = new Set<string>();
+function lookPicture(id: string): string | undefined {
+  const known = lookPictures.get(id);
+  if (known || lookLoading.has(id)) return known;
+  lookLoading.add(id);
+  void api<string>("tool-picture", { id }).then((src) => {
+    if (typeof src !== "string" || !src.startsWith("data:image/")) return;
+    lookPictures.set(id, src);
+    if (lookPictures.size > 60) lookPictures.delete(lookPictures.keys().next().value!);
+    document.querySelectorAll<HTMLImageElement>(`img[data-picture="${CSS.escape(id)}"]`).forEach((img) => { img.src = src; });
+  }).catch(() => {});
+  return undefined;
+}
+function lookStep(run: WorkspaceRun, tool: ToolEntry) {
+  const row = pageLookRow(tool, lookPicture);
+  return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
+    { runId: run.id, id: tool.id }, `tool-row wait-row look-row ${row.tone}`) + row.below;
+}
+/// Who you asked (pass 178 B): a turn's Heartbeat sends are one row.
+const askedOpen = new Set<string>();
+const isSend = (tool: ToolEntry) => tool.name === "heartbeat" && tool.input.action === "send";
+const firstSend = (run: WorkspaceRun, tool: ToolEntry) => isSend(tool) && run.entries.find((entry): entry is ToolEntry => entry.type === "tool" && isSend(entry)) === tool;
+function askedAnswers(run: WorkspaceRun) {
+  const asked = askedIn(run.entries);
+  if (!asked.length || !state) return { asked, answers: new Map<string, { text: string; performative: string }>() };
+  const at = state.runs.findIndex((other) => other.id === run.id);
+  return { asked, answers: answersAfter(state.runs, at, asked.map((item) => item.to)) };
+}
+function askStep(run: WorkspaceRun) {
+  const { asked, answers } = askedAnswers(run);
+  const housed = state?.housed ?? [];
+  return askRowHTML({ asked, answers, runId: run.id, open: asked.length ? askedOpen.has(`${run.id}:${asked[0]!.key}`) : false, mail: stepIconFor("mail"),
+    face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood === "focus" ? "focus" : "calm")}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
+    working: (agent) => housed.some((item) => item.id === agent && item.state === "working") });
+}
+/// Sub-agents at work (pass 183 A): a round of sub-agents is one line.
+const crewOpen = new Set<string>();
+/// When each sub-agent last took a step, for "the newest step any of them took".
+const crewSeen = new Map<string, { steps: number; at: number }>();
+const isSubagent = (entry: WorkspaceRun["entries"][number]): entry is ToolEntry => entry.type === "tool" && entry.name === "subagent";
+/// The sub-agents sent in one go with this one: the run of them around it.
+function crewOf(run: WorkspaceRun, tool: ToolEntry): ToolEntry[] {
+  const at = run.entries.indexOf(tool);
+  let start = at, end = at;
+  while (start > 0 && isSubagent(run.entries[start - 1]!)) start--;
+  while (end < run.entries.length - 1 && isSubagent(run.entries[end + 1]!)) end++;
+  return run.entries.slice(start, end + 1) as ToolEntry[];
+}
+const crewKey = (run: WorkspaceRun, members: ToolEntry[]) => `${run.id}:${members[0]!.id}`;
+function crewStep(run: WorkspaceRun, tool: ToolEntry) {
+  const members = crewOf(run, tool), key = crewKey(run, members);
+  let newest: { text: string; at: number } | null = null;
+  for (const member of members) {
+    const steps = member.trace?.length ?? 0, seen = crewSeen.get(member.toolCallId);
+    if (!seen || seen.steps !== steps) { if (crewSeen.size > 400) crewSeen.clear(); crewSeen.set(member.toolCallId, { steps, at: Date.now() }); }
+    const last = member.trace?.at(-1)?.text.replace(/^[^·]+ · /, "");
+    const at = crewSeen.get(member.toolCallId)!.at;
+    if (((member.state === "running" && !member.crew?.match(/reported|stopped/)) || member.drafting) && last && (!newest || at > newest.at)) newest = { text: nowWords(last), at };
+  }
+  const running = members.find((member) => member.state === "running" && member.crew !== "reported" && member.crew !== "stopped");
+  const slot = running ? run.entries.filter((entry) => entry.type === "tool" && isAgentStep(entry)).indexOf(running) : 0;
+  const model = running?.subagentModel ?? state!.model.id;
+  return crewRowHTML({
+    members: members.map((member) => ({
+      runId: run.id, id: member.id, agent: cliAgent(member), task: String(member.input.description ?? member.detail ?? "Sub-agent"),
+      state: member.state, drafting: member.drafting, steps: member.trace?.length ?? 0, durationMs: member.durationMs,
+      toolCallId: member.toolCallId, ...(member.crew ? { crew: member.crew } : {}), ...(member.asked?.length ? { asked: member.asked } : {}),
+      found: ["failed", "denied", "stopped"].includes(member.state) ? (member.message ?? "").replace(/^Error: (sub-agent failed: )?/, "") : member.report,
+      open: stepOpen.has(`${run.id}:${member.id}`), fold: stepOpen.has(`${run.id}:${member.id}`) ? agentFold(run, member) : undefined,
+    })),
+    key, open: crewOpen.has(key), newest: newest?.text,
+    phrase: running ? { slot, model, text: matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model) } : undefined,
+    face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood)}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
+  });
+}
+/// A running crew changes in place: only its parts that changed are swapped.
+function patchCrew(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
+  const members = crewOf(run, tool), key = crewKey(run, members);
+  const was = [...content.querySelectorAll<HTMLElement>("[data-crew]")].find((node) => node.dataset.crew === key);
+  if (!was) return false;
+  const next = document.createElement("template");
+  next.innerHTML = crewStep(run, tool);
+  const now = next.content.firstElementChild as HTMLElement | null;
+  if (!now?.matches("[data-crew]")) return false;
+  const oldHead = was.querySelector<HTMLElement>(":scope > .crew-row"), newHead = now.querySelector<HTMLElement>(":scope > .crew-row");
+  if (!oldHead || !newHead) return false;
+  syncChildren(oldHead, newHead);
+  for (const attr of [...newHead.attributes]) if (oldHead.getAttribute(attr.name) !== attr.value) oldHead.setAttribute(attr.name, attr.value);
+  const oldLines = was.querySelector<HTMLElement>(":scope > .crew-lines"), newLines = now.querySelector<HTMLElement>(":scope > .crew-lines");
+  if (oldLines && newLines) {
+    // A line and an open guide keep their nodes: only what's inside them changes.
+    const old = [...oldLines.children] as HTMLElement[], fresh = [...newLines.children] as HTMLElement[];
+    fresh.forEach((node, i) => {
+      const before = old[i];
+      if (!before) oldLines.append(node);
+      else if (before.className === node.className && (node.matches(".crew-line") || node.matches(".agent-steps"))) {
+        syncChildren(before, node);
+        for (const attr of [...node.attributes]) if (before.getAttribute(attr.name) !== attr.value) before.setAttribute(attr.name, attr.value);
+      }
+      else if (steadyHTML(before) !== steadyHTML(node)) before.replaceWith(node);
+    });
+    for (const node of old.slice(fresh.length)) node.remove();
+  }
+  else if (newLines) was.append(newLines);
+  else oldLines?.remove();
+  return true;
+}
+/// Deep research (pass 182 A): one quiet line; click for who took what.
+const researchOpen = new Set<string>();
+const researchFace = (agent: string | null, mood: "focus" | "calm") => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood)}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`;
+function researchStep(run: WorkspaceRun, tool: ToolEntry) {
+  const key = `${run.id}:${tool.id}`;
+  return researchRowHTML({ research: tool.research, tool, open: researchOpen.has(key), key, face: researchFace, icon: stepIcon(tool) });
+}
+/// What the row shows depends on mail that came later: part of a turn's signature.
+function askedSignature(run: WorkspaceRun): string {
+  if (!run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
+  const { asked, answers } = askedAnswers(run);
+  return JSON.stringify([asked.map((item) => item.state), [...answers.keys()], [...askedOpen].filter((key) => key.startsWith(`${run.id}:`)),
+    (state?.housed ?? []).filter((item) => asked.some((one) => one.agent === item.id)).map((item) => item.state)]);
+}
+/// A step that read or wrote one file a preview can show: its path.
+const stepPreviewPath = (tool: ToolEntry) => ["read_file", "write_file", "edit_file"].includes(tool.name) && typeof tool.input.path === "string" && previewable(tool.input.path) ? tool.input.path : "";
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
+  // The plan is the ribbon; loading tools (tool_search) is plumbing; waiting
+  // on, asking or stopping background agents shows on their crew line.
+  if (tool.name === UPDATE_PLAN || tool.name === "tool_search" || tool.name === "agents") return "";
+  if (isSend(tool)) return firstSend(run, tool) ? askStep(run) : "";
+  // Finding who to ask is part of asking: no row of its own beside the one above.
+  if (tool.name === "heartbeat" && tool.input.action === "agents" && run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
+  if (tool.name === "wait_for") return waitStep(run, tool);
+  if (tool.name === "look_at_page") return lookStep(run, tool);
+  if (tool.name === "research") return researchStep(run, tool);
+  // A round of sub-agents is one line, drawn at its first.
+  if (tool.name === "subagent") return crewOf(run, tool)[0] === tool ? crewStep(run, tool) : "";
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
   if (tool.name === "ask_user") {
@@ -1836,7 +2160,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
         : now
           ? subagentSteps(tool) || ""
           : tool.state === "done"
-            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${tool.name === "subagent" && subagentSteps(tool) ? `${subagentSteps(tool)} · ` : ""}${duration(tool.durationMs)}`
+            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${isAgentStep(tool) && subagentSteps(tool) ? `${subagentSteps(tool)} · ` : ""}${duration(tool.durationMs)}`
             : tool.state === "failed" || tool.state === "denied"
               ? `<span class="danger">×</span> ${tool.exitCode != null ? `exit ${tool.exitCode}` : h(tool.state)}`
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
@@ -1844,7 +2168,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and plain words: the working line
     // under the turn carries the cube and the silver.
-    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target" title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target"${stepPreviewPath(tool) ? ` data-preview-path="${h(stepPreviewPath(tool))}"` : ""} title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -1860,9 +2184,10 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // drawing itself is kept across repaints and dropped into this slot.
   const tree = tool.repo && tool.state === "done" ? repoSlot(tool) : "";
   // What a running sub-agent is on right now, on a quiet line under its row.
-  const last = tool.name === "subagent" && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
+  const last = isAgentStep(tool) && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
   const nowLine = last ? `<div class="agent-now">${h(nowWords(last))}</div>` : "";
-  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
+  const card = tool.handoff && tool.state !== "running" ? handoffCard(tool.handoff) : "";
+  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + card + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
 }
 const hasFileEdit = (tool: ToolEntry) => tool.phase === "change" && tool.state === "done" && Boolean(tool.changes?.length);
 const fileEditSlot = (tool: ToolEntry) => `<div data-file-edit="${h(tool.toolCallId)}"></div>`;
@@ -1985,7 +2310,7 @@ function rewindLine(rewind: Snapshot["rewinds"][number]) {
 /// command's recorded output (its tail), loaded when first opened, or a
 /// sub-agent's own guide.
 function stepFold(run: WorkspaceRun, tool: ToolEntry) {
-  if (tool.name === "subagent") return agentFold(run, tool);
+  if (isAgentStep(tool)) return agentFold(run, tool);
   if (tool.phase === "change") {
     if (tool.changes?.length) return `<div class="step-fold">${fileEditSlot(tool)}</div>`;
     const files = tool.changes?.length ? tool.changes.map((change) => ({ path: change.path, before: change.before ?? "", after: change.after ?? "" })) : tool.diff ? [{ path: String(tool.input.path ?? tool.detail ?? ""), before: tool.diff.oldText, after: tool.diff.newText }] : [];
@@ -2054,10 +2379,59 @@ function agentFold(run: WorkspaceRun, tool: ToolEntry) {
     body += `<div class="agent-found"><b><span class="danger">×</span> ${h(tool.state === "stopped" ? "Stopped" : "Failed")}</b>${tool.message ? ` · ${h(tool.message.replace(/^Error: (sub-agent failed: )?/, "").split("\n")[0] ?? "")}` : ""}</div>`;
   else if (tool.report) {
     const open = foundOpen.has(key), text = tool.report.trim(), clipped = !open && text.length > 240;
-    body += `<div class="agent-found"><b>Found</b> · ${h(clipped ? `${text.slice(0, 240).trimEnd()}…` : text)}${text.length > 240 ? btn("agent-found", open ? "less" : "more", { key }, "link agent-more") : ""}</div>`;
+    body += `<div class="agent-found"><b>${tool.name === "hand_off" ? "Said" : "Found"}</b> · ${h(clipped ? `${text.slice(0, 240).trimEnd()}…` : text)}${text.length > 240 ? btn("agent-found", open ? "less" : "more", { key }, "link agent-more") : ""}</div>`;
   }
   return `<div class="agent-steps" role="group">${body}</div>`;
 }
+/// A hand-off's change card (pass 165 A): what the agent changed in its own
+/// copy, with Bring it in, Ask for changes and Discard, and once brought in,
+/// Undo. Where it is now comes from the daemon (the turn's own record is how
+/// it was when the turn ended); the diff loads when a file is opened.
+const handoffNow = new Map<string, { status: string; error?: string; patch?: string }>();
+const handoffAsked = new Set<string>();
+const handoffOpenFile = new Map<string, string>();
+const handoffBusy = new Set<string>();
+function handoffFetch(id: string) {
+  if (handoffAsked.has(id)) return;
+  handoffAsked.add(id);
+  void api<{ handoff: { status: string; error?: string }; patch: string }>("handoff", { id }).then((found) => {
+    handoffNow.set(id, { status: found.handoff.status, ...(found.handoff.error ? { error: found.handoff.error } : {}), patch: found.patch });
+    follow = false;
+    renderConversation();
+  }).catch(() => { /* the turn's own record stands */ });
+}
+/// One file's part of a git patch, as colored lines.
+function patchFor(patch: string, path: string) {
+  const parts = patch.split(/^(?=diff --git )/m);
+  const part = parts.find((chunk) => chunk.startsWith(`diff --git a/${path} `) || chunk.includes(` b/${path}\n`)) ?? "";
+  const body = part.split("\n").filter((line) => !/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode|similarity|rename )/.test(line));
+  if (!body.length || !part) return '<div class="ho-diff muted">No diff to show</div>';
+  const shown = body.slice(0, 400);
+  return `<pre class="ho-diff">${shown.map((line) => `<span class="${line.startsWith("+") ? "a" : line.startsWith("-") ? "d" : line.startsWith("@@") ? "at" : ""}">${h(line)}</span>`).join("\n")}${body.length > shown.length ? `\n<span class="muted">… ${body.length - shown.length} more lines</span>` : ""}</pre>`;
+}
+function handoffCard(card: NonNullable<ToolEntry["handoff"]>) {
+  handoffFetch(card.id);
+  const now = handoffNow.get(card.id), status = now?.status ?? card.status, error = now ? now.error : card.error;
+  const name = CLI_NAMES[card.agent] ?? card.agent, busy = handoffBusy.has(card.id);
+  const added = card.files.reduce((sum, file) => sum + file.added, 0), removed = card.files.reduce((sum, file) => sum + file.removed, 0);
+  const open = handoffOpenFile.get(card.id);
+  const files = card.files.map((file) => btn("handoff-file", `${fileFirst(file.path)}<span class="sp"></span><small><span class="add">+${file.added}</span> <span class="del">−${file.removed}</span></small>`,
+    { id: card.id, path: file.path }, `ho-file ${open === file.path ? "open" : ""}`) + (open === file.path ? now?.patch !== undefined ? patchFor(now.patch, file.path) : '<div class="ho-diff muted">Loading…</div>' : "")).join("");
+  const state = status === "applied" ? `<span class="success">Brought in</span>` : status === "discarded" ? "Discarded" : status === "working" ? "Working…" : status === "failed" ? `<span class="danger">Didn't finish</span>` : "Not in your files yet";
+  const actions = status === "ready"
+    ? btn("handoff-act", "Bring it in", { id: card.id, action: "apply" }, "ho-go", busy) + btn("handoff-again", "Ask for changes", { id: card.id, agent: card.agent }, "ho-btn", busy) + btn("handoff-act", "Discard", { id: card.id, action: "discard" }, "ho-btn quiet", busy)
+    : status === "applied" ? btn("handoff-act", `${ICON_UNDO}Undo`, { id: card.id, action: "undo" }, "ho-btn", busy)
+    : status === "failed" && card.files.length ? btn("handoff-act", "Discard", { id: card.id, action: "discard" }, "ho-btn quiet", busy) : "";
+  const changed = card.files.length ? `${name} changed ${card.files.length} file${card.files.length === 1 ? "" : "s"}` : `${name} changed nothing`;
+  return `<div class="ho-card ${h(status)}" data-handoff="${h(card.id)}">
+    <div class="ho-h"><span class="agent-face step-face" data-provider="${h(card.agent)}" aria-hidden="true">${agentFace(card.agent, "calm")}</span><b>${h(changed)}</b>${card.files.length ? `<span class="add">+${added}</span><span class="del">−${removed}</span>` : ""}<span class="sp"></span><small>${state}</small></div>
+    ${files ? `<div class="ho-files">${files}</div>` : ""}
+    ${card.checks.length ? `<div class="ho-checks">Ran ${card.checks.slice(0, 4).map((check) => `<code>${h(check.length > 60 ? `${check.slice(0, 59)}…` : check)}</code>`).join(" ")}</div>` : ""}
+    ${error && status !== "applied" ? `<div class="ho-error">${h(error)}</div>` : ""}
+    ${actions ? `<div class="ho-actions">${actions}</div>` : ""}
+  </div>`;
+}
+
 /// Under the last turn that changed Demesne's own source: whether the app
 /// you're in runs it yet (its build is newer than the turn), and on a Mac,
 /// Rebuild and open. The open waits until nothing is working.
@@ -2090,6 +2464,8 @@ function requestText(content: string) {
     : `<details class="paste-chip"><summary title="${h(part.text.split("\n").slice(0, 6).join("\n"))}">${PASTE_ICON}${h(pasteLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`).join("");
 }
 const PASTE_ICON = '<span class="pc-ic" aria-hidden="true">TXT</span>';
+/// The Foundry steps that make or change a page.
+const FOUNDRY_WORK = new Set(["foundry_save", "foundry_edit", "foundry_read", "foundry_try"]);
 function runHTML(run: WorkspaceRun, index: number) {
   const rewound = rewoundBy(run);
   if (rewound) return rewindLine(rewound);
@@ -2098,6 +2474,9 @@ function runHTML(run: WorkspaceRun, index: number) {
     const at = run.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === cut.toolCallId);
     if (at >= 0) run = { ...run, entries: run.entries.slice(0, at + 1) };
   }
+  // The plan is the ribbon at the top, never a step row of its own.
+  const plan = planOf(tools(run));
+  run = { ...run, entries: run.entries.filter((entry) => entry.type !== "tool" || entry.name !== UPDATE_PLAN) };
   const items = tools(run),
     files = new Set(
       items
@@ -2113,12 +2492,19 @@ function runHTML(run: WorkspaceRun, index: number) {
   // latest trace unless the reader explicitly collapses it.
   // A step serving a live page keeps the trace open so its preview shows.
   const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
-  let body = "", steps = "";
+  let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }) : "", steps = "";
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
+  // Foundry works quietly (pass 192 A): once a page is being made, words
+  // between its steps are progress talk, and only the answer after the last
+  // step shows. The working line says what it is on meanwhile.
+  const isTool = (entry: WorkspaceRun["entries"][number]) => entry.type === "tool";
+  const making = run.entries.findIndex((entry) => entry.type === "tool" && FOUNDRY_WORK.has(entry.name));
+  const lastStep = run.entries.findLastIndex(isTool);
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
       key = `${run.id}:${entry.id}`;
     if (entry.type === "assistant") {
+      if (making >= 0 && i > making && i < lastStep) continue;
       flush();
       body += `<div class="answer"><span class="answer-mark" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
     }
@@ -2126,6 +2512,11 @@ function runHTML(run: WorkspaceRun, index: number) {
       // Folded steps keep their trees: a commit or merge stays drawn.
       if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
       if (entry.type === "tool" && entry.name === "start_threads" && entry.state === "done") { flush(); body += THREADS_SLOT; }
+      if (entry.type === "tool" && entry.handoff) { flush(); body += handoffCard(entry.handoff); }
+      // Who this turn asked stays in sight, with how many have answered.
+      if (entry.type === "tool" && firstSend(run, entry)) { flush(); body += `<div class="steps">${askStep(run)}</div>`; }
+      // So does a research line: the work behind the report.
+      if (entry.type === "tool" && entry.name === "research") { flush(); body += `<div class="steps">${researchStep(run, entry)}</div>`; }
       if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
@@ -2441,16 +2832,22 @@ function runningRowOnly(entry: WorkspaceRun["entries"][number], previous: Worksp
   return entry.type === "tool" && previous.type === "tool" && entry.id === previous.id && entry.name === previous.name &&
     entry.phase === previous.phase && entry.state === "running" && previous.state === "running" &&
     !entry.drafting && !previous.drafting && !entry.waiting && !previous.waiting && !entry.repo && !previous.repo &&
-    !stepOpen.has(`${runId}:${entry.id}`);
+    // A sub-agent's guide grows in place when open (patchAgentLines).
+    (isAgentStep(entry) || !stepOpen.has(`${runId}:${entry.id}`));
 }
 function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
+  if (tool.name === "subagent" && !tool.drafting) return patchCrew(content, run, tool);
   const args = JSON.stringify({ runId: run.id, id: tool.id });
   const row = [...content.querySelectorAll<HTMLButtonElement>("button.tool-row")].find((node) => node.dataset.args === args);
   if (!row) return !toolRow(run, tool);
   const next = document.createElement("template");
   next.innerHTML = toolRow(run, tool);
   const fresh = next.content.querySelector<HTMLButtonElement>("button.tool-row");
-  if (!fresh || next.content.childElementCount !== 1) return false;
+  // A running sub-agent also has the line under its row: what it's on now,
+  // or its own guide when open. Those are patched in place too.
+  const extras = [...next.content.children].slice(1);
+  if (!fresh || next.content.firstElementChild !== fresh || (extras.length && (!isAgentStep(tool) || extras.some((node) => !node.matches(".agent-now, .agent-steps"))))) return false;
+  if (isAgentStep(tool)) patchAgentLines(row, extras as HTMLElement[]);
   // Read before the swap below, which moves the fresh target into the row.
   const title = fresh.querySelector(".target")?.getAttribute("title") ?? "";
   // The shining verb keeps running; only the words that changed are swapped.
@@ -2465,6 +2862,32 @@ function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry)
   for (const attr of [...fresh.attributes]) if (row.getAttribute(attr.name) !== attr.value) row.setAttribute(attr.name, attr.value);
   return true;
 }
+/// Under a working sub-agent's row: its "now" line, or its guide when open.
+/// Each step changes only the lines that changed, so the turn never redraws
+/// (it flickered on every step) and the last line keeps shining.
+function patchAgentLines(row: HTMLElement, fresh: HTMLElement[]) {
+  const kinds = [".agent-now", ".agent-steps"];
+  let at: Element = row;
+  for (const kind of kinds) {
+    const was = at.nextElementSibling?.matches(kind) ? at.nextElementSibling as HTMLElement : null;
+    const now = fresh.find((node) => node.matches(kind));
+    if (was && now) { syncChildren(was, now); at = was; }
+    else if (now) { at.after(now); at = now; }
+    else if (was) was.remove();
+  }
+}
+/// The shine's phase follows the clock, so lines compare without it.
+const steadyHTML = (node: Element) => node.outerHTML.replace(/ style="animation-delay:-\d+ms"/g, "");
+function syncChildren(was: HTMLElement, now: HTMLElement) {
+  if (!was.children.length && !now.children.length) { if (was.textContent !== now.textContent) was.textContent = now.textContent; return; }
+  const old = [...was.children], next = [...now.children];
+  next.forEach((node, i) => {
+    const before = old[i];
+    if (!before) was.append(node);
+    else if (steadyHTML(before) !== steadyHTML(node)) before.replaceWith(node);
+  });
+  for (const node of old.slice(next.length)) node.remove();
+}
 // Attach the new shell before moving retained answers. Chromium's state-
 // preserving move keeps streaming text animations alive through tool boundaries.
 function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, retained: Array<[HTMLElement, HTMLElement]>) {
@@ -2477,6 +2900,13 @@ function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, reta
     slot.remove();
   }
   for (const node of old) if (!retained.some(([, element]) => element === node)) node.remove();
+}
+/// An open checklist longer than it shows scrolls to the step it is on.
+function planInView() {
+  for (const list of document.querySelectorAll<HTMLElement>(".plan-ribbon.open .pr-list")) {
+    const row = list.querySelector<HTMLElement>(".pr-row.n") ?? list.querySelector<HTMLElement>(".pr-row:not(.d)");
+    if (row && list.scrollHeight > list.clientHeight) list.scrollTop = Math.max(0, row.offsetTop - list.clientHeight / 2);
+  }
 }
 function revealCompactedTurn(id: string) {
   if (!state?.checkpoint) return;
@@ -2553,6 +2983,10 @@ function renderConversation() {
       index === state.runs.length - 1,
       expanded.has(run.id),
       stepsOpen.has(run.id),
+      planOpen.has(run.id),
+      askedSignature(run),
+      [...crewOpen].filter((key) => key.startsWith(`${run.id}:`)),
+      run.entries.flatMap((entry) => entry.type === "tool" && entry.name === "research" ? [JSON.stringify(entry.research ?? null), researchOpen.has(`${run.id}:${entry.id}`)] : []),
       [...fileEditsOpen].filter(key => key.startsWith(`${run.id}:`)),
       // Unfolded steps, and the recorded output a command's fold shows.
       [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
@@ -2651,18 +3085,14 @@ function renderConversation() {
     if (!editKeys.has(key)) { view.dispose(); fileEditViews.delete(key); }
     else if (!view.element.isConnected) view.suspend();
   }
-  // While Foundry writes a page, the pane opens on its title; the page then
-  // assembles in it the moment the save lands.
-  const writing = state.activeTurnId ? state.runs.find((run) => run.id === state!.activeTurnId) : undefined;
-  pane.making(writing && writing.status === "running" ? makingTitle(tools(writing)) : null);
   if (changed) {
-    // An artifact keeps its chip in the turn that first showed it; later changes are an "Edited" line.
+    // Every turn that made or changed a page shows its chip; the pane follows newer versions.
     const shown = state.runs.flatMap((run) => runNodes.get(run.id) ?? []);
-    editedIn(shown.map((item) => item.artifacts.artifacts)).forEach((edited, at) => shown[at]!.artifacts.shape(edited));
     pane.refresh(shown.flatMap((item) => item.artifacts.artifacts));
   }
   if (changed) placeQuestions();
   if (changed) fillThreadLists();
+  if (changed) planInView();
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
     // Older turns mounted above keep what you're reading where it was.
@@ -3061,25 +3491,17 @@ async function commentOn(id: string, text: string) {
 }
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
 let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
-const foundryUi: FoundryUi = { tab: "all", view: "preview", width: "desktop", edit: null, draft: "", error: "", busy: false };
+const foundryUi = { error: "" };
 /// The pane beside the conversation: one artifact open the way Claude
 /// shows one. Per chat; the chips in the chat open and mark it.
 const pane = new FoundryPane(el("pane"), {
   read: (id, version) => api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id }),
   markdown,
-  copy: (text) => api("copy", { text }),
-  export: async (id, version) => {
-    const result = await api<{ path: string } | null>("desktop-foundry-export", { id, version });
-    if (result?.path) notice(`Exported to ${result.path}`);
-  },
-  restore: (detail) => api<FoundryArtifactDetail>("foundry-save", { id: detail.id, source: detail.source }),
   openFoundry: (id, version) => { void openFoundry(id, version); },
-  notice,
   changed: () => {
     el("app").classList.toggle("pane-on", pane.open);
     runNodes.forEach((item) => item.artifacts.mark());
   },
-  assembleDocument,
   // Point at a part: it lands as a chip in the composer, and the words you type say what to change.
   point: () => { void pointAt("foundry"); },
   // A pick on the page goes to the chat as a message; while a turn works it waits for that turn.
@@ -3088,21 +3510,22 @@ const pane = new FoundryPane(el("pane"), {
     followLatest();
     void act(() => api("submit", { text: `I pick ${option}`, wait: Boolean(state?.activeTurnId) }));
   },
-  // Build this: in a project the chat starts on it; a page from Just a chat
-  // first asks which project it's for, with the request waiting in the composer.
-  build: (detail, version) => {
-    if (!state?.session) return;
-    const text = buildRequest(detail.title, detail.id, version);
-    if (isPlain()) {
-      buildWaits.write({ sessionId: state.session.id, text, at: Date.now() });
-      toggleWhere("move");
-      notice("Which project is this page for? Once the chat moves there, it starts building.");
-      return;
-    }
-    followLatest();
-    void act(() => api("submit", { text, wait: Boolean(state?.activeTurnId) }));
-  },
 });
+/// Build this (Foundry's open line): in a project the chat starts on it; a
+/// page from Just a chat first asks which project it's for, with the request
+/// waiting in the composer.
+function buildPage(detail: FoundryArtifactDetail, version: number) {
+  if (!state?.session) return;
+  const text = buildRequest(detail.title, detail.id, version);
+  if (isPlain()) {
+    buildWaits.write({ sessionId: state.session.id, text, at: Date.now() });
+    toggleWhere("move");
+    notice("Which project is this page for? Once the chat moves there, it starts building.");
+    return;
+  }
+  followLatest();
+  void act(() => api("submit", { text, wait: Boolean(state?.activeTurnId) }));
+}
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
@@ -3307,13 +3730,12 @@ function openPage(kind: "" | PageKind) {
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
-  if (kind === "foundry") { if (was !== "foundry") Object.assign(foundryUi, { edit: null, error: "" }); foundrySaves = foundrySaveCount(); void loadFoundry(); }
+  if (kind === "foundry") { if (was !== "foundry") foundryUi.error = ""; foundrySaves = foundrySaveCount(); void loadFoundry(); }
   if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
   if (kind === "today") { if (was !== "today") Object.assign(todayUi, { replying: "", error: "", picking: "", profile: null }); todayDot.clear(); void loadSocials(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
-  if (kind === "foundry" && !foundryOpen) document.querySelector<HTMLInputElement>("#foundry-make input")?.focus({ preventScroll: true });
   if (kind === "settings" && was !== "settings") document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
   if (!kind && was === "settings") document.querySelector<HTMLElement>(".sidebar-settings")?.focus({ preventScroll: true });
 }
@@ -3327,7 +3749,7 @@ async function loadFoundry() {
     // The open artifact follows its newest version unless an older one or an edit is on screen.
     const open = foundryOpen, latest = open && foundryList.find((item) => item.id === open.id);
     if (open && !latest) foundryOpen = null;
-    else if (open && latest && foundryUi.edit === null && open.version === open.versions[0]?.version && latest.version !== open.version) await openFoundry(open.id);
+    else if (open && latest && open.version === open.versions[0]?.version && latest.version !== open.version) await openFoundry(open.id);
     foundryUi.error = "";
   } catch (error) {
     foundryList = foundryList ?? [];
@@ -3338,7 +3760,6 @@ async function loadFoundry() {
 async function openFoundry(id: string, version?: number) {
   try {
     const found = await api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id });
-    if (foundryOpen?.id !== found.id) Object.assign(foundryUi, { view: "preview", edit: null });
     foundryOpen = found;
     foundryUi.error = "";
   } catch (error) { foundryUi.error = errorWords(error); }
@@ -3346,15 +3767,6 @@ async function openFoundry(id: string, version?: number) {
   document.getElementById("page")?.scrollTo({ top: 0 });
 }
 const errorWords = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^.*?: /, "");
-async function foundryMake(text: string) {
-  foundryUi.busy = true; renderPage();
-  try {
-    await api("foundry-make", { text });
-    foundryUi.draft = foundryUi.error = "";
-    openPage("");
-  } catch (error) { foundryUi.error = errorWords(error); }
-  finally { foundryUi.busy = false; renderPage(); }
-}
 async function loadArchived() {
   try {
     const result = await api<{ sessions: Array<{ id: string; title: string; archivedAt: string; workspace?: string }> }>("archived-list");
@@ -3390,13 +3802,9 @@ function renderPage() {
     if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
     html = scheduledPage({ routines: routinesHere, auto: isPlain() || inAssistant() ? null : state.breakage.auto, here: isPlain() ? "" : here, assistant: inAssistant(), error: routineUi.error, draft: routineUi.draft });
   } else if (pageOpen === "foundry") {
-    // Source being edited keeps its words through a redraw.
-    const area = root.querySelector<HTMLTextAreaElement>(".fd-source textarea:not([readonly])");
-    if (area && foundryUi.edit !== null) foundryUi.edit = area.value;
-    if (document.activeElement?.closest("#foundry-make")) foundryUi.draft = (document.activeElement as HTMLInputElement).value;
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
-    html = foundryPage({ list: foundryList, open: foundryOpen, ui: foundryUi, here: isPlain() ? "" : here, markdownHtml: markdown });
+    html = foundryPage({ list: foundryList, open: foundryOpen, error: foundryUi.error, markdownHtml: markdown });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
@@ -3451,7 +3859,6 @@ document.getElementById("page")?.addEventListener("paste", (event) => {
 });
 document.getElementById("page")?.addEventListener("change", (event) => {
   const input = event.target as HTMLElement;
-  if (input instanceof HTMLSelectElement && input.matches("[data-foundry-version]") && foundryOpen) return void openFoundry(foundryOpen.id, Number(input.value));
   if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
 });
 // A number in Settings saves on Enter, or when you leave it.
@@ -3542,13 +3949,6 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     if (text) void commentOn(form.dataset.id ?? "", text);
     return;
   }
-  if (form.id === "foundry-make") {
-    event.preventDefault();
-    const text = form.querySelector("input")?.value.trim() ?? "";
-    foundryUi.draft = text;
-    if (text && !foundryUi.busy) void foundryMake(text);
-    return;
-  }
   if (form.id !== "routine-new") return;
   event.preventDefault();
   const text = form.querySelector("input")?.value.trim() ?? "";
@@ -3580,6 +3980,8 @@ let composerSession: string | null = null, heldChatDraft: string | null = null;
 /// question doesn't hold the composer: you answer it in its card.
 function pendingQuestion() { return state?.questions.find((q) => !q.open); }
 const questionById = (id: unknown) => state?.questions.find((q) => q.id === id);
+/// An open question still waiting: the composer's words answer it too.
+function openQuestion() { return state?.questions.find((q) => q.open && q.status === "waiting" && (q.answers?.length ?? 0) < q.questions.length); }
 function questionIndex() { return pendingQuestion()?.answers?.length ?? 0; }
 function replyCacheKey(id: string,index: number) { return `demesne-question-draft:${id}:${index}`; }
 function cachedReply(id: string,index: number): {text:string;version:number} | null {
@@ -3758,7 +4160,7 @@ function renderComposer() {
     state.connection,
     state.busy,
     state.approvals.length,
-    state.questions.length,
+    state.questions.map((q) => [q.id, q.status, q.answers?.length]),
     state.session?.autoApprove,
     state.session?.acceptEdits,
     state.planOnly,
@@ -3818,11 +4220,11 @@ function renderComposer() {
     : question
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to carry on…" : question.questions[questionIndex()]?.suggestions?.length ? "Answer, or pick one above…" : "Type your answer…"
     : inSession()
-    ? state.questions.length
-      ? "Reply… the question stays in the chat"
+    ? openQuestion()
+      ? openQuestion()!.questions[openQuestion()!.answers?.length ?? 0]?.suggestions?.length ? "Answer in your own words, or pick one above…" : "Type your answer…"
       : state.activeTurnId
       ? "Steer it while it works…"
-      : suggestion ? `${suggestion}   Alt+→` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
+      : suggestion ? `${suggestion}   Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
     : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
   editor.disabled =
     state.connection !== "online" ||
@@ -3837,7 +4239,10 @@ function renderComposer() {
   const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || pointed.length > 0 || state.attachments.length > 0 || pastes.length > 0, session = inSession();
   const attachRow = el("attach-row");
   attachRow.hidden = (!state.attachments.length && !pastes.length) || Boolean(question);
-  attachRow.innerHTML = state.attachments.map((image) => {
+  // A screenshot from the capture keys shows in its card; here only a note.
+  // (A narrow window has no card column: then it's an ordinary picture chip.)
+  const waitingShots = getComputedStyle(el("cards")).display === "none" ? [] : chatShots().filter((shot) => !shot.sent && state!.attachments.some((image) => image.id === shot.id));
+  attachRow.innerHTML = shotsNote(waitingShots) + state.attachments.filter((image) => !waitingShots.some((shot) => shot.id === image.id)).map((image) => {
     const preview = attachmentPreviews.get(image.id);
     return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
   }).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
@@ -4027,22 +4432,24 @@ function questionCard(question: WorkspaceQuestion): string {
   const answered = index >= total, item = question.questions[Math.min(index, total - 1)]!;
   const paused = question.status === "paused", interview = question.mode === "interview";
   const id = question.id, picks = questionPicks.get(id) ?? new Set<number>();
-  const tag = question.open ? "The agent asks · it keeps working meanwhile" : interview ? "The agent asks" : "The agent is waiting on you";
   const trail = question.questions.slice(0, Math.min(index, total)).map((asked, n) =>
     `<li><span>${h(asked.question)}</span><b>${h(question.answers?.[n]?.answer ?? "Let it decide")}</b></li>`).join("");
   const choices = answered ? [] : item.suggestions ?? [];
   const words = h(item.question).split(" ").map((word) => `<span class="w">${word} </span>`).join("");
+  // One row per answer (pass 192): the words, one dim line on what it means,
+  // and the agent's recommendation (always its first) marked.
   const choice = (label: string, n: number) => btn(item.multiple ? "question-toggle" : "question-pick",
-    `<kbd>${n + 1}</kbd><span class="tx"><b>${h(label)}</b>${item.details?.[n] ? `<span>${h(item.details[n]!)}</span>` : ""}</span>${n === 0 && choices.length > 1 ? '<span class="rec">Suggested</span>' : ""}`,
-    { id, n, text: label }, `ask-choice${picks.has(n) ? " on" : ""}`).replace("<button ", `<button aria-pressed="${item.multiple ? picks.has(n) : false}" `);
-  const own = answered ? "" : `<label class="ask-own"><input data-ask-own="${h(id)}" maxlength="2000" placeholder="${choices.length ? "Or type your own answer" : "Type your answer"}" aria-label="Your own answer">${btn("question-own", "↵", { id }, "ask-send")}</label>`;
+    `<kbd>${n + 1}</kbd><span class="tx"><b>${h(label)}</b>${item.details?.[n] ? `<span>${h(item.details[n]!)}</span>` : ""}</span>${n === 0 && choices.length > 1 ? '<span class="rec">Recommended</span>' : ""}`,
+    { id, n, text: label }, `ask-choice${n === 0 && choices.length > 1 ? " first" : ""}${picks.has(n) ? " on" : ""}`).replace("<button ", `<button aria-pressed="${item.multiple ? picks.has(n) : false}" `);
+  const decide = answered || paused || interview || item.multiple ? "" : btn("question-skip", '<kbd></kbd><span class="tx"><b>Let it decide</b></span>', { id }, "ask-choice ask-decide");
+  const rows = choices.length ? `<div class="ask-choices">${choices.map(choice).join("")}${decide}</div>` : "";
   const foot = answered || paused
-    ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { id, action: "resume" }, "ask-link")}`
+    ? [`<span>${answered ? "Answered" : "Paused"}</span>`, btn("question-control", "Resume", { id, action: "resume" }, "ask-link")]
     : [item.multiple ? btn("question-multi", picks.size ? `Done · ${picks.size} picked` : "Pick any that apply", { id }, "ask-done-btn", !picks.size) : "",
       index > 0 ? btn("question-control", "Back", { id, action: "back" }, "ask-link ask-prev") : "",
-      interview ? "" : btn("question-skip", "Let it decide", { id }, "ask-link"),
-      question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean).join("");
-  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}"><div class="ask-tag"><i></i>${tag}${total > 1 ? `<span>${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<p class="ask-text">${words}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map(choice).join("")}</div>` : ""}${own}<div class="ask-foot">${foot}</div></div>`;
+      !choices.length && !interview ? btn("question-skip", "Let it decide", { id }, "ask-link") : "",
+      question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean);
+  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}">${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<div class="ask-q"><i aria-hidden="true"></i><p class="ask-text">${words}</p>${total > 1 ? `<span class="ask-n">${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${rows}${foot.length ? `<div class="ask-foot">${foot.join("")}</div>` : ""}</div>`;
 }
 function renderQuestion() {
   if (!state) return;
@@ -4062,17 +4469,14 @@ function renderQuestion() {
     if (!card) { const node = document.createElement("div"); node.className = "ask-slot-card"; card = { node, signature: "" }; questionCards.set(question.id, card); }
     if (card.signature === signature) continue;
     const step = card.signature && JSON.parse(card.signature)[2]?.length !== question.answers?.length;
-    const own = card.node.querySelector<HTMLInputElement>("[data-ask-own]")?.value ?? "";
     card.signature = signature;
     card.node.innerHTML = questionCard(question);
-    const input = card.node.querySelector<HTMLInputElement>("[data-ask-own]");
-    if (input) input.value = step ? question.draft ?? "" : own;
     if (isNew || step) {
       const root = card.node.firstElementChild!;
       if (isNew && !settled) snap(root, { opacity: [0, 1], y: [12, 0], scale: [0.98, 1] });
       if (!settled || step) {
         snap(root.querySelectorAll(".ask-text .w"), { opacity: [0, 1], y: [10, 0], delay: stagger(22) });
-        snap(root.querySelectorAll(".ask-choice, .ask-own"), { opacity: [0, 1], y: [12, 0], delay: stagger(45, { start: 120 }) });
+        snap(root.querySelectorAll(".ask-choice"), { opacity: [0, 1], y: [12, 0], delay: stagger(45, { start: 120 }) });
       }
       if (isNew) fresh = card.node;
     }
@@ -4086,15 +4490,12 @@ function renderQuestion() {
 /// screen (a waiting interview, a turn that stopped) sits at the end.
 function placeQuestions() {
   if (!state) return;
-  const focused = document.activeElement instanceof HTMLInputElement && document.activeElement.matches("[data-ask-own]") ? document.activeElement : null;
   for (const question of state.questions) {
     const card = questionCards.get(question.id);
     if (!card) continue;
     const slot = document.querySelector<HTMLElement>(`#conversation [data-ask-slot="${CSS.escape(question.toolCallId)}"]`) ?? el("question");
     if (card.node.parentElement !== slot) slot.append(card.node);
   }
-  if (focused && !focused.isConnected) return;
-  if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
 }
 /// The way back to an open question you've scrolled past.
 function renderQuestionBack() {
@@ -5160,6 +5561,13 @@ async function submitText(value = editor.value, wait = false) {
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
   // Folded pastes go after the words, whole.
   if (pastes.length && !value.startsWith("/")) { value = withPastes(value, pastes); pastes.length = 0; }
+  // A screenshot's window text goes folded after them; its card folds to one line.
+  const going = value.startsWith("/") || pendingQuestion() ? [] : chatShots().filter((shot) => !shot.sent && state!.attachments.some((image) => image.id === shot.id));
+  if (going.length) {
+    value = withPastes(value, going.map(shotPaste).filter((paste): paste is Paste => paste !== null));
+    for (const shot of going) shot.sent = Date.now();
+    renderCards();
+  }
   if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;
@@ -5169,6 +5577,13 @@ async function submitText(value = editor.value, wait = false) {
     renderConversation();
   }
   if (pendingQuestion()) return answerQuestion(value);
+  // Your own words answer an open question, as its rows would.
+  const open = openQuestion();
+  if (open && value.trim() && !value.startsWith("/") && !notes && !state.attachments.length) {
+    editor.value = "";
+    renderComposer();
+    return answerQuestion(value, "typed", open);
+  }
   if (state.activeTurnId) {
     // Enter while a turn runs steers it; ⌥↵ queues the next message.
     if (value.startsWith("/")) return;
@@ -5370,7 +5785,6 @@ function followLatest() {
 async function foundryAction(action: string, args: Record<string, any>) {
   const open = foundryOpen;
   const redraw = () => { renderPage(); if (state) renderState({ ...state }); };
-  if (action === "foundry-tab") { foundryUi.tab = args.tab; return renderPage(); }
   if (action === "foundry-open") return openFoundry(String(args.id));
   if (action === "foundry-open-step") {
     // A new artifact's id is in the tool's result; a revision names it in its input.
@@ -5383,42 +5797,27 @@ async function foundryAction(action: string, args: Record<string, any>) {
     if (id) return pane.show(id);
     return openPage("foundry");
   }
-  if (action === "foundry-close") { foundryOpen = null; foundryUi.edit = null; redraw(); void loadFoundry(); return; }
-  if (action === "foundry-view") { foundryUi.view = args.view === "source" ? "source" : "preview"; return renderPage(); }
-  if (action === "foundry-width") { foundryUi.width = args.width; return renderPage(); }
-  if (!open) return;
-  if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
-  if (action === "foundry-reload") { const frame = document.querySelector<HTMLIFrameElement>("#page .fd-frame"); if (frame) frame.src = frame.src; return; }
-  if (action === "foundry-edit") { foundryUi.edit = open.source; foundryUi.view = "source"; renderPage(); document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea")?.focus(); return; }
-  if (action === "foundry-edit-cancel") { foundryUi.edit = null; return renderPage(); }
-  if (action === "foundry-edit-save" || action === "foundry-restore") {
-    const area = document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea:not([readonly])");
-    const source = action === "foundry-restore" ? open.source : area?.value ?? foundryUi.edit ?? "";
-    try {
-      foundryOpen = await api<FoundryArtifactDetail>("foundry-save", { id: open.id, source });
-      Object.assign(foundryUi, { edit: null, view: "preview", error: "" });
-    } catch (error) { foundryUi.error = errorWords(error); }
-    return renderPage();
-  }
-  if (action === "foundry-copy") { await act(() => api("copy", { text: open.source })); return notice("Copied the source"); }
-  if (action === "foundry-export") {
-    const saved = await act(() => api<{ path: string } | null>("desktop-foundry-export", { id: open.id, version: open.version }));
+  if (action === "foundry-close") { foundryOpen = null; redraw(); void loadFoundry(); return; }
+  // Export and delete come from a card on the wall (its id) or the open mockup.
+  const id = typeof args.id === "string" ? args.id : open?.id;
+  if (action === "foundry-export" && id) {
+    const saved = await act(() => api<{ path: string } | null>("desktop-foundry-export", { id, version: open?.id === id ? open.version : undefined }));
     if (saved && typeof saved === "object" && "path" in saved) notice(`Exported to ${saved.path}`);
     return;
   }
-  if (action === "foundry-delete") {
-    if (!confirm(`Delete "${open.title}" and all ${open.versions.length} version${open.versions.length === 1 ? "" : "s"}?`)) return;
-    await act(() => api("foundry-delete", { id: open.id }));
-    pane.forget(open.id);
-    foundryOpen = null;
+  if (action === "foundry-delete" && id) {
+    const item = foundryList?.find((entry) => entry.id === id);
+    const title = item?.title ?? open?.title ?? "this";
+    if (!confirm(`Delete "${title}" and all its versions?`)) return;
+    await act(() => api("foundry-delete", { id }));
+    pane.forget(id);
+    if (foundryOpen?.id === id) foundryOpen = null;
     redraw();
     return loadFoundry();
   }
-  if (action === "foundry-revise") {
-    await act(() => api("foundry-revise", { id: open.id, title: open.title, chat: open.sessionId }));
-    openPage("");
-    editor.focus({ preventScroll: true });
-  }
+  if (!open) return;
+  if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
+  if (action === "foundry-build") { openPage(""); buildPage(open, open.version); }
 }
 // Double-click an artifact's title to rename it; Enter keeps it, Esc puts it back.
 document.getElementById("page")?.addEventListener("dblclick", (event) => {
@@ -5690,18 +6089,50 @@ async function dispatch(
   }
   if (action === "card-fold") {
     const name = String(args.name);
-    if (cardsFolded.has(name)) { cardsFolded.delete(name); cardUnfolding = name; } else cardsFolded.add(name);
-    try { localStorage.setItem("demesne-cards-folded", JSON.stringify([...cardsFolded])); } catch {}
+    if (cardsOpen.has(name)) cardsOpen.delete(name); else cardsOpen.add(name);
+    try { localStorage.setItem("demesne-cards-open", JSON.stringify([...cardsOpen])); } catch {}
     renderCards();
     document.querySelector<HTMLButtonElement>(`#cards [data-card="${name}"] .card-head`)?.focus({ preventScroll: true });
     return;
   }
   if (action === "cycle-mode") return cycleMode();
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
-  if (action === "detach") return api("detach", { id: args.id });
+  if (action === "detach") {
+    const at = windowShots.findIndex((shot) => shot.id === args.id && !shot.sent);
+    if (at >= 0) { windowShots.splice(at, 1); renderCards(); }
+    return api("detach", { id: args.id });
+  }
+  if (action === "preview-file") return openPreview(String(args.path ?? ""), target);
+  if (action === "preview-close") return closePreview();
+  if (action === "preview-wide") return widenPreview();
+  if (action === "preview-open") { const open = chatPreview(); return open?.data ? api("open-preview", { absolute: open.data.absolute }) : undefined; }
+  if (action === "preview-sheet" || action === "preview-slide") {
+    const open = chatPreview();
+    if (open) { if (action === "preview-sheet") open.sheet = Number(args.index) || 0; else open.slide = Number(args.index) || 0; renderCards(); }
+    return;
+  }
+  if (action === "shot-big") {
+    const shot = windowShots.find((one) => one.id === args.id);
+    if (shot) { shot.big = !shot.big; renderCards(); }
+    return;
+  }
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
   if (action === "context-card") {
-    contextCardOpen = !contextCardOpen;
+    // The card already sits in the column: open it there, never show it twice.
+    let inColumn = columnContextCard();
+    if (inColumn) {
+      contextCardOpen = false;
+      if (!cardsOpen.has("context")) {
+        cardsOpen.add("context");
+        try { localStorage.setItem("demesne-cards-open", JSON.stringify([...cardsOpen])); } catch {}
+        renderCards();
+        inColumn = columnContextCard()!;
+      }
+      inColumn.classList.remove("pointed");
+      void inColumn.offsetWidth;
+      inColumn.classList.add("pointed");
+      inColumn.scrollIntoView({ block: "nearest" });
+    } else contextCardOpen = !contextCardOpen;
     renderContextCard();
     return;
   }
@@ -5739,11 +6170,6 @@ async function dispatch(
     const item = q?.questions[q.answers?.length ?? 0];
     if (!q || !item || !picks.length) return;
     return answerQuestion(picks.map((n) => item.suggestions[n]).filter(Boolean).join("; "), "suggestion", q);
-  }
-  if (action === "question-own") {
-    const q = questionById(args.id), input = document.querySelector<HTMLInputElement>(`[data-ask-own="${CSS.escape(String(args.id))}"]`);
-    if (!q || !input?.value.trim()) return input?.focus();
-    return answerQuestion(input.value, "typed", q);
   }
   if (action === "question-back") {
     const card = questionCards.get(String(args.id))?.node;
@@ -5881,6 +6307,35 @@ async function dispatch(
     }
     return;
   }
+  if (action === "handoff-file") {
+    const id = String(args.id), path = String(args.path);
+    handoffOpenFile.get(id) === path ? handoffOpenFile.delete(id) : handoffOpenFile.set(id, path);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "handoff-again") {
+    setDraft(`Ask ${CLI_NAMES[String(args.agent)] ?? "the agent"} to change hand-off ${String(args.id)}: `);
+    return;
+  }
+  if (action === "handoff-act") {
+    const id = String(args.id), verb = String(args.action);
+    if (handoffBusy.has(id)) return;
+    handoffBusy.add(id);
+    follow = false;
+    renderConversation();
+    try {
+      const done = await api<{ handoff: { status: string; error?: string } }>("handoff-act", { id, action: verb });
+      handoffNow.set(id, { ...handoffNow.get(id), status: done.handoff.status, error: undefined });
+      notice(verb === "apply" ? "Brought in: the change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded");
+    } catch (error) {
+      notice(error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error));
+    } finally {
+      handoffBusy.delete(id);
+      renderConversation();
+    }
+    return;
+  }
   if (action === "agent-found") {
     const key = String(args.key);
     foundOpen.has(key) ? foundOpen.delete(key) : foundOpen.add(key);
@@ -5947,6 +6402,44 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  // Stop on a background sub-agent's line (pass 190 A).
+  if (action === "stop-agent") {
+    void act(() => api("stop-agent", { toolCallId: String(args.toolCallId) }));
+    return;
+  }
+  if (action === "toggle-crew") {
+    const key = String(args.id);
+    crewOpen.has(key) ? crewOpen.delete(key) : crewOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "toggle-research") {
+    const key = String(args.id);
+    researchOpen.has(key) ? researchOpen.delete(key) : researchOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "toggle-asked") {
+    const key = String(args.id);
+    askedOpen.has(key) ? askedOpen.delete(key) : askedOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "look-picture") {
+    const src = lookPictures.get(String(args.id));
+    if (src) showPicture(src, String(args.caption ?? ""));
+    return;
+  }
+  if (action === "toggle-plan") {
+    planOpen.has(args.id) ? planOpen.delete(args.id) : planOpen.add(args.id);
+    follow = false;
+    renderConversation();
+    planInView();
+    return;
   }
   if (action === "toggle-steps") {
     stepsOpen.has(args.id) ? stepsOpen.delete(args.id) : stepsOpen.add(args.id);
@@ -6531,6 +7024,13 @@ document.addEventListener("click", (event) => {
       detailsOpen.add(id);
     }
   }
+  // A file name in a step previews the file instead of unfolding the step.
+  const named = (event.target as Element).closest<HTMLElement>(".tool-row [data-preview-path]");
+  if (named) {
+    event.preventDefault();
+    void act(() => openPreview(named.dataset.previewPath!, named));
+    return;
+  }
   const target = (event.target as Element).closest<HTMLElement>(
     "[data-action]",
   );
@@ -6846,10 +7346,10 @@ document.addEventListener("keydown", (event) => {
     else { settingsUi.fold = ""; renderPage(); }
     return;
   }
-  // Esc in an open artifact goes back to Foundry's gallery first.
+  // Esc in an open mockup goes back to Foundry's wall first.
   if (key === "escape" && !ctrl && pageOpen === "foundry" && foundryOpen && !field) {
     event.preventDefault();
-    if (foundryUi.edit !== null) foundryUi.edit = null; else foundryOpen = null;
+    foundryOpen = null;
     renderPage();
     if (state) renderState({ ...state });
     return;
@@ -6869,15 +7369,10 @@ document.addEventListener("keydown", (event) => {
     document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
     return;
   }
-  if ((event.target as HTMLElement).matches?.("[data-ask-own]") && key === "enter" && !event.shiftKey) {
-    event.preventDefault();
-    (event.target as HTMLElement).parentElement?.querySelector<HTMLElement>(".ask-send")?.click();
-    return;
-  }
   // 1, 2, 3… pick the model's suggested answers while nothing is typed.
   if (!ctrl && !event.altKey && /^[1-9]$/.test(key) && (!field || (event.target === editor && !editor.value))) {
     const cards = document.querySelectorAll<HTMLElement>(".ask-card"), card = cards[cards.length - 1];
-    const choice = card?.querySelectorAll<HTMLElement>(".ask-choice")[Number(key) - 1];
+    const choice = card?.querySelectorAll<HTMLElement>(".ask-choice:not(.ask-decide)")[Number(key) - 1];
     if (choice) { event.preventDefault(); choice.click(); return; }
   }
   if ((event.target as HTMLElement).id === "rv-note-input" && (key === "enter" || key === "escape")) {
@@ -7111,12 +7606,13 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (
-    key === "arrowright" && event.altKey && !ctrl &&
+    (key === "tab" && !event.altKey || key === "arrowright" && event.altKey) && !ctrl &&
     !event.shiftKey &&
     event.target === editor &&
     !editor.value && !pendingQuestion() && !state.approvals.length
   ) {
-    // Accept a visible suggestion explicitly; Tab remains focus navigation.
+    // Tab (or Alt+→) takes the suggested prompt shown in the empty composer.
+    // With nothing suggested, Tab still moves focus as usual.
     const suggestion = nextSuggestion();
     if (suggestion) run(() => setDraft(suggestion));
     return;

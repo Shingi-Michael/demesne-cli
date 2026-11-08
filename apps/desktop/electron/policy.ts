@@ -1,5 +1,4 @@
 import { isAbsolute, resolve, sep } from "node:path";
-import { assembledDocument } from "./foundry-assemble.ts";
 import { isReadyKind, KINDS_SCRIPT, KINDS_STYLE, renderReadyKind } from "./foundry-kinds.ts";
 export const APP_URL = "demesne://app/index.html";
 /** Whether the window is glass, with the Glass slider in Settings: on the
@@ -139,16 +138,13 @@ export const FOUNDRY_FONT_HOSTS = { styles: "https://fonts.googleapis.com", file
  * else: no forms, no other origins. Its only fetch is to foundry:, for
  * what the page saves and asks (foundryPageCall). */
 export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; connect-src foundry:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
-/** The first show of a version assembles the page: anime.js and the
- * assembly script ride along, with the previous version to diff against. */
-export interface FoundryAssembly { library: string; previous: string | null }
 /** The page an artifact frame shows: HTML as written, SVG as an image (so it runs no script). */
-export function foundryDocument(kind: string, source: string, title: string, assembly?: FoundryAssembly) {
+export function foundryDocument(kind: string, source: string, title: string) {
   const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);
   // A Deck, a Doc or a Dashboard: the content drawn by the app's own renderer.
   if (isReadyKind(kind)) return renderReadyKind(kind, source, title);
-  if (kind === "html") return withPick(assembly ? assembledDocument(source, assembly.library, assembly.previous) : source);
-  if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}${assembly ? "@media(prefers-reduced-motion:no-preference){img{animation:in 600ms cubic-bezier(.2,.8,.2,1)}@keyframes in{from{opacity:0;transform:scale(.6) rotate(-6deg)}}}" : ""}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
+  if (kind === "html") return withPick(source);
+  if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
   return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><pre style="white-space:pre-wrap;font:14px/1.6 system-ui;padding:24px">${esc(source)}</pre>`;
 }
 export const EVENTS = ["demesne:update", "demesne:desktop-error", "demesne:desktop-action"] as const;

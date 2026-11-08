@@ -1,9 +1,9 @@
-/// What a chat made in Foundry, in the conversation: a chip per artifact,
-/// the way Claude shows an artifact. A kind tile, the title and "Prototype ·
-/// v2"; nothing live runs in the chat. Click opens the page in the pane
-/// beside the conversation (foundry-pane.ts); the open one wears a tone.
-/// An artifact gets one chip, where it was first made: a later turn that
-/// changed it says so in one quiet line, "Edited Idea garden · v2".
+/// What a chat made in Foundry, in the conversation: a link card per
+/// artifact (pass 192 A). Its kind's tile, the title, "Prototype · v2" and
+/// Open; nothing live runs in the chat. Click opens the page in the pane beside the conversation
+/// (foundry-pane.ts); the open one wears a tone.
+/// Every turn that made or changed a page ends with its chip, so the newest
+/// version is always one click away (a quiet "Edited" line was missed).
 import { FOUNDRY_KINDS, type FoundryKind } from "@demesne/protocol";
 import type { ToolEntry, WorkbenchEntry } from "@demesne/workbench/entries.ts";
 import { KIND_ICON, KIND_WORD } from "./foundry-page.ts";
@@ -34,30 +34,8 @@ interface ChipOptions {
   isOpen(artifact: ChatArtifact): boolean;
 }
 
-/** What Foundry is writing, from a save still being drafted: the title
- * arrives early in the arguments, long before the page's source is done. */
-export function makingTitle(tools: readonly Pick<ToolEntry, "name" | "state" | "input" | "drafting" | "draftArguments">[]): string | null {
-  const writing = tools.findLast((tool) => tool.name === "foundry_save" && (tool.drafting || tool.state === "running"));
-  if (!writing) return null;
-  if (typeof writing.input.title === "string" && writing.input.title) return writing.input.title;
-  const found = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(writing.draftArguments ?? "");
-  if (!found) return "Something new";
-  try { return (JSON.parse(`"${found[1]}"`) as string) || "Something new"; } catch { return "Something new"; }
-}
-
 /** The chip's words: what it is and which version. */
 export const chipWords = (artifact: ChatArtifact) => `${KIND_WORD[artifact.kind]} · v${artifact.version}`;
-
-/** Which of a chat's artifacts, turn by turn, are changes to one an earlier
- * turn already showed: those are an "Edited" line, not another chip. */
-export function editedIn(turns: readonly (readonly ChatArtifact[])[]) {
-  const seen = new Set<string>();
-  return turns.map((artifacts) => {
-    const edited = new Set(artifacts.filter((artifact) => seen.has(artifact.id)).map((artifact) => artifact.id));
-    for (const artifact of artifacts) seen.add(artifact.id);
-    return edited;
-  });
-}
 
 function chip(artifact: ChatArtifact, options: ChipOptions) {
   const node = document.createElement("button");
@@ -65,29 +43,26 @@ function chip(artifact: ChatArtifact, options: ChipOptions) {
   node.className = "fd-chip";
   node.dataset.artifactId = artifact.id;
   node.dataset.version = String(artifact.version);
-  fill(node, artifact, false);
+  fill(node, artifact);
   node.addEventListener("click", () => { void options.open(artifact); });
   return node;
 }
 
-/// A chip's two forms: the full chip, or the quiet line for a later change.
-function fill(node: HTMLButtonElement, artifact: ChatArtifact, edited: boolean) {
-  node.classList.toggle("fd-edited", edited);
+function fill(node: HTMLButtonElement, artifact: ChatArtifact) {
   const title = document.createElement("b");
   title.textContent = artifact.title;
-  if (edited) {
-    node.replaceChildren("Edited ", title, ` · v${artifact.version}`);
-    node.setAttribute("aria-label", `Open ${artifact.title}, edited to v${artifact.version}`);
-    return;
-  }
+  // Its kind's tile; nothing live runs in the chat.
   const tile = document.createElement("span");
-  tile.className = "fd-chip-ic";
+  tile.className = "fd-chip-thumb";
   tile.innerHTML = KIND_ICON[artifact.kind];
   const text = document.createElement("span"), words = document.createElement("span");
   text.className = "fd-chip-text";
   words.textContent = chipWords(artifact);
   text.append(title, words);
-  node.replaceChildren(tile, text);
+  const open = document.createElement("span");
+  open.className = "fd-chip-open";
+  open.textContent = "Open";
+  node.replaceChildren(tile, text, open);
   node.setAttribute("aria-label", `Open ${artifact.title}, ${chipWords(artifact)}`);
 }
 
@@ -117,13 +92,6 @@ export class FoundryChatArtifacts {
     this.element.hidden = !artifacts.length;
     this.mark();
     return artifacts;
-  }
-  /// Changes to an artifact an earlier turn showed are an "Edited" line.
-  shape(edited: ReadonlySet<string>) {
-    for (const item of this.chips.values()) {
-      const now = edited.has(item.artifact.id);
-      if (item.node.classList.contains("fd-edited") !== now) fill(item.node, item.artifact, now);
-    }
   }
   /// The chip whose artifact the pane shows wears a tone.
   mark() {

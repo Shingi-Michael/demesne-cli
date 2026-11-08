@@ -1637,14 +1637,19 @@ export class DemesneStore {
   /// A step line (`text`) or, once at the end, what a sub-agent found (`report`).
   /// Why Auto gave a sub-agent to the agent tool it runs on (`why`).
   /// A commit or merge step's tree (`repo`): git before and after it.
-  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string; why?: string; repo?: import("@demesne/protocol").RepoFlow }): void {
+  /// A hand-off's change card, once its agent is done (`handoff`).
+  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string; why?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard; research?: import("@demesne/protocol").ResearchState; asked?: string; crew?: "working" | "reported" | "stopped" }): void {
     const turn = this.getTurnOrThrow(turnId);
     if (turn.status !== "running") return;
     const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId,
       ...(update.text !== undefined ? { text: update.text.slice(0, 500) } : {}),
       ...(update.report ? { report: update.report.slice(0, 4000) } : {}),
       ...(update.why ? { why: update.why.slice(0, 300) } : {}),
-      ...(update.repo ? { repo: update.repo } : {}) }, new Date().toISOString());
+      ...(update.repo ? { repo: update.repo } : {}),
+      ...(update.handoff ? { handoff: update.handoff } : {}),
+      ...(update.research ? { research: update.research } : {}),
+      ...(update.asked ? { asked: update.asked.slice(0, 1000) } : {}),
+      ...(update.crew ? { crew: update.crew } : {}) }, new Date().toISOString());
     this.eventSink?.(event);
   }
 
@@ -1943,6 +1948,17 @@ export class DemesneStore {
     this.requireSession(sessionId);
     return (this.database.query("SELECT * FROM events WHERE session_id = ? AND (? IS NULL OR turn_id = ?) AND type IN ('tool.call_completed','turn.reverted','session.rewound','session.rewind_redone') ORDER BY id LIMIT 10001")
       .all(sessionId,turnId??null,turnId??null) as EventRow[]).map(mapEvent);
+  }
+
+  /// Source previews are authorized by completed tool records, never by a
+  /// filename invented in model prose or supplied in a download URL.
+  completedFileReads(sessionId: string, turnId: string) {
+    const turn = this.getTurn(turnId);
+    if (!turn || turn.sessionId !== sessionId) throw new NotFoundError("Turn not found in session");
+    return this.database.query(`SELECT id, name, arguments_json AS argumentsJson, result_text AS resultText
+      FROM tool_calls WHERE turn_id = ? AND status = 'completed'
+      AND name IN ('read_file', 'read_files', 'personal_files') ORDER BY rowid LIMIT 256`)
+      .all(turnId) as { id: string; name: string; argumentsJson: string; resultText: string | null }[];
   }
 
   eventsAfter(sessionId: string, afterEventId: number, limit = 100): EventEnvelope[] {
@@ -2625,9 +2641,12 @@ function mapEvent(row: EventRow): EventEnvelope {
 }
 
 function toolResultMetadata(name: string, resultText: string): Record<string, unknown> {
+  if (name === "look_at_page") return pageLookMetadata(resultText);
   let result: unknown;
   try {
-    result = JSON.parse(resultText);
+    // A result that came with pictures (Foundry's look and try) has a line
+    // per picture after its JSON: "Image artifact <id>: <file> (w×h)".
+    result = JSON.parse(resultText.replace(/(?:\nImage artifact [^\n]*)+$/, ""));
   } catch {
     return {};
   }
@@ -2659,6 +2678,18 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
       ...(typeof value.bytes === "number" ? { bytes: value.bytes } : {}),
     };
   }
+  // A Heartbeat message: who it went to (their face and name) and its id, so
+  // the chat can tie the answer back to it.
+  if (name === "heartbeat" && typeof value.to === "string" && typeof value.id === "string" && typeof value.name === "string") {
+    return { message: JSON.stringify({ id: value.id.slice(0, 80), to: value.to.slice(0, 200), agent: typeof value.agent === "string" ? value.agent.slice(0, 40) : null,
+      name: value.name.slice(0, 80), project: typeof value.project === "string" ? value.project.slice(0, 120) : "" }) };
+  }
+  // Wait and watch: what it waited for and how it ended, for the step row.
+  if (name === "wait_for" && ["matched", "exited", "timeout"].includes(String(value.status))) {
+    return { message: JSON.stringify({ command: typeof value.command === "string" ? value.command.slice(0, 200) : "", status: value.status, afterMs: typeof value.afterMs === "number" ? value.afterMs : 0,
+      line: typeof value.line === "string" ? value.line.slice(0, 300) : null, exitCode: typeof value.exitCode === "number" ? value.exitCode : null,
+      tail: typeof value.tail === "string" ? value.tail.slice(-1_200) : "" }) };
+  }
   if (name === "run_command") {
     const limit = 16_000;
     return {
@@ -2677,4 +2708,21 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
 /// How steered words read to the model: the person's, mid-task, to act on now.
 export function steerContent(texts: string[]): string {
   return `The user sent this while you were working. Take it into account from your next step on:\n\n${texts.join("\n\n")}`;
+}
+
+/// See the app: where it looked, how each step went and its pictures (the
+/// session artifacts the engine listed after the report), for the step row.
+export function pageLookMetadata(resultText: string): Record<string, unknown> {
+  const [head = "", ...rest] = resultText.split("\nImage artifact ");
+  let value: Record<string, unknown>;
+  try { const parsed = JSON.parse(head) as unknown; if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}; value = parsed as Record<string, unknown>; } catch { return {}; }
+  const labels = Array.isArray(value.pictures) ? value.pictures.filter((item): item is string => typeof item === "string") : [];
+  const pictures = rest.map((line, index) => {
+    const match = /^([0-9a-f-]{36}): \S+ \((\d+)×(\d+)\)/.exec(line);
+    return match ? { id: match[1], width: Number(match[2]), height: Number(match[3]), label: (labels[index] ?? "").slice(0, 120) } : null;
+  }).filter((item) => item !== null).slice(0, 3);
+  const steps = Array.isArray(value.steps) ? value.steps.filter((item): item is string => typeof item === "string").slice(0, 12).map((line) => line.slice(0, 240)) : [];
+  const errors = Array.isArray(value.console_errors) ? value.console_errors.filter((item): item is string => typeof item === "string") : [];
+  return { message: JSON.stringify({ url: typeof value.url === "string" ? value.url.slice(0, 500) : "", title: typeof value.title === "string" ? value.title.slice(0, 200) : "",
+    width: typeof value.width === "string" ? value.width : "", steps, errors: errors.slice(0, 3).map((line) => line.slice(0, 200)), errorCount: errors.length, pictures }) };
 }

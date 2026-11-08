@@ -233,6 +233,9 @@ test("the tools carry the design brief, the kit and the library rules", () => {
     expect(JSON.stringify(foundryEditTool(store).definition)).toContain("base_version");
     expect(DESIGN_BRIEF).toContain("phone width");
     expect(DESIGN_BRIEF).toContain("the kit is the floor");
+    // Pass 200 A: layout is even; off-centre only on purpose, on the grid.
+    expect(DESIGN_BRIEF).toContain("cards side by side the same height");
+    expect(DESIGN_BRIEF).not.toContain("an asymmetric layout");
     expect(DESIGN_BRIEF).not.toContain("little CSS");
     // Sizes, spaces and colours come from the kit's scales (the quality eval found 8-16 sizes and 12-25 colours without them).
     expect(DESIGN_BRIEF).toContain("var(--text-xs|sm|md|lg|xl|display)");

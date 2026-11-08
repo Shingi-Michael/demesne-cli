@@ -106,7 +106,7 @@ d-demesne.dp-narrow .dm-proj small{display:none}
 d-demesne.dp-narrow .dm-tabs>.dm-tab{padding:0 12px;font-size:13px}
 d-demesne.dp-narrow .dm-main{padding:16px 20px 12px}
 d-demesne.dp-narrow .dm-card{flex-direction:column}
-d-demesne.dp-narrow .dm-cards{width:auto;flex-direction:row;flex-wrap:wrap;padding:0 16px 16px}
+d-demesne.dp-narrow .dm-cards{width:auto;flex-direction:row;flex-wrap:wrap;padding:0 20px 16px}
 d-demesne.dp-narrow .dm-cards>*{flex:1 1 220px}
 d-demesne.dp-tight d-sidebar,d-demesne.dp-tight .dm-lights{display:none}
 d-demesne.dp-tight .dm-tabs{padding-left:8px}

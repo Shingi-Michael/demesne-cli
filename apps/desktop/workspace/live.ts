@@ -690,7 +690,10 @@ function renderSidebar() {
   const housedIds = new Set(housed.flatMap((agent) => agent.sessionId ? [agent.sessionId] : []));
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()]]);
+  // The open chat's time moves with every streamed word; its row says it by
+  // the minute, so that's all the list redraws for.
+  const openId = state.session?.id;
+  const signature = JSON.stringify([[...parentOf], sessions.map((item) => item.id === openId ? { ...item, updatedAt: item.updatedAt?.slice(0, 16) } : item), projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()]]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -1777,7 +1780,9 @@ function renderTabs() {
   const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen === "today" ? "Today" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
   const shown = tabs.ids.filter((id) => byId.has(id));
   const tones = shown.map((id) => chatTone(byId.get(id)!));
-  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
+  // The open chat's own time moves with every streamed word; its tab has no
+  // glance to key by it, so it doesn't redraw the strip.
+  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
   if (signature === tabsSignature) return;
   renderRailChats(shown.map((id, index) => ({ item: byId.get(id)!, tone: tones[index]!, on: chatOpen && id === current!.id })));
   tabsSignature = signature;
@@ -1798,8 +1803,11 @@ function renderTabs() {
   if (newTab) newTab.title = `New chat (${shortcut("Ctrl+T")})`;
   const callSlot = document.getElementById("workspace-call");
   if (callSlot) callSlot.innerHTML = callButton;
-  (strip.contains(document.activeElement) ? document.activeElement : selected)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // Scrolled into view only when it changes: scrolling asks the browser to lay out the page.
+  const focus = strip.contains(document.activeElement) ? document.activeElement as HTMLElement : selected;
+  if (focus && focus.id !== tabsInView) { tabsInView = focus.id; focus.scrollIntoView({ block: "nearest", inline: "nearest" }); }
 }
+let tabsInView = "";
 /// Closes a tab; the one you were on hands over to its neighbour, or Home.
 function closeTab(id: string): Promise<unknown> | void {
   if (!id) { if (pageOpen) return openPage(""); if (tabOn && tabs.has(tabOn)) return goChat(tabOn); return; }
@@ -3205,9 +3213,12 @@ function renderSakura(show: boolean) {
   }
   host.hidden = !show || !sakura;
   if (!sakura) return;
+  // Hidden, it only rests: reading the ink's colour asks the browser for
+  // styles, which in a chat cost more than anything else on each update.
+  if (!show) { sakura.pause(); return; }
   const dark = inkIsDark();
   if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
-  if (show) { sakura.resume(); sakura.refit(); } else sakura.pause();
+  sakura.resume(); sakura.refit();
 }
 /// When the window was last in front of you, kept on this computer: Home
 /// says what happened since.
@@ -4569,6 +4580,8 @@ function placeQuestions() {
 function renderQuestionBack() {
   let back = document.getElementById("ask-back");
   const open = state?.questions.filter((question) => question.open) ?? [];
+  // Nothing open: no need to measure the page (which makes the browser lay it out).
+  if (!open.length) { if (back) back.hidden = true; return; }
   const stage = el("stage").getBoundingClientRect();
   const away = open.find((question) => {
     const rect = questionCards.get(question.id)?.node.getBoundingClientRect();
@@ -7306,11 +7319,14 @@ function paintTimeline() {
   const long = Boolean(state) && !conversation.hidden && stage.scrollHeight > stage.clientHeight + 40;
   line.hidden = !long;
   if (!long) { timeline = []; return; }
-  line.style.top = `${stage.offsetTop + 14}px`;
-  line.style.height = `${Math.max(0, stage.clientHeight - 28)}px`;
+  // Only what moved is written, so a scroll doesn't make the browser work
+  // out styles twice in one frame.
+  const set = (node: HTMLElement, name: "top" | "height", value: string) => { if (node.style[name] !== value) node.style[name] = value; };
+  set(line, "top", `${stage.offsetTop + 14}px`);
+  set(line, "height", `${Math.max(0, stage.clientHeight - 28)}px`);
   const view = line.querySelector<HTMLElement>(".tl-view")!;
-  view.style.top = `${(stage.scrollTop / stage.scrollHeight) * 100}%`;
-  view.style.height = `${(stage.clientHeight / stage.scrollHeight) * 100}%`;
+  set(view, "top", `${((stage.scrollTop / stage.scrollHeight) * 100).toFixed(2)}%`);
+  set(view, "height", `${((stage.clientHeight / stage.scrollHeight) * 100).toFixed(2)}%`);
   if (!line.classList.contains("on")) return;
   timeline = timelineMarks(timelineFacts(stage), stage.scrollHeight);
   line.querySelector(".tl-marks")!.innerHTML = timeline.map((mark) =>

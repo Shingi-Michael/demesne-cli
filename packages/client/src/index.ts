@@ -2,6 +2,8 @@ import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent, FilePre
 import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
+/// Which agents may work, and where (the daemon's agent-choice.ts).
+export interface AgentChoiceView { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[] }[] }
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean; callback?: string }
 export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
@@ -182,6 +184,13 @@ export class DemesneClient {
   }
   async setSubagentModel(model: string | null): Promise<{ model: string | null; models: { id: string; provider: string }[]; saved: boolean }> {
     return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model }) });
+  }
+  /// Which agents may work, and where (pass 206 A).
+  async agentChoice(): Promise<AgentChoiceView> {
+    return this.request("/v1/agent-choice");
+  }
+  async setAgentChoice(change: { off?: boolean; agent?: string; mode?: "every" | "some" | "off"; projects?: string[] }): Promise<AgentChoiceView> {
+    return this.request("/v1/agent-choice", { method: "POST", body: JSON.stringify(change) });
   }
   /// The folders you trust, and taking one back.
   async trusted(): Promise<import("@demesne/protocol").TrustedResponse> {

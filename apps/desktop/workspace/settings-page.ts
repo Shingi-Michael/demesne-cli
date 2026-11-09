@@ -35,6 +35,8 @@ export interface SettingsInfo {
   /// Folders you trust, or null when the daemon can't say.
   trusted: string[] | null;
   subagent: { model: string | null; often?: string; models: { id: string; provider: string }[] };
+  /// Which agents may work, and where; null when the daemon can't say.
+  agents?: { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[] }[] } | null;
   agent: { maxModelRounds: number; maxToolCalls: number };
   drive: { maxActiveMinutes: number; maxTokens: number; maxTasks: number };
   /// Null when no image service is set up.
@@ -45,9 +47,9 @@ export interface SettingsInfo {
   restart: string[];
 }
 
-export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "providers" | "connectors" | "heartbeat" | "data";
+export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "agents" | "providers" | "connectors" | "heartbeat" | "data";
 const icon = (path: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${path}</svg>`;
-/// Settings › the list (pass 154 B): nine pages, each worth opening. The
+/// Settings › the list (pass 154 B; Agents from pass 206 A): ten pages, each worth opening. The
 /// sections that held a row or two live inside another page now, and their
 /// ids still open it (SETTINGS_HOME), so links and search keep working.
 export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = [
@@ -56,6 +58,7 @@ export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = 
     ["general", "General", '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'],
     ["appearance", "Appearance", '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z"/>'],
     ["models", "Models", '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 2v4M14 2v4M10 18v4M14 18v4M2 10h4M2 14h4M18 10h4M18 14h4"/>'],
+    ["agents", "Agents", '<circle cx="9" cy="9" r="3.5"/><circle cx="16.5" cy="10.5" r="2.5"/><path d="M3 19c.8-3 3.2-4.5 6-4.5s5.2 1.5 6 4.5M15 15.2c2.6-.3 4.8.9 5.5 3.3"/>'],
     ["permissions", "Permissions", '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/>'],
     ["drive", "Drive", '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>'],
     ["connectors", "Connections", '<path d="M9 7 4 12l5 5M15 7l5 5-5 5"/>'],
@@ -67,7 +70,7 @@ export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = 
 /// The page a section is drawn on.
 export const settingsHome = (id: SettingsSection): SettingsSection => SETTINGS_HOME[id] ?? id;
 export const SETTINGS_ORDER = SETTINGS_GROUPS.flatMap(([, items]) => items.map(([id]) => id));
-const ALL_SECTIONS: SettingsSection[] = ["overview", "general", "notifications", "appearance", "keys", "archived", "usage", "permissions", "drive", "models", "providers", "connectors", "heartbeat", "data"];
+const ALL_SECTIONS: SettingsSection[] = ["overview", "general", "notifications", "appearance", "keys", "archived", "usage", "permissions", "drive", "models", "agents", "providers", "connectors", "heartbeat", "data"];
 export const isSettingsSection = (value: unknown): value is SettingsSection => ALL_SECTIONS.includes(value as SettingsSection);
 
 /// Native desktop notifications, each kind with its own switch.
@@ -239,6 +242,43 @@ function shortcuts(mac: boolean): Group[] {
   ];
 }
 
+/// The agent tools' names, as a sentence: "Claude Code, Codex and Gemini".
+const listWords = (items: string[]) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+const folderName = (root: string) => root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
+
+/// Settings › Agents (pass 206 A): one switch for every agent, then each
+/// agent everywhere, in some projects (ticked under it), or off.
+function agentsPage(view: SettingsView): Page {
+  const choice = view.info?.agents;
+  const sub = "The agent tools on this computer. They can be opened as chats, used for side work, and they post on Today.";
+  if (!choice) return { id: "agents", title: "Agents", sub, groups: [{ name: "Agents", rows: [{ title: view.info ? "The daemon can't say" : "Reading…", line: view.info ? "Restart the daemon to choose agents here" : "", keywords: "agents claude code codex gemini" }] }] };
+  const found = choice.agents.map((agent) => agent.name);
+  if (!found.length) return { id: "agents", title: "Agents", sub, groups: [{ name: "Agents", rows: [{ title: "No agent tools found", line: "Install Claude Code, Codex or Gemini and they show here", keywords: "agents claude code codex gemini install" }] }] };
+  const on = !choice.off;
+  // Projects to tick: the folders you trust, then any kept that you don't.
+  const projects = [...new Set([...(view.info?.trusted ?? []), ...choice.agents.flatMap((agent) => agent.projects)])];
+  const rows: SettingsRow[] = choice.agents.map((agent) => {
+    const where = agent.mode === "every" ? "In every project" : agent.mode === "off" ? "Off everywhere" : agent.projects.length ? `In ${listWords(agent.projects.map(folderName))}` : "In no projects yet. Tick one below";
+    const pick = (mode: "every" | "some" | "off") => ({ agent: agent.id, mode });
+    return {
+      title: agent.name,
+      line: on ? where : "Off, with every agent",
+      control: on ? segments([["Everywhere", agent.mode === "every", "agent-choice", pick("every")], ["Some projects", agent.mode === "some", "agent-choice", pick("some")], ["Off", agent.mode === "off", "agent-choice", pick("off")]], `Where ${agent.name} works`) : "",
+      keywords: `agents agent project ${agent.name.toLowerCase()} off on`,
+      fold: on && agent.mode === "some" ? (projects.length
+        ? choices(`Projects for ${agent.name}`, projects.map((root): [string, boolean, string, Record<string, unknown>] => {
+          const kept = agent.projects.includes(root);
+          return [`${kept ? "✓ " : ""}${folderName(root)}`, kept, "agent-choice", { agent: agent.id, mode: "some", projects: kept ? agent.projects.filter((item) => item !== root) : [...agent.projects, root] }];
+        }))
+        : `<p class="st-hint">Open a project once and it shows here to tick.</p>`) : "",
+    };
+  });
+  return { id: "agents", title: "Agents", sub, groups: [
+    { name: "All agents", rows: [{ title: "Agents", line: on ? `On: ${listWords(found)} ${found.length === 1 ? "was" : "were"} found on this computer` : "Off: no agent chats, side work, hand-offs or Today posts", control: toggle(on, "agent-choice", { off: on }, "Agents"), keywords: "agents off on turn off disable" }] },
+    { name: "Each agent", rows, hint: "Where one is off, side work and hand-offs run on the chat’s own model and it leaves the Agents list. Its old chats stay readable." },
+  ] };
+}
+
 function pages(view: SettingsView): Page[] {
   const info = view.info;
   const out: Page[] = [];
@@ -325,6 +365,7 @@ function pages(view: SettingsView): Page[] {
       { title: "Tool calls", line: "And after this many tool calls", control: number("agent.max_tool_calls", info.agent.maxToolCalls, "", "Tool calls", AGENT_DEFAULTS.maxToolCalls), keywords: "limit tools turn" },
     ] : [{ title: "Reading…" }], hint: "The daemon reads these when it starts." },
   ] });
+  out.push(agentsPage(view));
   out.push({ id: "providers", title: "Providers", sub: "Where models come from: accounts, API keys and model servers on this computer.", groups: [
     { name: "Accounts", rows: [
       ...view.providers.items.map((item) => {

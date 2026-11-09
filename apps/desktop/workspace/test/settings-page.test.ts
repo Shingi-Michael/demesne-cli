@@ -80,7 +80,7 @@ test("numbers are typed as you would say them", () => {
 });
 
 test("every section draws, and the list has nine with Overview first", () => {
-  expect(SETTINGS_ORDER).toEqual(["overview", "general", "appearance", "models", "permissions", "drive", "connectors", "keys", "data"]);
+  expect(SETTINGS_ORDER).toEqual(["overview", "general", "appearance", "models", "agents", "permissions", "drive", "connectors", "keys", "data"]);
   for (const section of SETTINGS_ORDER) expect(settingsPage(view({ section }))).toContain('class="cp-title"');
   // The small pages live inside a bigger one, and their ids still open it.
   expect(settingsPage(view({ section: "providers" }))).toContain('<h1 class="cp-title">Models</h1>');
@@ -261,3 +261,25 @@ test("Models has How often for subagents, Usual unless set", () => {
   const more = settingsPage(view({ section: "models", info: { ...info, subagent: { ...info.subagent, often: "more" } } }));
   expect(more).toMatch(/class="on" aria-pressed="true" data-action="subagent-often" data-args="[^"]*more/);
 });
+
+test("Settings › Agents: one switch, then each agent everywhere, some projects or off (pass 206 A)", () => {
+  const agents = { off: false, agents: [
+    { id: "claude", name: "Claude Code", mode: "every" as const, projects: [] },
+    { id: "codex", name: "Codex", mode: "some" as const, projects: ["/Users/mike/projects/demesne-cli"] },
+    { id: "gemini", name: "Gemini", mode: "off" as const, projects: [] },
+  ] };
+  const html = settingsPage(view({ section: "agents", info: { ...info, trusted: ["/Users/mike/projects/demesne-cli", "/Users/mike/projects/acme-web"], agents } }));
+  expect(html).toContain('<h1 class="cp-title">Agents</h1>');
+  expect(html).toContain("On: Claude Code, Codex and Gemini were found on this computer");
+  expect(html).toContain("In every project");
+  expect(html).toContain("In demesne-cli");
+  expect(html).toContain("Off everywhere");
+  // Some projects unfolds the projects to tick; ticking acme-web adds it.
+  expect(html).toContain("✓ demesne-cli");
+  expect(html).toContain(h('{"agent":"codex","mode":"some","projects":["/Users/mike/projects/demesne-cli","/Users/mike/projects/acme-web"]}'));
+  const off = settingsPage(view({ section: "agents", info: { ...info, agents: { ...agents, off: true } } }));
+  expect(off).toContain("Off: no agent chats, side work, hand-offs or Today posts");
+  expect(off).not.toContain("Some projects");
+  expect(settingsPage(view({ section: "agents", info: { ...info, agents: { off: false, agents: [] } } }))).toContain("No agent tools found");
+});
+const h = (text: string) => text.replace(/"/g, "&quot;");

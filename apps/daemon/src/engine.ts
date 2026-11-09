@@ -86,10 +86,10 @@ interface AgentEngineOptions extends AgentConfig {
   subagentModels?: () => SubagentModel[];
   /// Your agent tools as sub-agents (agent-cli.ts): which are installed, a
   /// read-only run of one, and the record Auto picks from.
-  cliSubagents?: { available: () => AgentId[]; run: (id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void, web?: boolean) => Promise<string>; book?: RouteBook };
+  cliSubagents?: { available: (workspaceRoot?: string) => AgentId[]; run: (id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void, web?: boolean) => Promise<string>; book?: RouteBook };
   /// Hand-offs (handoff.ts): a whole change made by one of your agent
   /// tools in its own worktree, which you bring in or discard.
-  handoffs?: { available: () => AgentId[]; offer?: (workspaceRoot: string) => boolean; book?: RouteBook; store: Pick<Handoffs, "start" | "patch" | "get"> };
+  handoffs?: { available: (workspaceRoot?: string) => AgentId[]; offer?: (workspaceRoot: string) => boolean; book?: RouteBook; store: Pick<Handoffs, "start" | "patch" | "get"> };
   /// The model's own presets and compositions, per session.
   sessionTools?: SessionToolStore;
   /// What you added to or took off each chat's Keep list.
@@ -276,7 +276,7 @@ export class AgentEngine {
     // `ask_user` needs someone to answer: only in a chat you're in (ask).
     // Drive, mail and other Auto turns decide for themselves.
     const canAsk = Boolean(this.options.questions) && turn.permissionMode === "ask";
-    const handoffAgents = !themefy && !assistant && session.workspace && (this.options.handoffs?.offer?.(session.workspace.root) ?? true) ? this.options.handoffs?.available() ?? [] : [];
+    const handoffAgents = !themefy && !assistant && session.workspace && (this.options.handoffs?.offer?.(session.workspace.root) ?? true) ? this.options.handoffs?.available(session.workspace.root) ?? [] : [];
     const definitions = themefy
       ? [...this.tools.definitions().filter(definition=>definition.name === "ask_user"),themefyDefinition]
       : assistant
@@ -349,7 +349,7 @@ export class AgentEngine {
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, orchestrate: orchestrating, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         attended: turn.permissionMode === "ask" && !turn.fromDrive && !turn.fromRoutine,
-        delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available().length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, modelSees: inference.vision === true, configured: this.configuredSystemPrompt, sessionContext: [this.options.sessionContext?.(session.id), sourcesContext(keptSources)].filter(Boolean).join("\n") || undefined }) + moreToolsSection(deferrable);
+        delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available(session.workspace?.root).length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, modelSees: inference.vision === true, configured: this.configuredSystemPrompt, sessionContext: [this.options.sessionContext?.(session.id), sourcesContext(keptSources)].filter(Boolean).join("\n") || undefined }) + moreToolsSection(deferrable);
       const unplannedMessages: ProviderMessage[] = [
         { role: "system", content: systemPrompt + (noting ? NOTE_INSTRUCTION : "") + (finalizing
           ? `\n${budgetReason}. Tools are unavailable for this final status request. Report what was actually done, checks and their outcomes, and the specific next steps. Distinguish unfinished work from completed work. The user can send a follow-up to continue from this saved context.` : "") },
@@ -840,7 +840,7 @@ export class AgentEngine {
     if (cli && (named || (!requested && (setting === undefined || setting === "auto")))) {
       // The kind the main model named, else a guess from the label and brief.
       const kind = givenKind ?? jobKind(description, prompt);
-      const available = cli.available();
+      const available = cli.available(workspaceRoot);
       const pick = named ? (available.includes(named) ? { agent: named, why: "" } : null) : pickAgent(kind, available, cli.book?.read() ?? { jobs: {}, restUntil: {} });
       if (named && !pick) {
         const result = `Error: ${named} isn't installed on this machine. Available sub-agents: ${(this.options.subagentModels?.() ?? []).map((model) => model.id).join(", ")}`;
@@ -922,7 +922,7 @@ export class AgentEngine {
     const cli = this.options.cliSubagents;
     const book = cli?.book?.read() ?? { jobs: {}, restUntil: {} };
     // Auto's pick for research first, then the rest that aren't resting.
-    const ready = (cli?.available() ?? []).filter((agent) => !((book.restUntil[agent] ?? 0) > Date.now()));
+    const ready = (cli?.available(workspaceRoot) ?? []).filter((agent) => !((book.restUntil[agent] ?? 0) > Date.now()));
     const first = pickAgent("research", ready, book)?.agent;
     const agents = first ? [first, ...ready.filter((agent) => agent !== first)] : ready;
     let delegate = inference;
@@ -965,7 +965,7 @@ export class AgentEngine {
     if (!handoffs) return fail("failed", "Error: hand-offs are unavailable here");
     let parsed: ReturnType<typeof parseHandoffInput>;
     try { parsed = parseHandoffInput(input); } catch (error) { return fail("failed", `Error: ${error instanceof Error ? error.message : "invalid hand_off input"}`); }
-    const available = handoffs.available();
+    const available = handoffs.available(workspaceRoot);
     // A sent-back hand-off runs on its own agent, whatever Auto would pick now.
     const earlier = parsed.again ? handoffs.store.get(parsed.again) : null;
     if (parsed.again && (!earlier || earlier.sessionId !== sessionId)) return fail("failed", `Error: no hand-off ${parsed.again} in this chat. Start a new one without continue.`);

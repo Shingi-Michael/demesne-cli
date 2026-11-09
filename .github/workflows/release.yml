@@ -126,11 +126,32 @@ jobs:
         with:
           node-version: "22"
       - run: bun install --frozen-lockfile
+      # electron-builder downloads Electron and its packaging tools from
+      # GitHub on every run; a 504 there fails the whole release. Keep them
+      # in one cache path on every OS so later runs skip the download.
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ${{ runner.temp }}/electron-builder-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock', 'apps/desktop/electron-builder.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-${{ runner.arch }}-
       - name: Build app bundle
         shell: bash
+        env:
+          ELECTRON_CACHE: ${{ runner.temp }}/electron-cache
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
         run: |
           export DEMESNE_BUILD_VERSION="${{ needs.version.outputs.version }}"
-          bun run build:desktop
+          # Retry so a transient download error (such as a 504) doesn't
+          # fail the release; a real build error still fails all attempts.
+          for attempt in 1 2 3; do
+            if bun run build:desktop; then exit 0; fi
+            [ "$attempt" -lt 3 ] && { echo "::warning::build:desktop failed (attempt $attempt), retrying in 30s"; sleep 30; }
+          done
+          exit 1
 
       # Check each bundle carries its backend, since copying only the
       # executable would leave the app without a daemon.

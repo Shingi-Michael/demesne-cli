@@ -1,4 +1,4 @@
-import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent, FilePreview} from "@demesne/protocol";
+import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent, FilePreview, ChatSource} from "@demesne/protocol";
 import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
@@ -531,6 +531,20 @@ export class DemesneClient {
   /// Adds a line to a chat's Keep list, or takes one off; returns the list.
   async editKeep(sessionId: string, change: { add?: string; remove?: string }): Promise<{ keep: string[] }> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/keep`, { method: "POST", body: JSON.stringify(change) });
+  }
+
+  /// Sources kept with a chat (pass 204), newest first.
+  async listSources(sessionId: string): Promise<{ sources: ChatSource[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sources`);
+  }
+
+  /// Keeps a link, a file or folder by its full path, or a picture waiting in the composer.
+  async addSource(sessionId: string, source: { url: string } | { path: string } | { attachmentId: string }): Promise<{ source: ChatSource; sources: ChatSource[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sources`, { method: "POST", body: JSON.stringify(source) });
+  }
+
+  async removeSource(sessionId: string, sourceId: string): Promise<{ sources: ChatSource[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sources/${encodeURIComponent(sourceId)}`, { method: "DELETE" });
   }
 
   async compactSession(sessionId: string, request: CompactSessionRequest = {}): Promise<SubmitTurnResponse> {

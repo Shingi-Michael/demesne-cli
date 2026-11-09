@@ -9,6 +9,7 @@ import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, T
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
+import { linkTitle, SourceError, SourceStore } from "./sources.ts";
 import { rememberTool } from "./remember.ts";
 import { updatePlanTool } from "./plan.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
@@ -464,6 +465,7 @@ export function createDaemonApp(options: {
     } });
   }
   const keepEdits = new KeepEdits(join(dirname(options.databasePath), "keep"));
+  const sources = new SourceStore(join(dirname(options.databasePath), "sources"));
   const engine = new AgentEngine(
     store,
     tools,
@@ -497,6 +499,7 @@ export function createDaemonApp(options: {
       } : undefined,
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       keepEdits,
+      sources,
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
       hiddenTools: (sessionId: string) => driveFixes.isThread(sessionId) ? THREAD_HIDDEN_TOOLS : null,
@@ -1792,6 +1795,36 @@ export function createDaemonApp(options: {
         } catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
       }
 
+      // Sources kept with a chat (pass 204): a file or folder by its path, a
+      // link, or a picture from the composer by its upload id.
+      if (path.length >= 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "sources") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        try {
+          if (request.method === "GET" && path.length === 4) return json({ sources: sources.list(session.id) });
+          if (request.method === "DELETE" && path.length === 5) return json({ sources: sources.remove(session.id, path[4]!) });
+          if (request.method === "POST" && path.length === 4) {
+            const body = await readJson(request);
+            const field = (key: string) => isRecord(body) && typeof body[key] === "string" && (body[key] as string).trim() ? (body[key] as string).trim() : undefined;
+            const url = field("url"), file = field("path"), attachmentId = field("attachmentId");
+            let source;
+            if (url) source = await sources.addLink(session.id, url, (link) => linkTitle(tools.get("web_fetch"), link));
+            else if (file) source = sources.addPath(session.id, file, session.workspace?.root);
+            else if (attachmentId) {
+              const upload = uploads.get(attachmentId);
+              if (!upload || upload.sessionId !== session.id) return apiError("not_found", "That picture isn't waiting to be sent any more", 404);
+              const name = upload.attachment.filename, ending = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp" }[upload.mimeType] ?? "";
+              source = sources.addData(session.id, /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name}${ending}`, upload.data);
+            } else return apiError("invalid_request", "Pass url, path or attachmentId", 400);
+            return json({ source, sources: sources.list(session.id) }, 201);
+          }
+        } catch (error) {
+          if (error instanceof SourceError) return apiError("invalid_request", error.message, 400);
+          throw error;
+        }
+        return apiError("not_found", "Not found", 404);
+      }
+
       // Stop on a background sub-agent's line (pass 190 A).
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "agents" && path[4] === "stop") {
         if (!store.getSession(path[2]!)) return apiError("not_found", "Session not found", 404);
@@ -1879,7 +1912,7 @@ export function createDaemonApp(options: {
         const session = state.session.workspace && branch
           ? { ...state.session, workspace: { ...state.session.workspace, gitBranch: branch, ...(sync ? { gitAhead: sync.ahead, gitBehind: sync.behind } : {}) } }
           : state.session;
-        return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!) });
+        return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!), sources: sources.list(path[2]!) });
       }
 
       // The chat's Keep list: add a line, or take one off (pass 114).

@@ -42,6 +42,7 @@ import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
 import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
+import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, usedSources, type SourcesView } from "./sources-card.ts";
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
 import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
 import { previewable, type FilePreview } from "@demesne/protocol";
@@ -175,6 +176,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "look_at_page") return pageName(tool.input.url);
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
   if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
+  if (tool.name === "read_source") return sourceName(tool);
   const path = String(tool.input.path ?? tool.detail ?? "");
   return isAgentStep(tool) ? "" : path.split("/").at(-1) ?? path;
 }
@@ -286,6 +288,7 @@ const verb = (tool: ToolEntry) =>
     git_history: "History",
     session_tools: "Tool",
     recall_turn: "Recalled",
+    read_source: "Read",
     subagent: "Agent",
     foundry_save: "Made",
     foundry_edit: "Changed",
@@ -1316,6 +1319,38 @@ const chatShots = () => windowShots.filter((shot) => shot.sessionId === state?.s
 /// opened from.
 let preview: OpenPreview | null = null;
 const chatPreview = () => preview && preview.sessionId === state?.session?.id ? preview : null;
+/// The Sources card's field and drop state (sources-card.ts).
+const sourceView: Omit<SourcesView, "open"> = { field: false, dragging: false };
+let sourceText = "", sourceFocus = false, sourceFreshTimer: ReturnType<typeof setTimeout> | undefined;
+const sourceName = (tool: ToolEntry) => state?.sources.find((source) => source.id === tool.input.id)?.name ?? "a source";
+/// A step that read one of your sources says so, in pink.
+const yourSource = (tool: ToolEntry) => tool.state !== "failed" && tool.state !== "denied" && state?.sources.length && sourceOfStep(state.sources, tool) ? '<span class="your-source"> · your source</span>' : "";
+const cleanError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^.*?:\s*(?=[A-Z])/, "");
+/// Keeps a source, slides its row in, and opens the card to show it.
+async function keepSource(args: Record<string, unknown>) {
+  const source = await api<{ id: string }>("source-add", args);
+  sourceView.field = false; sourceView.error = undefined; sourceText = "";
+  if (source?.id) {
+    sourceView.fresh = source.id;
+    clearTimeout(sourceFreshTimer);
+    sourceFreshTimer = setTimeout(() => { sourceView.fresh = undefined; renderCards(); }, 1600);
+  }
+  renderCards();
+}
+async function dropSources(event: DragEvent) {
+  const files = [...event.dataTransfer?.files ?? []];
+  const pathFor = (window as { demesneDesktop?: { pathForFile?: (file: File) => string } }).demesneDesktop?.pathForFile;
+  if (files.length) {
+    for (const file of files) {
+      const path = pathFor?.(file) ?? "";
+      if (path) await keepSource({ path });
+      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`);
+    }
+    return;
+  }
+  const link = droppedLink(event.dataTransfer?.getData("text/uri-list") || event.dataTransfer?.getData("text/plain") || "");
+  if (link) await keepSource({ url: link });
+}
 function card(name: keyof typeof CARD_ICON, line: string, right: string, body: string, need = false) {
   const open = cardsOpen.has(name);
   return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
@@ -1351,12 +1386,15 @@ function renderCards() {
   const seenRuns = s.runs.filter((run) => !rewoundBy(run));
   const pile = chatPile(seenRuns, pileHidden(s.session?.id ?? ""));
   const filePreview = chatPreview();
-  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview) return hide();
+  // What you keep with the chat (pass 204), and which the last answer used.
+  const sources = s.sources ?? [], dragging = sourceView.dragging && Boolean(s.session);
+  const sourcesUsed = usedSources(sources, seenRuns.length ? tools(seenRuns.at(-1)!) : []);
+  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview) return hide();
   app.classList.add("cards-on");
   app.classList.toggle("cards-wide", Boolean(filePreview?.wide));
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1365,6 +1403,8 @@ function renderCards() {
     const open = cardsOpen.has("where");
     out.push(`<section class="card env${open ? " open" : ""}${where.state ? ` env-${where.state}` : ""}" data-card="where"><button type="button" class="card-head" data-action="card-fold" data-args='{"name":"where"}' aria-expanded="${open}">${where.rows}</button>${where.state === "off" ? btn("start-daemon", "Start", {}, "env-start") : ""}<div class="card-body">${where.more}</div></section>`);
   }
+  const sourcesCard = sourcesCardHTML(sources, sourcesUsed, { ...sourceView, dragging, open: cardsOpen.has(SOURCES_CARD) });
+  if (sourcesCard) out.push(sourcesCard);
   // The context card itself (pass 177 C) once the chat or the plan is half
   // used: one line like the others, the whole card when it opens; a short
   // window folds its parts list away first.
@@ -1427,6 +1467,13 @@ function renderCards() {
     index++;
   }
   for (const [node, shot] of landing) landWhenSeen(node, shot);
+  // The link field keeps what you typed across redraws.
+  const sourceInput = aside.querySelector<HTMLInputElement>(".src-input");
+  if (sourceInput) {
+    if (sourceInput.value !== sourceText) sourceInput.value = sourceText;
+    if (sourceFocus) { sourceInput.focus({ preventScroll: true }); sourceInput.setSelectionRange(sourceText.length, sourceText.length); }
+  }
+  sourceFocus = false;
   if (arrivingPreview) void landPreview(arrivingPreview);
   else if (filePreview?.data?.kind === "pdf") { const pages = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"] [data-pdf]`); if (pages) void drawPdf(pages, filePreview.data.data, filePreview.wide ? 30 : 3).catch(() => {}); }
 }
@@ -1880,6 +1927,7 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
   if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
+  if (tool.name === "read_source") return h(sourceName(tool));
   // A try names its steps: click “Add”, type “Milk”, press Enter.
   if (tool.name === "use_skill") return `<span class="step-skill">${h(String(tool.input.name ?? ""))}</span>`;
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
@@ -1948,7 +1996,7 @@ const stepIcon = (tool: ToolEntry) => {
     : isAgentStep(tool) ? "agent"
     : tool.name === "ask_user" ? "ask"
     : tool.name === "heartbeat" ? "mail"
-    : ["read_file", "read_files", "web_fetch", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
+    : ["read_file", "read_files", "read_source", "web_fetch", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
     : "other";
   return stepIconFor(kind);
 };
@@ -2182,7 +2230,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and plain words: the working line
     // under the turn carries the cube and the silver.
-    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target"${stepPreviewPath(tool) ? ` data-preview-path="${h(stepPreviewPath(tool))}"` : ""} title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target"${stepPreviewPath(tool) ? ` data-preview-path="${h(stepPreviewPath(tool))}"` : ""} title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${yourSource(tool)}${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -4324,7 +4372,7 @@ function composerFrame(width: number) {
   const waitingShots = getComputedStyle(el("cards")).display === "none" ? [] : chatShots().filter((shot) => state!.attachments.some((image) => image.id === shot.id));
   attachRow.innerHTML = shotsNote(waitingShots) + state.attachments.filter((image) => !waitingShots.some((shot) => shot.id === image.id)).map((image) => {
     const preview = attachmentPreviews.get(image.id);
-    return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
+    return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("source-keep", "Keep", { id: image.id }, "att-keep").replace("<button ", `<button title="Keep it with this chat as a source" `)}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
   }).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
@@ -6175,6 +6223,25 @@ async function dispatch(
     document.querySelector<HTMLButtonElement>(`#cards [data-card="${name}"] .card-head`)?.focus({ preventScroll: true });
     return;
   }
+  // Sources (pass 204): the + field, Choose…, open, take off, Keep.
+  if (action === "source-field") {
+    sourceView.field = !sourceView.field; sourceView.error = undefined;
+    sourceFocus = sourceView.field;
+    return renderCards();
+  }
+  if (action === "source-choose") {
+    const path = await api<string | null>("desktop-pick-source");
+    if (path) await keepSource({ path });
+    return;
+  }
+  if (action === "source-open") {
+    const source = state?.sources.find((one) => one.id === args.id);
+    if (!source) return;
+    if (source.kind === "file" && previewable(source.target)) return openPreview(source.target, target);
+    return api("source-open", { id: source.id });
+  }
+  if (action === "source-remove") return api("source-remove", { id: args.id });
+  if (action === "source-keep") return keepSource({ attachmentId: args.id });
   if (action === "cycle-mode") return cycleMode();
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
   if (action === "detach") {
@@ -7402,24 +7469,60 @@ editor.addEventListener("paste", (event) => {
 });
 let dragDepth = 0;
 const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") === true;
+/// Files, folders and links can be dropped on the Sources line (pass 204).
+const carriesSource = (event: DragEvent) => carriesFiles(event) || event.dataTransfer?.types.includes("text/uri-list") === true;
+const onSourceLine = (event: DragEvent) => event.target instanceof Element && Boolean(event.target.closest("[data-source-drop]"));
+const dragging = (on: boolean) => {
+  if (sourceView.dragging === on) return;
+  sourceView.dragging = on;
+  renderCards();
+};
 document.addEventListener("dragenter", (event) => {
-  if (!carriesFiles(event) || !state?.session) return;
+  if (!carriesSource(event) || !state?.session) return;
   dragDepth++;
-  el("drop-zone").hidden = false;
+  dragging(true);
+  if (carriesFiles(event)) el("drop-zone").hidden = false;
 });
 document.addEventListener("dragleave", (event) => {
-  if (!carriesFiles(event)) return;
+  if (!carriesSource(event)) return;
   dragDepth = Math.max(0, dragDepth - 1);
-  if (!dragDepth) el("drop-zone").hidden = true;
+  if (!dragDepth) { el("drop-zone").hidden = true; dragging(false); }
 });
-document.addEventListener("dragover", (event) => { if (carriesFiles(event)) event.preventDefault(); });
-document.addEventListener("drop", (event) => {
-  if (!carriesFiles(event)) return;
+document.addEventListener("dragover", (event) => {
+  if (!carriesSource(event)) return;
   event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = onSourceLine(event) || carriesFiles(event) ? "copy" : "none";
+});
+// The Sources field: Return keeps the link, Escape closes it.
+document.addEventListener("input", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.classList.contains("src-input")) sourceText = event.target.value;
+});
+document.addEventListener("keydown", (event) => {
+  if (!(event.target instanceof HTMLInputElement) || !event.target.classList.contains("src-input") || event.isComposing) return;
+  if (event.key === "Escape") {
+    event.preventDefault(); event.stopPropagation();
+    sourceView.field = false; sourceView.error = undefined; sourceText = "";
+    renderCards();
+    return;
+  }
+  if (event.key !== "Enter") return;
+  event.preventDefault(); event.stopPropagation();
+  const asked = fieldLink(sourceText);
+  if ("error" in asked) { sourceView.error = asked.error; sourceFocus = true; renderCards(); return; }
+  void keepSource({ url: asked.url }).catch((error: unknown) => { sourceView.error = cleanError(error); sourceFocus = true; renderCards(); });
+}, true);
+document.addEventListener("dragend", () => { dragDepth = 0; el("drop-zone").hidden = true; dragging(false); });
+document.addEventListener("drop", (event) => {
+  if (!carriesSource(event)) return;
+  event.preventDefault();
+  const kept = onSourceLine(event);
   dragDepth = 0;
   el("drop-zone").hidden = true;
+  dragging(false);
+  if (!state?.session) return;
+  if (kept) { void act(() => dropSources(event)); return; }
   const files = [...event.dataTransfer?.files ?? []];
-  if (files.length && state?.session) void act(() => attachFiles(files));
+  if (files.length) void act(() => attachFiles(files));
 });
 document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;

@@ -1430,6 +1430,15 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
   await capture("07-project-groups");
+  // Where you are (pass 201 A): the chat you're in is a filled row, and the other projects step back.
+  const whereYouAre = await page.evaluate(() => {
+    const row = document.querySelector<HTMLElement>("#desktop-sidebar .sidebar-session.selected");
+    const other = document.querySelector<HTMLElement>("#sidebar-sessions .sidebar-project:not(:has(.sidebar-session.selected)) .sidebar-project-name");
+    const mine = row?.closest(".sidebar-project")?.querySelector<HTMLElement>(".sidebar-project-name");
+    return { fill: row ? getComputedStyle(row).backgroundColor : "", other: other ? getComputedStyle(other).color : "", mine: mine ? getComputedStyle(mine).color : "" };
+  });
+  assert(whereYouAre.fill && !/rgba?\(0, 0, 0, 0\)|transparent/.test(whereYouAre.fill), `the chat you're in is a filled row: ${whereYouAre.fill}`);
+  if (whereYouAre.other && whereYouAre.mine) assert.notEqual(whereYouAre.other, whereYouAre.mine, "the other projects step back a shade");
   // Drive has no page: its pill sits on the top bar, and drops a sheet with its line (pass 198 A).
   const line = page.locator("#briefing"), pill = page.locator("#drive-pill");
   const openDrive = async () => { if (await page.locator("#drive-sheet").isHidden()) await pill.click(); await page.locator("#drive-sheet").waitFor(); };

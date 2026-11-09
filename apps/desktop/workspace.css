@@ -2668,3 +2668,8 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 /* A level top bar (pass 199 A): the tabs hang 40px from the bar's foot, so their names sit 4px below its middle;
    the sidebar button, +, the needs-you call, Drive's pill and ⋯ move down onto that line. */
 #desktop-toggle-sidebar, #workspace-new-tab, #workspace-call, #bar-drive, #desktop-toolbar > header { transform: translateY(4px); }
+/* Where you are, at a glance (pass 201 A): the chat you're in is a soft filled row with a bolder name,
+   not a hairline box that glass washes out, and the other projects' names step back a shade. */
+#desktop-sidebar .sidebar-session.selected, #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { background: color-mix(in srgb, var(--t1) 10%, transparent); box-shadow: -2px 0 0 var(--acc); }
+#desktop-sidebar .sidebar-session.selected .sidebar-session-name { font-weight: 500; }
+#sidebar-sessions:has(.sidebar-session.selected) :is(.sidebar-project, .sidebar-group-block):not(:has(.sidebar-session.selected)) :is(.sidebar-project-name, .sidebar-group-toggle) { color: var(--t2); }

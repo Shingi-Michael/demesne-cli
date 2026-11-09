@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chatPile, chatShelf, pileHTML, shelfListsHTML } from "../shot-pile.ts";
+import { chatPile, pileHTML } from "../shot-pile.ts";
 
 const id = (n: number) => `6b1d2c3e-0000-4000-8000-00000000000${n}`;
 const tool = (name: string, input: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ type: "tool", name, state: "done", input, ...extra });
@@ -26,29 +26,16 @@ test("a chat's pile holds what you sent and what it took, oldest first, each onc
   expect(chatPile(runs, new Set([id(2)])).map((shot) => shot.id)).toEqual([id(1), id(3)]);
 });
 
-test("the shelf lists files the chat made and the folders and pages it looked at, once each", () => {
-  const shelf = chatShelf(runs, "/work/app");
-  expect(shelf.made).toEqual(["notes/Review.md"]);
-  expect(shelf.looked.map((item) => item.label)).toEqual(["localhost:5173/login", "research/", "www.kaggle.com/datasets/stocks", "app/"]);
-});
-
 test("the pile shows up to three pictures, newest on top, with a count, and marks one that just landed", () => {
   const pile = chatPile(runs);
   const html = pileHTML(pile, (one) => one === id(1) ? "data:image/png;base64,AA==" : undefined, id(3));
   expect(html.match(/class="pile-shot/g)).toHaveLength(3);
   expect(html).toContain('<span class="pile-n">3</span>');
-  expect(html).toContain("3 screenshots");
+  expect(html).not.toContain("screenshots<");
+  expect(html).not.toContain("pile-cap");
   expect(html).toContain('data-action="pile-open" data-args=\'{"index":2}\'');
   expect(html).toMatch(/class="pile-shot landing" style="[^"]*z-index:10" data-picture="6b1d2c3e-0000-4000-8000-000000000003"/);
   expect(html).toContain('src="data:image/png;base64,AA=="');
   expect(pileHTML([], () => undefined)).toBe("");
   expect(pileHTML([{ id: id(1), caption: "<b>", by: "you" }], () => undefined)).not.toContain("<b>");
-});
-
-test("the lists show three, then how many more, and escape what they show", () => {
-  const html = shelfListsHTML(["a.md", "b.md", "c.md", "d.md"], [{ label: "<x>/", title: "<x>" }], (_, label) => `<a>${label}</a>`);
-  expect(html).toContain("<span>Made</span><span>4</span>");
-  expect(html).toContain("and 1 more");
-  expect(html).toContain("&lt;x&gt;/");
-  expect(shelfListsHTML([], [], () => "")).toBe("");
 });

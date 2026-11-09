@@ -7835,6 +7835,7 @@ window.demesne.subscribe((update) => {
 void window.demesne
   .request<Snapshot>("bootstrap")
   .then((snapshot) => {
+    performance.mark("demesne-chat");
     const next = stateReceiver.seed(snapshot);
     if (next) renderState(next);
     if (stateReceiver.needsReset) resyncState();

@@ -49,7 +49,12 @@ export function createDesktopBridge(
       ready() {
         if (ready || disposed) return;
         ready = true;
-        void request("desktop-ready").catch(onError);
+        // When the page's own steps happened, for the startup line in desktop.log.
+        const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+        const marks: Record<string, number> = { ...(navigation ? { parsed: navigation.domInteractive } : {}) };
+        for (const mark of performance.getEntriesByType("mark")) if (mark.name.startsWith("demesne-")) marks[mark.name.slice(8)] = mark.startTime;
+        marks.drawn = performance.now();
+        void request("desktop-ready", { marks }).catch(onError);
       },
     },
     update(update: StateUpdate) {

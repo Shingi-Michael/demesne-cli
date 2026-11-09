@@ -41,7 +41,10 @@ describe("desktop bridge", () => {
     const transport = fixture();
     transport.bridge.ready();
     transport.bridge.ready();
-    expect(transport.calls).toEqual([{ command: "desktop_request", args: { method: "desktop-ready", args: {} } }]);
+    expect(transport.calls).toHaveLength(1);
+    expect(transport.calls[0]).toMatchObject({ command: "desktop_request", args: { method: "desktop-ready" } });
+    // It carries when the page's own startup steps happened, for desktop.log.
+    expect(typeof (transport.calls[0] as any).args.args.marks.drawn).toBe("number");
   });
   test("passes requests only through the restricted native proxy", async () => {
     const transport = fixture();

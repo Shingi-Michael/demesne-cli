@@ -24,6 +24,10 @@ const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
 /// Stops the capture keys (capture-keys.ts) when the app quits.
 let stopCaptureKeys: (() => void) | undefined;
+/// How long each step of a launch took, from the process starting (ms), for
+/// one line in desktop.log once the window shows: where a slow start went.
+const startup: Array<[string, number]> = [];
+const startupMark = (name: string) => { if (startup.length < 16) startup.push([name, Math.round(performance.now())]); };
 let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
@@ -64,6 +68,7 @@ function launchToFront() {
 }
 
 if (!lookJob) void app.whenReady().then(async () => {
+  startupMark("ready");
   const base = app.getAppPath();
   const resources = app.isPackaged ? process.resourcesPath : join(base, "..");
   const runtime = join(resources, "backend");
@@ -157,6 +162,7 @@ if (!lookJob) void app.whenReady().then(async () => {
   const clear = liquidGlass(process.platform, release(), process.env);
   const liquidAddon = join(base, "liquid-glass.node"), liquidVariant = Number(process.env.DEMESNE_GLASS_VARIANT);
   const liquid = clear && process.env.DEMESNE_GLASS_VARIANT !== undefined && Number.isInteger(liquidVariant) && liquidVariant >= 0 && existsSync(liquidAddon);
+  startupMark("window");
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
@@ -288,6 +294,12 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (quitting) throw new Error("The desktop app is closing");
     if (method === "desktop-ready") {
       window?.show(); window?.focus(); launchToFront();
+      if (startup.length && !readied) {
+        startupMark("shown");
+        // The page's own steps, on its clock (from when it began loading).
+        const marks = (args as { marks?: unknown }).marks, page = marks && typeof marks === "object" ? Object.entries(marks).filter(([name, at]) => /^[a-z-]{1,24}$/.test(name) && typeof at === "number" && Number.isFinite(at)).slice(0, 12) : [];
+        log(`Startup: ${startup.map(([name, at]) => `${name} ${at}ms`).join(" · ")}${page.length ? ` (page: ${page.map(([name, at]) => `${name} ${Math.round(at as number)}ms`).join(" · ")})` : ""}`);
+      }
       if (updater && !readied) { readied = true; updater.started(); updater.schedule(); }
       // The capture keys start once the page can take a screenshot card.
       stopCaptureKeys ??= startCaptureKeys({ window: () => window, emit: value => emit("demesne:desktop-action", value), log, cacheDir: join(app.getPath("userData"), "screen") });
@@ -454,6 +466,7 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (process.platform === "darwin") window?.hide(); else void quit();
   });
   await window.loadURL(APP_URL);
+  startupMark("page");
   if (liquid) {
     try {
       const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number; setVariant(id: number, variant: number): void } } };

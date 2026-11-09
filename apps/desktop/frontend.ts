@@ -1,4 +1,5 @@
 import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
+performance.mark("demesne-script");
 import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
 import { checkResult, releaseLine, type AppUpdate } from "./workspace/release-line.ts";
 
@@ -99,6 +100,7 @@ function renderProjects() {
 }
 async function applyBootstrap(result: DesktopBootstrap) {
   if (fatal) return;
+  if (!mounted) performance.mark("demesne-host");
   document.body.dataset.user = result.userName ?? "";
   const previous = workspace;
   workspace = result.workspace;
@@ -118,6 +120,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
   if (!mounted) {
     mounted = true;
     await import("./workspace/live.ts");
+    performance.mark("demesne-ui");
   }
   setBusy(false, "");
 }

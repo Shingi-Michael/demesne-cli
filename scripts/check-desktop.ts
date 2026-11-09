@@ -920,7 +920,7 @@ try {
   await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Overview" }).waitFor();
   assert(await page.locator("#sidebar-projects").isHidden(), "the sidebar holds Settings' list instead of the chats");
   assert.equal(await page.locator("#workspace-title").innerText(), "Settings", "the title bar says Settings");
-  assert.equal(await page.locator("#settings-nav .st-nav").count(), 9, "nine sections");
+  assert.equal(await page.locator("#settings-nav .st-nav").count(), 10, "ten sections");
   await page.locator("#page .ov-say").filter({ hasText: "Answers come from" }).waitFor();
   assert.equal(await page.locator("#page .ov-tile").count(), 6, "six tiles");
   await capture("02-settings-overview");

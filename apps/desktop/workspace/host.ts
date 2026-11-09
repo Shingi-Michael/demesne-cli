@@ -1157,9 +1157,10 @@ export class WorkspaceHost {
   private async settingsInfo(): Promise<SettingsInfo> {
     const config = this.settings.loaded.config, mine = new Set(this.userAllowRules());
     const user = this.userConfig(), userMcp = isRecord(user.mcp) && isRecord(user.mcp.servers) ? user.mcp.servers : {};
-    const [trusted, subagent] = await Promise.all([
+    const [trusted, subagent, agents] = await Promise.all([
       this.client.trusted().then((result) => result.trusted).catch(() => null),
       this.client.subagentModel().catch(() => null),
+      Promise.resolve().then(() => this.client.agentChoice()).catch(() => null),
     ]);
     const limits = config.drive ?? {};
     return {
@@ -1170,6 +1171,7 @@ export class WorkspaceHost {
       allow: config.permissions.allow.map((rule) => ({ rule, mine: mine.has(rule) })),
       trusted,
       subagent: subagent ? { model: subagent.model, often: subagent.often ?? "usual", models: subagent.models } : { model: config.agent?.subagentModel ?? null, often: config.agent?.subagentOften ?? "usual", models: [] },
+      agents,
       agent: { maxModelRounds: config.agent?.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds, maxToolCalls: config.agent?.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls },
       drive: { maxActiveMinutes: limits.maxActiveMinutes ?? DEFAULT_DRIVE_LIMITS.maxActiveMinutes, maxTokens: limits.maxTokens ?? DEFAULT_DRIVE_LIMITS.maxTokens, maxTasks: limits.maxTasks ?? DEFAULT_DRIVE_LIMITS.maxTasks },
       images: config.images?.url ? { model: config.images.model ?? null } : null,
@@ -2382,6 +2384,20 @@ export class WorkspaceHost {
       if (often !== "less" && often !== "usual" && often !== "more") throw new Error("Invalid value");
       await this.client.setSubagentOften(often);
       this.reloadSettings();
+      return this.settingsInfo();
+    }
+    // Settings › Agents (pass 206 A): the one switch, or one agent's place.
+    if (method === "agent-choice") {
+      const mode = args.mode;
+      if (mode !== undefined && mode !== "every" && mode !== "some" && mode !== "off") throw new Error("Invalid value");
+      const projects = args.projects === undefined ? undefined : Array.isArray(args.projects) ? args.projects.map((root) => string(root, "project", 4000)) : null;
+      if (projects === null) throw new Error("Invalid value");
+      await this.client.setAgentChoice({
+        ...(typeof args.off === "boolean" ? { off: args.off } : {}),
+        ...(args.agent !== undefined ? { agent: string(args.agent, "agent", 40), mode: mode ?? "every", ...(projects ? { projects } : {}) } : {}),
+      });
+      // The sidebar's Agents list follows at once.
+      void this.refreshAgents();
       return this.settingsInfo();
     }
     if (method === "subagent-model") {

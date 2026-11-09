@@ -98,6 +98,7 @@ import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
 import { RouteBook } from "./subagent-route.ts";
+import { AgentChoice, type AgentMode } from "./agent-choice.ts";
 import { Handoffs } from "./handoff.ts";
 import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
@@ -320,8 +321,10 @@ export function createDaemonApp(options: {
   }
   // Models a sub-agent can run on, and your agent tools (agent-cli.ts) as
   // `agent:<id>`, read-only.
+  // Which agents you let work, and where (agent-choice.ts, pass 206 A).
+  const agentChoice = new AgentChoice(join(dirname(options.databasePath), "agent-choice.json"));
   const subagentModels = () => [...processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }],
-    ...(cliSubagentsOn ? agentCli.agents() : []).map((agent) => ({ id: agent.model, provider: `${agent.name} on this machine` }))];
+    ...(cliSubagentsOn ? agentCli.agents().filter((agent) => agentChoice.allows(agent.id)) : []).map((agent) => ({ id: agent.model, provider: `${agent.name} on this machine` }))];
   // Under `bun test`, only a test that brings its own agent tools gets them,
   // so a Claude Code installed on the machine never runs in a test.
   const cliSubagentsOn = Boolean(options.agentCli) || process.env.NODE_ENV !== "test";
@@ -487,12 +490,12 @@ export function createDaemonApp(options: {
       fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
       cliSubagents: cliSubagentsOn ? {
-        available: () => agentCli.agents().map((agent) => agent.id),
+        available: (root) => agentChoice.filter(agentCli.agents().map((agent) => agent.id), root),
         run: (id, prompt, cwd, signal, step, web) => agentCli.subagent(id, prompt, cwd, signal, step, web),
         book: subagentBook,
       } : undefined,
       handoffs: cliSubagentsOn ? {
-        available: () => agentCli.agents().map((agent) => agent.id),
+        available: (root) => agentChoice.filter(agentCli.agents().map((agent) => agent.id), root),
         offer: (root) => !root.split(/[\\/]/).includes(".demesne-worktrees") && !inDriveWorktree(root),
         book: subagentBook,
         store: handoffs,
@@ -511,7 +514,7 @@ export function createDaemonApp(options: {
   // Agent socials (socials.ts): the agents post about the day you have
   // together, written by the default model with thinking off.
   const socials = options.socials ? new SocialFeed(join(dirname(options.databasePath), "socials.json"), {
-    agents: () => agentCli.agents().map((agent) => agent.id),
+    agents: () => agentChoice.filter(agentCli.agents().map((agent) => agent.id)),
     // Pictures of their day (social-pictures.ts), from the [images] model.
     picture: options.images ? pictureMaker(options.images, { facePng: (svg) => svgToPng(svg, 512), shrink: (data) => feedPicture(data, 768) }) : null,
     // The Friday reel's opening clip (social-reel.ts), from the video model.
@@ -1394,13 +1397,31 @@ export function createDaemonApp(options: {
         }
       }
 
+      // Which agents may work, and where (pass 206 A): the agent tools on
+      // this machine with your choice for each, and changing one.
+      if (url.pathname === "/v1/agent-choice" && (request.method === "GET" || request.method === "POST")) {
+        if (request.method === "POST") {
+          const body = await readJson(request) as { off?: unknown; agent?: unknown; mode?: unknown; projects?: unknown };
+          if (typeof body.off === "boolean") agentChoice.setOff(body.off);
+          if (body.agent !== undefined) {
+            const agent = agentCli.agents().find((item) => item.id === body.agent);
+            if (!agent) return apiError("agent_not_found", `${String(body.agent)} isn't installed on this machine`, 404);
+            if (body.mode !== "every" && body.mode !== "some" && body.mode !== "off") return apiError("invalid_request", "mode is every, some or off", 400);
+            if (body.projects !== undefined && !(Array.isArray(body.projects) && body.projects.every((root) => typeof root === "string"))) return apiError("invalid_request", "projects is a list of folders", 400);
+            agentChoice.set(agent.id, body.mode as AgentMode, body.projects as string[] | undefined);
+          }
+        }
+        const record = agentChoice.read();
+        return json({ off: record.off, agents: agentCli.agents().map((agent) => ({ id: agent.id, name: agent.name, mode: record.agents[agent.id]?.mode ?? "every", projects: record.agents[agent.id]?.projects ?? [] })) });
+      }
+
       // Other agents Heartbeat sees, for the sidebar's project lines.
       // Agents that live in Demesne (agent-cli.ts): the agent tools on this
       // machine, each with its chat in the project asked about.
       if (request.method === "GET" && url.pathname === "/v1/agents") {
         const root = url.searchParams.get("workspace");
         const chats = root ? store.listSessions(500).filter((session) => session.workspace?.root === root) : [];
-        const agents = agentCli.agents().map((agent) => {
+        const agents = agentCli.agents().filter((agent) => agentChoice.allows(agent.id, root)).map((agent) => {
           const chat = chats.find((session) => session.preferredModel === agent.model);
           const busy = chat?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
           return { ...agent, sessionId: chat?.id ?? null, state: busy ? "working" : "ready", address: chat ? heartbeat?.address(chat.id) ?? null : null };
@@ -1415,6 +1436,7 @@ export function createDaemonApp(options: {
         let root: string;
         try { root = canonicalWorkspace(body.workspacePath); } catch (error) { return apiError("invalid_workspace", error instanceof Error ? error.message : "Invalid workspace", 400); }
         if (!workspaceTrust.isTrusted(root)) return apiError("workspace_untrusted", `Do you trust the files in ${root}?`, 403);
+        if (!agentChoice.allows(agent.id, root)) return apiError("agent_off", `${agent.name} is off in this project. Turn it on in Settings › Agents`, 403);
         let session = store.listSessions(500).find((item) => item.workspace?.root === root && item.preferredModel === agent.model) ?? null;
         if (!session) {
           session = store.createSession(agent.name, root).session;

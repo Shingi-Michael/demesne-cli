@@ -6105,6 +6105,7 @@ async function dispatch(
     return renderPage();
   }
   if (action === "settings-command") { openPage(""); return setDraft(String(args.text)); }
+  if (action === "agent-choice") return settingsCall("agent-choice", args);
   if (action === "subagent-often") return settingsCall("subagent-often", { often: args.often });
   if (action === "subagent-model") { settingsUi.fold = ""; return settingsCall("subagent-model", { model: args.model ?? null }); }
   if (["settings-config", "allow-rule-remove", "trusted-forget", "mcp-remove"].includes(action)) return settingsCall(action, args);

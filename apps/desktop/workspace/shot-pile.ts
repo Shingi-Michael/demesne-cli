@@ -1,8 +1,8 @@
 /// Screenshots that pile up (pass 202 A). Every picture a chat has seen, the
 /// windows and pages it took and the ones you sent it, stacks into one pile
 /// card on the right, newest on top, for the whole chat. Hover fans it out; a
-/// click opens them full size to flip through. Above it, two quiet lists:
-/// what the chat made, and what it looked at. Each thing shows once.
+/// click opens them full size to flip through. Just the pictures, no words
+/// (Mike, 2026-11-09). Each picture shows once.
 import { pageLookOutcome, pageName, pictureCaption } from "./page-look-row.ts";
 
 export interface PileShot {
@@ -42,33 +42,6 @@ export function chatPile(runs: readonly PileRun[], hidden: ReadonlySet<string> =
   return out;
 }
 
-/// What the chat made (files it created) and looked at (folders it listed,
-/// pages it opened), each once, oldest first.
-export function chatShelf(runs: readonly PileRun[], root: string): { made: string[]; looked: { label: string; title: string }[] } {
-  const made: string[] = [], looked = new Map<string, string>();
-  const strip = (path: string) => root && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
-  for (const run of runs) for (const tool of toolsOf(run)) {
-    if (tool.state !== "done") continue;
-    if (tool.phase === "change") {
-      const fresh = tool.changes?.length
-        ? tool.changes.filter((change) => !change.beforeExists && change.afterExists).map((change) => change.path)
-        : tool.name === "write_file" && tool.created && typeof tool.input.path === "string" ? [tool.input.path] : [];
-      for (const path of fresh.map(strip)) if (path && !made.includes(path)) made.push(path);
-    }
-    if (tool.name === "list_files") {
-      const path = strip(String(tool.input.path ?? ".").replace(/\/+$/, ""));
-      const label = !path || path === "." ? `${root.split("/").filter(Boolean).at(-1) ?? "this folder"}/` : `${path}/`;
-      if (!looked.has(label)) looked.set(label, path || ".");
-    }
-    if ((tool.name === "web_fetch" || tool.name === "look_at_page") && typeof tool.input.url === "string") {
-      const label = pageName(tool.input.url);
-      if (!looked.has(label)) looked.set(label, tool.input.url);
-    }
-  }
-  // Something it made isn't also something it looked at.
-  return { made, looked: [...looked].filter(([label]) => !made.includes(label)).map(([label, title]) => ({ label, title })) };
-}
-
 /// Up to three pictures fanned out, newest on top; on hover they spread out
 /// in a row. `src` gives a picture's data URL once it's loaded; `landing`
 /// is a picture that just joined, which drops onto the pile.
@@ -85,16 +58,7 @@ export function pileHTML(shots: readonly PileShot[], src: (id: string) => string
     return `<img class="pile-shot${shot.id === landing && depth === 0 ? " landing" : ""}" style="--rest:${REST[depth]};--fan:${fan};z-index:${10 - depth}" data-picture="${h(shot.id)}" alt="${h(shot.caption)}" draggable="false"${url ? ` src="${h(url)}"` : ""}>`;
   }).join("");
   const word = shots.length === 1 ? "1 screenshot" : `${shots.length} screenshots`;
-  return `<button type="button" class="pile-stack" data-action="pile-open" data-args='{"index":${shots.length - 1}}' aria-label="Look through the ${word}">${shots.length > 1 ? `<span class="pile-n">${shots.length}</span>` : ""}${pictures}</button>`
-    + `<div class="pile-cap"><span>${word}</span><span>${shots.length > 1 ? "newest on top" : h(shots[0]!.caption)}</span></div>`;
-}
-
-/// The quiet lists above the pile: up to three of each, then "and N more".
-export function shelfListsHTML(made: readonly string[], looked: readonly { label: string; title: string }[], link: (path: string, label: string) => string): string {
-  const list = (title: string, items: string[]) => items.length ? `<div class="shelf-list"><div class="shelf-title"><span>${title}</span><span>${items.length}</span></div>${items.slice(0, 3).join("")}${items.length > 3 ? `<div class="shelf-more">and ${items.length - 3} more</div>` : ""}</div>` : "";
-  const name = (path: string) => path.split("/").at(-1) ?? path;
-  return list("Made", made.map((path) => `<div class="shelf-row" title="${h(path)}"><i aria-hidden="true">▤</i>${link(path, name(path))}</div>`))
-    + list("Looked at", looked.map((item) => `<div class="shelf-row" title="${h(item.title)}"><i aria-hidden="true">${item.label.endsWith("/") ? "▢" : "↗"}</i><span>${h(item.label)}</span></div>`));
+  return `<button type="button" class="pile-stack" data-action="pile-open" data-args='{"index":${shots.length - 1}}' aria-label="Look through the ${word}">${shots.length > 1 ? `<span class="pile-n">${shots.length}</span>` : ""}${pictures}</button>`;
 }
 
 /// The flip-through: one picture full size, ‹ › and the arrow keys, a strip of

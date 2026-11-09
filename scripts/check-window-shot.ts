@@ -97,9 +97,10 @@ try {
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "sent.png") });
   // Sent, it joins the chat's pile (pass 202 A), and stays.
-  const pile = page.locator("#cards .card.shelf");
+  const pile = page.locator("#cards .card.pile");
   await pile.waitFor({ timeout: 10_000 });
-  expect((await pile.locator(".pile-cap").innerText()).includes("1 screenshot"), "the sent screenshot is on the chat's pile");
+  expect(await pile.locator(".pile-shot").count() === 1 && await pile.locator(".pile-n").count() === 0, "the sent screenshot is on the chat's pile");
+  expect((await pile.innerText()).trim() === "", "the pile is just the picture, no words");
   await page.waitForFunction(() => (document.querySelector<HTMLImageElement>("#cards .pile-shot")?.naturalWidth ?? 0) > 300, null, { timeout: 10_000 }).then(() => expect(true, "the pile shows its picture"), () => expect(false, "the pile shows its picture"));
   // A second one lands on top.
   await sh("xdotool", "windowactivate", "--sync", browserWindow);
@@ -113,7 +114,7 @@ try {
   await page.locator("#cards .pile-n", { hasText: "2" }).waitFor({ timeout: 20_000 });
   expect(await page.locator("#cards .pile-shot.landing").count() === 1, "the new one drops onto the pile");
   await page.waitForTimeout(1300);
-  expect((await pile.locator(".pile-cap").innerText()).includes("2 screenshots"), "two screenshots on the pile");
+  expect(await pile.locator(".pile-shot").count() === 2, "two screenshots on the pile");
   const rest = await page.locator("#cards .pile-shot").last().boundingBox();
   await page.locator("#cards .pile-stack").hover();
   await page.waitForTimeout(900);
@@ -134,7 +135,7 @@ try {
   await page.keyboard.press("Escape");
   expect(await page.locator(".pile-view").count() === 0, "Escape closes it");
   await page.waitForTimeout(300);
-  expect((await pile.locator(".pile-cap").innerText()).includes("1 screenshot"), "the pile has one left");
+  expect(await pile.locator(".pile-shot").count() === 1, "the pile has one left");
   await page.mouse.move(10, 10);
   await page.waitForTimeout(600);
   await page.screenshot({ path: join(output, "pile.png") });

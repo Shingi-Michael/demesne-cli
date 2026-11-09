@@ -41,7 +41,7 @@ import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
-import { chatPile, chatShelf, pileHTML, shelfListsHTML, showPile } from "./shot-pile.ts";
+import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
 import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
 import { previewable, type FilePreview } from "@demesne/protocol";
@@ -1346,15 +1346,14 @@ function renderCards() {
   // everything the chat has seen piles into one (pass 202 A).
   const shots = chatShots();
   const seenRuns = s.runs.filter((run) => !rewoundBy(run));
-  const pile = chatPile(seenRuns, pileHidden(s.session?.id ?? "")), shelf = chatShelf(seenRuns, root);
-  const showShelf = pile.length > 0 || shelf.made.length > 0 || shelf.looked.length > 0;
+  const pile = chatPile(seenRuns, pileHidden(s.session?.id ?? ""));
   const filePreview = chatPreview();
-  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !showShelf && !filePreview) return hide();
+  if (!showWhere && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview) return hide();
   app.classList.add("cards-on");
   app.classList.toggle("cards-wide", Boolean(filePreview?.wide));
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shelf, filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1386,8 +1385,8 @@ function renderCards() {
   if (servers.length)
     out.push(card("connectors", h(servers.map((server) => server.name).join(", ")), servers.some((server) => server.state === "failed") ? '<span class="card-dot failed"></span>' : "",
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
-  // What the chat made and looked at, and its pile of screenshots.
-  if (showShelf) out.push(`<section class="card shelf" data-card="shelf">${shelfListsHTML(shelf.made, shelf.looked, (path, label) => previewable(path) ? fileLink(path, label) : `<span>${h(label)}</span>`)}${pileHTML(pile, pileSrc, pileLanding(s.session?.id ?? "", pile.at(-1)?.id))}</section>`);
+  // Every screenshot the chat has seen, in one pile.
+  if (pile.length) out.push(`<section class="card pile" data-card="pile">${pileHTML(pile, pileSrc, pileLanding(s.session?.id ?? "", pile.at(-1)?.id))}</section>`);
   // Screenshots still to send come last, in the order they were taken.
   for (const shot of shots) out.push(shotCardHTML(shot));
   // A file you opened comes last of all (pass 188 A).

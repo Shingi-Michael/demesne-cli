@@ -392,7 +392,15 @@ export interface Turn {
   attachments?: TurnAttachment[];
 }
 
-export interface TurnAttachment { id: string; filename: string; width: number; height: number }
+export interface TurnAttachment {
+  id: string; filename: string; width: number; height: number;
+  /// A file that isn't a picture (pass 205 A): its text goes with the message
+  /// and it is kept with the chat as a source. Width and height are 0.
+  kind?: "file";
+  size?: number;
+  /// Its source once sent.
+  sourceId?: string;
+}
 
 /// A current file that a completed read in this turn actually returned.
 /// IDs are scoped to the session/turn; the content route never accepts paths.

@@ -42,7 +42,7 @@ import {
   planContextRequest,
   type ContextPlanner,
 } from "./context-planner.ts";
-import { READ_SOURCE, readSource, readSourceDefinition, sourcesContext, type SourceStore } from "./sources.ts";
+import { attachedFileText, READ_SOURCE, readSource, readSourceDefinition, sourcesContext, type SourceStore } from "./sources.ts";
 import { keepLines, type KeepEdits, NOTE_INSTRUCTION, NoteFilter, NOTES_FROM, RECALL_TURN, recallText, recallTurnDefinition, roughTokens } from "./turn-notes.ts";
 
 interface AssembledToolCall {
@@ -257,11 +257,16 @@ export class AgentEngine {
     const history = themefy ? [] : groupHistory(this.store.getModelContextTranscript(session.id));
     // Attached images travel with the message as artifact ids; the text names
     // them so a model that can't see pixels still knows they are there.
-    const attached = turn.attachments ?? [];
+    const attached = (turn.attachments ?? []).filter((one) => one.kind !== "file");
+    // Files sent with the message (pass 205 A) go with it as text; each is
+    // kept as a source, so the rest of a long one can be read on need.
+    const files = themefy ? [] : (turn.attachments ?? []).filter((one) => one.kind === "file");
+    const filesText = files.length ? `\n\n${(await Promise.all(files.map((file) =>
+      attachedFileText(file.sourceId ? this.options.sources?.get(turn.sessionId, file.sourceId) : undefined, file.filename)))).join("\n\n")}` : "";
     const assistant = !themefy && this.options.assistantChat?.(session.id) === true;
     // The assistant's messages carry the date and time they were sent, saved
     // with the message so the conversation's start never changes.
-    const content = assistant ? `${assistantStamp(this.options.now?.() ?? new Date())} ${turn.content}` : turn.content;
+    const content = (assistant ? `${assistantStamp(this.options.now?.() ?? new Date())} ${turn.content}` : turn.content) + filesText;
     const userMessage = attached.length
       ? { role: "user" as const, content: `${content}\n\n${attached.map((image) => `[Attached image ${image.filename}, ${image.width}×${image.height}]`).join("\n")}`,
         imageArtifactIds: attached.map((image) => image.id) }

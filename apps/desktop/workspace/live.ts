@@ -42,6 +42,7 @@ import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
 import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
+import { fileChipHTML, isPicture, MAX_FILE_BYTES, refusal, sizeWord } from "./file-chips.ts";
 import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, usedSources, type SourcesView } from "./sources-card.ts";
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
 import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
@@ -2562,6 +2563,9 @@ function runHTML(run: WorkspaceRun, index: number) {
   // A step serving a live page keeps the trace open so its preview shows.
   const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
   let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }).replace('<div class="plan-ribbon', `<div style="--pr-phase:-${Math.round(performance.now() % 1400)}ms" class="plan-ribbon`) : "", steps = "";
+  // Files sent with the message were read with it (pass 205 A): one line each.
+  const sentFiles = run.status === "queued" ? [] : (run.attachments ?? []).filter((one) => one.kind === "file");
+  if (sentFiles.length) body += `<div class="steps file-reads">${sentFiles.map((file) => `<div class="tool-row file-read">${stepIconFor("read")}<span class="verb">Read</span><code class="target"><span class="name">${h(file.filename)}</span></code><span class="sp"></span><small class="meta"><span class="success">✓</span> ${file.size != null ? h(sizeWord(file.size)) : ""}</small></div>`).join("")}</div>`;
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
@@ -2683,7 +2687,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}${canRewind(run) ? btn("rewind", "rewind", { turnId: run.id }).replace("<button ", '<button title="Put the files and the chat back to just before this message" ') : ""}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
   const attached = run.attachments?.length
-    ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
+    ? `<div class="request-att">${run.attachments.map((image) => image.kind === "file" ? fileChipHTML(image, { small: true }) : attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
   const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? threadReport(run) ?? threadAsked(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${requestText(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
@@ -4135,7 +4139,6 @@ async function answerQuestion(value: string | null, source: "typed" | "suggestio
 /// Images for the next message: previews stay here, the host holds the
 /// uploaded artifacts.
 const attachmentPreviews = new Map<string, string>();
-const ATTACHABLE = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
 /// A picture fitted for sending (fit-image.ts). An iPhone photo (HEIC) the
 /// window can't draw is turned into a JPEG by the Mac first.
 async function readPicture(file: File, options: { side: number; bytes: number }): Promise<{ url: string; type: string }> {
@@ -4145,9 +4148,25 @@ async function readPicture(file: File, options: { side: number; bytes: number })
   const jpeg = await api<string>("image-convert", { data: raw });
   return fitImage(await (await fetch(jpeg)).blob(), options);
 }
+/// Files the daemon couldn't read: their chips say why, and they aren't sent.
+let refusedFiles: { id: string; filename: string; why: string }[] = [];
+/// A file that isn't a picture (pass 205 A): sent whole, read by the daemon.
+async function attachFile(file: File) {
+  const refuse = (why: string) => { refusedFiles = [...refusedFiles, { id: crypto.randomUUID(), filename: file.name || "file", why }]; composerSignature = ""; renderComposer(); };
+  if (file.size > MAX_FILE_BYTES) return refuse("too big · up to 20 MB");
+  let data: string;
+  try {
+    const url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+    data = url.slice(url.indexOf(",") + 1);
+  } catch { return refuse(file.size ? "can’t be read" : "a folder? drop it on Sources"); }
+  try {
+    await api("attach", { name: file.name || "file", mimeType: file.type && !isPicture(file) ? file.type : "application/octet-stream", data });
+    composerSignature = ""; renderComposer();
+  } catch (error) { refuse(refusal(error instanceof Error ? error.message : String(error), file.name)); }
+}
 async function attachFiles(files: File[]) {
-  const images = files.filter((file) => ATTACHABLE.includes(file.type) || /\.hei[cf]$/i.test(file.name));
-  if (images.length < files.length) notice("Only PNG, JPEG, WebP and HEIC images can be attached.");
+  const images = files.filter(isPicture);
+  for (const file of files.filter((one) => !isPicture(one))) await attachFile(file);
   for (const file of images) {
     // Big photos and screenshots are redrawn to fit (fit-image.ts), never refused for size.
     let fitted: { url: string; type: string };
@@ -4300,6 +4319,7 @@ function composerFrame(width: number) {
     pointed.map((point) => point.id).join(),
     state.attachments.map((image) => image.id).join(),
     pastes.map((paste) => paste.id).join(),
+    refusedFiles.map((file) => file.id).join(),
   ]);
   if (
     signature === composerSignature &&
@@ -4366,14 +4386,15 @@ function composerFrame(width: number) {
   const armed = Date.now() < stopArmed;
   const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || pointed.length > 0 || state.attachments.length > 0 || pastes.length > 0, session = inSession();
   const attachRow = el("attach-row");
-  attachRow.hidden = (!state.attachments.length && !pastes.length) || Boolean(question);
+  attachRow.hidden = (!state.attachments.length && !pastes.length && !refusedFiles.length) || Boolean(question);
   // A screenshot from the capture keys shows in its card; here only a note.
   // (A narrow window has no card column: then it's an ordinary picture chip.)
   const waitingShots = getComputedStyle(el("cards")).display === "none" ? [] : chatShots().filter((shot) => state!.attachments.some((image) => image.id === shot.id));
   attachRow.innerHTML = shotsNote(waitingShots) + state.attachments.filter((image) => !waitingShots.some((shot) => shot.id === image.id)).map((image) => {
+    if (image.kind === "file") return fileChipHTML(image, { remove: "detach" });
     const preview = attachmentPreviews.get(image.id);
     return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("source-keep", "Keep", { id: image.id }, "att-keep").replace("<button ", `<button title="Keep it with this chat as a source" `)}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
-  }).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
+  }).join("") + refusedFiles.map((file) => fileChipHTML(file, { remove: "unrefuse", bad: file.why })).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
   // While a turn runs the send button is Stop; Enter queues what you type.
   el("send-label").innerHTML = question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${asking ? `${k("Enter")} send instead` : `${k("↵")} steer · ${k("⌥↵")} after this turn`}</span>` : ""}<span class="stop-word">■ Stop</span>`
@@ -5729,6 +5750,8 @@ async function submitText(value = editor.value, wait = false) {
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
   // Folded pastes go after the words, whole.
   if (pastes.length && !value.startsWith("/")) { value = withPastes(value, pastes); pastes.length = 0; }
+  // Files that couldn't be read aren't sent; their chips go with the message.
+  if (!value.startsWith("/")) refusedFiles = [];
   // A screenshot's window text goes folded after them. Once sent, its picture
   // is in your bubble, so its card goes; so does a file preview you looked at.
   const going = value.startsWith("/") || pendingQuestion() ? [] : chatShots().filter((shot) => state!.attachments.some((image) => image.id === shot.id));
@@ -6241,6 +6264,7 @@ async function dispatch(
     return api("source-open", { id: source.id });
   }
   if (action === "source-remove") return api("source-remove", { id: args.id });
+  if (action === "unrefuse") { refusedFiles = refusedFiles.filter((file) => file.id !== args.id); composerSignature = ""; renderComposer(); return; }
   if (action === "source-keep") return keepSource({ attachmentId: args.id });
   if (action === "cycle-mode") return cycleMode();
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }

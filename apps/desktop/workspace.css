@@ -882,6 +882,23 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .src-card.drop :is(.src-marks, .src-add, .card-body) { display: none; }
 .desktop #cards .src-card.src-ghost { border: 1.5px dashed color-mix(in srgb, var(--blossom) 55%, transparent); background: color-mix(in srgb, var(--blossom) 6%, transparent); color: var(--blossom); }
 .desktop .your-source { flex: none; color: var(--blossom); white-space: nowrap; }
+/* Files in the composer (pass 205 A): kind on a colour, name, size. */
+.desktop .fc { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 44px; max-width: 220px; padding: 0 10px 0 7px; box-sizing: border-box; border-radius: var(--r-sm); background: var(--tone2); box-shadow: 0 0 0 1px var(--hair); vertical-align: top; }
+.desktop .fc.small { height: 36px; padding-left: 6px; }
+.desktop .fc-k { flex: none; width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; font: 700 8px/1 inherit; letter-spacing: .02em; color: #fff; background: #4a4c52; }
+.desktop .fc.small .fc-k { width: 22px; height: 22px; font-size: 7px; border-radius: 6px; }
+.desktop .fc-k.pdf { background: #d9534f; } .desktop .fc-k.doc { background: #2f6fd0; } .desktop .fc-k.xls { background: #228b55; } .desktop .fc-k.ppt { background: #d0652f; }
+.desktop .fc-k.plain { color: var(--t2); background: color-mix(in srgb, var(--t1) 14%, transparent); }
+.desktop .fc-nm { min-width: 0; display: flex; flex-direction: column; line-height: 15px; }
+.desktop .fc-nm span { color: var(--t1); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop .fc-nm small { color: var(--t3); font-size: 11px; white-space: nowrap; }
+.desktop .fc.bad .fc-nm small { color: var(--danger, #e5a0a0); }
+.desktop .fc.bad .fc-k { opacity: .5; }
+.desktop .fc-x { position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; padding: 0; border-radius: 50%; background: var(--surface2, #2a2b2e); box-shadow: 0 0 0 1px var(--hair); color: var(--t2); font-size: 10px; line-height: 16px; opacity: 0; cursor: pointer; }
+.desktop .fc:hover .fc-x, .desktop .fc-x:focus-visible { opacity: 1; }
+.desktop #attach-row { overflow: visible; }
+.desktop .file-reads .file-read { cursor: default; }
+.desktop .request-att:has(.fc) { margin-bottom: 6px; }
 .desktop #attach-row .att-keep { position: absolute; left: 3px; bottom: 3px; padding: 0 6px; height: 16px; border: 0; border-radius: 99px; background: color-mix(in srgb, var(--ink) 70%, transparent); color: var(--blossom); font-size: 11px; line-height: 16px; opacity: 0; cursor: pointer; }
 .desktop #attach-row .att:hover .att-keep, .desktop #attach-row .att-keep:focus-visible { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {

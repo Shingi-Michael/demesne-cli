@@ -184,13 +184,16 @@ function slice(text: string, offset: number, extra: Record<string, unknown>): st
   return JSON.stringify({ ...extra, length: text.length, ...(end < text.length ? { nextOffset: end } : {}), content: part });
 }
 
-async function fileText(absolute: string): Promise<string> {
+/// A file's text: PDF, Word, Excel and PowerPoint through documents.ts,
+/// anything else when it is UTF-8 text (code, SQL, CSV, Markdown, JSON).
+export async function fileText(absolute: string): Promise<string> {
   const stat = lstatSync(absolute);
   if (!stat.isFile()) throw new SourceError("not a regular file");
   if (isSensitivePath(absolute)) throw new SourceError("it holds secrets, which are never read");
   const kind = readable(absolute);
   if (kind === "pdf" || kind === "office") return documentText(absolute, stat.size);
   if (stat.size > 4 * 1024 * 1024) throw new SourceError("over 4 MB of text");
+  if (/\.(zip|gz|tgz|rar|7z|dmg|iso|exe|mp4|mov|mp3|wav|m4a|webm|avi)$/i.test(absolute)) throw new SourceError(`a ${absolute.split(".").at(-1)!.toLowerCase()} file, not text`);
   const bytes = readFileSync(absolute);
   if (bytes.includes(0)) throw new SourceError("a binary file, not text");
   try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw new SourceError("not text (not valid UTF-8)"); }
@@ -231,4 +234,17 @@ export async function linkTitle(fetchPage: AgentTool | undefined, url: URL): Pro
     const value = JSON.parse(await fetchPage.execute({ url: url.href, maxChars: 1000 }, { signal: controller.signal, workspaceRoot: "" })) as { title?: string };
     return value.title;
   } catch { return undefined; } finally { clearTimeout(timer); }
+}
+
+/// The text of a file sent with a message (pass 205 A): its first part, and
+/// where the rest is (read_source with the source's id and an offset).
+export const ATTACHED_CHARS = 60_000;
+export async function attachedFileText(source: ChatSource | undefined, filename: string): Promise<string> {
+  if (!source || !existsSync(source.target)) return `[Attached file ${filename}: no longer kept, so it can't be read]`;
+  let text: string;
+  try { text = await fileText(source.target); }
+  catch (error) { return `[Attached file ${filename}: it can't be read (${error instanceof Error ? error.message : String(error)})]`; }
+  const part = text.slice(0, ATTACHED_CHARS);
+  const rest = text.length > part.length ? `\n[The file goes on for ${text.length - part.length} more characters: read_source with id ${source.id} and offset ${part.length}]` : "";
+  return `[Attached file ${filename}, kept as source ${source.id}]\n<file name="${filename.replace(/"/g, "'")}">\n${part}\n</file>${rest}`;
 }

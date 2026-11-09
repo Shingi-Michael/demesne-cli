@@ -430,6 +430,7 @@ export class WorkspaceHost {
       files: this.files,
       planOnly: this.planOnly,
       attachments: this.attachments,
+      sources: this.current?.state.sources ?? [],
       queue: this.queue,
       steers: this.steers,
       asks: this.asks,
@@ -1979,6 +1980,39 @@ export class WorkspaceHost {
     if (method === "stop-agent") {
       if (!this.current) throw new Error("Choose a session first.");
       await this.client.stopAgent(this.current.session.id, string(args.toolCallId, "agent", 200));
+      return;
+    }
+    // Sources kept with the chat (pass 204): a link, a file or folder by its
+    // path (Choose… or a drop), or a picture waiting in the composer (Keep).
+    if (method === "source-add") {
+      if (!this.current) throw new Error("Choose a session first.");
+      const selected = this.current;
+      const asked = typeof args.url === "string" ? { url: string(args.url, "link", 8000) }
+        : typeof args.path === "string" ? { path: string(args.path, "path", 4096) }
+        : { attachmentId: string(args.attachmentId, "attachment", 200) };
+      const { source, sources } = await this.client.addSource(selected.session.id, asked);
+      selected.state.sources = sources;
+      if ("attachmentId" in asked && this.current === selected) this.attachments = this.attachments.filter((image) => image.id !== asked.attachmentId);
+      this.publish();
+      return source;
+    }
+    if (method === "source-remove") {
+      if (!this.current) throw new Error("Choose a session first.");
+      const selected = this.current;
+      selected.state.sources = (await this.client.removeSource(selected.session.id, string(args.id, "source", 100))).sources;
+      this.publish();
+      return;
+    }
+    // A folder opens in Finder, a link in the browser, a file in its own app
+    // (the page shows a file it can preview in the preview card instead).
+    if (method === "source-open") {
+      const source = this.current?.state.sources?.find((one) => one.id === args.id);
+      if (!source) throw new Error("That source isn't kept here any more");
+      if (source.kind === "link") {
+        const url = new URL(source.target);
+        if (!["http:", "https:"].includes(url.protocol)) throw new Error("Unsupported link");
+      }
+      await this.open(source.target);
       return;
     }
     // A file for its preview card (pass 188 A).

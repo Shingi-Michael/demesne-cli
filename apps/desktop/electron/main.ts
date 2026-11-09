@@ -421,6 +421,12 @@ if (!lookJob) void app.whenReady().then(async () => {
       await writeFile(selected.filePath, Buffer.from(url.slice(url.indexOf(",") + 1), "base64"));
       return { path: selected.filePath };
     }
+    // A file or folder to keep with a chat (Sources, pass 204). Only the Mac
+    // picks either in one dialog; elsewhere it's a file (folders drop in).
+    if (method === "desktop-pick-source") {
+      const selected = await dialog.showOpenDialog(window!, { title: "Keep a file or folder with this chat", buttonLabel: "Keep", properties: process.platform === "darwin" ? ["openFile", "openDirectory"] : ["openFile"] });
+      return selected.canceled ? null : selected.filePaths[0] ?? null;
+    }
     // A folder for a chat to move into: the path, or null when cancelled.
     if (method === "desktop-pick-folder") {
       const selected = await dialog.showOpenDialog(window!, { title: "Move this chat to a project", properties: ["openDirectory"] });

@@ -587,6 +587,25 @@ export interface SessionStateResponse {
   rewinds?: SessionRewindState[];
   /// Asked again: the answers that share one spot, and the one in force.
   versions?: TurnVersions[];
+  /// Sources the person keeps with this chat, newest first (pass 204).
+  sources?: ChatSource[];
+}
+
+/// A source kept with a chat (pass 204): a file, a folder or a link. A file
+/// in the project stays where it is; one from elsewhere is copied in.
+export interface ChatSource {
+  id: string;
+  kind: "file" | "folder" | "link";
+  /// An absolute path, or the link.
+  target: string;
+  name: string;
+  /// One dim line: where it is ("in this project · db/"), or the page's title.
+  detail: string;
+  /// Its path in the project, when it is in the project.
+  inProject?: string;
+  /// Copied into the chat from elsewhere.
+  copied?: boolean;
+  addedAt: string;
 }
 
 /// Ask again (pass 115): one message answered more than once, oldest first.

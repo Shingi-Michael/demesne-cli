@@ -42,6 +42,7 @@ import {
   planContextRequest,
   type ContextPlanner,
 } from "./context-planner.ts";
+import { READ_SOURCE, readSource, readSourceDefinition, sourcesContext, type SourceStore } from "./sources.ts";
 import { keepLines, type KeepEdits, NOTE_INSTRUCTION, NoteFilter, NOTES_FROM, RECALL_TURN, recallText, recallTurnDefinition, roughTokens } from "./turn-notes.ts";
 
 interface AssembledToolCall {
@@ -93,6 +94,8 @@ interface AgentEngineOptions extends AgentConfig {
   sessionTools?: SessionToolStore;
   /// What you added to or took off each chat's Keep list.
   keepEdits?: KeepEdits;
+  /// Sources the person keeps with each chat (pass 204).
+  sources?: SourceStore;
   /// Lines added to the system prompt for this chat (its Heartbeat address).
   sessionContext?: (sessionId: string) => string | null;
   /// Other agents working in a project (Heartbeat), for the overlap check.
@@ -295,6 +298,9 @@ export class AgentEngine {
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
     // Turns swapped for notes can be brought back whole, one at a time.
     if (!themefy && !assistant && checkpoint?.noteTurnIds?.some(Boolean)) definitions.push(recallTurnDefinition);
+    // Sources you keep with the chat: one line each in the prompt, read on need.
+    const keptSources = !themefy && !assistant ? this.options.sources?.list(session.id) ?? [] : [];
+    if (keptSources.length && !hidden?.has(READ_SOURCE)) definitions.push(readSourceDefinition);
     // Tool search (tool-search.ts): the everyday tools go whole, the rest
     // wait as one line each until the model loads them for this chat.
     const deferring = !themefy && !assistant && this.options.deferTools === true;
@@ -338,7 +344,7 @@ export class AgentEngine {
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, orchestrate: orchestrating, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         attended: turn.permissionMode === "ask" && !turn.fromDrive && !turn.fromRoutine,
-        delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available().length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, modelSees: inference.vision === true, configured: this.configuredSystemPrompt, sessionContext: this.options.sessionContext?.(session.id) ?? undefined }) + moreToolsSection(deferrable);
+        delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available().length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, modelSees: inference.vision === true, configured: this.configuredSystemPrompt, sessionContext: [this.options.sessionContext?.(session.id), sourcesContext(keptSources)].filter(Boolean).join("\n") || undefined }) + moreToolsSection(deferrable);
       const unplannedMessages: ProviderMessage[] = [
         { role: "system", content: systemPrompt + (noting ? NOTE_INSTRUCTION : "") + (finalizing
           ? `\n${budgetReason}. Tools are unavailable for this final status request. Report what was actually done, checks and their outcomes, and the specific next steps. Distinguish unfinished work from completed work. The user can send a follow-up to continue from this saved context.` : "") },
@@ -1094,7 +1100,7 @@ export class AgentEngine {
       return result;
     }
     // The assistant's file, search and phone tools need no project folder.
-    if (!workspaceRoot && call.name !== "ask_user" && call.name !== RECALL_TURN && call.name !== UPDATE_PLAN && !FOUNDRY_TOOL_NAMES.has(call.name) && !WEB_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
+    if (!workspaceRoot && call.name !== "ask_user" && call.name !== RECALL_TURN && call.name !== READ_SOURCE && call.name !== UPDATE_PLAN && !FOUNDRY_TOOL_NAMES.has(call.name) && !WEB_TOOL_NAMES.has(call.name) && !(themefy && call.name === "apply_theme")
       && !(assistant && call.name !== "assistant_notes")) {
       const result = "Error: this session is not bound to a workspace";
       this.store.settleToolCall(toolCallId, "failed", result);
@@ -1131,6 +1137,19 @@ export class AgentEngine {
       const result="Error: Themefy questions must use mode=interview";this.store.settleToolCall(toolCallId,"failed",result);return result;
     }
     if (call.name === RECALL_TURN) return this.recallTurn(toolCallId, input, sessionId);
+    if (call.name === READ_SOURCE) {
+      this.store.startToolCall(toolCallId);
+      try {
+        const result = await readSource(this.options.sources?.list(sessionId) ?? [], input, signal, this.tools.get("web_fetch"));
+        this.store.settleToolCall(toolCallId, "completed", result);
+        return result;
+      } catch (error) {
+        if (signal.aborted) throw error;
+        const result = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        this.store.settleToolCall(toolCallId, "failed", result);
+        return result;
+      }
+    }
     if (call.name === TOOL_SEARCH) {
       this.store.startToolCall(toolCallId);
       const { found, result } = searchTools(this.turnDeferrable.get(turnId) ?? [], input);

@@ -3748,8 +3748,14 @@ function renderLastChat() {
   }
   if (session && inSession()) try { localStorage.setItem("demesne-last-chat", JSON.stringify({ id: session.id, path: session.workspace?.root ?? null })); } catch {}
 }
+/// Where you were in the chat when a page (Foundry, Settings, …) covered it:
+/// the page scrolls the same stage, so closing it puts the chat back there.
+let chatPlace: { id: string; top: number; follow: boolean } | null = null;
 function openPage(kind: "" | PageKind) {
   const was = pageOpen;
+  const stage = document.getElementById("stage");
+  if (!was && kind && stage && state?.session) chatPlace = { id: state.session.id, top: stage.scrollTop, follow };
+  if (kind && stage && kind !== was) stage.scrollTop = 0;
   if (was === "settings" && kind !== "settings") clearGoogleAIForm();
   pageOpen = kind;
   sidebarSignature = heroSignature = "";
@@ -3764,6 +3770,15 @@ function openPage(kind: "" | PageKind) {
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
   if (kind === "settings" && was !== "settings") document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
   if (!kind && was === "settings") document.querySelector<HTMLElement>(".sidebar-settings")?.focus({ preventScroll: true });
+  if (!kind && was) {
+    const place = chatPlace;
+    chatPlace = null;
+    if (place && stage && place.id === state?.session?.id) {
+      const put = () => { follow = place.follow; stage.scrollTop = place.follow ? stage.scrollHeight : place.top; lastStageTop = stage.scrollTop; };
+      put();
+      requestAnimationFrame(put);
+    }
+  }
 }
 /// Foundry saves seen in this window's chats: a new one refreshes the page.
 function foundrySaveCount() {

@@ -104,12 +104,16 @@ export class QuestionRepository {
       WHERE q.turn_id=? AND q.status='paused'`).all(turnId) as Row[]).map(row=>this.map(row));
   }
   recover(): void {
+    // "<provider> dropped the connection. Continue on …?" belongs to the turn that asked it, and nothing
+    // is running after a restart: it closes instead of coming back as a paused question on every open.
+    const switchAsk="EXISTS(SELECT 1 FROM tool_calls c WHERE c.id=user_questions.tool_call_id AND c.provider_tool_call_id LIKE 'switch-%')";
+    this.db.query(`UPDATE user_questions SET status='cancelled',draft='',revision=revision+1 WHERE status IN ('waiting','paused') AND ${switchAsk}`).run();
     // An open question outlives its turn: the answer starts the next one.
     this.db.query(`UPDATE user_questions SET status='cancelled',draft='',revision=revision+1 WHERE status IN ('waiting','paused') AND open=0
       AND EXISTS(SELECT 1 FROM turns t WHERE t.id=user_questions.turn_id AND t.status IN ('cancelled','completed'))`).run();
     // A crash can land after answers commit but before their tool result does.
     // Keep those answers resumable instead of losing them from model history.
-    this.db.query(`UPDATE user_questions SET status='paused',revision=revision+1 WHERE status='answered' AND open=0
+    this.db.query(`UPDATE user_questions SET status='paused',revision=revision+1 WHERE status='answered' AND open=0 AND NOT ${switchAsk}
       AND EXISTS(SELECT 1 FROM turns t WHERE t.id=user_questions.turn_id AND t.status='interrupted')
       AND NOT EXISTS(SELECT 1 FROM tool_calls c JOIN model_messages m ON m.turn_id=c.turn_id
         AND m.tool_call_id=c.provider_tool_call_id AND m.role='tool' WHERE c.id=user_questions.tool_call_id)`).run();

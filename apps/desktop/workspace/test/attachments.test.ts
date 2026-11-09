@@ -39,7 +39,7 @@ test("an attached image goes to the model with the next message and stays on the
   } finally { host.dispose(); await f.close(); }
 });
 
-test("only images attach, a model without vision gets the names only, and a stale id is refused", async () => {
+test("pictures and readable files attach, a model without vision gets the names only, and a stale id is refused", async () => {
   const seen: ProviderMessage[][] = [];
   const f = await fixture({
     providerId: "test", modelId: "test", async listModels() { return []; },
@@ -53,7 +53,10 @@ test("only images attach, a model without vision gets the names only, and a stal
   try {
     await host.connect();
     const sessionId = host.current!.session.id;
-    await expect(host.handle("attach", { sessionId, name: "notes.txt", mimeType: "text/plain", data: Buffer.from("hi").toString("base64") })).rejects.toThrow("PNG, JPEG or WebP");
+    // A text file attaches as a file (pass 205 A); a picture in another format doesn't.
+    expect(await host.handle("attach", { sessionId, name: "notes.txt", mimeType: "text/plain", data: Buffer.from("hi").toString("base64") })).toMatchObject({ kind: "file", size: 2 });
+    await host.handle("detach", { sessionId, id: host.snapshot().attachments[0]!.id });
+    await expect(host.handle("attach", { sessionId, name: "a.gif", mimeType: "image/gif", data: Buffer.from("GIF89a").toString("base64") })).rejects.toThrow("PNG, JPEG or WebP");
     await expect(host.handle("attach", { sessionId, name: "fake.png", mimeType: "image/png", data: Buffer.from("not a png").toString("base64") })).rejects.toThrow();
     await host.handle("attach", { sessionId, name: "shot.png", mimeType: "image/png", data: (await png()).toString("base64") });
     await host.submit("What is this?");

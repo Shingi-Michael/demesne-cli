@@ -9,7 +9,7 @@ import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, T
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
-import { linkTitle, SourceError, SourceStore } from "./sources.ts";
+import { fileText, linkTitle, MAX_COPY_BYTES, SourceError, SourceStore } from "./sources.ts";
 import { rememberTool } from "./remember.ts";
 import { updatePlanTool } from "./plan.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
@@ -110,7 +110,7 @@ import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
@@ -1778,7 +1778,34 @@ export function createDaemonApp(options: {
         const session = store.getSession(path[2]!);
         if (!session) return apiError("not_found", "Session not found", 404);
         const mimeType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-        if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) return apiError("invalid_request", "Attach a PNG, JPEG or WebP image", 400);
+        // Any other file (pass 205 A): kept if its text can be read, so the
+        // message can carry it; refused with why when it can't.
+        if (mimeType.startsWith("image/") && !["image/png", "image/jpeg", "image/webp", "image/svg+xml"].includes(mimeType)) return apiError("invalid_request", "Attach a PNG, JPEG or WebP image", 400);
+        if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) {
+          if (Number(request.headers.get("content-length") ?? 0) > MAX_COPY_BYTES) return apiError("invalid_request", "Files can be at most 30 MB", 400);
+          const data = Buffer.from(await request.arrayBuffer());
+          if (!data.byteLength) return apiError("invalid_request", "That file is empty", 400);
+          if (data.byteLength > MAX_COPY_BYTES) return apiError("invalid_request", "Files can be at most 30 MB", 400);
+          let filename = "file";
+          try { filename = decodeURIComponent(request.headers.get("x-demesne-filename") ?? "file"); } catch { /* keep the default */ }
+          filename = filename.replace(/[\u0000-\u001f/\\]/g, "").slice(0, 200) || "file";
+          // A name with no ending takes one from its type, so it's read as what it is.
+          const ending = ({ "application/pdf": ".pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx", "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx" } as Record<string, string>)[mimeType];
+          if (ending && !/\.[a-z0-9]{1,5}$/i.test(filename)) filename += ending;
+          const scratch = mkdtempSync(join(tmpdir(), "demesne-file-"));
+          try {
+            const at = join(scratch, filename);
+            writeFileSync(at, data, { mode: 0o600 });
+            await fileText(at);
+          } catch (error) {
+            return apiError("invalid_request", `${filename} can't be read: ${error instanceof Error ? error.message : String(error)}`, 400);
+          } finally { rmSync(scratch, { recursive: true, force: true }); }
+          const attachment: TurnAttachment = { id: randomUUID(), filename, width: 0, height: 0, kind: "file", size: data.byteLength };
+          uploads.set(attachment.id, { sessionId: session.id, data, mimeType, attachment });
+          for (const id of uploads.keys()) { if (uploads.size <= 24) break; uploads.delete(id); }
+          return json(attachment, 201);
+        }
         if (Number(request.headers.get("content-length") ?? 0) > 20 * 1024 * 1024) return apiError("invalid_request", "Images can be at most 20 MB", 400);
         const data = Buffer.from(await request.arrayBuffer());
         if (!data.byteLength || data.byteLength > 20 * 1024 * 1024) return apiError("invalid_request", "Images can be at most 20 MB", 400);
@@ -1949,7 +1976,7 @@ export function createDaemonApp(options: {
           const message = error instanceof Error ? error.message : "Turn processor cannot snapshot inference configuration";
           return apiError("not_supported", message, 400);
         }
-        if (body.requireImageInput === true && body.attachmentIds?.length && !acceptsImageInput(inference)) {
+        if (body.requireImageInput === true && (body.attachmentIds ?? []).some((id) => uploads.get(id)?.attachment.kind !== "file") && !acceptsImageInput(inference)) {
           return apiError("image_input_unavailable", "This chat's current model isn't set up to read images. Choose an image-capable setup on your PC and try again.", 400);
         }
         const held = (body.attachmentIds ?? []).map((id) => {
@@ -1957,7 +1984,10 @@ export function createDaemonApp(options: {
           if (!upload || upload.sessionId !== path[2]) throw new ProtocolValidationError("An attached image is missing; attach it again");
           return upload;
         });
-        const attachments = held.map((upload) => upload.attachment);
+        // A file goes with its message and stays with the chat as a source.
+        const attachments = held.map((upload) => upload.attachment.kind === "file"
+          ? { ...upload.attachment, sourceId: sources.addData(path[2]!, upload.attachment.filename, upload.data).id }
+          : upload.attachment);
         const { turn, event } = store.createTurn(
           path[2]!,
           body.content,
@@ -1970,6 +2000,7 @@ export function createDaemonApp(options: {
         );
         for (const upload of held) {
           uploads.delete(upload.attachment.id);
+          if (upload.attachment.kind === "file") continue;
           // A failed save leaves the message's text naming the image; the
           // model just doesn't receive its pixels.
           await ingestImage(store, { data: upload.data, mimeType: upload.mimeType, filename: upload.attachment.filename },

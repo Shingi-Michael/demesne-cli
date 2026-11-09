@@ -4,7 +4,7 @@ import { chatPile, pileHTML } from "../shot-pile.ts";
 const id = (n: number) => `6b1d2c3e-0000-4000-8000-00000000000${n}`;
 const tool = (name: string, input: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ type: "tool", name, state: "done", input, ...extra });
 const runs = [
-  { attachments: [{ id: id(1), filename: "Safari.png" }], entries: [
+  { attachments: [{ id: id(1), filename: "Safari.png" }, { id: id(9), filename: "pricing.pdf", kind: "file" }], entries: [
     tool("capture_window", {}, { message: JSON.stringify({ app: "Figma", title: "Checkout", picture: { id: id(2) } }) }),
     tool("look_at_page", { url: "http://localhost:5173/login" }, { message: JSON.stringify({ url: "http://localhost:5173/login", title: "Login", pictures: [{ id: id(3), width: 1280, height: 800, label: "on opening" }, { id: id(2), width: 1, height: 1, label: "again" }] }) }),
     tool("list_files", { path: "/work/app/research" }),

@@ -64,3 +64,44 @@ test("sources are kept with the chat, told to the model, and read on need", asyn
     await app.close?.();
   }
 });
+
+test("a file sent with a message goes with it as text and is kept as a source", async () => {
+  const root = mkdtempSync(join(tmpdir(), "demesne-files-app-"));
+  mkdirSync(join(root, "data"));
+  const databasePath = join(root, "data/state.sqlite");
+  const store = new DemesneStore(databasePath);
+  const { session } = store.createSession("Files");
+  store.close();
+  const seen: ProviderMessage[][] = [];
+  const processor: TurnProcessor = { providerId: "test", modelId: "test-model", contextCapacity: 32768, maxOutputTokens: 1024,
+    async listModels() { return []; },
+    async *stream(messages) {
+      seen.push(structuredClone(messages));
+      yield { type: "text_delta", delta: "Pro goes to $29." };
+      yield { type: "finish", reason: "stop" };
+      yield { type: "usage", usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 } };
+    } };
+  const app = createDaemonApp({ databasePath, processor, web: false });
+  const client = new DemesneClient({ server: "http://localhost", fetch: ((input: string | URL | Request, init?: RequestInit) =>
+    Promise.resolve(app.fetch(new Request(input, init)))) as typeof fetch });
+  try {
+    const file = await client.uploadAttachment(session.id, new TextEncoder().encode("# Pricing\nPro: $29 a month\n"), "text/markdown", "pricing.md");
+    expect(file).toMatchObject({ filename: "pricing.md", kind: "file", size: 27, width: 0 });
+    await expect(client.uploadAttachment(session.id, new Uint8Array([80, 75, 3, 4, 0, 0]), "application/zip", "assets.zip")).rejects.toThrow("assets.zip can't be read");
+    const submitted = await client.submitTurn(session.id, { content: "What does Pro cost?", attachmentIds: [file.id] });
+    for await (const event of client.streamEvents(session.id, submitted.eventId, AbortSignal.timeout(3000)) as AsyncIterable<EventEnvelope>) {
+      if (event.turnId === submitted.turn.id && /^turn\.(completed|failed)$/.test(event.type)) break;
+    }
+    const user = seen[0]!.findLast((message) => message.role === "user")!;
+    expect(user.content).toContain("What does Pro cost?");
+    expect(user.content).toContain('<file name="pricing.md">');
+    expect(user.content).toContain("Pro: $29 a month");
+    expect((user as { imageArtifactIds?: string[] }).imageArtifactIds).toBeUndefined();
+    const sources = (await client.listSources(session.id)).sources;
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({ name: "pricing.md", copied: true });
+    expect(submitted.turn.attachments?.[0]?.sourceId).toBe(sources[0]!.id);
+  } finally {
+    await app.close?.();
+  }
+});

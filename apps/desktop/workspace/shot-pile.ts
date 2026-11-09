@@ -13,7 +13,7 @@ export interface PileShot {
 }
 
 interface PileTool { name: string; state: string; input: Record<string, unknown>; message?: string; phase?: string; created?: boolean; changes?: { path: string; beforeExists: boolean; afterExists: boolean }[] }
-interface PileRun { attachments?: { id: string; filename: string }[]; entries: readonly { type: string }[] }
+interface PileRun { attachments?: { id: string; filename: string; kind?: string }[]; entries: readonly { type: string }[] }
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -24,7 +24,7 @@ export function chatPile(runs: readonly PileRun[], hidden: ReadonlySet<string> =
   const out: PileShot[] = [], seen = new Set<string>();
   const add = (shot: PileShot) => { if (!shot.id || seen.has(shot.id) || hidden.has(shot.id)) return; seen.add(shot.id); out.push(shot); };
   for (const run of runs) {
-    for (const image of run.attachments ?? []) add({ id: image.id, caption: image.filename.replace(/\.(png|jpe?g|webp|gif)$/i, ""), by: "you" });
+    for (const image of (run.attachments ?? []).filter((one) => one.kind !== "file")) add({ id: image.id, caption: image.filename.replace(/\.(png|jpe?g|webp|gif)$/i, ""), by: "you" });
     for (const tool of toolsOf(run)) {
       if (tool.state !== "done" || !tool.message) continue;
       if (tool.name === "capture_window") {

@@ -1295,6 +1295,8 @@ export class WorkspaceHost {
         ...(attached.length ? { attachmentIds: attached.map((image) => image.id) } : {}),
       });
       if (this.current?.session.id === id) this.attachments = this.attachments.filter((image) => !attached.includes(image));
+      // A file sent with the message is kept as a source (pass 205 A).
+      if (attached.some((one) => one.kind === "file")) session.state.sources = (await this.client.listSources(id).catch(() => null))?.sources ?? session.state.sources;
       if (this.current?.session.id === id) {
         session.ensureTurn(result.turn);
         this.drive?.agent.workerStarted(id, content, result.turn.id);
@@ -1877,12 +1879,12 @@ export class WorkspaceHost {
     }
     if (method === "attach") {
       if (!this.current) throw new Error("Choose a session first.");
-      if (typeof args.data !== "string" || typeof args.mimeType !== "string" || typeof args.name !== "string") throw new Error("Invalid image");
-      if (this.attachments.length >= 6) throw new Error("A message can carry at most 6 images.");
+      if (typeof args.data !== "string" || typeof args.mimeType !== "string" || typeof args.name !== "string") throw new Error("Invalid file");
+      if (this.attachments.length >= 10) throw new Error("A message can carry at most 10 files and pictures.");
       const selected = this.current;
       const artifact = await this.client.uploadAttachment(selected.session.id, Buffer.from(args.data, "base64"), args.mimeType, args.name);
       if (this.current !== selected) return;
-      const image = { id: artifact.id, filename: artifact.filename, width: artifact.width, height: artifact.height };
+      const image = { id: artifact.id, filename: artifact.filename, width: artifact.width, height: artifact.height, ...(artifact.kind === "file" ? { kind: "file" as const, size: artifact.size } : {}) };
       this.attachments = [...this.attachments, image];
       this.publish();
       return image;

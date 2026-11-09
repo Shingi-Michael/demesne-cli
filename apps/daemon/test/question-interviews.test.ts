@@ -137,6 +137,26 @@ test("saved complete answers remain resumable if shutdown interrupted their tool
   expect(done.session.turns.at(-1)!.responseText).toContain("muted gold");expect(done.pendingQuestions).toEqual([]);
 });
 
+test("a dropped-connection question never comes back after a restart, answered or not",async()=>{
+  const f=fixture();await f.app.close();
+  const store=new DemesneStore(f.databasePath);
+  const {session}=store.createSession("Local model gone",f.workspace);
+  const ask=(answered:boolean)=>{
+    const {turn}=store.createTurn(session.id,"Hello","ask");store.startTurn(turn.id);
+    const {providerCallId}=store.startProviderCall(turn.id,"qwen","qwen");
+    const {toolCallId}=store.recordToolCall(turn.id,providerCallId,`switch-${providerCallId}`,"ask_user",'{}');store.startToolCall(toolCallId);
+    const {questionId}=store.requestQuestions(toolCallId,[{question:"qwen dropped the connection. Continue on codex gpt?",suggestions:["Continue","Stop"]}],"clarification");
+    if(answered)store.resolveQuestions(questionId,toolCallId,[{answer:"Continue",source:"suggestion"}]);
+    store.interruptTurn(turn.id,"Question interview paused for daemon shutdown");
+  };
+  ask(false);ask(true);store.close();
+  for(let restart=0;restart<2;restart++){
+    const reopened=f.start(),state=await reopened.client.getSessionState(session.id);
+    expect(state.pendingQuestions ?? []).toEqual([]);
+    await reopened.app.close();
+  }
+});
+
 test("preference interviews need no project and expose no filesystem tools",async()=>{
   const f=fixture();const {session}=await f.client.createSession({title:"Global preferences"});
   await f.client.submitTurn(session.id,{content:"Interview about preferences",permissionMode:"ask"});

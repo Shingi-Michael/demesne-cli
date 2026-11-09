@@ -1439,6 +1439,24 @@ try {
   });
   assert(whereYouAre.fill && !/rgba?\(0, 0, 0, 0\)|transparent/.test(whereYouAre.fill), `the chat you're in is a filled row: ${whereYouAre.fill}`);
   if (whereYouAre.other && whereYouAre.mine) assert.notEqual(whereYouAre.other, whereYouAre.mine, "the other projects step back a shade");
+  // A page over the chat (Foundry here) hands the chat back where you left it, not at its top.
+  // Scrolled up the way a person does it (a wheel), so the chat stops following its end.
+  const stageBox = (await page.locator("#stage").boundingBox())!;
+  await page.mouse.move(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
+  await page.evaluate(() => { const stage = document.getElementById("stage")!; stage.scrollTop = stage.scrollHeight; });
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -1200);
+  await page.waitForTimeout(400);
+  const midway = await page.evaluate(() => document.getElementById("stage")!.scrollTop);
+  assert(midway > 100 && await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollHeight - stage.clientHeight - stage.scrollTop > 200; }), `the chat is scrolled up somewhere in the middle: ${midway}`);
+  const foundryRow = page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Foundry" });
+  await foundryRow.click();
+  await until(() => page.locator('#page[data-kind="foundry"]').isVisible(), "Foundry opens over the chat");
+  await foundryRow.click();
+  await until(() => page.locator("#page").isHidden(), "Foundry folds away");
+  await page.waitForTimeout(150);
+  const back = await page.evaluate(() => document.getElementById("stage")!.scrollTop);
+  assert(Math.abs(back - midway) <= 4, `the chat comes back where you left it: ${back} vs ${midway}`);
   // Drive has no page: its pill sits on the top bar, and drops a sheet with its line (pass 198 A).
   const line = page.locator("#briefing"), pill = page.locator("#drive-pill");
   const openDrive = async () => { if (await page.locator("#drive-sheet").isHidden()) await pill.click(); await page.locator("#drive-sheet").waitFor(); };

@@ -7834,18 +7834,32 @@ function resyncState() {
 // Updates arrive up to 40 times a second while a turn streams: the window
 // draws the newest once per frame, so typing and clicks get the time between
 // (a hidden window, which gets no frames, still draws within 100ms).
+// A slow computer (Low Power Mode) paces itself: once redraws take long, the
+// next waits three times as long as the last took (50 to 100ms, so 10 to 20
+// redraws a second), leaving the time between for typing, scrolling and clicks.
 let pendingState: Snapshot | null = null, stateFrame = 0, stateTimer: ReturnType<typeof setTimeout> | undefined;
+let drawnAt = 0, drawCost = 0;
+const SLOW_DRAW = 8;
 function drawPendingState() {
   cancelAnimationFrame(stateFrame); clearTimeout(stateTimer); stateFrame = 0; stateTimer = undefined;
   const next = pendingState; pendingState = null;
-  if (next) renderState(next);
+  if (!next) return;
+  const start = performance.now();
+  renderState(next);
+  drawnAt = performance.now();
+  // Smoothed, so one slow redraw (a chat opening) doesn't hold back the next ones for long.
+  drawCost = drawCost * .6 + (drawnAt - start) * .4;
+}
+function redrawGap(cost: number): number { return cost < SLOW_DRAW ? 0 : Math.min(100, Math.max(50, cost * 3)); }
+function scheduleDraw() {
+  if (stateFrame || stateTimer) return;
+  const wait = drawnAt + redrawGap(drawCost) - performance.now();
+  const frame = () => { stateTimer = undefined; stateFrame = requestAnimationFrame(drawPendingState); stateTimer = setTimeout(drawPendingState, 100); };
+  if (wait > 4) stateTimer = setTimeout(frame, wait); else frame();
 }
 window.demesne.subscribe((update) => {
   const next = stateReceiver.apply(update);
-  if (next) {
-    pendingState = next;
-    if (!stateFrame) { stateFrame = requestAnimationFrame(drawPendingState); stateTimer = setTimeout(drawPendingState, 100); }
-  }
+  if (next) { pendingState = next; scheduleDraw(); }
   if (stateReceiver.needsReset) resyncState();
 });
 void window.demesne
@@ -7875,8 +7889,10 @@ function drawCubes(now: number) {
   cubeFrame = requestAnimationFrame(drawCubes);
   const marks = [...cubeMarks];
   // 30 frames a second is plenty for a mark this small; a 120Hz screen
-  // otherwise rebuilds its picture 120 times a second.
-  if (now - cubeDrawn < 33) return;
+  // otherwise rebuilds its picture 120 times a second. A slow computer
+  // (redraws taking long, see drawCost) turns it at 8 a second instead:
+  // each frame rebuilds the mark's drawing, which then has to be laid out.
+  if (now - cubeDrawn < (drawCost >= SLOW_DRAW ? 125 : 33)) return;
   cube = advance(cube, now);
   if (!moving(cube, now) && marks[0]!.dataset.at === String(cube.beatAt)) return;
   cubeDrawn = now;

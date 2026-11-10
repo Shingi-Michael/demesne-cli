@@ -1170,6 +1170,7 @@ export function derivePersistedRule(toolName: string | undefined, rawArguments: 
     if (!argv.every((entry) => typeof entry === "string" && entry.length > 0 && !/\s/.test(entry))) return null;
     return `run_command:${argv.join(" ")}`;
   }
+  if (toolName === "open") { const key = openAppKey(input); return key ? `open:${key}` : null; }
   const target = pathFrom(input, toolName === "move_path" ? "from" : "path");
   if (!target) return null;
   const normalized = target.split("\\").join("/").replace(/^\.\//, "").replace(/\/+$/, "");
@@ -1177,6 +1178,23 @@ export function derivePersistedRule(toolName: string | undefined, rawArguments: 
   const segments = normalized.split("/").filter(Boolean);
   segments.pop();
   return `${toolName}:${segments.join("/") || normalized}`;
+}
+
+/// What an `open` is approved by (pass 210 A): the app it opens, so
+/// "Always" covers that app. A link with no app is "web links" (or
+/// "<scheme> links"); a file with no app is its default app, by its ending
+/// (".pdf files"); a folder "folders".
+export function openAppKey(input: unknown): string | null {
+  const args = parseRuleArguments(input);
+  const app = typeof args.app === "string" ? args.app.trim().toLowerCase() : "";
+  if (app) return app;
+  const target = typeof args.target === "string" ? args.target.trim() : "";
+  if (!target) return null;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(target);
+  if (scheme && !/^[a-z]:[\\/]/i.test(target)) return /^https?$/i.test(scheme[1]!) ? "web links" : `${scheme[1]!.toLowerCase()} links`;
+  const name = target.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+  const ending = /\.([a-z0-9]{1,12})$/i.exec(name);
+  return ending ? `.${ending[1]!.toLowerCase()} files` : "folders";
 }
 
 function pathFrom(input: Record<string, unknown>, key: string): string | null {

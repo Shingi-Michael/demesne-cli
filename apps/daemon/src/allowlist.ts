@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { isRecord } from "@demesne/protocol";
+import { isRecord, openAppKey } from "@demesne/protocol";
 import { parseConfigFile } from "@demesne/config";
 
 /// Persistent approval allowlists.
@@ -12,6 +12,8 @@ import { parseConfigFile } from "@demesne/config";
 ///   approval that saved it did; `run_command:git status *` opts in to any
 ///   further arguments. A bare `run_command` or `run_command:*` entry is
 ///   rejected because host execution is not sandboxed and must stay explicit.
+/// - `open:figma` allows opening Figma (an app's name; "web links",
+///   ".pdf files" or "folders" when no app was named).
 /// - A bare `tool` entry allows every use of that tool.
 ///
 /// The daemon re-reads the user config when its mtime changes, so a rule saved
@@ -53,6 +55,8 @@ export function parseAllowRule(entry: string): AllowRule | null {
 
 export function allowRuleMatches(rule: AllowRule, toolName: string, input: unknown): boolean {
   if (rule.tool !== toolName) return false;
+  // `open:figma` allows opening Figma, and nothing else (pass 210 A).
+  if (toolName === "open" && rule.pathPrefix !== undefined) return rule.pathPrefix.toLowerCase() === openAppKey(input);
   if (rule.argv) {
     if (!isRecord(input) || !Array.isArray(input.argv)) return false;
     const argv = input.argv;
@@ -77,7 +81,7 @@ export function allowRuleMatches(rule: AllowRule, toolName: string, input: unkno
 export function allowRulesCover(rules: AllowRule[], toolName: string, input: unknown): boolean {
   const toolRules = rules.filter((rule) => rule.tool === toolName);
   if (toolRules.length === 0) return false;
-  if (toolName === "run_command") return toolRules.some((rule) => allowRuleMatches(rule, toolName, input));
+  if (toolName === "run_command" || toolName === "open") return toolRules.some((rule) => allowRuleMatches(rule, toolName, input));
   const paths = pathsOf(input);
   if (paths.length === 0) return toolRules.some((rule) => allowRuleMatches(rule, toolName, input));
   return paths.every((path) => toolRules.some((rule) => pathUnderPrefix(path, rule)));

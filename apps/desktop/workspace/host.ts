@@ -89,6 +89,8 @@ export interface WorkspaceHostOptions {
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
   open?: (path: string) => Promise<void>;
+  /// Brings an app the chat opened in front of Demesne (tests pass a fake).
+  bringToFront?: (app: string) => Promise<void>;
   changed: (snapshot: ReturnType<WorkspaceHost["snapshot"]>) => void;
   /// Applied once, the first time the daemon is online: `demesne --model <id>`
   /// and `demesne "<message>"`.
@@ -2476,6 +2478,18 @@ export class WorkspaceHost {
         if (skipped.length) throw new Error(`Kept ${skipped.length} ${skipped.length === 1 ? "chat" : "chats"}: ${skipped[0]!.reason}`);
       }
       await this.refreshSessions();
+      return;
+    }
+    // Bring to front (pass 210 A): only an app this chat opened.
+    if (method === "bring-to-front") {
+      const app = string(args.app, "app", 100);
+      const opened = this.current?.runs().some((run) => run.entries.some((entry) => entry.type === "tool" && entry.name === "open" && entry.state === "done"
+        && typeof entry.message === "string" && (() => { try { return (JSON.parse(entry.message) as { app?: unknown }).app === app; } catch { return false; } })()));
+      if (!opened) throw new Error("This chat didn't open that app");
+      if (this.options.bringToFront) return this.options.bringToFront(app);
+      if (process.platform !== "darwin") throw new Error("Bring it to front from your taskbar");
+      const child = Bun.spawn(["open", "-a", app], { stdout: "ignore", stderr: "ignore" });
+      if ((await child.exited) !== 0) throw new Error(`Could not bring ${app} to front`);
       return;
     }
     if (method === "open-link") {

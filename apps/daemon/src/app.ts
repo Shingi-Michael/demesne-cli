@@ -15,6 +15,7 @@ import { updatePlanTool } from "./plan.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
+import { openTool, showTool } from "./open-show.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
   encodeServerSentEvent,
@@ -212,6 +213,8 @@ export function createDaemonApp(options: {
   foundryTry?: FoundryTry;
   /// Opens the app being built for look_at_page (tests pass a fake; the daemon uses the desktop app).
   pageLook?: PageLook;
+  /// The open and show tools (pass 210 A); on unless false.
+  openShow?: boolean;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
   /// Agent socials: the agents post about the day (the daemon on; tests off).
@@ -375,6 +378,8 @@ export function createDaemonApp(options: {
   // Seeing the app being built: the same hidden window, opened on a local address.
   const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
   if (pageLook) tools.register(lookAtPageTool(pageLook));
+  // Open it behind Demesne, and show it on the right (pass 210 A).
+  if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index
   // over them, brought up to date at start and every ten minutes.
   let personalIndex: PersonalIndex | undefined;

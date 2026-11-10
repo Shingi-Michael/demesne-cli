@@ -44,6 +44,7 @@ import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
 import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
+import { chatShown, latestShown, shownCardHTML, SHOWN_CARD, type Shown } from "./shown-card.ts";
 import { fileChipHTML, isPicture, MAX_FILE_BYTES, refusal, sizeWord } from "./file-chips.ts";
 import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, usedSources, type SourcesView } from "./sources-card.ts";
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
@@ -177,6 +178,8 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
   if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
   if (tool.name === "look_at_page") return pageName(tool.input.url);
+  if (tool.name === "open") return [tool.input.target, tool.input.app].filter((one): one is string => typeof one === "string" && Boolean(one)).map((one) => /^[a-z][a-z0-9+.-]*:\/\//i.test(one) ? pageName(one) : one.split(/[\\/]/).at(-1) ?? one).join(" in ");
+  if (tool.name === "show") return typeof tool.input.url === "string" ? pageName(tool.input.url) : String(tool.input.title ?? tool.input.path ?? "").split("/").at(-1) ?? "";
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
   if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   if (tool.name === "read_source") return sourceName(tool);
@@ -283,6 +286,8 @@ const verb = (tool: ToolEntry) =>
     update_plan: "Planned",
     wait_for: "Waited for",
     look_at_page: "Opened",
+    open: "Opened",
+    show: "Showed",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",
@@ -1387,17 +1392,22 @@ function renderCards() {
   // everything the chat has seen piles into one (pass 202 A).
   const shots = chatShots();
   const seenRuns = s.runs.filter((run) => !rewoundBy(run));
-  const pile = chatPile(seenRuns, pileHidden(s.session?.id ?? ""));
+  // What the chat opened or showed (pass 210 A): the newest in its own card,
+  // the earlier pictures in the pile.
+  const allShown = chatShown(seenRuns);
+  arrivedShown(s.session?.id ?? "", seenRuns, allShown);
+  const shownNow = latestShown(allShown, shownClosed);
+  const pile = chatPile(seenRuns, new Set([...pileHidden(s.session?.id ?? ""), ...(shownNow?.picture ? [shownNow.picture.id] : [])]));
   const filePreview = chatPreview();
   // What you keep with the chat (pass 204), and which the last answer used.
   const sources = s.sources ?? [], dragging = sourceView.dragging && Boolean(s.session);
   const sourcesUsed = usedSources(sources, seenRuns.length ? tools(seenRuns.at(-1)!) : []);
-  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview) return hide();
+  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview && !shownNow) return hide();
   app.classList.add("cards-on");
-  app.classList.toggle("cards-wide", Boolean(filePreview?.wide));
+  app.classList.toggle("cards-wide", Boolean(filePreview?.wide) || Boolean(shownNow && shownBig));
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1435,7 +1445,8 @@ function renderCards() {
   if (pile.length) out.push(`<section class="card pile" data-card="pile">${pileHTML(pile, pileSrc, pileLanding(s.session?.id ?? "", pile.at(-1)?.id))}</section>`);
   // Screenshots still to send come last, in the order they were taken.
   for (const shot of shots) out.push(shotCardHTML(shot));
-  // A file you opened comes last of all (pass 188 A).
+  // What the chat opened or showed, then a file you opened, come last (pass 188 A).
+  if (shownNow) out.push(shownCardHTML(shownNow, pileSrc));
   if (filePreview) out.push(previewCardHTML(filePreview));
   // Only the cards that changed are replaced, so the others keep their
   // hover and never repaint while the chat streams.
@@ -1470,6 +1481,8 @@ function renderCards() {
     index++;
   }
   for (const [node, shot] of landing) landWhenSeen(node, shot);
+  // Bigger in place, so a live page doesn't reload (pass 210 A).
+  aside.querySelector(`:scope > [data-card="${SHOWN_CARD}"]`)?.classList.toggle("wide", shownBig);
   // The link field keeps what you typed across redraws.
   const sourceInput = aside.querySelector<HTMLInputElement>(".src-input");
   if (sourceInput) {
@@ -1523,6 +1536,32 @@ async function landPreview(card: HTMLElement) {
   if (!card.isConnected || !card.offsetParent) return;
   const name = previewName(open.path);
   await growPreview(card, name ? rectOfElement(name) : open.from, name);
+}
+/// Open and show (pass 210 A): closed cards, by the step that showed them,
+/// and the steps already acted on, so a file is put in its preview once.
+const shownClosed = new Set<string>(), shownSeen = new Set<string>(), shownChats = new Set<string>();
+let shownBig = false;
+/// A step that just showed something, in the chat's last turn: a file goes
+/// to the file preview card; anything else replaces the file preview. What a
+/// chat showed before it was opened here is only remembered.
+function arrivedShown(sessionId: string, runs: readonly WorkspaceRun[], all: readonly Shown[]) {
+  if (!sessionId || !runs.length) return;
+  if (!shownChats.has(sessionId)) { shownChats.add(sessionId); for (const one of all) shownSeen.add(one.id); return; }
+  const last = all.at(-1);
+  if (!last || shownSeen.has(last.id) || !chatShown([runs.at(-1)!]).some((one) => one.id === last.id)) return;
+  shownSeen.add(last.id);
+  shownBig = false;
+  if (last.shown === "file" && last.path) {
+    const open = chatPreview();
+    // No room for the column: it waits for a click, it never opens over the chat.
+    if (open?.path !== last.path && wideEnough()) queueMicrotask(() => void openPreview(last.path!));
+  } else if (chatPreview()) queueMicrotask(() => void closePreview());
+}
+function closeShown() {
+  const card = el("cards").querySelector<HTMLElement>(`[data-card="${SHOWN_CARD}"]`);
+  if (card?.dataset.shown) shownClosed.add(card.dataset.shown);
+  shownBig = false;
+  renderCards();
 }
 async function closePreview() {
   const open = chatPreview();
@@ -6394,6 +6433,9 @@ async function dispatch(
   }
   if (action === "preview-file") return openPreview(String(args.path ?? ""), target);
   if (action === "preview-close") return closePreview();
+  if (action === "shown-close") return closeShown();
+  if (action === "shown-big") { shownBig = !shownBig; return renderCards(); }
+  if (action === "shown-front") return api("bring-to-front", { app: args.app });
   if (action === "preview-wide") return widenPreview();
   if (action === "preview-open") { const open = chatPreview(); return open?.data ? api("open-preview", { absolute: open.data.absolute }) : undefined; }
   if (action === "preview-sheet" || action === "preview-slide") {

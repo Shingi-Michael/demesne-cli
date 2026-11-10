@@ -8,6 +8,7 @@ import { hydrateImageInputs } from "./image-inputs.ts";
 import { FOUNDRY_LOOK_PREFIX } from "./foundry-look.ts";
 import { PAGE_LOOK_PREFIX } from "./page-look.ts";
 import { WINDOW_CAPTURE_FILE } from "./window-capture.ts";
+import { OPEN, SHOW, SHOWN_FILE } from "./open-show.ts";
 import { ProviderError, type ProviderMessage, type ProviderToolCall, type ProviderToolDefinition } from "@demesne/providers";
 import { DemesneStore, NotFoundError, type SnapshotFile } from "@demesne/storage";
 import { createHash } from "node:crypto";
@@ -290,7 +291,10 @@ export class AgentEngine {
         ...(handoffAgents.length ? [handoffDefinition(handoffAgents)] : [])], turn.content), turn.planOnly === true)
         .filter((definition) => canAsk || definition.name !== "ask_user")
       : planModeDefinitions(this.tools.definitions().filter(definition =>
-        FOUNDRY_TOOL_NAMES.has(definition.name) || WEB_TOOL_NAMES.has(definition.name) || definition.name === UPDATE_PLAN || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+        FOUNDRY_TOOL_NAMES.has(definition.name) || WEB_TOOL_NAMES.has(definition.name) || definition.name === UPDATE_PLAN || definition.name === OPEN || definition.name === SHOW || (canAsk && definition.name === "ask_user")), turn.planOnly === true);
+    // Opening apps on the computer, and showing things on the right, are for
+    // a chat you're in: never Drive, a routine or a turn nobody watches.
+    if (turn.permissionMode !== "ask" || turn.fromDrive || turn.fromRoutine) for (let index = definitions.length - 1; index >= 0; index--) if (definitions[index]!.name === OPEN || definitions[index]!.name === SHOW) definitions.splice(index, 1);
     // Sub-agents that stay: agents waits for, asks or stops the ones in the background.
     if (definitions.some((definition) => definition.name === SUBAGENT_TOOL)) definitions.push(agentsDefinition);
     // Deep research wherever the web is: the chat plans, agents read, a judge checks.
@@ -1443,7 +1447,7 @@ export function delegateGuidance({ often, onAgents }: { often: SubagentOften; on
 }
 
 /// Tool pictures a model that sees always gets, even without provider.vision.
-export const seenToolPicture = (filename: string) => filename.startsWith(FOUNDRY_LOOK_PREFIX) || filename.startsWith(PAGE_LOOK_PREFIX) || filename === WINDOW_CAPTURE_FILE;
+export const seenToolPicture = (filename: string) => filename.startsWith(FOUNDRY_LOOK_PREFIX) || filename.startsWith(PAGE_LOOK_PREFIX) || filename === WINDOW_CAPTURE_FILE || filename === SHOWN_FILE;
 export function agentSystemPrompt(options: { workspaceRoot?: string; definitions: ProviderToolDefinition[]; content?: string;
   planOnly?: boolean; orchestrate?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean;
   /// The model takes pictures, though tool pictures weren't turned on for it.
@@ -1515,6 +1519,8 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "ask_user",
   // A checklist on screen; it changes nothing.
   "update_plan",
+  // A preview on the right; it changes nothing.
+  "show",
   // Read-only. A literal: subagent.ts imports this module, so its constant
   // may not be initialised yet while this set is built.
   "subagent", "agents",

@@ -17,7 +17,7 @@ export interface BreakageState {
   inbox: DriveFix[];
   /// The latest away run: proposals worked one after another while you're away.
   away: DriveAway | null;
-  /// Drive on by default: whether it starts on its own here, and today's runs.
+  /// Drive on its own: whether it starts on its own here, and today's runs.
   auto: DriveAuto | null;
   /// The action in flight (fix, apply, pr, discard).
   busy: string | null;
@@ -113,7 +113,7 @@ export class BreakageWatch {
     }, FIX_EVERY);
   }
 
-  /// Drive on by default: its switch here, and whether it started a run on
+  /// Drive on its own: its switch here, and whether it started a run on
   /// its own since the last look (the daemon starts those).
   async refreshAuto() {
     const client = this.options.client(), workspace = this.options.workspace();

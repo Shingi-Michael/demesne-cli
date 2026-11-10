@@ -1605,7 +1605,7 @@ export class WorkspaceHost {
     // The Next queue: refresh, Run (a bounded Drive mission), Plan first
     // (a read-only plan turn), Not now (a day), Never (a veto in memory).
     if (method === "next-refresh") return this.refreshNext(true);
-    // Drive on by default: the one switch per project.
+    // Drive on its own: the one switch per project (off until turned on).
     if (method === "drive-auto") {
       if (!this.breakage.supported) throw new Error("Drive on its own needs a newer daemon.");
       return this.breakage.setAuto(args.on === true);

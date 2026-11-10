@@ -394,7 +394,8 @@ test("the window picks up an away run Drive started and leaves each one to revie
     const tidy = (id: string) => ({ proposal: { id, kind: "tidy" as const, title: `Tidy ${id}`, why: "It's untidy." }, signals: [] });
     await f.client.startDriveAway({ workspace: f.workspace, items: [tidy("A"), tidy("B"), tidy("C")] });
     await host.breakage.refreshAuto();
-    expect(host.breakage.state.auto?.on).toBe(true);
+    // Off until turned on: these were started by hand here, so the switch stays off.
+    expect(host.breakage.state.auto?.on).toBe(false);
     expect(host.breakage.state.away?.items.map((item) => item.proposal.title)).toEqual(["Tidy A", "Tidy B", "Tidy C"]);
     // Ideas Drive already has in hand leave its list, so Plan or Run can't start them twice.
     await eventually(() => !host.nextQueue.loading, 5000);

@@ -341,7 +341,7 @@ function readFilesTool(): AgentTool {
           if (Buffer.byteLength(content) > remaining) {
             record.content = content.slice(0, Math.max(0, remaining)).replace(/\n[^\n]*$/, "");
             record.truncated = true;
-            record.note = "content truncated by batch budget";
+            record.note = "content truncated by batch budget: read the rest with offset, or fewer files at once";
           }
           remaining -= Buffer.byteLength(record.content as string);
           givenBefore(context, "read", record);
@@ -357,7 +357,10 @@ function readFilesTool(): AgentTool {
   };
 }
 
-const READ_BATCH_LIMIT_BYTES = 256 * 1024;
+/// One read_files call returns at most this much text. It was 256 KB; every
+/// later round of the turn resends what a read returned, so a big batch is
+/// paid for again and again (reads were over half of all tool output).
+const READ_BATCH_LIMIT_BYTES = 64 * 1024;
 
 /// What this turn has already been given, by turn: a read (path and lines)
 /// or a diff, with a hash of its text. Asking again for the same unchanged

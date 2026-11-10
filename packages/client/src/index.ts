@@ -203,7 +203,7 @@ export class DemesneClient {
   async planLimits(): Promise<import("@demesne/protocol").PlanLimitsResponse> {
     return this.request("/v1/limits");
   }
-  /// Drive on by default: whether it starts on its own in this project.
+  /// Drive on its own: whether it starts on its own in this project.
   async driveAuto(workspace: string): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request(`/v1/drive/auto?workspace=${encodeURIComponent(workspace)}`);
   }

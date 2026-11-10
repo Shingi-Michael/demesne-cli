@@ -552,7 +552,8 @@ try {
   assert.equal(completedSession.turns.at(-1)?.status, "completed");
   const commands = await f.client.commands(sessionId);
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
-  assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
+  // Math renders once KaTeX has loaded, which can land after the words.
+  await until(() => evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
   const turnId = completedSession.turns.at(-1)!.id;
   // The edge is a timeline: a long chat shows its shape on the panel's right edge.
   // Padding grows the conversation without changing its content box, so a scroll tells the edge.

@@ -2736,3 +2736,40 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 #desktop-sidebar .sidebar-session.selected, #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { background: color-mix(in srgb, var(--t1) 10%, transparent); box-shadow: -2px 0 0 var(--acc); }
 #desktop-sidebar .sidebar-session.selected .sidebar-session-name { font-weight: 500; }
 #sidebar-sessions:has(.sidebar-session.selected) :is(.sidebar-project, .sidebar-group-block):not(:has(.sidebar-session.selected)) :is(.sidebar-project-name, .sidebar-group-toggle) { color: var(--t2); }
+
+/* Settings, pass 207 (like Codex): the list in named categories, a big
+   title, plain group names, roomy rows with a sentence under each name. */
+.desktop #page[data-kind="settings"] { padding-top: 44px; }
+#page[data-kind="settings"] .cp-title { margin-bottom: 6px; font-size: 28px; line-height: 34px; }
+#page[data-kind="settings"] .cp-lede { margin-bottom: 8px; font-size: 13.5px; line-height: 20px; }
+#page[data-kind="settings"] .st-head { margin: 30px 2px 10px; color: var(--t1); font-size: 14px; }
+#page[data-kind="settings"] .st-head span + span { font-size: 12px; }
+#page[data-kind="settings"] .st-group { border-radius: 14px; background: color-mix(in srgb, var(--t1) 3%, transparent); }
+#page[data-kind="settings"] .st-row { min-height: 60px; padding: 11px 16px; }
+#page[data-kind="settings"] .st-tx b { font-size: 13.5px; line-height: 19px; }
+#page[data-kind="settings"] .st-tx small { margin-top: 1px; font-size: 12.5px; line-height: 18px; }
+#page[data-kind="settings"] .st-hint { margin: 8px 4px 0; }
+#desktop-sidebar .st-nav-group { margin: 16px 0 4px; padding-left: 10px; color: var(--t3); font-size: 12.5px; letter-spacing: 0; text-transform: none; }
+
+/* Notifications: a banner as the system shows one, over a soft desktop. */
+.nt-scene { display: grid; place-items: center; height: 116px; margin-top: 20px; border-radius: 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--acc) 30%, transparent), color-mix(in srgb, var(--blossom, #f2b6c8) 26%, transparent)); box-shadow: 0 0 0 1px var(--hair); }
+.nt-banner { display: flex; align-items: center; gap: 11px; width: min(360px, 88%); padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--surface) 88%, transparent); box-shadow: var(--shadow-2, 0 8px 24px rgb(0 0 0 / .3)), 0 0 0 1px var(--hair); }
+.nt-mark { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--tone); color: var(--blossom, #f2b6c8); font-weight: 700; }
+.nt-words { flex: 1; min-width: 0; line-height: 17px; }
+.nt-words b { display: block; color: var(--t1); font-size: 13px; font-weight: 600; }
+.nt-words small { display: block; overflow: hidden; color: var(--t2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.nt-words code { font: 11.5px "JetBrains Mono", ui-monospace, monospace; }
+.nt-when { align-self: flex-start; color: var(--t4); font-size: 11px; }
+
+/* Data and daemon: the daemon's state at the top, green while it runs. */
+.dm-card { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding: 16px; border-radius: 14px; background: color-mix(in srgb, #6cc68e 7%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, #6cc68e 28%, transparent); }
+.dm-card.off { background: color-mix(in srgb, #ef8a84 7%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, #ef8a84 30%, transparent); }
+.dm-pulse { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, #6cc68e 16%, transparent); }
+.dm-pulse i { width: 9px; height: 9px; border-radius: 50%; background: #6cc68e; box-shadow: 0 0 0 0 #6cc68e88; animation: dm-pulse 2.4s ease-out infinite; }
+.dm-card.off .dm-pulse { background: color-mix(in srgb, #ef8a84 16%, transparent); }
+.dm-card.off .dm-pulse i { background: #ef8a84; animation: none; }
+@keyframes dm-pulse { 70%, 100% { box-shadow: 0 0 0 8px #6cc68e00; } }
+@media (prefers-reduced-motion: reduce) { .dm-pulse i { animation: none; } }
+.dm-words { flex: 1; min-width: 0; line-height: 19px; }
+.dm-words b { display: block; color: var(--t1); font-size: 15px; font-weight: 600; }
+.dm-words small { display: block; color: var(--t3); font-size: 12.5px; }

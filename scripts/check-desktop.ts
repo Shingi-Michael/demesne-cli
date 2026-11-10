@@ -920,7 +920,7 @@ try {
   await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Overview" }).waitFor();
   assert(await page.locator("#sidebar-projects").isHidden(), "the sidebar holds Settings' list instead of the chats");
   assert.equal(await page.locator("#workspace-title").innerText(), "Settings", "the title bar says Settings");
-  assert.equal(await page.locator("#settings-nav .st-nav").count(), 10, "ten sections");
+  assert.equal(await page.locator("#settings-nav .st-nav").count(), 14, "fourteen sections in four categories");
   await page.locator("#page .ov-say").filter({ hasText: "Answers come from" }).waitFor();
   assert.equal(await page.locator("#page .ov-tile").count(), 6, "six tiles");
   await capture("02-settings-overview");
@@ -934,10 +934,12 @@ try {
   await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "last"), "Open on remembers Last chat");
   await page.locator("#page .st-row").filter({ hasText: "Open on" }).getByRole("button", { name: "Home" }).click();
   await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "home"), "Open on goes back to Home");
-  // Notifications live on General now (pass 154 B); every control ends on one edge.
+  // Notifications have their own page again (pass 207), with a banner; every control ends on one edge.
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Notifications" }).click();
   await page.getByRole("switch", { name: "A chat finishes" }).waitFor();
+  await page.locator("#page .nt-banner").waitFor();
   const edges = await page.locator("#page .st-group .st-ctl").evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().right)));
-  assert(new Set(edges).size === 1, `every control on General ends on one edge: ${[...new Set(edges)].join(", ")}`);
+  assert(new Set(edges).size === 1, `every control on Notifications ends on one edge: ${[...new Set(edges)].join(", ")}`);
   assert(await page.locator("#status").isHidden(), "the chat's status bar stays off Settings");
   // Every kind starts on (#302), so the first click turns this one off.
   await page.getByRole("switch", { name: "A chat finishes" }).click();
@@ -1017,12 +1019,12 @@ try {
   const rowHeights = await page.locator("#page .pm-rule").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
   assert(rowHeights.every((height) => height <= 33), "each unfolded rule is one line, the full text on hover");
   await capture("02-permissions-rules");
-  await page.locator("#settings-nav .st-nav").filter({ hasText: "Overview" }).click();
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Usage" }).click();
   await page.locator("#page .st-head").filter({ hasText: "Turns by model" }).waitFor();
   await capture("02-usage");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Keyboard shortcuts" }).click();
   assert(await page.locator("#page .st-keys").count() > 10, "the shortcuts are listed");
-  await page.locator("#settings-nav .st-nav").filter({ hasText: "Models" }).click();
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Accounts" }).click();
   await page.locator("#page .st-row").filter({ hasText: "Provider setup" }).waitFor();
   await capture("02-providers");
   await page.locator("#page .st-row").filter({ hasText: "Provider setup" }).getByRole("button", { name: "Open" }).click();

@@ -55,18 +55,30 @@ const icon = (path: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden
 export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = [
   ["", [
     ["overview", "Overview", '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'],
+  ]],
+  ["Personal", [
     ["general", "General", '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'],
+    ["notifications", "Notifications", '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5h4"/>'],
     ["appearance", "Appearance", '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z"/>'],
+    ["keys", "Keyboard shortcuts", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>'],
+  ]],
+  ["How it works", [
     ["models", "Models", '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 2v4M14 2v4M10 18v4M14 18v4M2 10h4M2 14h4M18 10h4M18 14h4"/>'],
+    ["providers", "Accounts", '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1-3.5 3.8-5 7-5s6 1.5 7 5"/>'],
     ["agents", "Agents", '<circle cx="9" cy="9" r="3.5"/><circle cx="16.5" cy="10.5" r="2.5"/><path d="M3 19c.8-3 3.2-4.5 6-4.5s5.2 1.5 6 4.5M15 15.2c2.6-.3 4.8.9 5.5 3.3"/>'],
     ["permissions", "Permissions", '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/>'],
     ["drive", "Drive", '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>'],
+  ]],
+  ["Integrations", [
     ["connectors", "Connections", '<path d="M9 7 4 12l5 5M15 7l5 5-5 5"/>'],
-    ["keys", "Keyboard shortcuts", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>'],
-    ["data", "Data", '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'],
+  ]],
+  ["This computer", [
+    ["usage", "Usage", '<path d="M4 20V11M10 20V5M16 20v-6M21 20H3"/>'],
+    ["archived", "Chats", '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4 3v-3h-.5A2.5 2.5 0 0 1 4 14.5z"/>'],
+    ["data", "Data and daemon", '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'],
   ]],
 ];
-export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { notifications: "general", providers: "models", heartbeat: "connectors", archived: "data", usage: "overview" };
+export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { heartbeat: "connectors" };
 /// The page a section is drawn on.
 export const settingsHome = (id: SettingsSection): SettingsSection => SETTINGS_HOME[id] ?? id;
 export const SETTINGS_ORDER = SETTINGS_GROUPS.flatMap(([, items]) => items.map(([id]) => id));
@@ -323,7 +335,7 @@ function pages(view: SettingsView): Page[] {
   const scores = (view.usage ?? []).filter((score) => score.turns > 0).sort((a, b) => b.turns - a.turns);
   const most = Math.max(1, ...scores.map((score) => score.turns));
   const runs = scores.reduce((sum, score) => sum + score.driveRuns, 0), landed = scores.reduce((sum, score) => sum + score.driveLanded, 0);
-  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, counted from your own chats on this computer, and what your plan has left.", html: usageTop(view, scores, false), groups: [
+  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, counted from your own chats on this computer, and what your plan has left.", html: usageTop(view, scores), groups: [
     { name: "Turns by model", right: scores.length ? `${scores.reduce((sum, score) => sum + score.turns, 0)} turns` : "", rows: view.usage === null ? [{ title: "Counting…" }] : scores.length ? scores.map((score) => {
       const ended = score.finished + score.failed;
       return { title: view.modelWords({ id: score.model }), line: [`${score.provider}`, `${score.turns} ${score.turns === 1 ? "turn" : "turns"}`, ended ? `${Math.round((score.finished / ended) * 100)}% finished` : "", score.tokensPerSecond ? `${Math.round(score.tokensPerSecond)} tok/s` : ""].filter(Boolean).join(" · "), control: `<span class="st-bar" aria-hidden="true"><i style="width:${Math.max(3, Math.round((score.turns / most) * 100))}%"></i></span><span class="st-count">${score.turns}</span>`, keywords: "usage turns tokens speed model" };
@@ -367,7 +379,7 @@ function pages(view: SettingsView): Page[] {
   ] });
   out.push(agentsPage(view));
   out.push({ id: "providers", title: "Providers", sub: "Where models come from: accounts, API keys and model servers on this computer.", groups: [
-    { name: "Accounts", rows: [
+    { name: "Sign-ins and keys", rows: [
       ...view.providers.items.map((item) => {
         if (item.kind === "google") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
           control: link("google-ai-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("google-ai-disconnect", "Remove saved key", { key: item.key }, " quiet") : ""),
@@ -412,14 +424,63 @@ function pages(view: SettingsView): Page[] {
       { title: "Clean up", line: "Delete empty, quick and old chats; you choose which first", control: link("overlay", "Review", { name: "cleanup" }), keywords: "delete clean sessions" },
     ] },
   ] });
-  return merged(out);
+  return merged(sorted(out, view));
+}
+
+/// Pass 207: each row on the page it's about. Side work joins Agents, your
+/// chats join the archived ones on Chats, Appearance's rows split into the
+/// window and the System palette, and Notifications and Data get a picture.
+function sorted(out: Page[], view: SettingsView): Page[] {
+  const page = (id: SettingsSection) => out.find((item) => item.id === id);
+  const models = page("models"), agents = page("agents");
+  const side = models?.groups[0]?.rows.filter((row) => row.title === "Subagents run on" || row.title === "How often") ?? [];
+  if (models && agents && side.length) {
+    models.groups[0]!.rows = models.groups[0]!.rows.filter((row) => !side.includes(row));
+    agents.groups.push({ name: "Side work", rows: side });
+  }
+  const data = page("data"), chats = page("archived");
+  const yours = data?.groups.find((group) => group.name === "Conversations");
+  if (data && chats && yours) {
+    data.groups = data.groups.filter((group) => group !== yours);
+    chats.groups.unshift({ ...yours, name: "Your chats" });
+  }
+  const look = page("appearance");
+  if (look?.groups[0]) {
+    const rows = look.groups[0].rows, palette = rows.filter((row) => /palette/i.test(row.title)), theme = rows.filter((row) => row.title === "Theme");
+    look.groups = [
+      { name: "Window", rows: rows.filter((row) => !palette.includes(row) && !theme.includes(row)) },
+      ...(palette.length ? [{ name: "System palette", rows: palette, hint: "For a desktop themed by one tool: Demesne takes its colours from a file when the System theme is picked." }] : []),
+      { name: "Theme", hidden: true, rows: theme },
+    ];
+  }
+  const notify = page("notifications");
+  if (notify && view.desktop) notify.html = notifyBanner();
+  if (data) {
+    data.html = daemonCard(view);
+    // The card says it now; its rows stay for search.
+    for (const group of data.groups) if (group.name === "The daemon") group.hidden = true;
+  }
+  return out;
+}
+
+/// Notifications: what a banner looks like, so the switches below read as
+/// "when do I get one of these".
+const notifyBanner = () => `<div class="nt-scene" aria-hidden="true"><div class="nt-banner"><span class="nt-mark">d.</span><span class="nt-words"><b>Demesne</b><small>Fix the login redirect is waiting on you</small></span><span class="nt-when">now</span></div></div>`;
+
+/// Data and daemon: whether the daemon runs, at the top, with its restart.
+function daemonCard(view: SettingsView): string {
+  const info = view.info, waiting = info?.restart.includes("app.update") ? "A newer daemon came with this app. It restarts by itself once nothing is working" : info?.restart.length ? "Settings you changed wait for a restart" : "";
+  const where = info ? info.server.replace(/^https?:\/\//, "").replace(/\/$/, "") : "";
+  return `<div class="dm-card${view.online ? "" : " off"}"><span class="dm-pulse" aria-hidden="true"><i></i></span><span class="dm-words"><b>${view.online ? "The daemon is running" : "The daemon isn’t answering"}</b><small>${h(waiting || (view.online ? `It runs your chats, and keeps going when you close the window${where ? ` · ${where}` : ""}` : "Chats and Drive wait until it’s back"))}</small></span>${link("restart-daemon", "Restart")}</div>`;
 }
 
 /// Pass 154 B: the small pages join a bigger one, in the list's order.
 const RENAME: Partial<Record<SettingsSection, { title: string; sub: string }>> = {
-  models: { title: "Models", sub: "Which model answers, where models come from, and how far one turn may go." },
-  connectors: { title: "Connections", sub: "Tools from MCP servers, and agents nearby that can message your chats. Everything here runs on this computer." },
-  data: { title: "Data", sub: "Where Demesne keeps your chats, the daemon that runs them, and the chats you put away." },
+  models: { title: "Models", sub: "Which model answers, and how far one turn may go." },
+  providers: { title: "Accounts", sub: "Where models come from: sign-ins, API keys and model servers on this computer." },
+  connectors: { title: "Connections", sub: "Things outside Demesne that it talks to: servers that add tools to every chat, and agents nearby that can message your chats." },
+  archived: { title: "Chats", sub: "Every conversation on this computer, and the ones you put away." },
+  data: { title: "Data and daemon", sub: "The background program that runs your chats, and where Demesne keeps things." },
 };
 const GROUP_NAMES: Record<string, string> = { "Tell me when": "Notifications", "Archived": "Archived chats" };
 function merged(out: Page[]): Page[] {

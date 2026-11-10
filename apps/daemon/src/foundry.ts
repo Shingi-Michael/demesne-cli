@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
-import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseSteps, TRY_MAX_STEPS, type FoundryKind, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool } from "./tools.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
@@ -142,7 +142,38 @@ function checkOptions(kind: string | undefined, source: string) {
   if (kind !== undefined && kind !== "html") return;
   const count = source.match(/\bdata-option\s*=/g)?.length ?? 0;
   if (count > MAX_OPTIONS) throw new Error(`[too_many_options] This page has ${count} options; at most ${MAX_OPTIONS}. Hint: keep the best ${MAX_OPTIONS}, recommended first`);
+  // Several options always come with the one you would use (pass 208 A).
+  // (recommended="A" on the <d-compare>, or data-recommended on the option of a page drawn without it).
+  if (count > 1 && !/<d-compare\b[^>]*\brecommended\s*=\s*["']?[^\s"'>]/i.test(source) && !/<[^>]*\bdata-recommended\b[^>]*>/i.test(source))
+    throw new Error(`[no_recommendation] This page has ${count} options and no pick. Hint: set recommended="<option name>" on the <d-compare> (or data-recommended on that option), put it first, and say why in the chat`);
 }
+
+/// One ask that makes several mockups marks the one it would use (pass 208
+/// A): a second new mockup in the same ask is refused until one is marked.
+function checkPick(store: DemesneStore, turnId: string | undefined, recommended: boolean | undefined) {
+  if (!turnId || recommended === true) return;
+  const made = store.foundryInTurn(turnId).filter((item) => item.version === 1);
+  if (!made.length || made.some((item) => item.recommended)) return;
+  throw new Error(`[no_recommendation] This ask already made ${made.map((item) => `"${item.title}"`).join(", ")}; with this one that is ${made.length + 1} mockups and none is marked as the one you would use. Hint: save this with recommended: true, or first foundry_edit the one you would use with only id and recommended: true, and say why in the chat`);
+}
+
+/// What a mockup was made from: an id, optionally "id@version".
+function basedOnOf(store: DemesneStore, value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new Error("[invalid_input] based_on is the id of the mockup this one is made from");
+  const [id, at] = value.split("@");
+  const found = store.getFoundryArtifact(id!);
+  if (!found) throw new Error("[not_found] based_on names no Foundry artifact. Hint: foundry_read without id lists them");
+  const version = at ? Number(at) : found.version;
+  if (!found.versions.some((item) => item.version === version)) throw new Error(`[not_found] ${found.title} has no version ${at}`);
+  return { id: found.id, version };
+}
+
+const savedResult = (saved: FoundryArtifactDetail) => {
+  const current = saved.versions.find((item) => item.version === saved.version);
+  return { id: saved.id, title: saved.title, kind: saved.kind, version: saved.version, description: saved.description,
+    note: current?.note ?? "", ...(current?.recommended ? { recommended: true } : {}) };
+};
 
 const clean = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : undefined;
 
@@ -175,7 +206,10 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating: deck, doc or dashboard (content Demesne designs), html (a page you design), svg, or markdown (plain notes)." },
           source: { type: "string", description: "The complete source." },
           base_version: { type: "integer", minimum: 1, description: "When revising: the version you read." },
-          note: { type: "string", maxLength: 300, description: "What changed, in a few words." },
+          note: { type: "string", maxLength: 300, description: "This version's name, a few words." },
+          description: { type: "string", maxLength: 600, description: "Required when creating: one or two sentences, what it is and what to look at." },
+          based_on: { type: "string", description: "Made from another mockup: its id." },
+          recommended: { type: "boolean", description: "True on the one you would use when an ask makes several." },
         },
         required: ["source"],
         additionalProperties: false,
@@ -189,16 +223,21 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const kind = typeof input.kind === "string" ? input.kind as FoundryKind : undefined;
       if (!id && (!kind || !FOUNDRY_KINDS.includes(kind))) throw new Error(`[invalid_input] kind must be one of ${FOUNDRY_KINDS.join(", ")} when creating. Hint: deck, doc or dashboard for slides, a report or numbers; html for anything else`);
       if (!id && (typeof input.title !== "string" || !input.title.trim())) throw new Error("[invalid_input] A new artifact needs a title. Hint: name it in a few words");
+      if (!id && (typeof input.description !== "string" || !input.description.trim())) throw new Error("[invalid_input] A new artifact needs a description. Hint: one or two sentences on what it is and what to look at");
       checkOptions(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
+      const basedOn = id ? null : basedOnOf(store, input.based_on);
+      const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
+      if (!id) checkPick(store, context.turnId, recommended);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
       try {
         saved = store.saveFoundryArtifact({ id, kind, title: clean(input.title, 200), source: input.source, note: clean(input.note, 300) ?? "", baseVersion,
+          description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}),
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
-      return JSON.stringify({ id: saved.id, title: saved.title, kind: saved.kind, version: saved.version,
+      return JSON.stringify({ ...savedResult(saved),
         message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.` });
     },
   };
@@ -226,14 +265,15 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
     definition: {
       name: "foundry_edit",
       description: "Change part of a Foundry artifact without resending it: exact find-and-replace edits on the version you read, saved as a new version. "
-        + "Each find must match exactly once (all: true replaces every occurrence). Refused if the artifact moved past base_version.",
+        + "Each find must match exactly once (all: true replaces every occurrence). Refused if the artifact moved past base_version. "
+        + "With no edits it only changes title, note, description or recommended, with no new version.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "string" },
           base_version: { type: "integer", minimum: 1, description: "The version you read." },
           edits: {
-            type: "array", minItems: 1, maxItems: 50,
+            type: "array", maxItems: 50,
             items: {
               type: "object",
               properties: {
@@ -246,18 +286,29 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
             },
           },
           title: { type: "string", maxLength: 200 },
-          note: { type: "string", maxLength: 300, description: "What changed, in a few words." },
+          note: { type: "string", maxLength: 300, description: "This version's name, a few words." },
+          description: { type: "string", maxLength: 600, description: "What it is and what to look at." },
+          recommended: { type: "boolean", description: "True on the one you would use." },
         },
-        required: ["id", "base_version", "edits"],
+        required: ["id"],
         additionalProperties: false,
       },
     },
     permission: () => null,
     async execute(input, context) {
       if (!isRecord(input) || typeof input.id !== "string" || !input.id) throw new Error("[invalid_input] foundry_edit needs the artifact id. Hint: foundry_read lists them");
+      const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
+      // Names and words only: no new version, no look.
+      if (input.edits === undefined || (Array.isArray(input.edits) && input.edits.length === 0)) {
+        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended };
+        if (!words.title?.trim() && !words.description?.trim() && !words.note?.trim() && recommended === undefined) throw new Error("[invalid_input] foundry_edit needs edits, or a title, note, description or recommended to change. Hint: pass edits to change the page");
+        if (!store.getFoundryArtifact(input.id)) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
+        const saved = store.describeFoundryArtifact(input.id, words);
+        return JSON.stringify({ ...savedResult(saved), message: `Updated its ${[words.title && "name", words.note && "version name", words.description && "description", recommended !== undefined && (recommended ? "pick" : "unpick")].filter(Boolean).join(", ")}; the page itself is unchanged.` });
+      }
       const baseVersion = baseVersionOf(input);
       if (baseVersion === undefined) throw new Error("[invalid_input] foundry_edit needs base_version. Hint: pass the version you read");
-      if (!Array.isArray(input.edits) || input.edits.length === 0 || input.edits.length > 50) throw new Error("[invalid_input] edits must be 1 to 50 {find, replace} items");
+      if (!Array.isArray(input.edits) || input.edits.length > 50) throw new Error("[invalid_input] edits must be 1 to 50 {find, replace} items");
       const edits: FoundryEdit[] = input.edits.map((edit, index) => {
         if (!isRecord(edit) || typeof edit.find !== "string" || !edit.find || typeof edit.replace !== "string") throw new Error(`[invalid_input] Edit ${index + 1} needs find (non-empty) and replace strings`);
         return { find: edit.find, replace: edit.replace, all: edit.all === true };
@@ -273,9 +324,10 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       let saved;
       try {
         saved = store.saveFoundryArtifact({ id: input.id, title: clean(input.title, 200), source, note: clean(input.note, 300) ?? "", baseVersion,
+          description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}),
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
-      return JSON.stringify({ id: saved.id, title: saved.title, kind: saved.kind, version: saved.version, edits: edits.length,
+      return JSON.stringify({ ...savedResult(saved), edits: edits.length,
         message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.` });
     },
   };
@@ -299,12 +351,13 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       const args = isRecord(input) ? input : {};
       if (args.id === "kit:parts") return PARTS_GUIDE;
       if (typeof args.id !== "string" || !args.id) {
-        return JSON.stringify(store.listFoundryArtifacts().slice(0, 50).map(({ id, title, kind, version, updatedAt, workspace }) => ({ id, title, kind, version, updatedAt, workspace })));
+        return JSON.stringify(store.listFoundryArtifacts().slice(0, 50).map(({ id, title, kind, version, updatedAt, workspace, description }) => ({ id, title, kind, version, updatedAt, workspace, ...(description ? { description } : {}) })));
       }
       const found = store.getFoundryArtifact(args.id, typeof args.version === "number" ? args.version : undefined);
       if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
-      return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, source: found.source,
-        versions: found.versions.map(({ version, note, createdAt }) => ({ version, note, createdAt })) });
+      return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
+        ...(found.basedOn ? { basedOn: found.basedOn } : {}), source: found.source,
+        versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };
 }

@@ -1722,7 +1722,8 @@ export function createDaemonApp(options: {
           try {
             return json(store.saveFoundryArtifact({ id: typeof body.id === "string" ? body.id : undefined, title: typeof body.title === "string" ? body.title : undefined,
               kind: typeof body.kind === "string" ? body.kind as never : undefined, workspace: typeof body.workspace === "string" ? body.workspace : null,
-              note: typeof body.note === "string" ? body.note.slice(0, 300) : "Edited by you", source: body.source }), 201);
+              note: typeof body.note === "string" ? body.note.slice(0, 300) : "Edited by you", source: body.source,
+              ...(typeof body.description === "string" ? { description: body.description.slice(0, 600) } : {}) }), 201);
           } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
         }
         if (id && path.length === 3 && request.method === "GET") {

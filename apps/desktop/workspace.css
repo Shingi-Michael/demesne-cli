@@ -1784,6 +1784,21 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-ln b { overflow: hidden; text-overflow: ellipsis; color: var(--t1); font-size: 14px; font-weight: 500; }
 .fd-ln span { overflow: hidden; text-overflow: ellipsis; }
 .fd-ln .fd-ln-r { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+/* Pass 208 A: a bigger name, its description, the version's name, links. */
+.fd-ln { margin-bottom: 0; }
+.fd-ln b { font-size: 15px; font-weight: 600; }
+.fd-link { all: unset; cursor: pointer; color: var(--t2); box-shadow: inset 0 -1px 0 var(--hair2); transition: color 140ms var(--ease), box-shadow 140ms var(--ease); }
+.fd-link:hover { color: var(--t1); box-shadow: inset 0 -1px 0 var(--electric, #4c8dff); }
+.fd-link:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; border-radius: 3px; }
+.fd-desc { margin: 4px 0 0; max-width: 68ch; color: var(--t2); font-size: 13px; line-height: 19px; }
+.fd-ver { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 6px 0 10px; color: var(--t3); font-size: 12.5px; }
+.fd-ver b { color: var(--t1); font-weight: 500; }
+.fd-rec-pill, .fd-chip-rec { padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 16%, transparent); color: var(--blossom, #e48aa6); font-size: 11.5px; font-weight: 500; line-height: 18px; }
+/* "@Roaster pricing" in a message: opens that mockup in Foundry. */
+.fd-at { all: unset; cursor: pointer; padding: 0 5px; border-radius: 5px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 14%, transparent); color: var(--blossom, #e48aa6); white-space: nowrap; }
+.fd-at:hover { background: color-mix(in srgb, var(--blossom, #f2b6c8) 24%, transparent); }
+.fd-at:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 1px; }
+.fd-rec .fd-stage, .fd-rec .fd-doc { box-shadow: 0 0 0 1.5px var(--blossom, #f2b6c8); }
 .fd-stage { overflow: hidden; height: clamp(520px, 78vh, 900px); border-radius: var(--r-lg); background: #fff; box-shadow: 0 0 0 1px var(--hair); transition: box-shadow 400ms var(--ease); }
 .fd-stage.graphic { height: clamp(320px, 50vh, 560px); background: repeating-conic-gradient(var(--surface2) 0 25%, transparent 0 50%) 0 0 / 20px 20px; }
 .fd-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
@@ -1816,6 +1831,8 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-chip-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 .fd-chip-text b { overflow: hidden; color: var(--t1); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .fd-chip-text span { color: var(--t3); font-size: 12px; }
+.fd-chip-text .fd-chip-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--t2); font-size: 12.5px; line-height: 18px; }
+.fd-chip-text .fd-chip-rec { align-self: flex-start; margin-top: 2px; }
 .fd-chip-open { flex: none; margin-right: 6px; padding: 3px 10px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); font-size: 12px; }
 
 @media (prefers-reduced-motion: reduce) { .fd-chip { transition: none; } }

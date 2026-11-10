@@ -62,7 +62,7 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
       }
       const results = messages.filter(message => message.role === "tool");
       const id = results[0]?.content ? JSON.parse(results[0].content).id : undefined;
-      const call = results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", source: "<h1>Garden one</h1>" } }
+      const call = results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", description: "A test page.", source: "<h1>Garden one</h1>" } }
         : results.length === 1 ? { name: "foundry_read", input: { id } }
         : results.length === 2 ? { name: "foundry_save", input: { id, source: "<h1>Garden two</h1>" } } : null;
       if (call) {
@@ -133,7 +133,7 @@ test("plan mode reads and makes Foundry pages, which change no project files", a
     yield { type: "tool_call_delta", index: 0, idDelta: `plan-${results.length}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.input) };
     yield { type: "finish", reason: "tool_calls" };
   });
-  const artifact = await client.foundrySave({ title: "Original", kind: "markdown", source: "Original" });
+  const artifact = await client.foundrySave({ title: "Original", kind: "markdown", description: "A test page.", source: "Original" });
   const { session } = await client.createSession({ title: "Plan" });
   await client.submitTurn(session.id, { content: "Plan changes to the Foundry document", planOnly: true });
   await completed(client, session.id);
@@ -145,7 +145,7 @@ test("plan mode reads and makes Foundry pages, which change no project files", a
 test("foundry_save creates an artifact and keeps every version", async () => {
   const store = new DemesneStore(":memory:");
   const save = foundrySaveTool(store);
-  const created = JSON.parse(await save.execute({ title: "Landing", kind: "html", source: "<h1>One</h1>" }, context));
+  const created = JSON.parse(await save.execute({ title: "Landing", kind: "html", description: "A test page.", source: "<h1>One</h1>" }, context));
   expect(created.version).toBe(1);
   const revised = JSON.parse(await save.execute({ id: created.id, source: "<h1>Two</h1>", note: "Bigger title" }, context));
   expect(revised.version).toBe(2);
@@ -176,7 +176,7 @@ test("foundry_save refuses a new artifact without a kind or title", async () => 
   const store = new DemesneStore(":memory:");
   const save = foundrySaveTool(store);
   await expect(save.execute({ title: "No kind", source: "x" }, context)).rejects.toThrow("kind");
-  await expect(save.execute({ kind: "svg", source: "<svg/>" }, context)).rejects.toThrow("title");
+  await expect(save.execute({ kind: "svg", description: "A test page.", source: "<svg/>" }, context)).rejects.toThrow("title");
   await expect(save.execute({ id: "missing", source: "x" }, context)).rejects.toThrow();
   store.close();
 });
@@ -188,12 +188,12 @@ test("artifact identity reaches live events and old replay without rewriting the
     const { turn } = store.createTurn(session.id, "Make a mockup");
     store.startTurn(turn.id);
     const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
-    const input = { title: "Mockup", kind: "html", source: "<button>Interact</button>" };
+    const input = { title: "Mockup", kind: "html", description: "A test page.", source: "<button>Interact</button>" };
     const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
     const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
     const event = store.settleToolCall(toolCallId, "completed", result);
     const artifact = JSON.parse(result);
-    const expected = { id: artifact.id, title: "Mockup", kind: "html", version: 1 };
+    const expected = { id: artifact.id, title: "Mockup", kind: "html", version: 1, description: "A test page." };
     expect(JSON.parse(event.payload.message as string)).toEqual(expected);
     expect(event.payload.message).not.toContain(input.source);
     const legacy = { ...event.payload }; delete legacy.message;
@@ -212,13 +212,13 @@ test("a save that came back with the look's pictures still names its artifact (t
     const { turn } = store.createTurn(session.id, "Make a mockup");
     store.startTurn(turn.id);
     const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
-    const input = { title: "Mockup", kind: "html", source: "<button>Interact</button>" };
+    const input = { title: "Mockup", kind: "html", description: "A test page.", source: "<button>Interact</button>" };
     const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
     const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
     // The engine adds a line per picture after the tool's JSON.
     const withPictures = `${JSON.stringify({ ...JSON.parse(result), look: { issues: [] } })}\nImage artifact f20e2bf4: foundry-look-1280.png (960×600)\nImage artifact 5bf0f588: foundry-look-390.png (390×844)`;
     const event = store.settleToolCall(toolCallId, "completed", withPictures);
-    expect(JSON.parse(event.payload.message as string)).toEqual({ id: JSON.parse(result).id, title: "Mockup", kind: "html", version: 1 });
+    expect(JSON.parse(event.payload.message as string)).toEqual({ id: JSON.parse(result).id, title: "Mockup", kind: "html", version: 1, description: "A test page." });
   } finally { store.close(); }
 });
 
@@ -248,7 +248,7 @@ test("foundry_edit applies exact edits to the version it read and refuses a stal
   const store = new DemesneStore(":memory:");
   try {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
-    const created = JSON.parse(await save.execute({ title: "Garden", kind: "html", source: "<h1>Garden</h1><p>one</p><p>one</p>" }, context));
+    const created = JSON.parse(await save.execute({ title: "Garden", kind: "html", description: "A test page.", source: "<h1>Garden</h1><p>one</p><p>one</p>" }, context));
     const edited = JSON.parse(await edit.execute({ id: created.id, base_version: 1, note: "Title",
       edits: [{ find: "<h1>Garden</h1>", replace: "<h1>Tiny garden</h1>" }, { find: "one", replace: "two", all: true }] }, context));
     expect(edited).toMatchObject({ id: created.id, version: 2, edits: 2 });
@@ -313,7 +313,7 @@ test("the next turn's request carries a stub where the earlier turn's page was, 
     requests.push(structuredClone(messages));
     const results = messages.filter(message => message.role === "tool");
     const turn = messages.filter(message => message.role === "user").length;
-    const call = turn === 1 && results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", source: page } }
+    const call = turn === 1 && results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", description: "A test page.", source: page } }
       : turn === 2 && results.length === 1 ? { name: "foundry_read", input: { id: JSON.parse(results[0]!.content).id } } : null;
     if (call) {
       yield { type: "tool_call_delta", index: 0, idDelta: `foundry-${turn}-${results.length}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.input) };
@@ -345,7 +345,7 @@ test("a deck, doc or dashboard is saved as content, and the tool says how to wri
   const context = { signal: new AbortController().signal, workspaceRoot: "" } as never;
   const tool = foundrySaveTool(store);
   for (const kind of ["deck", "doc", "dashboard"] as const) {
-    const saved = JSON.parse(await tool.execute({ title: `A ${kind}`, kind, source: "# Q1 launch\n\n---\n\n# 3.1×\nSign-ups tripled." }, context));
+    const saved = JSON.parse(await tool.execute({ title: `A ${kind}`, kind, description: "A test page.", source: "# Q1 launch\n\n---\n\n# 3.1×\nSign-ups tripled." }, context));
     expect(saved.kind).toBe(kind);
     expect(store.getFoundryArtifact(saved.id)!.kind).toBe(kind);
   }
@@ -361,7 +361,7 @@ test("one ask, one version: saves in the turn that made the latest version chang
   try {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
     const t1 = { ...context, turnId: "t1" }, t2 = { ...context, turnId: "t2" };
-    const made = JSON.parse(await save.execute({ title: "Pricing", kind: "html", source: "<p>one</p>", note: "First take" }, t1));
+    const made = JSON.parse(await save.execute({ title: "Pricing", kind: "html", description: "A test page.", source: "<p>one</p>", note: "First take" }, t1));
     const fixed = JSON.parse(await edit.execute({ id: made.id, base_version: 1, edits: [{ find: "one", replace: "uno" }], note: "Fix button" }, t1));
     expect(fixed.version).toBe(1);
     const again = JSON.parse(await save.execute({ id: made.id, base_version: 1, source: "<p>whole</p>" }, t1));
@@ -388,10 +388,90 @@ test("a page holds at most three options", async () => {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
     const option = (name: string) => `<section data-option="${name}">x</section>`;
     const four = `<d-compare recommended="A">${["A", "B", "C", "D"].map(option).join("")}</d-compare>`;
-    await expect(save.execute({ title: "Too many", kind: "html", source: four }, context)).rejects.toThrow("too_many_options");
+    await expect(save.execute({ title: "Too many", kind: "html", description: "A test page.", source: four }, context)).rejects.toThrow("too_many_options");
     const three = `<d-compare recommended="A">${["A", "B", "C"].map(option).join("")}</d-compare>`;
-    const made = JSON.parse(await save.execute({ title: "Three", kind: "html", source: three }, context));
+    const made = JSON.parse(await save.execute({ title: "Three", kind: "html", description: "A test page.", source: three }, context));
     await expect(edit.execute({ id: made.id, base_version: 1, edits: [{ find: "</d-compare>", replace: `${option("D")}</d-compare>` }] }, context)).rejects.toThrow("at most 3");
     expect(DESIGN_BRIEF).toContain("never more than three");
   } finally { store.close(); }
+});
+
+test("every mockup is described, and its versions are named (pass 208 A)", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store), edit = foundryEditTool(store), read = foundryReadTool(store);
+    await expect(save.execute({ title: "Roaster pricing", kind: "html", source: "<p>x</p>" }, context)).rejects.toThrow("needs a description");
+    const made = JSON.parse(await save.execute({ title: "Roaster pricing", kind: "html", description: "Three plans for the roastery. Look at the yearly toggle.", note: "First take", source: "<p>x</p>" }, { ...context, turnId: "t1" }));
+    expect(made).toMatchObject({ description: "Three plans for the roastery. Look at the yearly toggle.", note: "First take" });
+    // Renaming, describing and naming the version happen with no new version.
+    const named = JSON.parse(await edit.execute({ id: made.id, title: "Roastery plans", note: "Yearly first", description: "Plans, yearly first." }, context));
+    expect(named).toMatchObject({ version: 1, title: "Roastery plans", note: "Yearly first", description: "Plans, yearly first." });
+    expect(store.getFoundryArtifact(made.id)!.versions).toHaveLength(1);
+    await expect(edit.execute({ id: made.id }, context)).rejects.toThrow("needs edits, or a title");
+    // A mockup made from another says so, and reading it shows the words.
+    const from = JSON.parse(await save.execute({ title: "Plans on a phone", kind: "html", description: "The plans at phone width.", based_on: made.id, source: "<p>y</p>" }, context));
+    expect(store.getFoundryArtifact(from.id)!.basedOn).toEqual({ id: made.id, version: 1 });
+    await expect(save.execute({ title: "Nope", kind: "html", description: "x", based_on: "missing", source: "<p>z</p>" }, context)).rejects.toThrow("based_on");
+    const listed = JSON.parse(await read.execute({}, context)) as { title: string; description?: string }[];
+    expect(listed.find((item) => item.title === "Roastery plans")?.description).toBe("Plans, yearly first.");
+    expect(JSON.parse(await read.execute({ id: from.id }, context)).basedOn).toEqual({ id: made.id, version: 1 });
+  } finally { store.close(); }
+});
+
+test("one ask that makes several mockups marks the one it would use (pass 208 A)", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store), edit = foundryEditTool(store);
+    const t1 = { ...context, turnId: "t1" };
+    const page = (title: string, extra: Record<string, unknown> = {}) => save.execute({ title, kind: "html", description: `${title}.`, source: `<p>${title}</p>`, ...extra }, t1);
+    const calm = JSON.parse(await page("Calm"));
+    // A second mockup in the ask with no pick is refused, and says how to pick.
+    await expect(page("Bold")).rejects.toThrow("no_recommendation");
+    const bold = JSON.parse(await page("Bold", { recommended: true }));
+    expect(bold.recommended).toBe(true);
+    // A third may come without a pick now that one is marked.
+    const third = JSON.parse(await page("Quiet"));
+    // Marking another moves the pick: one ask, one recommendation.
+    expect(JSON.parse(await edit.execute({ id: calm.id, recommended: true }, t1)).recommended).toBe(true);
+    const picks = store.foundryInTurn("t1").filter((item) => item.recommended).map((item) => item.id);
+    expect(picks).toEqual([calm.id]);
+    expect(store.listFoundryVersions().find((item) => item.artifactId === third.id)).toMatchObject({ turnId: "t1", recommended: false });
+    // Another ask starts over.
+    expect(JSON.parse(await save.execute({ title: "Alone", kind: "html", description: "x", source: "<p>a</p>" }, { ...context, turnId: "t2" })).version).toBe(1);
+  } finally { store.close(); }
+});
+
+test("a page with several options names the one it would use (pass 208 A)", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store);
+    const options = `<section data-option="A · Pills">a</section><section data-option="B · Tabs">b</section>`;
+    await expect(save.execute({ title: "No pick", kind: "html", description: "x", source: `<d-compare>${options}</d-compare>` }, context)).rejects.toThrow("no_recommendation");
+    expect(JSON.parse(await save.execute({ title: "Pick", kind: "html", description: "x", source: `<d-compare recommended="A">${options}</d-compare>` }, context)).version).toBe(1);
+    // A page drawn without the part marks its pick on the option.
+    expect(JSON.parse(await save.execute({ title: "Own", kind: "html", description: "x", source: options.replace('data-option="A · Pills"', 'data-option="A · Pills" data-recommended') }, context)).version).toBe(1);
+    // One option needs no pick.
+    expect(JSON.parse(await save.execute({ title: "One", kind: "html", description: "x", source: `<d-compare><section data-option="A">a</section></d-compare>` }, context)).version).toBe(1);
+  } finally { store.close(); }
+});
+
+test("an older Foundry database gains descriptions, based on and picks", () => {
+  const directory = mkdtempSync(join(tmpdir(), "demesne-foundry-"));
+  try {
+    const path = join(directory, "old.sqlite");
+    const old = new DemesneStore(path);
+    const made = old.saveFoundryArtifact({ title: "Old", kind: "html", source: "<p>old</p>" });
+    old.close();
+    const { Database } = require("bun:sqlite") as typeof import("bun:sqlite");
+    const raw = new Database(path);
+    raw.run("ALTER TABLE foundry_artifacts DROP COLUMN description");
+    raw.run("ALTER TABLE foundry_artifacts DROP COLUMN based_on");
+    raw.run("ALTER TABLE foundry_artifacts DROP COLUMN based_on_version");
+    raw.run("ALTER TABLE foundry_versions DROP COLUMN recommended");
+    raw.close();
+    const store = new DemesneStore(path);
+    expect(store.getFoundryArtifact(made.id)).toMatchObject({ title: "Old", description: "", basedOn: null });
+    expect(store.getFoundryArtifact(made.id)!.versions[0]!.recommended).toBe(false);
+    store.close();
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

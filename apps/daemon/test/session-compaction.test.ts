@@ -391,7 +391,7 @@ test("invalid agent compaction arguments cannot target another session", async (
     });
     await consume(await client.submitTurn(id, { content: "Compact", permissionMode: "allow" }));
     expect((await client.getSessionState(id)).session.turns.some(turn => turn.kind === "compaction")).toBe(false);
-  }, { undo: true });
+  }, { undo: true, capacity: 40_000 });
 });
 
 test("failure of the calling turn discards scheduled compaction", async () => {

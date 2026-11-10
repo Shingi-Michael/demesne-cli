@@ -17,9 +17,11 @@ const mockup = (blue = false) => `<!doctype html><html><head><meta charset="utf-
 :root{--accent:${blue ? "#3158ba" : "#285b48"}}body{padding:24px}h1{font-size:38px;margin:16px 0}input{margin:8px 0}
 </style></head><body><main class="container narrow"><span class="eyebrow">Foundry · live mockup</span><h1>A little room to grow</h1>
 <p>Try this mockup right inside the conversation.</p><input aria-label="Your idea" placeholder="Name your next idea">
-<div class="row"><div class="card" data-option="A · Pills">A · Pills</div><div class="card" data-option="B · Joined">B · Joined</div></div>
+<div class="row"><div class="card" data-option="A · Pills" data-recommended>A · Pills</div><div class="card" data-option="B · Joined">B · Joined</div></div>
 <button id="counter" class="primary" onclick="this.textContent='Planted '+(++window.plants)">Plant an idea</button>
 <script>window.plants=0;var tl=anime.createTimeline({autoplay:false});tl.add("h1",{opacity:[0,1],duration:400}).add("button",{y:[8,0],duration:300});demesne.motion("Arrive",tl);tl.play();</script></main></body></html>`;
+/// What the model got when a message named a mockup with "@".
+const mentioned: string[] = [];
 const f = await fixture({
   providerId: "fixture", modelId: "foundry-chat",
   async listModels() { return [{ id: "foundry-chat", provider: "fixture", contextWindow: 262144 }]; },
@@ -33,6 +35,11 @@ const f = await fixture({
     }).findLast(value => value.kind === "html" && value.id);
     const call = (name: string, input: unknown) => ({ type: "tool_call_delta" as const, index: 0,
       idDelta: `${name}-${at}-${current.length}`, nameDelta: name, argumentsDelta: JSON.stringify(input) });
+    if (request.includes("Mockups I mentioned with @")) {
+      mentioned.push(request);
+      yield { type: "text_delta", delta: "That one, noted." };
+      yield { type: "finish", reason: "stop" }; return;
+    }
     if (blue && !current.length) {
       yield call("foundry_read", { id: previous.id });
       yield { type: "finish", reason: "tool_calls" }; return;
@@ -49,6 +56,7 @@ const f = await fixture({
       assert(tools.some(tool => tool.name === "foundry_save"));
       const graphic = /graphic/i.test(request), document = /document/i.test(request), deck = /slide deck/i.test(request);
       const save = call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : deck ? "Q1 launch" : "Idea garden",
+        description: "A small page to try in the chat.", note: "First take",
         kind: graphic ? "svg" : document ? "markdown" : deck ? "deck" : "html",
         source: deck ? "---\ntheme: forest\n---\n# Q1 launch\nWhat the free tier did.\n\n---\n\n# 3.1×\nSign-ups a week.\n\n---\n\n## Sign-ups\n```chart\nlabels: W1, W2, W3\nvalues: 1200, 2400, 3700\n```"
           : graphic ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#285b48"/></svg>'
@@ -108,6 +116,8 @@ try {
   making.resolve();
   // The page arrives as a link (its chip) in the chat; it opens only when clicked.
   await chips.first().filter({ hasText: "Idea garden" }).waitFor();
+  assert.equal(await chips.first().locator(".fd-chip-desc").textContent(), "A small page to try in the chat.", "the chip says what it is");
+  assert.match((await chips.first().textContent())!, /Prototype · v1 · First take/);
   await page.waitForTimeout(400);
   assert(await page.locator("#page").isHidden(), "a new page waits for its link to be opened");
   // Foundry works quietly: its own checks (foundry_try) are never a step row.
@@ -136,8 +146,12 @@ try {
   };
   await served(1, 1);
   // One long page: the mockup at real size under one quiet line, and nothing to press.
-  assert.match((await item(artifact.id, 1).locator(".fd-ln").textContent())!, /Idea garden.*Prototype · v1/);
-  assert.equal(await foundry.locator("button:not([data-action=foundry-day]), form, input, .cp-tabs").count(), 0, "nothing to press on Foundry but the day strip");
+  assert.match((await item(artifact.id, 1).locator(".fd-ln").textContent())!, /Idea garden.*Prototype/);
+  // Pass 208 A: what it is, the version's name, and a link to its chat.
+  assert.equal(await item(artifact.id, 1).locator(".fd-desc").textContent(), "A small page to try in the chat.");
+  assert.equal(await item(artifact.id, 1).locator(".fd-ver b").textContent(), "v1 · First take");
+  assert.equal(await item(artifact.id, 1).locator('.fd-ln .fd-link[data-action="select-session"]').count(), 1, "from links to its chat");
+  assert.equal(await foundry.locator("button:not([data-action=foundry-day]):not(.fd-link), form, input, .cp-tabs").count(), 0, "nothing to press on Foundry but the day strip and links");
   await frame.getByRole("button", { name: "Plant an idea" }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   await page.waitForTimeout(300);
@@ -164,7 +178,7 @@ try {
   await item(artifact.id, 1).waitFor({ state: "attached" });
   const order = await foundry.locator(".fd-item").evaluateAll((items) => items.map((node) => (node as HTMLElement).dataset.fd));
   assert.deepEqual(order, [`${artifact.id}:2`, `${artifact.id}:1`], "every version, newest first");
-  assert.equal(await item(artifact.id, 2).locator(".fd-ln-r").getAttribute("title"), "Blue");
+  assert.equal(await item(artifact.id, 2).locator(".fd-ver b").textContent(), "v2 · Blue");
   await served(2, 1);
   console.log("PASS: a follow-up edits the artifact in place (foundry_edit); both versions sit on the long page, newest first.");
   await backToChat();
@@ -211,6 +225,27 @@ try {
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-deck.png") });
   console.log("PASS: a deck is drawn from content and walks with its strip.");
+  await backToChat();
+  // Pass 208 A: "@" offers mockups by name; the model gets that one by id,
+  // and the name in your message opens it.
+  await page.waitForFunction(() => !(window.demesneInspect?.() as { host?: { busy?: boolean } })?.host?.busy);
+  await editor.fill("");
+  await editor.pressSequentially("Build @Idea");
+  const offered = page.locator('#completion .cm-row').filter({ hasText: "Idea garden" });
+  await offered.first().waitFor();
+  assert.match((await page.locator("#completion .cm-group").first().textContent())!, /Mockups/);
+  await editor.press("Enter");
+  assert.match(await editor.inputValue(), /^Build @Idea garden $/);
+  await editor.pressSequentially("in the app");
+  await editor.press("Enter");
+  await eventually(async () => mentioned.length === 1);
+  assert.match(mentioned[0]!, new RegExp(`"Idea garden" id ${artifact.id} \\(v2\\)`), "the model gets the mockup's id and version");
+  const at = page.locator("#conversation .request .fd-at").filter({ hasText: "@Idea garden" });
+  await at.first().waitFor();
+  assert.equal(await page.locator("#conversation .request").last().textContent().then((text) => text!.includes("Mockups I mentioned")), false, "the line for the model stays out of your bubble");
+  await at.first().click();
+  await item(artifact.id, 2).waitFor();
+  console.log("PASS: @ a mockup in the chat: offered by name, sent by id, and the name opens it in Foundry.");
   assert.deepEqual(errors, []);
   console.log("PASS: graphics, documents and decks sit on Foundry's long page; chips return when the chat is reopened.");
 } catch (error) {

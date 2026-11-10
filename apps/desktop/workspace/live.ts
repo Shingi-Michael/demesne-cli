@@ -23,6 +23,7 @@ import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { fileName, readPaths, stretchWords, stretches } from "./steps-fold.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
+import { linkMockups, mentionedMockups, mockupRefs, splitMockupRefs, type MockupName } from "./foundry-mention.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPage, unseenStories, whoName, type TodayUi } from "./today-page.ts";
@@ -336,7 +337,7 @@ let completionItems: {
     hint: string;
     group: string;
     value: string;
-    kind: "command" | "mention";
+    kind: "command" | "mention" | "mockup";
     icon?: string;
   }[] = [],
   completionIndex = 0,
@@ -2523,7 +2524,8 @@ function rebuildWhenIdle() {
 }
 /// A sent message, its big pastes shown folded as they were in the composer.
 function requestText(content: string) {
-  return splitPastes(content).map((part) => part.kind === "text" ? h(part.text)
+  const { text, refs } = splitMockupRefs(content);
+  return splitPastes(text).map((part) => part.kind === "text" ? linkMockups(h(part.text), refs)
     : `<details class="paste-chip"><summary title="${h(part.text.split("\n").slice(0, 6).join("\n"))}">${PASTE_ICON}${h(pasteLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`).join("");
 }
 const PASTE_ICON = '<span class="pc-ic" aria-hidden="true">TXT</span>';
@@ -3597,6 +3599,17 @@ async function commentOn(id: string, text: string) {
 }
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
 let foundryList: FoundryArtifact[] | null = null, foundryVersions: FoundryShelfVersion[] | null = null, foundrySaves = -1;
+/// Mockups by name, for "@" in the composer (pass 208 A); read again after a save.
+let foundryNames: MockupName[] = [], foundryNamesAt = -2;
+function ensureMockupNames() {
+  const saves = foundrySaveCount();
+  if (foundryNamesAt === saves) return;
+  foundryNamesAt = saves;
+  void api<FoundryArtifact[]>("foundry-list").then((list) => {
+    foundryNames = list.map(({ id, title, version, description, kind }) => ({ id, title, version, description: description ?? "", kind }));
+    renderCompletion();
+  }).catch(() => { foundryNamesAt = -2; });
+}
 /// The version a chat link asked for: the long page scrolls to it once drawn.
 let foundryFocus: { id: string; version?: number } | null = null;
 /// Documents on the long page, rendered once they scroll near ("id:version").
@@ -3841,6 +3854,7 @@ async function loadFoundry() {
     const shelf = await api<FoundryListResponse>("foundry-shelf");
     foundryList = shelf.artifacts;
     foundryVersions = shelf.versions ?? shelf.artifacts.map((item) => ({ artifactId: item.id, version: item.version, createdAt: item.updatedAt, sessionId: item.sessionId, note: "" }));
+    foundryNames = shelf.artifacts.map(({ id, title, version, description, kind }) => ({ id, title, version, description: description ?? "", kind }));
     foundryUi.error = "";
   } catch (error) {
     foundryList = foundryList ?? [];
@@ -5566,7 +5580,21 @@ function renderCompletion() {
   completionItems = [];
   if (mention) {
     const query = mention[1]!.toLowerCase();
-    completionItems = state.files
+    ensureMockupNames();
+    // Mockups first (pass 208 A): "@" a mockup and the model gets that one.
+    const mockups = foundryNames
+      .filter((item) => item.title.toLowerCase().includes(query) || item.title.toLowerCase().replace(/\s+/g, "").includes(query))
+      .slice(0, 6)
+      .map((item) => ({
+        label: item.title,
+        description: `v${item.version}${item.description ? ` · ${item.description}` : ""}`,
+        hint: "",
+        group: "MOCKUPS",
+        value: item.id,
+        kind: "mockup" as const,
+        icon: "mockup",
+      }));
+    completionItems = [...mockups, ...state.files
       .filter(
         (file) =>
           !/[\s]/.test(file.path) && file.path.toLowerCase().includes(query),
@@ -5580,9 +5608,9 @@ function renderCompletion() {
         hint: "",
         group: "FILES",
         value: file.path,
-        kind: "mention",
+        kind: "mention" as const,
         icon: "file",
-      }));
+      }))];
   } else if (command) {
     const row = (item: Snapshot["commands"][number], group = sectionTitle(item.section)) => ({
       label: plainName(item.name),
@@ -5646,7 +5674,7 @@ function renderCompletion() {
     })
     .join("");
   const more = !mention && completionMore ? btn("completion-more", `<span>${completionMore} more</span><span>›</span>`, {}, "cm-more") : "";
-  el("completion").innerHTML = `<div class="cm-list" id="completion-list" role="listbox" aria-label="${mention ? "Files" : "Commands"}">${rows}</div>${more}`;
+  el("completion").innerHTML = `<div class="cm-list" id="completion-list" role="listbox" aria-label="${mention ? "Mockups and files" : "Commands"}">${rows}</div>${more}`;
   // A multiline textbox controlling a listbox: keep the caret in the editor
   // while exposing the same active option that the arrow keys highlight.
   editor.setAttribute("aria-autocomplete", "list");
@@ -5693,12 +5721,12 @@ function setDraft(text: string) {
 async function chooseCompletion(index = completionIndex) {
   const item = completionItems[index];
   if (!item) return;
-  if (item.kind === "mention") {
+  if (item.kind === "mention" || item.kind === "mockup") {
     const caret = editor.selectionStart,
       match = /(?:^|\s)@([^\s]*)$/.exec(editor.value.slice(0, caret));
     if (!match) return;
     const start = caret - match[1]!.length - 1;
-    editor.setRangeText(`@${item.value} `, start, caret, "end");
+    editor.setRangeText(`@${item.kind === "mockup" ? item.label : item.value} `, start, caret, "end");
     editor.focus();
     changedDraft();
   } else {
@@ -5747,8 +5775,11 @@ async function submitText(value = editor.value, wait = false) {
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
+  // Mockups named with "@" go with it by id, so the model reads that one.
+  const named = value.startsWith("/") ? "" : mockupRefs(mentionedMockups(value, foundryNames));
   // Folded pastes go after the words, whole.
   if (pastes.length && !value.startsWith("/")) { value = withPastes(value, pastes); pastes.length = 0; }
+  if (named) value = `${value}\n\n${named}`;
   // Files that couldn't be read aren't sent; their chips go with the message.
   if (!value.startsWith("/")) refusedFiles = [];
   // A screenshot's window text goes folded after them. Once sent, its picture
@@ -5977,7 +6008,7 @@ function followLatest() {
 }
 /// Foundry's long page: links from the chat, and the day strip. You only look here.
 async function foundryAction(action: string, args: Record<string, any>) {
-  if (action === "foundry-open") return openFoundry(String(args.id));
+  if (action === "foundry-open") return openFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
   if (action === "foundry-open-step") {
     // A new artifact's id is in the tool's result; a revision names it in its input.
     let id = typeof args.id === "string" ? args.id : "";
@@ -6755,7 +6786,7 @@ async function dispatch(
   if (action === "edit-ask" || action === "retry-ask") {
     const run = state!.runs.find((run) => run.id === args.id);
     if (!run) return;
-    if (action === "edit-ask") return setDraft(run.content);
+    if (action === "edit-ask") return setDraft(splitMockupRefs(run.content).text);
     if (state!.activeTurnId) return;
     return submitText(run.content);
   }

@@ -1211,7 +1211,10 @@ export interface FoundryVersion {
   /// The chat and turn that saved it; null when saved by the person.
   sessionId: string | null;
   turnId: string | null;
+  /// The version's short name (pass 208 A), "vN · <note>".
   note: string;
+  /// The one the model would use, among what one ask made.
+  recommended: boolean;
   byteLength: number;
 }
 
@@ -1225,6 +1228,10 @@ export interface FoundryArtifact {
   createdAt: string;
   updatedAt: string;
   version: number;
+  /// What it is and what to look at, in a sentence or two (pass 208 A).
+  description: string;
+  /// The mockup it was made from, when it was.
+  basedOn: { id: string; version: number } | null;
 }
 
 export interface FoundryArtifactDetail extends FoundryArtifact {
@@ -1239,7 +1246,10 @@ export interface FoundryShelfVersion {
   version: number;
   createdAt: string;
   sessionId: string | null;
+  /// The ask that made it: what one ask made is shown together.
+  turnId?: string | null;
   note: string;
+  recommended?: boolean;
 }
 
 export interface FoundryListResponse {

@@ -78,7 +78,8 @@ interface AgentEngineOptions extends AgentConfig {
   providerRequestTimeoutMs?: number;
   providerEventLimit?: number;
   /// Another configured model's call, for sub-agents on `subagentModel`.
-  inferenceFor?: (model: string, thinkingEnabled: boolean | undefined) => TurnInference;
+  /// light: a side job such as naming a chat, at low effort (processor.ts).
+  inferenceFor?: (model: string, thinkingEnabled: boolean | undefined, light?: boolean) => TurnInference;
   /// Name a chat from its first answer (chat-name.ts). Off in tests, whose
   /// scripted processors would hand the naming call a turn's next reply.
   nameChats?: boolean;
@@ -235,7 +236,7 @@ export class AgentEngine {
       .map((item) => typeof item.message.content === "string" ? item.message.content : "").filter(Boolean).at(-1) ?? "";
     const before = session.title;
     let namer = inference;
-    if (inference.thinkingEnabled !== false && this.options.inferenceFor) try { namer = this.options.inferenceFor(inference.modelId, false); } catch { /* its own call names it */ }
+    if (this.options.inferenceFor) try { namer = this.options.inferenceFor(inference.modelId, false, true); } catch { /* its own call names it */ }
     const lease = await this.scheduler.for(namer.providerId).acquire(turnId, new AbortController().signal);
     let name: string | null;
     try { name = await askName(namer, turn.content, answered); } finally { lease.release(); }

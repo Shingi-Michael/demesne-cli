@@ -486,7 +486,7 @@ export function createDaemonApp(options: {
       questions,
       themes,
       commands,
-      inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
+      inferenceFor: (model, thinkingEnabled, light) => snapshotTurnInference(processor, thinkingEnabled, { model, ...(light ? { light } : {}) }),
       fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
       cliSubagents: cliSubagentsOn ? {
@@ -534,7 +534,7 @@ export function createDaemonApp(options: {
       };
     },
     write: async (messages) => {
-      const inference = snapshotTurnInference(processor, false);
+      const inference = snapshotTurnInference(processor, false, { light: true });
       const leaseId = `socials:${randomUUID()}`;
       const lease = await scheduler.for(inference.providerId).acquire(leaseId, new AbortController().signal);
       try { return await writeOnce((items, signal) => inference.stream(items, [], signal), messages); } finally { lease.release(); }
@@ -1128,7 +1128,7 @@ export function createDaemonApp(options: {
         // git and gh run only in a workspace this daemon already knows.
         const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace);
         if (!known) return apiError("not_found", "Unknown workspace", 404);
-        const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS });
+        const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS, light: true });
         const contextKey = JSON.stringify([body.workspace, body.memory ?? [], inference.providerId, inference.modelId]);
         const pendingKey = `${contextKey}:${Boolean(body.force)}`;
         const pending = driveNextRuns.get(pendingKey);
@@ -1757,7 +1757,7 @@ export function createDaemonApp(options: {
           if (!artifact) return apiError("not_found", "Foundry artifact not found", 404);
           const wait = askLimits.take(id);
           if (wait) return apiError("rate_limited", wait, 429);
-          const inference = snapshotTurnInference(processor, false);
+          const inference = snapshotTurnInference(processor, false, { light: true });
           const lease = await scheduler.for(inference.providerId).acquire(`foundry-ask:${randomUUID()}`, request.signal);
           try { return json({ answer: await askOnce((messages, signal) => inference.stream(messages, [], signal), artifact.title, question) }); }
           catch (error) { return apiError("ask_failed", error instanceof Error ? error.message : String(error), 502); }

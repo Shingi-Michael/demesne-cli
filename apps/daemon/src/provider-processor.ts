@@ -107,7 +107,8 @@ export class ProviderTurnProcessor implements TurnProcessor {
     const requestDefaults = { ...this.requestDefaults };
     // The chosen thinking level belongs to the selected model; another model
     // (a sub-agent's) runs at its own default.
-    requestDefaults.reasoningLevel = this.requestReasoning(model, thinkingEnabled, overrides?.reasoning);
+    requestDefaults.reasoningLevel = overrides?.light && this.discoveredModels.get(model)?.reasoningLevels?.includes("low") ? "low"
+      : this.requestReasoning(model, thinkingEnabled, overrides?.reasoning);
     // A cap only ever lowers the configured output limit.
     if (overrides?.maxOutputTokens) requestDefaults.maxOutputTokens = Math.min(requestDefaults.maxOutputTokens ?? overrides.maxOutputTokens, overrides.maxOutputTokens);
     const contextCapacity = this.effectiveContextCapacity(model);

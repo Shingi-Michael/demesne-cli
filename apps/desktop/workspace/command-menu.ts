@@ -33,6 +33,8 @@ const ICONS: Record<string, string> = {
   workflow: "M6 4v6a4 4 0 0 0 4 4h8M14 10l4 4-4 4M6 20h.01",
   custom: "M8 9l-4 3 4 3M16 9l4 3-4 3M13 6l-2 12",
   file: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5",
+  // A Foundry mockup, for @ (pass 208 A).
+  mockup: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM3 8h18M10 13l-2 2 2 2M14 13l2 2-2 2",
   command: "M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z",
 };
 

@@ -60,15 +60,41 @@ export function foundryPage(view: FoundryView) {
     day.items.push(item);
   }
   const strip = days.length > 1 ? `<nav class="fd-days" aria-label="Days">${days.map((day) => `<button type="button" data-action="foundry-day" data-args="${h(JSON.stringify({ day: day.key }))}">${h(day.word)}</button>`).join("")}</nav>` : "";
-  const item = (version: FoundryShelfVersion) => {
+  // Pass 208 A: the name, from which chat (a link to it), what it is, and
+  // the version's own name; "based on" links to the mockup it came from.
+  const item = (version: FoundryShelfVersion, pick: boolean) => {
     const artifact = byId.get(version.artifactId)!, key = shelfKey(artifact.id, version.version);
     const chat = version.sessionId ? view.chatTitle(version.sessionId) : null;
-    const line = `<div class="fd-ln"><b>${h(artifact.title)}</b>${chat ? `<span>from “${h(chat)}”</span>` : ""}`
-      + `<span class="fd-ln-r"${version.note ? ` title="${h(version.note)}"` : ""}>${h(KIND_WORD[artifact.kind])} · v${version.version} · ${h(clock(version.createdAt))}</span></div>`;
+    const line = `<div class="fd-ln"><b>${h(artifact.title)}</b>${chat ? `<span>from ${link("select-session", { id: version.sessionId }, `“${h(chat)}”`, "Open the chat")}</span>` : ""}`
+      + `<span class="fd-ln-r">${h(KIND_WORD[artifact.kind])} · ${h(clock(version.createdAt))}</span></div>`;
+    const based = artifact.basedOn && byId.get(artifact.basedOn.id);
+    const ver = `<div class="fd-ver"><b>v${version.version}${version.note ? ` · ${h(version.note)}` : ""}</b>`
+      + (pick ? '<span class="fd-rec-pill">recommended</span>' : "")
+      + (based ? `<span>based on ${link("foundry-open", { id: based.id, version: artifact.basedOn!.version }, `${h(based.title)} v${artifact.basedOn!.version}`, "Show it")}</span>` : "") + "</div>";
+    const words = artifact.description ? `<p class="fd-desc">${h(artifact.description)}</p>` : "";
     const body = artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
       : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt)}</div>`;
-    return `<section class="fd-item" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}`)}">${line}${body}</section>`;
+    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${words}${ver}${body}</section>`;
   };
-  return title + strip + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${day.items.map(item).join("")}`).join("");
+  return title + strip + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
+}
+
+const link = (action: string, args: Record<string, unknown>, html: string, tip: string) =>
+  `<button type="button" class="fd-link" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="${h(tip)}">${html}</button>`;
+
+/// What one ask made sits together, the one the model would use first
+/// (pass 208 A). The pink mark shows only where an ask made several.
+export function pickFirst(items: readonly FoundryShelfVersion[]) {
+  const out: { version: FoundryShelfVersion; pick: boolean }[] = [];
+  for (let at = 0; at < items.length;) {
+    const turn = items[at]!.turnId;
+    let end = at + 1;
+    if (turn) while (end < items.length && items[end]!.turnId === turn) end++;
+    const group = items.slice(at, end), several = new Set(group.map((item) => item.artifactId)).size > 1;
+    const pick = several ? group.find((item) => item.recommended) : undefined;
+    for (const version of pick ? [pick, ...group.filter((item) => item !== pick)] : group) out.push({ version, pick: version === pick });
+    at = end;
+  }
+  return out;
 }

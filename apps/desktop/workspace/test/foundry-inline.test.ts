@@ -39,3 +39,14 @@ test("a chip's words name the kind and the version", async () => {
   expect(chipWords({ ...artifact, kind: "markdown", version: 4 })).toBe("Document · v4");
 });
 
+
+test("a chip carries the description and the version's name, and the pick leads (pass 208 A)", async () => {
+  const { chipWords } = await import("../foundry-inline.ts");
+  const calm = { ...artifact, id: "calm", title: "Calm", description: "Quiet plans.", note: "First take" };
+  const bold = { ...artifact, id: "bold", title: "Bold", description: "Loud plans.", recommended: true };
+  expect(chatArtifacts([save(calm), save(bold)])).toEqual([bold, calm]);
+  expect(chipWords(calm)).toBe("Prototype · v1 · First take");
+  // A lone mockup is never marked; a later fold without words keeps them.
+  expect(chatArtifacts([save(bold)])).toEqual([{ ...artifact, id: "bold", title: "Bold", description: "Loud plans." }]);
+  expect(chatArtifacts([save(calm), save({ ...artifact, id: "calm", title: "Calm" })])).toEqual([calm]);
+});

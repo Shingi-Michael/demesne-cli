@@ -238,7 +238,7 @@ export class DemesneClient {
   async foundryGet(id: string, version?: number): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}`);
   }
-  async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; source: string }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
+  async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; description?: string; source: string }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request("/v1/foundry", { method: "POST", body: JSON.stringify(body) });
   }
   async foundryRename(id: string, title: string): Promise<import("@demesne/protocol").FoundryArtifact> {

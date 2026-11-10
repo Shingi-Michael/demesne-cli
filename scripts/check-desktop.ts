@@ -1561,15 +1561,16 @@ try {
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
   assert(await page.evaluate(() => Boolean(document.querySelector("#desktop-toolbar #drive-sheet > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing, #desktop-sidebar #briefing")), "Drive's line sits in its sheet on the top bar, not over the composer or in the sidebar");
   assert((await pill.innerText()).includes("3 ideas"), "the pill counts Drive's ideas");
-  // Drive is on by default: the line says when it starts on its own, and one word turns it off.
-  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes")), "Drive's line says it starts on its own");
+  // Drive runs nothing on its own until you turn it on here (its own runs
+  // spent plans while people were away); Turn off puts it back.
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("runs only what you start")), "Drive runs only what you start until you turn it on");
+  await capture("10-drive-off");
+  await page.locator("#briefing").getByRole("button", { name: "Run on its own", exact: true }).click();
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes") && text.includes("Turn off")), "Run on its own says when Drive starts");
   await capture("10-drive-auto");
   await openDrive();
   await page.locator("#briefing").getByRole("button", { name: "Turn off", exact: true }).click();
-  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive is off here") && text.includes("3 ideas")), "Turn off says Drive is off here");
-  await capture("10-drive-off");
-  await page.locator("#briefing").getByRole("button", { name: "Turn on", exact: true }).click();
-  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas") && text.includes("Turn off")), "Turn on brings it back");
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas") && text.includes("runs only what you start")), "Turn off puts it back to what you start");
   await page.locator("#briefing .bf-chev").click();
   await until(() => page.locator("#briefing .bf-word").innerText().then(text => text.includes("Three things I could do next")), "the line becomes Drive's reply");
   await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas unfold under its line");

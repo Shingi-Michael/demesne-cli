@@ -579,7 +579,7 @@ export function createDaemonApp(options: {
   const activeControllers = new Map<string, AbortController>();
   const activeStreamClosers = new Set<() => void>();
   const driveLifecycle = new AbortController();
-  // Drive on by default: a quiet project's top idea runs in a worktree on its own.
+  // Drive on its own, once turned on: a quiet project's top idea runs in a worktree.
   const driveAuto = new DriveAutoRuns(join(dirname(options.databasePath), "drive-auto.json"), {
     workspaces: () => (store.database.query("SELECT root FROM workspaces").all() as { root: string }[]).map((row) => row.root),
     trusted: (workspace) => workspaceTrust.isTrusted(workspace),
@@ -1215,7 +1215,7 @@ export function createDaemonApp(options: {
       if (request.method === "GET" && url.pathname === "/v1/limits") {
         return json({ limits: processor.planLimits?.() ?? [] } satisfies PlanLimitsResponse);
       }
-      // Drive on by default, and the one switch per project that turns it off.
+      // Drive on its own, and the one switch per project that turns it on.
       if (request.method === "GET" && url.pathname === "/v1/drive/auto") {
         return json({ auto: driveAuto.state(url.searchParams.get("workspace") ?? "") } satisfies DriveAutoResponse);
       }

@@ -4812,18 +4812,17 @@ function renderBriefing() {
     const count = next.proposals.length, auto = state.breakage.auto;
     const title = `${count === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][count] ?? count} things`} I could do next`;
     const ideasWord = `${count} idea${count === 1 ? "" : "s"}`;
-    pill = `${mark(auto && !auto.on ? "hollow" : "idea")}${pillWord("Drive", "", ideasWord)}`;
+    pill = `${mark("idea")}${pillWord("Drive", "", ideasWord)}`;
+    parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${ideasWord}`, {}, "bf-word")}`);
     if (auto && !auto.on) {
-      // Off here: it only runs what you start.
-      parts.push(`${mark("hollow")}<b class="bf-word">Drive is off here</b>`, btn("ideas-show", ideasShown ? title : ideasWord, {}, "bf-word"), btn("drive-auto", "Turn on", { on: true }, "link"));
-    } else {
-      parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${ideasWord}`, {}, "bf-word")}`);
-      // On by default: the line says what Drive will do before it does it.
-      if (auto) {
-        const limits = `Up to ${auto.perDay} runs a day in this project, one at a time. Each run is in its own worktree; it never pushes or opens a PR. ${auto.usedToday} of ${auto.perDay} used today.`;
-        const when = auto.planPaused ? `waits while your plan is at ${auto.planPaused}%` : auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
-        parts.push(`<span class="bf-about" title="${h(limits)}">${when}</span>`, btn("drive-auto", "Turn off", { on: false }, "link"));
-      }
+      // Off until you turn it on: it only runs what you start, so it spends
+      // nothing of your plan while you're away.
+      parts.push(`<span class="bf-about">runs only what you start</span>`, btn("drive-auto", "Run on its own", { on: true }, "link"));
+    } else if (auto) {
+      // On: the line says what Drive will do before it does it.
+      const limits = `Up to ${auto.perDay} runs a day in this project, one at a time. Each run is in its own worktree; it never pushes or opens a PR. ${auto.usedToday} of ${auto.perDay} used today.`;
+      const when = auto.planPaused ? `waits while your plan is at ${auto.planPaused}%` : auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
+      parts.push(`<span class="bf-about" title="${h(limits)}">${when}</span>`, btn("drive-auto", "Turn off", { on: false }, "link"));
     }
     toggle = { action: "ideas-show", open: ideasShown };
     if (ideasShown) {

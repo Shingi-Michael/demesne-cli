@@ -1637,6 +1637,29 @@ html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notc
 #timeline .tl-label span { color: var(--t4); }
 @media (prefers-reduced-motion: reduce) { #timeline, #timeline .tl-m { transition: none; } }
 
+/* Snap to past mockups (pass 209 A): Foundry's edge has a tick per mockup,
+   the one on screen pink. Pointing there (or typing a name) opens the ticks
+   into names grouped by day; a click snaps the page to that mockup. */
+#foundry-rail { position: absolute; right: 0; z-index: 7; display: flex; flex-direction: column; justify-content: center; pointer-events: none; }
+#foundry-rail .fr-in { pointer-events: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; max-height: 100%; overflow-y: auto; scrollbar-width: none; padding: 8px 12px 8px 8px; border-radius: 12px 0 0 12px; transition: background-color 160ms var(--ease, ease), box-shadow 160ms var(--ease, ease); }
+#foundry-rail .fr-tk { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: 10px; white-space: nowrap; }
+#foundry-rail .fr-tk i { flex: none; width: 14px; height: 2px; border-radius: 2px; background: var(--t4, var(--t3)); transition: width 160ms var(--ease, ease), background-color 160ms var(--ease, ease); }
+#foundry-rail .fr-tk.on i { width: 22px; background: var(--blossom, #f2b6c8); }
+#foundry-rail .fr-tk:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; border-radius: 4px; }
+#foundry-rail .fr-name, #foundry-rail .fr-day, #foundry-rail .fr-find { display: none; }
+#foundry-rail .fr-day { height: 6px; }
+#foundry-rail.open .fr-in { gap: 2px; padding: 12px 12px 12px 18px; background: color-mix(in srgb, var(--panel, var(--ink)) 96%, transparent); box-shadow: -1px 0 0 var(--hair), -18px 0 40px -18px rgba(0, 0, 0, .55); backdrop-filter: blur(16px); }
+#foundry-rail.open .fr-tk { height: 24px; }
+#foundry-rail.open .fr-name { display: inline; max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: var(--t2); font-size: 12.5px; }
+#foundry-rail.open .fr-name small { margin-left: 7px; color: var(--t3); font-size: 11.5px; }
+#foundry-rail.open .fr-tk:hover .fr-name, #foundry-rail.open .fr-tk.on .fr-name { color: var(--t1); }
+#foundry-rail.open .fr-day { display: flex; align-self: stretch; height: 22px; align-items: flex-end; padding-bottom: 2px; color: var(--t3); font-size: 11.5px; }
+#foundry-rail.open .fr-day:first-child { height: 16px; }
+#foundry-rail.open .fr-find { display: flex; flex-direction: column; align-self: stretch; gap: 1px; padding: 0 0 8px; margin-bottom: 4px; box-shadow: inset 0 -1px 0 var(--hair); }
+#foundry-rail .fr-find span { color: var(--t1); font-size: 13px; }
+#foundry-rail .fr-find small { color: var(--t3); font-size: 11.5px; }
+@media (prefers-reduced-motion: reduce) { #foundry-rail .fr-in, #foundry-rail .fr-tk i { transition: none; } }
+
 /* The rim says the state (pass 74 B): the panel's edge carries the chat's
    state. Work: a blue light runs along it. Wait: a still amber arc on top.
    A failed check or turn: a short red dash until you touch the window. */
@@ -1772,14 +1795,9 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .desktop #page[data-kind="foundry"] { max-width: 1180px; padding-left: 28px; padding-right: 28px; }
 /* Foundry is one long page (pass 196 A): days on a strip, then every
    version newest first at real size under one quiet line. */
-.fd-days { position: sticky; top: 0; z-index: 3; display: flex; gap: 4px; margin: -6px 0 6px; padding: 6px 0; overflow-x: auto; scrollbar-width: none; background: color-mix(in srgb, var(--ink) 45%, transparent); backdrop-filter: blur(16px); }
-.fd-days button { flex: none; height: 26px; padding: 0 11px; border-radius: 99px; color: var(--t3); font-size: 12.5px; white-space: nowrap; }
-.fd-days button:hover { color: var(--t1); background: var(--tone2); }
 .fd-day { position: sticky; top: 0; z-index: 2; margin: 14px 0 8px; padding: 6px 0; background: color-mix(in srgb, var(--ink) 28%, transparent); backdrop-filter: blur(16px); color: var(--t3); font-size: 12px; font-weight: 500; }
-.fd-days ~ .fd-day { top: 38px; }
 .fd-day:first-of-type { margin-top: 0; }
 .fd-item { margin: 0 0 34px; scroll-margin-top: 72px; }
-.fd-days ~ .fd-item { scroll-margin-top: 110px; }
 .fd-ln { display: flex; align-items: baseline; gap: 10px; min-width: 0; margin-bottom: 8px; color: var(--t3); font-size: 12.5px; white-space: nowrap; }
 .fd-ln b { overflow: hidden; text-overflow: ellipsis; color: var(--t1); font-size: 14px; font-weight: 500; }
 .fd-ln span { overflow: hidden; text-overflow: ellipsis; }

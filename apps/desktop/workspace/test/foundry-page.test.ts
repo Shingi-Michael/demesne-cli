@@ -20,10 +20,10 @@ test("Foundry is one long page: every version, newest first, under its day, at r
     error: "",
     chatTitle: (id) => id === "s1" ? "Pricing page" : null,
   });
-  // Two days, a strip to jump between them, the newest day first.
+  // Two days, the newest first; the rail on the edge replaces the day strip.
   expect(html.match(/class="fd-day"/g)?.length).toBe(2);
   expect(html.indexOf(">Today<")).toBeLessThan(html.indexOf(">Yesterday<"));
-  expect(html).toContain('data-action="foundry-day"');
+  expect(html).not.toContain("fd-days");
   // Each version once, its line and its page; a deleted artifact's versions drop out.
   expect(html.match(/class="fd-item"/g)?.length).toBe(3);
   expect(html).toContain(`data-fd="${shelfKey("a1", 2)}"`);

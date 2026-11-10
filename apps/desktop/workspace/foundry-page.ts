@@ -44,8 +44,9 @@ export const shelfKey = (id: string, version: number) => `${id}:${version}`;
 const dayKey = (date: string) => { const at = new Date(date); return `${at.getFullYear()}-${at.getMonth() + 1}-${at.getDate()}`; };
 const clock = (date: string) => new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-/// The long page: days on a strip at the top, then every version, newest
-/// first, under the day it was made. The day stays at the top as you scroll.
+/// The long page: every version, newest first, under the day it was made.
+/// The day stays at the top as you scroll; the rail on the edge (pass 209 A)
+/// snaps to any mockup.
 export function foundryPage(view: FoundryView) {
   const { list, versions } = view;
   const title = `<h1 class="cp-title fd-h">Foundry</h1>` + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "");
@@ -53,13 +54,7 @@ export function foundryPage(view: FoundryView) {
   const byId = new Map(list.map((item) => [item.id, item]));
   const shown = versions.filter((item) => byId.has(item.artifactId));
   if (!shown.length) return title + `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
-  const days: { key: string; word: string; items: FoundryShelfVersion[] }[] = [];
-  for (const item of shown) {
-    const key = dayKey(item.createdAt);
-    const day = days.at(-1)?.key === key ? days.at(-1)! : (days.push({ key, word: dayWord(item.createdAt), items: [] }), days.at(-1)!);
-    day.items.push(item);
-  }
-  const strip = days.length > 1 ? `<nav class="fd-days" aria-label="Days">${days.map((day) => `<button type="button" data-action="foundry-day" data-args="${h(JSON.stringify({ day: day.key }))}">${h(day.word)}</button>`).join("")}</nav>` : "";
+  const days = shelfDays(shown);
   // Pass 208 A: the name, from which chat (a link to it), what it is, and
   // the version's own name; "based on" links to the mockup it came from.
   const item = (version: FoundryShelfVersion, pick: boolean) => {
@@ -77,7 +72,27 @@ export function foundryPage(view: FoundryView) {
       : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt)}</div>`;
     return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${words}${ver}${body}</section>`;
   };
-  return title + strip + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
+  return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
+}
+
+/// The page's days, newest first, each with its versions in page order.
+function shelfDays(shown: readonly FoundryShelfVersion[]) {
+  const days: { key: string; word: string; items: FoundryShelfVersion[] }[] = [];
+  for (const item of shown) {
+    const key = dayKey(item.createdAt);
+    const day = days.at(-1)?.key === key ? days.at(-1)! : (days.push({ key, word: dayWord(item.createdAt), items: [] }), days.at(-1)!);
+    day.items.push(item);
+  }
+  return days;
+}
+
+/// Every version in the order the long page draws it, with its day: what
+/// the rail on the page's edge is made from (pass 209 A).
+export function foundryOrder(list: readonly FoundryArtifact[] | null, versions: readonly FoundryShelfVersion[] | null) {
+  if (!list || !versions) return [];
+  const byId = new Map(list.map((item) => [item.id, item]));
+  return shelfDays(versions.filter((item) => byId.has(item.artifactId))).flatMap((day) =>
+    pickFirst(day.items).map(({ version }) => ({ id: version.artifactId, version: version.version, title: byId.get(version.artifactId)!.title, day: day.word })));
 }
 
 const link = (action: string, args: Record<string, unknown>, html: string, tip: string) =>

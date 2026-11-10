@@ -246,6 +246,42 @@ try {
   await at.first().click();
   await item(artifact.id, 2).waitFor();
   console.log("PASS: @ a mockup in the chat: offered by name, sent by id, and the name opens it in Foundry.");
+  // Pass 209 A: a tick per mockup on Foundry's edge; pointing opens names,
+  // a click snaps, ↑ ↓ step, typing a name finds one, and coming back
+  // returns to the mockup you were on.
+  const rail = page.locator("#foundry-rail");
+  const ticks = rail.locator(".fr-tk");
+  const atTop = async (id: string, version: number) => eventually(async () => { const box = await item(id, version).boundingBox(); return !!box && box.y < 200 && box.y > -20; });
+  const lit = async () => rail.locator('.fr-tk[aria-current="true"]').getAttribute("data-rail");
+  await rail.waitFor();
+  const made = (await f.client.foundryList()).artifacts;
+  assert.equal(await ticks.count(), made.length, "one tick per mockup");
+  assert.equal(await lit(), artifact.id, "the tick of the mockup on screen is lit");
+  await rail.hover();
+  await rail.locator(".fr-name").filter({ hasText: "A simple badge" }).waitFor();
+  await page.screenshot({ path: join(output, "foundry-rail.png") });
+  await ticks.filter({ hasText: "A simple badge" }).click();
+  await atTop(badge.id, 1);
+  await eventually(async () => await lit() === badge.id);
+  await page.mouse.move(200, 300);
+  // Newest first: ↓ goes to the older mockup below, ↑ back up.
+  await page.keyboard.press("ArrowDown");
+  await atTop(artifact.id, 2);
+  await page.keyboard.press("ArrowUp");
+  await atTop(badge.id, 1);
+  await page.keyboard.type("brief");
+  await rail.locator(".fr-find").filter({ hasText: "brief" }).waitFor();
+  assert.equal(await ticks.count(), 1, "typing narrows the names");
+  await page.keyboard.press("Enter");
+  await atTop(brief.id, 1);
+  assert.equal(await rail.locator(".fr-find").count(), 0, "the name clears once it snaps");
+  await page.keyboard.type("logo"); await page.keyboard.press("Escape");
+  assert(await foundry.isVisible(), "Esc clears the name before it closes the page");
+  await backToChat();
+  assert(await rail.isHidden(), "the rail is Foundry's alone");
+  await page.locator('[data-action="page-open"][data-args*="foundry"]').first().click();
+  await atTop(brief.id, 1);
+  console.log("PASS: snap to past mockups: ticks on the edge, names on hover, click, arrows and typing; Foundry comes back where you were.");
   assert.deepEqual(errors, []);
   console.log("PASS: graphics, documents and decks sit on Foundry's long page; chips return when the chat is reopened.");
 } catch (error) {

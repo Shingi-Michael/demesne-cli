@@ -30,7 +30,8 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryPage, shelfKey } from "./foundry-page.ts";
+import { foundryOrder, foundryPage, shelfKey } from "./foundry-page.ts";
+import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
@@ -3611,7 +3612,7 @@ function ensureMockupNames() {
   }).catch(() => { foundryNamesAt = -2; });
 }
 /// The version a chat link asked for: the long page scrolls to it once drawn.
-let foundryFocus: { id: string; version?: number } | null = null;
+let foundryFocus: { id: string; version?: number; quiet?: boolean } | null = null;
 /// Documents on the long page, rendered once they scroll near ("id:version").
 const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
 const foundryUi = { error: "" };
@@ -3824,10 +3825,19 @@ function openPage(kind: "" | PageKind) {
   if (was === "settings" && kind !== "settings") clearGoogleAIForm();
   pageOpen = kind;
   sidebarSignature = heroSignature = "";
+  // The rail on the edge is Foundry's alone.
+  if (kind !== "foundry") { railQuery = ""; paintRail(); }
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
-  if (kind === "foundry") { if (was !== "foundry") foundryUi.error = ""; foundrySaves = foundrySaveCount(); void loadFoundry(); }
+  if (kind === "foundry") {
+    if (was !== "foundry") {
+      foundryUi.error = "";
+      // Back to the mockup you were on, unless a link asked for another.
+      if (!foundryFocus && foundryPlace) foundryFocus = { id: foundryPlace, quiet: true };
+    }
+    foundrySaves = foundrySaveCount(); void loadFoundry();
+  }
   if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
   if (kind === "today") { if (was !== "today") Object.assign(todayUi, { replying: "", error: "", picking: "", profile: null }); todayDot.clear(); void loadSocials(); }
   if (state) renderState({ ...state });
@@ -3878,9 +3888,88 @@ function showFoundryFocus() {
   if (!target) return;
   foundryFocus = null;
   target.scrollIntoView({ block: "start" });
+  paintRail();
+  if (focus.quiet) return;
   target.classList.add("fd-here");
   setTimeout(() => target.classList.remove("fd-here"), 1600);
 }
+/// Snap to past mockups (pass 209 A): the rail on Foundry's edge, a tick per
+/// mockup, the one on screen lit. It opens into names while pointed at or
+/// while you type a name; a click, ↑ ↓ or Enter snaps the page to one.
+/// Leaving Foundry and coming back returns to the mockup you were on.
+let rail: RailMark[] = [], railHere: string | null = null, railQuery = "", railHTMLNow = "", railFrame = 0;
+/// The mockup you were on when you left Foundry.
+let foundryPlace: string | null = null;
+function railCurrent(): string | null {
+  const stage = el("stage"), top = stage.getBoundingClientRect().top + 120;
+  let here: string | null = null;
+  for (const item of document.querySelectorAll<HTMLElement>("#page .fd-item")) {
+    if (item.getBoundingClientRect().top > top) break;
+    here = item.dataset.fd!.slice(0, item.dataset.fd!.lastIndexOf(":"));
+  }
+  return here ?? rail[0]?.id ?? null;
+}
+function paintRail() {
+  railFrame = 0;
+  const node = el("foundry-rail"), stage = el("stage");
+  const on = pageOpen === "foundry" && rail.length > 1;
+  if (node.hidden === on) node.hidden = !on;
+  if (!on) return;
+  node.style.top = `${stage.offsetTop + 14}px`;
+  node.style.height = `${Math.max(0, stage.clientHeight - 28)}px`;
+  railHere = railCurrent();
+  if (railHere) foundryPlace = railHere;
+  node.classList.toggle("open", Boolean(railQuery) || node.matches(":hover"));
+  const html = railHTML(rail, railHere, railQuery);
+  if (html !== railHTMLNow) { node.querySelector(".fr-in")!.innerHTML = railHTMLNow = html; }
+}
+const repaintRail = () => { if (!railFrame) railFrame = requestAnimationFrame(paintRail); };
+function setRail() {
+  rail = railMarks(foundryOrder(foundryList, foundryVersions));
+  repaintRail();
+}
+/// The page snaps to the mockup (its newest version), with no flash: the
+/// lit tick already says where you are.
+function railGo(id: string) {
+  railQuery = "";
+  foundryFocus = { id, quiet: true };
+  showFoundryFocus();
+}
+el("foundry-rail").addEventListener("pointerenter", () => { el("foundry-rail").classList.add("open"); });
+el("foundry-rail").addEventListener("pointerleave", () => { if (!railQuery) el("foundry-rail").classList.remove("open"); });
+el("foundry-rail").addEventListener("click", (event) => {
+  const tick = (event.target as HTMLElement).closest<HTMLElement>("[data-rail]");
+  if (tick) railGo(tick.dataset.rail!);
+});
+el("stage").addEventListener("scroll", () => { if (pageOpen === "foundry") repaintRail(); }, { passive: true });
+new ResizeObserver(() => { if (pageOpen === "foundry") repaintRail(); }).observe(el("stage"));
+/// On Foundry, ↑ and ↓ step between mockups, and typing a name finds one.
+document.addEventListener("keydown", (event) => {
+  if (pageOpen !== "foundry" || rail.length < 2 || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || overlay) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']")) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const next = railStep(railQuery ? railMatches(rail, railQuery) : rail, railCurrent(), event.key === "ArrowDown" ? 1 : -1);
+    if (!next) return;
+    event.preventDefault();
+    if (railQuery) { railQuery = ""; }
+    railGo(next.id);
+    return;
+  }
+  if (event.key === "Escape" && railQuery) { event.preventDefault(); railQuery = ""; paintRail(); return; }
+  if (event.key === "Enter" && railQuery) {
+    event.preventDefault();
+    const first = railMatches(rail, railQuery)[0];
+    if (first) railGo(first.id); else { railQuery = ""; paintRail(); }
+    return;
+  }
+  if (event.key === "Backspace" && railQuery) { event.preventDefault(); railQuery = railQuery.slice(0, -1); paintRail(); return; }
+  if (event.key.length === 1 && (railQuery || /\S/.test(event.key))) {
+    event.preventDefault();
+    railQuery = (railQuery + event.key).slice(0, 60);
+    paintRail();
+  }
+});
 /// Documents render through the app's sanitizer when they scroll near.
 let foundryDocWatch: IntersectionObserver | null = null;
 function watchFoundryDocs(root: HTMLElement) {
@@ -3965,7 +4054,7 @@ function renderPage() {
   root.innerHTML = html;
   root.dataset.html = html;
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") watchFoundryDocs(root);
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.googleProvider!;
@@ -6020,7 +6109,6 @@ async function foundryAction(action: string, args: Record<string, any>) {
     if (id) return openFoundry(id);
     return openPage("foundry");
   }
-  if (action === "foundry-day") document.getElementById(`fd-day-${String(args.day)}`)?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 async function dispatch(
   action: string,
@@ -7612,6 +7700,8 @@ document.addEventListener("keydown", (event) => {
   }
   // Esc over a picture or a story on Today closes that, not the page.
   if (key === "escape" && pageOpen === "today" && (event.defaultPrevented || todayUi.zoom || todayUi.story)) return;
+  // Esc while finding a mockup on Foundry clears the name, not the page.
+  if (key === "escape" && pageOpen === "foundry" && event.defaultPrevented) return;
   if (key === "escape" && !ctrl && pageOpen && (!field || (event.target as HTMLElement).id === "settings-search")) {
     event.preventDefault();
     openPage("");

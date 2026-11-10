@@ -13,6 +13,8 @@ The daemon ingests static PNG, JPEG and WebP images. Files are limited to 20 MiB
 | MCP tools returning image content blocks | Structured ingestion with source/tool attribution |
 | `view_image` | Import an image from the permitted workspace |
 | `capture_window` | macOS window capture when the tool is registered and OS permission is available |
+| `open` | Opens an app, file, folder or link behind Demesne (asks once per app); returns a picture of the window it opened where windows can be pictured |
+| `show` | Puts a file, picture, the running app (live) or a web page (a picture) in the preview card on the right; never asks |
 | `generate_image` | Generate or edit using a separately configured Images-compatible backend |
 
 Enabling `vision`, image generation, or MCP servers registers the image path; `capture_window` is macOS-specific and needs OS screenshot permission. Generation credentials are separate from ChatGPT sign-in.

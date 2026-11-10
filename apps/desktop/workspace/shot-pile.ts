@@ -33,6 +33,13 @@ export function chatPile(runs: readonly PileRun[], hidden: ReadonlySet<string> =
           if (typeof value.picture?.id === "string") add({ id: value.picture.id, caption: String(value.title || value.app || "A window"), by: "chat" });
         } catch { /* not a picture */ }
       }
+      // What open and show pictured (pass 210 A); the newest also has its own card.
+      if (tool.name === "open" || tool.name === "show") {
+        try {
+          const value = JSON.parse(tool.message) as { name?: string; title?: string; app?: string; picture?: { id?: string } };
+          if (typeof value.picture?.id === "string") add({ id: value.picture.id, caption: String(value.title || value.name || value.app || "A preview"), by: "chat" });
+        } catch { /* not a picture */ }
+      }
       if (tool.name === "look_at_page") {
         const look = pageLookOutcome(tool.message);
         for (const picture of look?.pictures ?? []) add({ id: picture.id, caption: pictureCaption(picture.label, pageName(look!.url)), by: "chat" });

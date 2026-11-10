@@ -2704,6 +2704,7 @@ function mapEvent(row: EventRow): EventEnvelope {
 function toolResultMetadata(name: string, resultText: string): Record<string, unknown> {
   if (name === "look_at_page") return pageLookMetadata(resultText);
   if (name === "capture_window") return windowCaptureMetadata(resultText);
+  if (name === "open" || name === "show") return shownMetadata(resultText);
   let result: unknown;
   try {
     // A result that came with pictures (Foundry's look and try) has a line
@@ -2784,6 +2785,20 @@ export function windowCaptureMetadata(resultText: string): Record<string, unknow
   if (!head || !picture) return {};
   const [app = "", ...title] = head[1]!.split(" — ");
   return { message: JSON.stringify({ app: app.slice(0, 120), title: title.join(" — ").slice(0, 200), picture: { id: picture[1], width: Number(picture[2]), height: Number(picture[3]) } }) };
+}
+
+/// What open and show put on the right (pass 210 A): its name, the kind, the
+/// link, path or app, and the picture when there is one.
+export function shownMetadata(resultText: string): Record<string, unknown> {
+  const [head = "", ...rest] = resultText.split("\nImage artifact ");
+  let value: Record<string, unknown>;
+  try { const parsed = JSON.parse(head) as unknown; if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}; value = parsed as Record<string, unknown>; } catch { return {}; }
+  const text = (key: string, max: number) => typeof value[key] === "string" && value[key] ? { [key]: (value[key] as string).slice(0, max) } : {};
+  const picture = rest.length ? /^([0-9a-f-]{36}): \S+ \((\d+)×(\d+)\)/.exec(rest[0]!) : null;
+  const shown = value.opened === true ? "window" : typeof value.shown === "string" && ["file", "page", "app"].includes(value.shown) ? value.shown : null;
+  if (!shown) return {};
+  return { message: JSON.stringify({ shown, ...text("name", 200), ...text("app", 120), ...text("title", 200), ...text("target", 2000), ...text("path", 2000), ...text("url", 2000), ...text("kind", 20),
+    ...(value.live === true ? { live: true } : {}), ...(picture ? { picture: { id: picture[1], width: Number(picture[2]), height: Number(picture[3]) } } : {}) }) };
 }
 
 /// See the app: where it looked, how each step went and its pictures (the

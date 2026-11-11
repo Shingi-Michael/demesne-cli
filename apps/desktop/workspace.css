@@ -152,6 +152,12 @@ html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { backgroun
 html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* Hovering a row swaps its time for Pin and Archive; one click does it. */
 .sidebar-item { position: relative; }
+.sidebar-threads { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 3px; }
+.sidebar-thread { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 3px 10px 3px 28px; border-radius: 8px; color: var(--t3); font-size: 12.5px; text-align: left; }
+.sidebar-thread:hover { color: var(--t2); box-shadow: inset 0 0 0 1px var(--hair); }
+.sidebar-thread.on { color: var(--t1); background: var(--tone); }
+.sidebar-thread .th-ring { width: 13px; height: 13px; flex: none; }
+.sidebar-thread .sidebar-session-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-row-actions { position: absolute; top: 50%; right: 5px; display: flex; gap: 1px; margin-top: -11px; opacity: 0; pointer-events: none; transition: opacity 140ms var(--ease); }
 .sidebar-row-actions button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 8px; color: var(--t3); }
 .sidebar-row-actions button:hover { color: var(--t1); background: var(--tone2); }
@@ -2114,6 +2120,16 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .th-del:hover { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--surface)); }
 .th-del.armed { padding: 0 8px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, var(--surface)); font-size: 11.5px; font-weight: 600; }
 .th-row.on { background: var(--tone2); }
+/* Pass 211 A: four marks for working, back, checked, merged; Merge on each ready thread. */
+.th-stage { display: inline-flex; gap: 3px; margin-left: 8px; }
+.th-stage i { width: 14px; height: 3px; border-radius: 2px; background: var(--hair2); }
+.th-stage i.d { background: var(--t3); }
+.th-stage i.c { background: var(--blossom); }
+.th-line .sent { color: var(--blossom); }
+.th-item.ready .th-row { padding-right: 78px; }
+.th-merge-one { position: absolute; right: 10px; top: 8px; height: 22px; padding: 0 10px; border-radius: 7px; background: var(--acc); color: #0b1220; font-size: 12px; font-weight: 500; }
+.th-merge-one:disabled { opacity: .6; }
+.th-item.ready .th-del { right: 78px; }
 .th-name { overflow: hidden; color: var(--t1); font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
 .th-meta { display: flex; align-items: center; color: var(--t3); font-size: 12px; white-space: nowrap; }
 .th-line { grid-column: 2 / 4; overflow: hidden; color: var(--t3); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }

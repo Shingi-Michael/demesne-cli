@@ -37,3 +37,19 @@ test("the line above the composer says how they're doing, then offers Merge once
   expect(threadsFootHTML(view([ready("a"), ready("b"), ready("c")], { busy: "merge" }))).toContain("Merging…");
   expect(threadsFootHTML(view([fix("a", { status: "applied" })]))).toBe("");
 });
+
+test("pass 211 A: stage marks, sent back, checked, waits, and Merge on each ready thread", () => {
+  const first = fix("a", { status: "ready", review: { sentBack: 0, checked: true }, diff: { files: 1, additions: 4, deletions: 0, paths: ["a.ts"] }, checks: [{ command: "bun test", passed: true }] });
+  const back = fix("b", { review: { sentBack: 1, note: "a check failed (bun test)" } });
+  const waits = fix("c", { status: "starting", sessionId: null, thread: { brief: "", files: [], after: first.id } });
+  expect(threadState(waits)).toBe("waits");
+  expect(threadLine(waits, [first, back, waits])).toBe("Waits for “Thread a”");
+  expect(threadLine(back)).toContain("Sent back</span>: a check failed (bun test)");
+  expect(threadLine(first)).toStartWith("Checked · ");
+  expect(threadLine(fix("d", { status: "ready", review: { sentBack: 0, note: "no checks ran" } }))).toContain("Ready · no checks ran");
+  const html = threadListHTML(view([first, back, waits]));
+  expect(html.match(/data-action="thread-merge"/g)).toHaveLength(1);
+  expect(html).toContain('class="th-stage"');
+  expect(html.match(/<i class="d"><\/i>/g)!.length).toBeGreaterThanOrEqual(4);
+  expect(html).toContain('<i class=" c"></i>');
+});

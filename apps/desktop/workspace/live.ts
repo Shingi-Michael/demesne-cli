@@ -12,7 +12,7 @@ import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
-import { threadBriefHTML, threadMergeHTML, threadListHTML, threadReportHTML, threadsFootHTML, threadTabsHTML } from "./threads-view.ts";
+import { ring as threadRing, threadBriefHTML, threadMergeHTML, threadListHTML, threadReportHTML, threadsFootHTML, threadTabsHTML } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
@@ -708,7 +708,7 @@ function renderSidebar() {
   // The open chat's time moves with every streamed word; its row says it by
   // the minute, so that's all the list redraws for.
   const openId = state.session?.id;
-  const signature = JSON.stringify([[...parentOf], sessions.map((item) => item.id === openId ? { ...item, updatedAt: item.updatedAt?.slice(0, 16) } : item), projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()]]);
+  const signature = JSON.stringify([[...parentOf], sessions.map((item) => item.id === openId ? { ...item, updatedAt: item.updatedAt?.slice(0, 16) } : item), projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()], state.threads.list.map((fix) => [fix.id, fix.from, fix.title, fix.status, fix.waiting, fix.review, fix.activity?.steps]), state.threads.open, state.threads.closed]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -786,9 +786,15 @@ function renderSidebar() {
       { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
       .replace("<button ", `<button title="${h(socialsView?.moods?.[agent.id] ? moodTitle(agent.name, socialsView.moods[agent.id]) : agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
   }).join("")}</div>`;
+  // An orchestrator's threads hang under its row (pass 211 A), each with its
+  // ring; one opens on the right, beside its orchestrator.
+  const threadLines = (id: string) => {
+    const mine = state!.threads.list.filter((fix) => fix.from === id && fix.status !== "discarded");
+    return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-open", `${threadRing(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id }, `sidebar-thread${state!.threads.open === fix.id && !state!.threads.closed ? " on" : ""}`)).join("")}</div>` : "";
+  };
   const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
-    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)));
+    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)) + threadLines(item.id));
     if (items.length > limit) rows.push(btn("project-more", `Show ${items.length - limit} more`, { key }, "sidebar-more"));
     else if (!query && expandedProjectChats.has(key) && items.length > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { key }, "sidebar-more"));
     return rows;

@@ -7,6 +7,7 @@ import { commandIcon, groupWords, plainName, sectionRank, sectionTitle } from ".
 import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
+import { ChatDOM, ComposerHeight, isWindowsDesktopChat, threadConversationKey } from "./windows-chat-redraw.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
@@ -112,6 +113,9 @@ quietDom();
 const el = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id)! as T;
 const editor = document.querySelector<HTMLTextAreaElement>("textarea")!;
+const windowsDesktopChat = isWindowsDesktopChat(window.demesne.mode, navigator);
+const composerDOM = new ChatDOM(windowsDesktopChat);
+const composerHeight = windowsDesktopChat ? new ComposerHeight() : null;
 // Talk instead of typing: the Mac's own Dictation, only in the Mac app.
 el("composer-talk").hidden = !(window.demesne.mode === "desktop" && /Mac/i.test(navigator.platform));
 /// Big pastes waiting in the composer, as chips.
@@ -3193,7 +3197,7 @@ function renderConversation() {
         if (entry?.type !== "assistant") continue;
         let view = saved.views.get(id);
         if (!view) {
-          view = new MarkdownView();
+          view = new MarkdownView({ preserveNodes: windowsDesktopChat });
           saved.views.set(id, view);
         }
         view.element.dataset.answer = run.id;
@@ -4373,7 +4377,7 @@ function whereRow(mode: "home" | "move") {
 }
 function renderWhere() {
   const row = el("where-row");
-  row.hidden = whereOpen !== "home";
+  composerDOM.property(row, "hidden", whereOpen !== "home");
   const html = whereOpen === "home" ? whereRow("home") : "";
   if (row.dataset.html !== html) { row.innerHTML = html; row.dataset.html = html; }
 }
@@ -4479,33 +4483,33 @@ function composerFrame(width: number) {
   // The mode word says how this chat's edits and commands are gated; a
   // click or Alt+M in the composer steps to the next mode.
   const mode = currentMode(), chip = el("composer-mode");
-  chip.className = `cb mode-${mode}${chip.classList.contains("open") ? " open" : ""}`;
+  composerDOM.property(chip, "className", `cb mode-${mode}${chip.classList.contains("open") ? " open" : ""}`);
   if (!chip.querySelector(".mode-opt")) chip.innerHTML = `<span class="mode-list">${(Object.keys(MODES) as Mode[]).map((item) => `<span class="mode-opt mode-${item}" data-mode="${item}">${MODES[item]}</span>`).join("")}</span><kbd>Alt+M</kbd>`;
-  for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) option.classList.toggle("on", option.dataset.mode === mode);
-  chip.querySelector<HTMLElement>(".mode-opt.mode-orchestrate")!.style.display = state.session && !isPlain() ? "" : "none";
-  chip.setAttribute("aria-label", `Mode: ${MODES[mode]}`);
-  chip.title = `${MODE_HELP[mode]}. Click or Alt+M in the composer for the next mode.`;
+  for (const option of chip.querySelectorAll<HTMLElement>(".mode-opt")) composerDOM.toggle(option, "on", option.dataset.mode === mode);
+  composerDOM.property(chip.querySelector<HTMLElement>(".mode-opt.mode-orchestrate")!.style, "display", state.session && !isPlain() ? "" : "none");
+  composerDOM.attribute(chip, "aria-label", `Mode: ${MODES[mode]}`);
+  composerDOM.property(chip, "title", `${MODE_HELP[mode]}. Click or Alt+M in the composer for the next mode.`);
   // On Home one word says where the chat will live, and unfolds the choices.
   const whereWord = el("composer-where"), home = !inSession() && !question;
   if (!home && whereOpen === "home") whereOpen = null;
-  whereWord.hidden = !home;
-  whereWord.innerHTML = `${isPlain() ? "Just a chat" : `in ${h(projectLabel(state.workspace))}`}<span class="where-caret" aria-hidden="true">⌄</span>`;
-  whereWord.classList.toggle("open", whereOpen === "home");
-  whereWord.setAttribute("aria-expanded", String(whereOpen === "home"));
-  whereWord.title = "Where this chat lives (⌥P)";
-  el("hint-mention").hidden = isPlain();
+  composerDOM.property(whereWord, "hidden", !home);
+  composerDOM.html(whereWord, `${isPlain() ? "Just a chat" : `in ${h(projectLabel(state.workspace))}`}<span class="where-caret" aria-hidden="true">⌄</span>`);
+  composerDOM.toggle(whereWord, "open", whereOpen === "home");
+  composerDOM.attribute(whereWord, "aria-expanded", String(whereOpen === "home"));
+  composerDOM.property(whereWord, "title", "Where this chat lives (⌥P)");
+  composerDOM.property(el("hint-mention"), "hidden", isPlain());
   renderWhere();
-  form.classList.toggle("mode-plan", mode === "plan");
-  form.classList.toggle("queued", queued);
-  form.classList.toggle("restored", state.restored && !question);
-  form.classList.toggle("stop-armed", Date.now() < stopArmed);
-  form.classList.toggle("stopping", Boolean(state.activeTurnId) && !question);
-  el("queue-label").hidden = Boolean(question) || !queued && !state.restored;
-  el("queue-label").innerHTML =
-    `<span>${queued ? 'Queued <span class="muted">sends when this turn completes</span>' : 'Restored · not sent <span class="muted">the turn did not finish</span>'}</span>${btn("clear-queue", "Clear ×")}`;
+  composerDOM.toggle(form, "mode-plan", mode === "plan");
+  composerDOM.toggle(form, "queued", queued);
+  composerDOM.toggle(form, "restored", Boolean(state.restored && !question));
+  composerDOM.toggle(form, "stop-armed", Date.now() < stopArmed);
+  composerDOM.toggle(form, "stopping", Boolean(state.activeTurnId) && !question);
+  composerDOM.property(el("queue-label"), "hidden", Boolean(question) || !queued && !state.restored);
+  composerDOM.html(el("queue-label"),
+    `<span>${queued ? 'Queued <span class="muted">sends when this turn completes</span>' : 'Restored · not sent <span class="muted">the turn did not finish</span>'}</span>${btn("clear-queue", "Clear ×")}`);
   const suggestion = nextSuggestion();
   const asking = state.approvals.length > 0 && !question;
-  editor.placeholder = asking
+  composerDOM.property(editor, "placeholder", asking
     ? "Or tell demesne what to do instead…"
     : question
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to carry on…" : question.questions[questionIndex()]?.suggestions?.length ? "Answer, or pick one above…" : "Type your answer…"
@@ -4520,7 +4524,7 @@ function composerFrame(width: number) {
     state.connection !== "online" ||
     state.busy ||
     answeringQuestion ||
-    Boolean(answered);
+    Boolean(answered));
   // Like the terminal: no stop hint while running (Esc Esc still stops; only
   // the armed confirmation shows). In a session, an empty composer shows
   // / and @, and a draft shows ↵ send instead. The start screen keeps / and
@@ -4538,9 +4542,9 @@ function composerFrame(width: number) {
     return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("source-keep", "Keep", { id: image.id }, "att-keep").replace("<button ", `<button title="Keep it with this chat as a source" `)}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
   }).join("") + refusedFiles.map((file) => fileChipHTML(file, { remove: "unrefuse", bad: file.why })).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
   // While a turn runs the send button is Stop; Enter queues what you type.
-  el("send-label").innerHTML = question ? "answer" : state.activeTurnId
+  composerDOM.html(el("send-label"), question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${asking ? `${k("Enter")} send instead` : `${k("↵")} steer · ${k("⌥↵")} after this turn`}</span>` : ""}<span class="stop-word">■ Stop</span>`
-    : "send";
+    : "send");
   // The send mark sits in the box's corner, faint until there is something
   // to send; while a turn runs it is Stop.
   const send = form.querySelector<HTMLButtonElement>(".send")!;
@@ -7064,7 +7068,7 @@ let renderedPalette: Snapshot["palette"] | null = null,
 /// Threads (pass 126): the orchestrator chat on the left, the thread you
 /// picked running live on the right with a composer of its own. The list in
 /// the chat is the only switcher; nothing moves the right half but you.
-let foldedForThreads = false, threadPaneSignature = "", threadPaneFor = "";
+let foldedForThreads = false, threadPaneSignature = "", threadPaneFor = "", threadTurnsSignature = "";
 /// The tab whose × was pressed once: pressing it again deletes the thread.
 let threadDeleteArmed: string | null = null, threadDeleteTimer: ReturnType<typeof setTimeout> | null = null;
 /// Thread tabs you closed, for the orchestrator chat they belong to.
@@ -7141,10 +7145,10 @@ function fillThreadLists() {
 }
 function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
   const host = el("thread-pane");
-  host.hidden = !fix;
-  if (!fix || !state) { if (threadPaneFor) { host.innerHTML = ""; threadPaneSignature = threadPaneFor = ""; } return; }
+  composerDOM.property(host, "hidden", !fix);
+  if (!fix || !state) { if (threadPaneFor) { host.innerHTML = ""; threadPaneSignature = threadPaneFor = threadTurnsSignature = ""; } return; }
   if (threadPaneFor !== fix.id) {
-    threadPaneFor = fix.id; threadPaneSignature = "";
+    threadPaneFor = fix.id; threadPaneSignature = threadTurnsSignature = "";
     threadWorking ??= new WorkingLine(spinner);
     threadContextOpen = false;
     host.innerHTML = `<div class="tp-conv"><div class="tp-turns"></div></div><div class="tp-foot"><div id="tp-context-card" hidden></div><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg><svg class="ico send-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><div class="composer-bar"><span class="sp"></span><span class="tp-merge-host"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button><button type="button" id="tp-context" class="cb" data-action="thread-context" aria-expanded="false" hidden></button></div></form></div>`;
@@ -7167,16 +7171,23 @@ function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
   const atEnd = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 40;
   // The thread's turns draw with the same code as any chat's, its thinking
   // and words included, and its working line says what it is doing now.
-  turns.innerHTML = asThread(() => chat!.runs.map((run, index) => `<article class="turn">${runHTML(run, index)}</article>`).join("")) ?? `<p class="tp-empty">Opening the thread…</p>`;
+  const turnsSignature = windowsDesktopChat ? threadConversationKey(chat, [fix, state.threads.list.map((item) => [item.id, item.status]), threadDeleteArmed, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]) : "";
+  const redrawTurns = !windowsDesktopChat || turnsSignature !== threadTurnsSignature;
+  if (redrawTurns) {
+    turns.innerHTML = asThread(() => chat!.runs.map((run, index) => `<article class="turn">${runHTML(run, index)}</article>`).join("")) ?? `<p class="tp-empty">Opening the thread…</p>`;
+    threadTurnsSignature = turnsSignature;
+  }
   const last = chat?.runs.at(-1);
   if (last) asThread(() => workingLine(threadWorking!, last));
   else threadWorking!.update(null);
   renderThreadContext(host);
-  for (const slot of turns.querySelectorAll<HTMLElement>("[data-answer][data-entry]")) {
-    const entry = chat?.runs.find((run) => run.id === slot.dataset.answer)?.entries.find((item) => item.id === Number(slot.dataset.entry));
-    if (entry?.type === "assistant") slot.innerHTML = markdown(splitNextPrompt(entry.raw).text);
+  if (redrawTurns) {
+    for (const slot of turns.querySelectorAll<HTMLElement>("[data-answer][data-entry]")) {
+      const entry = chat?.runs.find((run) => run.id === slot.dataset.answer)?.entries.find((item) => item.id === Number(slot.dataset.entry));
+      if (entry?.type === "assistant") slot.innerHTML = markdown(splitNextPrompt(entry.raw).text);
+    }
   }
-  if (atEnd) conv.scrollTop = conv.scrollHeight;
+  if (redrawTurns && atEnd) conv.scrollTop = conv.scrollHeight;
   // What the thread waits on: an approval answers here; a question opens its chat.
   const asks = [
     ...(chat?.approvals ?? []).map((approval) => `<div class="tp-ask"><span class="from">Before it goes on</span><span>${h(approval.summary || approval.name)}</span><span class="tp-acts">${btn("thread-approve", "Allow once", { id: approval.id }, "primary")}${btn("thread-approve", "Deny", { id: approval.id, decision: "deny" })}</span></div>`),

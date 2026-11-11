@@ -2,6 +2,7 @@ import { previewable } from "@demesne/protocol";
 import { marked, Renderer, type Token, type TokensList } from "marked";
 import DOMPurify from "dompurify";
 import { decorateTables } from "./md-table.ts";
+import { markMarkdownFade, reconcileMarkdownNodes } from "./markdown-reconcile.ts";
 
 // Math and code colouring are big (about 430 KB of the window's code): they
 // load the first time an answer has a formula or a code block, not at launch.
@@ -197,9 +198,9 @@ interface Block {
 interface Fade { at: number; start: number; ms: number }
 
 /// Words arrive softly: each new run of streamed text fades in, over 120–400 ms
-/// matched to the stream's pace. A block is redrawn whole on every update, so
-/// runs still fading are wrapped again with a negative delay and carry on
-/// where they were instead of popping to full.
+/// matched to the stream's pace. Fresh nodes carry a negative delay so a fade
+/// survives structural changes; the opt-in reconciler keeps live wrappers on
+/// their existing timeline instead of restarting already-visible words.
 function wrapFades(nodes: ChildNode[], fades: Fade[], now: number) {
   if (!fades.length) return;
   const texts: Text[] = [];
@@ -226,6 +227,7 @@ function wrapFades(nodes: ChildNode[], fades: Fade[], now: number) {
       if (piece.data.trim()) {
         const span = document.createElement("span");
         span.className = "md-in";
+        markMarkdownFade(span, fade);
         span.style.animationDuration = `${fade.ms}ms`;
         span.style.animationDelay = `${-Math.round(now - fade.start)}ms`;
         piece.replaceWith(span);
@@ -244,7 +246,7 @@ const commonPrefix = (a: string, b: string) => {
 
 /** Lex the complete document to keep Markdown's context-sensitive semantics
  * (references, setext headings, loose lists, unfinished fences), but only parse,
- * sanitize, highlight and replace blocks whose source or link context changed.
+ * sanitize, highlight and update blocks whose source or link context changed.
  * Comment boundaries preserve the original DOM layout without extra wrappers. */
 export class MarkdownView {
   readonly element = document.createElement("div");
@@ -252,7 +254,7 @@ export class MarkdownView {
   private links = "";
   private blocks: Block[] = [];
   private lastUpdate = 0;
-  constructor() {
+  constructor(private readonly settings: { preserveNodes?: boolean } = {}) {
     this.element.className = "markdown";
     // A word that has faded in is done: it loses its fade, or moving the
     // answer (each time the turn around it redraws, as on every step) would
@@ -308,9 +310,13 @@ export class MarkdownView {
           if (fade && after.length > kept) block.fades.push({ at: kept, start: now, ms });
           wrapFades(nodes, block.fades, now);
         }
-        for (const node of block.nodes) node.remove();
-        block.end.before(template.content);
-        block.nodes = nodes;
+        if (this.settings.preserveNodes) {
+          block.nodes = reconcileMarkdownNodes(block.nodes, nodes, block.end);
+        } else {
+          for (const node of block.nodes) node.remove();
+          block.end.before(template.content);
+          block.nodes = nodes;
+        }
         block.html = html;
         mutated = true;
       }

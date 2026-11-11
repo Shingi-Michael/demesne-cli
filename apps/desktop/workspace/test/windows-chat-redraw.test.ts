@@ -9,7 +9,9 @@ test("changed renderer sources and the extracted browser fixture compile without
   // Syntax/fixture checks only, not a substitute for tsc or browser execution.
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const live = read("../live.ts"), fixture = read("./windows-chat-redraw.dom.test.ts");
-  const transpile = (code: string) => typeof Bun === "undefined" ? nodeModule.stripTypeScriptTypes(code, { mode: "transform" }) : new Bun.Transpiler({ loader: "ts" }).transformSync(code);
+  // Node supports transform mode; Bun's node:module declarations expose only strip.
+  const nodeTransform = nodeModule.stripTypeScriptTypes as (code: string, options: { mode: "strip" | "transform" }) => string;
+  const transpile = (code: string) => typeof Bun === "undefined" ? nodeTransform(code, { mode: "transform" }) : new Bun.Transpiler({ loader: "ts" }).transformSync(code);
   for (const path of ["../live.ts", "../markdown.ts", "../windows-chat-redraw.ts", "../markdown-reconcile.ts", "./windows-chat-redraw.dom.test.ts", "./markdown-redraw.dom.test.ts"])
     assert.doesNotThrow(() => transpile(read(path)), path);
   const section = (start: string, end: string) => {
@@ -121,12 +123,12 @@ test("offscreen measurement only writes a changed final height, never the live b
 });
 
 test("thread turns exclude draft bookkeeping but include rendered state and folds", () => {
-  const chat = { id: "thread", runs: [{ id: "turn", text: "hello" }], activeTurnId: null as string | null, approvals: [] as unknown[], questions: [] as unknown[], model: "model", provider: "provider", draft: "", draftVersion: 0, revision: 1 };
+  const chat = { id: "thread", runs: [{ id: "turn", text: "hello" }], activeTurnId: null as string | null, approvals: [] as unknown[], questions: [] as unknown[], model: "model", provider: { model: "model" }, draft: "", draftVersion: 0, revision: 1 };
   const key = threadConversationKey(chat, ["fix", []]);
   assert.equal(threadConversationKey({ ...chat, draft: "typing", draftVersion: 2, revision: 2 }, ["fix", []]), key);
   for (const patch of [
     { id: "other" }, { runs: [{ id: "turn", text: "hello world" }] }, { activeTurnId: "turn" },
-    { approvals: [{ id: "approval" }] }, { questions: [{ id: "question" }] }, { model: "other" }, { provider: "other" },
+    { approvals: [{ id: "approval" }] }, { questions: [{ id: "question" }] }, { model: "other" }, { provider: { model: "other" } },
   ]) assert.notEqual(threadConversationKey({ ...chat, ...patch }, ["fix", []]), key);
   assert.notEqual(threadConversationKey(chat, ["fix", ["open-step"]]), key);
   assert.notEqual(threadConversationKey(null, ["fix", []]), key);

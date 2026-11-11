@@ -31,7 +31,7 @@ const inSession = () => state.runs.length > 0, inAssistant = () => false, isPlai
 const projectLabel = path => path.replace(/\\\\/g, '/').split('/').at(-1);
 let question = null, suggestion = null, whereOpen = null, stopArmed = 0, answeringQuestion = false;
 const pendingQuestion = () => question, questionIndex = () => 0, nextSuggestion = () => suggestion;
-const diffNotes = new Map(), pointed = [], pastes = [], attachmentPreviews = new Map([['image','data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="30"/%3E']]);
+const diffNotes = new Map(), pointed = [], pastes = [], attachmentPreviews = new Map([['image','data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"/>')]]);
 const PASTE_ICON = '', pasteLabel = text => text.slice(0,20), pointLabel = point => point.label;
 let composerSignature = '', composerFiles = null, composerWidth = 0, pendingMode = null;
 ${section('type Mode =', 'let pendingMode:')}
@@ -152,8 +152,8 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Windows desktop chat red
     expect(await page.locator('[data-action="remove-mention"]').textContent()).toContain("src/alpha.ts");
     await page.evaluate(() => (window as any).fixture.draft("ready"));
     expect(await page.locator('[data-action="remove-mention"]').count()).toBe(0);
-    await page.evaluate(() => (window as any).fixture.preview('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="20"/%3E'));
-    expect(await page.locator('#attach-row img').getAttribute('src')).toContain('width="20"');
+    await page.evaluate(() => (window as any).fixture.preview('data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="20"/>')));
+    expect(await page.locator('#attach-row img').evaluate(node => decodeURIComponent(node.getAttribute('src') ?? ''))).toContain('width="20"');
     await page.evaluate(() => (window as any).fixture.patch({planOnly:true,activeTurnId:'turn'}));
     expect(await page.locator('#composer-mode').getAttribute('aria-label')).toBe('Mode: Plan');
     expect(await page.locator('#composer .send').getAttribute('aria-label')).toBe('Stop');
@@ -169,7 +169,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Windows desktop chat red
     const result = await page.evaluate(() => {
       const f = (window as any).fixture, turns = document.querySelector('.tp-turns')!, article = turns.querySelector('article'), answer = turns.querySelector('p');
       const conv = document.querySelector('.tp-conv')! as HTMLElement;
-      const spacer = document.createElement('div'); spacer.style.height = '1000px'; conv.append(spacer); conv.scrollTop = 100;
+      const spacer = document.createElement('div'); spacer.style.cssText = 'height:1000px;flex:none'; conv.append(spacer); conv.scrollTop = 100;
       const observer = new MutationObserver(() => {}); observer.observe(turns,{subtree:true,childList:true,characterData:true,attributes:true});
       f.thread({draft:'typing',draftVersion:1}); f.thread({draft:'typing more',draftVersion:2},'merge');
       const same = article === turns.querySelector('article') && answer === turns.querySelector('p'), records = observer.takeRecords().length, top = conv.scrollTop;

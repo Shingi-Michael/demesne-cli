@@ -373,7 +373,7 @@ async function capture(name: string) {
 async function open(workspace = false, welcome = false, extraEnv: Record<string, string> = {}) {
   desktop = await electron.launch({ ...(packagedExecutable ? { executablePath: resolve(packagedExecutable) } : {}), args: [...(packagedExecutable ? [] : [application]), `--user-data-dir=${join(f.root, "electron")}`, ...(workspace ? [`--workspace=${f.workspace}`] : []), `--server=${f.server.url}`], env: {
     // Solid unless a launch asks for glass (DEMESNE_GLASS="" leaves it on).
-    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), DEMESNE_GLASS: "0", ...extraEnv,
+    ...f.env, XDG_CONFIG_HOME: join(f.home, ".config"), XDG_CACHE_HOME: join(f.home, ".cache"), DEMESNE_GLASS: "0", DEMESNE_START_ON_ASK: "1", ...extraEnv,
   }, timeout: 30_000 });
   desktop.process().stderr?.on("data", bytes => { log = (log + String(bytes)).slice(-64 * 1024); });
   page = await desktop.firstWindow();

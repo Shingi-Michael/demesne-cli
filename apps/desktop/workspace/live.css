@@ -1828,7 +1828,7 @@ button:disabled {
   align-items: center;
   gap: 10px;
   min-height: 34px;
-  padding: 0 8px 0 12px;
+  padding: 0 6px 0 12px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--thinking) 13%, transparent);
   font-size: 13px;

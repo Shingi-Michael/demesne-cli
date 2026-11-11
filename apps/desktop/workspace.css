@@ -263,7 +263,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    columns are the same box at any width, with the info cards open or not. */
 .desktop #input-area > * { max-width: 780px; margin-left: auto; margin-right: auto; }
 .desktop .live-app:not(.start) #input-area { max-width: none; }
-.desktop .live-app:not(.start) #input-area > #composer-slot { box-sizing: border-box; padding-left: 32px; }
+/* The composer, an approval and the threads' merge bar all start on the answers' text. */
+.desktop .live-app:not(.start) #input-area > :is(#composer-slot, #approval, #threads-foot) { box-sizing: border-box; padding-left: 32px; }
 /* An approval above the box keeps its command in full: a habit note beside
    it gives up its room first. */
 .desktop .approval-row code { flex-shrink: 0; max-width: 65%; }
@@ -1214,7 +1215,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .where-opt:hover, .where-opt:focus-visible { background: var(--tone); color: var(--t1); outline: none; }
 .where-opt.on { color: var(--t1); box-shadow: inset 0 0 0 1px var(--hair); }
 .where-opt kbd { border: 0; background: none; padding: 0; font-size: 11px; color: var(--t4); }
-#plain-line { max-width: 780px; margin: 2px auto 18px; padding-left: 18px; }
+#plain-line { max-width: 780px; margin: 2px auto 18px; padding-left: 32px; }
 #plain-line .plain-note { margin: 0; font-size: 12.5px; color: var(--t4); }
 #plain-line .plain-note .link { color: var(--t3); }
 #plain-line .plain-note .link:hover { color: var(--t1); }
@@ -1850,8 +1851,8 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 /* What a chat made: a link card per artifact (pass 192 A), its kind's
    tile, its name and version, and Open. The one open in the
    pane wears a tone. */
-.fd-chips { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 8px 0 4px; }
-.fd-chip { display: flex; align-items: center; gap: 12px; width: min(440px, 100%); padding: 7px; border: 0; border-radius: var(--r-lg); background: color-mix(in srgb, var(--t1) 3%, transparent); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t2); font: inherit; text-align: left; cursor: pointer; transition: background-color 140ms var(--ease), box-shadow 140ms var(--ease); }
+.fd-chips { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 8px 0 4px 32px; }
+.fd-chip { display: flex; align-items: center; gap: 12px; width: min(440px, 100%); padding: 7px 7px 7px 13px; border: 0; border-radius: var(--r-lg); background: color-mix(in srgb, var(--t1) 3%, transparent); box-shadow: inset 0 0 0 1px var(--hair); color: var(--t2); font: inherit; text-align: left; cursor: pointer; transition: background-color 140ms var(--ease), box-shadow 140ms var(--ease); }
 .fd-chip:hover { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair2); }
 .fd-chip[aria-pressed="true"] { background: var(--tone); box-shadow: inset 0 0 0 1px var(--hair2); }
 .fd-chip:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; }
@@ -2828,3 +2829,7 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .dm-words small { display: block; color: var(--t3); font-size: 12.5px; }
 /* Customize's closing note starts on its rows' text, as Scheduled's starts on its field's. */
 #page[data-kind="customize"] .sp-hint { margin-inline: 10px; }
+/* A question under the chat sits on the answers' grid: its dot in the mark's column, its words, choices and foot on the text's line. */
+.desktop #question .ask-card { box-sizing: border-box; padding-left: 32px; }
+.desktop #question :is(.ask-q, .ask-foot) { position: relative; padding: 0; }
+.desktop #question .ask-q i { position: absolute; left: -25.5px; top: 6.5px; transform: none; }

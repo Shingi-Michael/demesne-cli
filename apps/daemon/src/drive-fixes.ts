@@ -95,7 +95,24 @@ End with two or three plain sentences: what you changed and how you checked it.`
 }
 
 /// At most this many threads work at once in a project.
-export const MAX_THREADS = 3;
+export const MAX_THREADS = 6;
+/// A thread is sent back at most this many times in all: once by its own
+/// check when it lands, once more by its orchestrator after reading it.
+export const MAX_SEND_BACKS = 2;
+
+const claimOf = (path: string) => path.trim().replace(/^\.\//, "").replace(/\/+$/, "");
+/// What's off with a thread that came back (pass 211): files it changed
+/// outside its claim, or a check that failed. No issues and a passing check
+/// is "checked". Paths are relative to the thread's project folder.
+export function threadIssues(fix: Pick<DriveFix, "thread" | "checks">, paths: string[]): string[] {
+  const claims = (fix.thread?.files ?? []).map(claimOf);
+  const outside = claims.some((claim) => claim === "" || claim === ".") ? [] : paths.filter((path) => !claims.some((claim) => path === claim || path.startsWith(`${claim}/`)));
+  const failed = (fix.checks ?? []).filter((check) => !check.passed).map((check) => check.command);
+  return [
+    ...(outside.length ? [`it changed files outside its claim (${outside.slice(0, 6).join(", ")}${outside.length > 6 ? ", …" : ""}). Undo those changes, unless the job can't be done without them; then keep them and say why at the end`] : []),
+    ...(failed.length ? [`a check failed (${failed.slice(0, 3).join("; ")}). Fix what it reports and run it again until it passes`] : []),
+  ];
+}
 
 const slugOf = (text: string, fallback: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32).replace(/-$/, "") || fallback;
 
@@ -215,36 +232,113 @@ export class DriveFixes {
   /// and branch, side by side with the others. It reports back to the chat
   /// that started it, and only the person merges it (Apply).
   async startThread(workspace: string, from: string, job: { title: string } & DriveThread): Promise<DriveFix> {
-    const open = this.fixes.filter((fix) => fix.workspace === workspace && fix.thread && (fix.status === "starting" || fix.status === "running"));
+    const open = this.fixes.filter((fix) => fix.workspace === workspace && fix.thread && fix.sessionId && (fix.status === "starting" || fix.status === "running"));
     if (open.length >= MAX_THREADS) throw new Error(`${MAX_THREADS} threads are already working in this project; wait for one to finish.`);
     const top = await this.git(["git", "rev-parse", "--show-toplevel"], workspace);
     if (!top.ok) throw new Error("Threads only work inside a project with a git repository.");
     const base = await this.git(["git", "rev-parse", "HEAD"], workspace);
     if (!base.ok) throw new Error("This repository has no commits yet.");
+    const after = job.after ? this.get(job.after) : null;
+    if (job.after && (!after?.thread || after.from !== from || !ACTIVE.has(after.status))) throw new Error("The thread it waits for isn't open.");
     const id = randomUUID().slice(0, 8);
     const title = firstLine(job.title).slice(0, 120) || "Thread";
     const branch = `thread/${slugOf(title, "job")}-${id.slice(0, 4)}`;
     const path = join(this.worktreeRoot, `${basename(top.out)}-${id}`);
-    const thread: DriveThread = { brief: job.brief.trim().slice(0, 4000), files: job.files.map((file) => file.trim()).filter(Boolean).slice(0, 40) };
+    const thread: DriveThread = { brief: job.brief.trim().slice(0, 4000), files: job.files.map((file) => file.trim()).filter(Boolean).slice(0, 40), ...(after ? { after: after.id } : {}) };
     const fix: DriveFix = { id, workspace, title, signals: [], from, thread, branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
     this.fixes.push(fix); this.save();
+    // One that waits starts once the thread it waits for is back and checked.
+    if (after && after.status !== "ready") return fix;
+    await this.launchThread(fix, top.out);
+    return fix;
+  }
+
+  /// Makes a thread's worktree and starts its first turn. One that waits
+  /// starts on the tip of the thread it waits for, so it only carries its own work.
+  private async launchThread(fix: DriveFix, top?: string) {
+    const thread = fix.thread!;
     try {
+      top ??= (await this.git(["git", "rev-parse", "--show-toplevel"], fix.workspace)).out;
+      if (thread.after) {
+        const after = this.get(thread.after);
+        const tip = after ? await this.git(["git", "rev-parse", after.branch], fix.workspace) : null;
+        if (!tip?.ok) throw new Error("The thread it waited for has no branch any more.");
+        fix.base = tip.out;
+      }
+      const { workspace, branch, path, title, from } = fix;
       mkdirSync(this.worktreeRoot, { recursive: true, mode: 0o700 });
       const added = await this.git(["git", "worktree", "add", "-b", branch, path, fix.base], workspace, 120_000);
       if (!added.ok) throw new Error(`Couldn't create the worktree: ${firstLine(added.err)}`);
-      fix.linked = await this.linkDependencies(top.out, path);
-      const sub = relative(top.out, workspace);
+      fix.linked = await this.linkDependencies(top, path);
+      const sub = relative(top, workspace);
       const sessionId = this.host.startSession(title, sub ? join(path, sub) : path, from);
       // Known as a thread before its first turn runs (it never sees Heartbeat).
       fix.sessionId = sessionId;
       const { turnId, done } = this.host.startTurn(sessionId, threadPrompt({ ...fix, thread }));
-      Object.assign(fix, { sessionId, turnId, status: "running" });
+      Object.assign(fix, { sessionId, turnId, status: "running", startedAt: new Date().toISOString() });
       this.save();
-      this.done.set(id, done.then(() => this.finish(fix)).catch((error) => this.fail(fix, error)).finally(() => { this.done.delete(id); this.reportThread(fix); }));
+      this.watchThread(fix, done);
     } catch (error) {
       this.fail(fix, error);
       await this.cleanup(fix, true);
+      this.thenWaiting(fix);
     }
+  }
+
+  /// Follows a thread's turn to its end, then checks it: work outside its
+  /// claim or a failed check sends it back once with what to fix. Then it
+  /// reports to its orchestrator, and threads waiting on it start.
+  private watchThread(fix: DriveFix, done: Promise<void>) {
+    const work = (async () => {
+      for (;;) {
+        try { await done; await this.finish(fix); } catch (error) { this.fail(fix, error); }
+        if (fix.status !== "ready") break;
+        const issues = threadIssues(fix, await this.threadPaths(fix));
+        const review = fix.review ?? { sentBack: 0 };
+        if (issues.length && review.sentBack < 1 && fix.sessionId) {
+          const note = issues.join("; ");
+          fix.review = { sentBack: review.sentBack + 1, note };
+          const next = this.host.startTurn(fix.sessionId, `Your work came back with something to fix before it's ready: ${note}.`);
+          Object.assign(fix, { turnId: next.turnId, status: "running", finishedAt: null });
+          this.save();
+          done = next.done;
+          continue;
+        }
+        fix.review = { sentBack: review.sentBack, ...(issues.length ? { note: issues.join("; ") } : !fix.checks?.length ? { note: "no checks ran" } : { checked: true }) };
+        this.save();
+        break;
+      }
+    })().finally(() => { this.done.delete(fix.id); this.reportThread(fix); this.thenWaiting(fix); });
+    this.done.set(fix.id, work);
+  }
+
+  /// The files a thread changed, relative to its project folder.
+  private async threadPaths(fix: DriveFix): Promise<string[]> {
+    const prefix = (await this.git(["git", "rev-parse", "--show-prefix"], fix.workspace)).out;
+    const listed = await this.git(["git", "diff", "--name-only", "--relative", `${fix.base}..HEAD`], prefix ? join(fix.path, prefix) : fix.path);
+    return listed.ok ? listed.out.split("\n").filter(Boolean) : [];
+  }
+
+  /// Threads waiting on this one start once it's back and checked, and fail
+  /// with it when it didn't make it.
+  private thenWaiting(fix: DriveFix) {
+    for (const next of this.fixes.filter((item) => item.thread?.after === fix.id && item.status === "starting" && !item.sessionId)) {
+      if (fix.status === "ready") void this.launchThread(next);
+      else if (fix.status !== "running") { this.fail(next, new Error(`"${fix.title}", which it waited for, didn't finish.`)); this.reportThread(next); }
+    }
+  }
+
+  /// The orchestrator (or you) sends a thread that's back to work again: it
+  /// runs, is checked and reports again like the first time.
+  sendBack(id: string, text: string, by: "orchestrator" | "you" = "you"): DriveFix {
+    const fix = this.get(id);
+    if (!fix?.thread || !fix.sessionId || fix.status !== "ready") throw new Error("That thread isn't back.");
+    const review = fix.review ?? { sentBack: 0 };
+    fix.review = by === "orchestrator" ? { sentBack: review.sentBack + 1, note: text.split("\n")[0]!.slice(0, 200) } : { sentBack: review.sentBack };
+    const next = this.host.startTurn(fix.sessionId, text);
+    Object.assign(fix, { turnId: next.turnId, status: "running", finishedAt: null });
+    this.save();
+    this.watchThread(fix, next.done);
     return fix;
   }
 
@@ -252,8 +346,11 @@ export class DriveFixes {
   private reportThread(fix: DriveFix) {
     if (!fix.thread || !fix.from || !fix.sessionId || (fix.status !== "ready" && fix.status !== "failed")) return;
     const others = this.fixes.filter((item) => item.thread && item.from === fix.from && item.workspace === fix.workspace && item.id !== fix.id && (item.status === "starting" || item.status === "running")).length;
-    this.host.report?.(fix.from, formatThreadReport({ title: fix.title, fix: fix.id, chat: fix.sessionId, branch: fix.branch, status: fix.status, working: others,
+    const waiting = this.fixes.filter((item) => item.thread?.after && item.from === fix.from && item.status === "starting" && !item.sessionId).length;
+    this.host.report?.(fix.from, formatThreadReport({ title: fix.title, fix: fix.id, chat: fix.sessionId, branch: fix.branch, status: fix.status, working: others + waiting,
       ...(fix.diff ? { diff: fix.diff } : {}), ...(fix.checks?.length ? { checks: fix.checks } : {}),
+      ...(fix.review ? { review: { sentBack: fix.review.sentBack, checked: fix.review.checked === true, ...(fix.review.note ? { note: fix.review.note } : {}), last: fix.review.sentBack >= MAX_SEND_BACKS } } : {}),
+      ...(fix.thread.after ? { after: this.get(fix.thread.after)?.title ?? fix.thread.after } : {}),
       summary: fix.status === "failed" ? fix.error ?? "It stopped." : fix.summary ?? "" }));
   }
 
@@ -441,11 +538,19 @@ export class DriveFixes {
     if (fix.status !== "ready") throw new Error(`The ${fix.proposal || fix.mission ? "change" : "fix"} isn't ready yet.`);
     if (action === "apply") {
       // Words the person sent the thread after it finished may have changed more.
-      if (fix.thread) { await this.commit(fix); if (fix.status !== "ready") throw new Error(fix.error ?? "The thread isn't ready."); }
+      if (fix.thread) {
+        const first = fix.thread.after ? this.get(fix.thread.after) : null;
+        if (first && first.status !== "applied") throw new Error(`Merge "${first.title}" first: this thread was built on it.`);
+        await this.commit(fix); if (fix.status !== "ready") throw new Error(fix.error ?? "The thread isn't ready.");
+      }
       const picked = await this.git(["git", "cherry-pick", `${fix.base}..${fix.branch}`], fix.workspace, 120_000);
       if (!picked.ok) {
         await this.git(["git", "cherry-pick", "--abort"], fix.workspace);
-        throw new Error(`It didn't apply cleanly to your checkout (${firstLine(picked.err || picked.out)}). It's still on ${fix.branch}.`);
+        // A thread fixes its own merge: its work goes onto your branch as it
+        // is now, and a turn settles the conflicts. Merge again once it's back.
+        const refit = fix.thread ? await this.refit(fix) : false;
+        if (refit === "fixing") return fix;
+        if (!refit) throw new Error(`It didn't apply cleanly to your checkout (${firstLine(picked.err || picked.out)}). It's still on ${fix.branch}.`);
       }
       await this.cleanup(fix, true);
       fix.status = "applied";
@@ -464,6 +569,42 @@ export class DriveFixes {
     this.save();
     this.settle(fix, before);
     return fix;
+  }
+
+  /// A thread that no longer applies: its work is laid on top of your
+  /// branch's latest commit in its own worktree. What applies cleanly is
+  /// committed at once; conflicts are left marked for a thread turn to
+  /// settle. False when it couldn't even be laid on (it stays as it was).
+  private async refit(fix: DriveFix): Promise<"applied" | "fixing" | false> {
+    if (!fix.sessionId) return false;
+    const head = await this.git(["git", "rev-parse", "HEAD"], fix.workspace);
+    const tip = await this.git(["git", "rev-parse", "HEAD"], fix.path);
+    const patch = await this.git(["git", "diff", "--binary", `${fix.base}..HEAD`], fix.path);
+    if (!head.ok || !tip.ok || !patch.ok || !patch.out) return false;
+    const base = fix.base, file = join(dirname(this.stateFile), `thread-${fix.id}.patch`);
+    writeFileSync(file, `${patch.out}\n`, { mode: 0o600 });
+    try {
+      const reset = await this.git(["git", "reset", "--hard", head.out], fix.path);
+      if (!reset.ok) return false;
+      const applied = await this.git(["git", "apply", "--3way", "--whitespace=nowarn", file], fix.path, 120_000);
+      fix.base = head.out;
+      if (applied.ok) {
+        await this.commit(fix);
+        if (fix.status !== "ready") return false;
+        const picked = await this.git(["git", "cherry-pick", `${fix.base}..${fix.branch}`], fix.workspace, 120_000);
+        if (!picked.ok) { await this.git(["git", "cherry-pick", "--abort"], fix.workspace); return false; }
+        return "applied";
+      }
+      const marked = await this.git(["git", "diff", "--name-only", "--diff-filter=U"], fix.path);
+      const files = marked.out.split("\n").filter(Boolean);
+      if (!files.length) { await this.git(["git", "reset", "--hard", tip.out], fix.path); fix.base = base; return false; }
+      fix.review = { sentBack: fix.review?.sentBack ?? 0, note: `fixing the merge in ${files.slice(0, 4).join(", ")}` };
+      const next = this.host.startTurn(fix.sessionId, `Your work didn't merge onto the person's branch: it moved on since you started. Your changes are now laid on top of its latest commit, with conflict markers (<<<<<<<, =======, >>>>>>>) in: ${files.join(", ")}. Settle each conflict so both their change and yours still work, remove every marker, then run the checks that cover it. Don't commit; demesne does.`);
+      Object.assign(fix, { turnId: next.turnId, status: "running", finishedAt: null });
+      this.save();
+      this.watchThread(fix, next.done);
+      return "fixing";
+    } finally { rmSync(file, { force: true }); }
   }
 
   /// Takes the worktree and its branch off the machine, and the chat out of

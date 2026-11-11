@@ -103,6 +103,8 @@ test("an orchestrator chat splits work into threads that run side by side, repor
     for (const name of ["write_file", "edit_file", "run_command"]) expect(orchestrated[0]).not.toContain(name);
     // Nothing reached the checkout until the person merges.
     expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 1;\n");
+    // A thread that was back went back to work, and is checked and back again.
+    for (let i = 0; i < 400 && (await call(`/v1/threads?from=${session.id}`)).body.fixes.some((fix: DriveFix) => fix.status !== "ready"); i++) await Bun.sleep(25);
     for (const fix of threads) expect((await call(`/v1/drive/fixes/${fix.id}/apply`, { method: "POST" })).body.fix.status).toBe("applied");
     expect(readFileSync(join(workspace, "src", "a.ts"), "utf8")).toBe("export const a = 3;\n");
     expect(readFileSync(join(workspace, "src", "b.ts"), "utf8")).toBe("export const b = 2;\n");

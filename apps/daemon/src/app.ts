@@ -694,6 +694,8 @@ export function createDaemonApp(options: {
       const sessionId = fix.sessionId!;
       const running = store.getSession(sessionId)?.turns.find((item) => item.status === "running");
       if (running && engine.steer(running.id, { id: randomUUID(), text })) return { title: fix.title, how: "steered" };
+      // A thread that's back goes back to work: it's checked and reports again.
+      if (fix.status === "ready") { driveFixes.sendBack(fix.id, text, "orchestrator"); return { title: fix.title, how: "sent" }; }
       const { turn } = store.createTurn(sessionId, text, "allow", true, false);
       void queueTurn(turn, inferenceIn(sessionId, true));
       return { title: fix.title, how: "sent" };

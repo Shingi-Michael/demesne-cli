@@ -5,7 +5,8 @@
 /// something the person typed.
 
 export const THREAD_REPORT_HEADER = "Thread report: ";
-const NOTE = "(This is one of the threads you started reporting back. It worked in its own git worktree and branch; nothing reaches the person's checkout until they press Merge on the thread list. If other threads are still working, acknowledge this in one short sentence. If it was the last one, read the reports, say in two or three sentences whether each stayed inside its files and passed its checks, and suggest the order to merge them. You can't merge: the person does. Use no tools.)";
+const NOTE = "(This is one of the threads you started reporting back. It worked in its own git worktree and branch; nothing reaches the person's checkout until they press Merge on it. Demesne already checked that it stayed inside its files and that its checks passed (the review line). Now check the work itself: read its summary against the brief you gave it. If it misses part of the brief or got something wrong, send it back once with message_thread, saying exactly what to fix, and tell the person in one sentence why. Otherwise, if other threads are still working, say in one short sentence that it's ready. If it was the last one, say in two or three sentences how each did and suggest the order to merge them (a thread built on another merges after it). You can't merge: the person does. Use no tools other than message_thread.)";
+const LAST_NOTE = "(This thread was already sent back as often as it can be: don't send it back again. Say in one sentence what is still off, if anything, and leave it to the person.)";
 
 export interface ThreadReport {
   title: string;
@@ -19,6 +20,11 @@ export interface ThreadReport {
   working: number;
   diff?: { files: number; additions: number; deletions: number; paths: string[] };
   checks?: { command: string; passed: boolean }[];
+  /// Demesne's check when it came back (pass 211): times sent back, whether
+  /// it came back clean, what was off, and whether it can't go back again.
+  review?: { sentBack: number; checked: boolean; note?: string; last?: boolean };
+  /// The title of the thread it was built on, which merges first.
+  after?: string;
   summary: string;
 }
 
@@ -33,7 +39,9 @@ export function formatThreadReport(report: ThreadReport): string {
   ];
   if (report.diff) lines.push(`changed: +${report.diff.additions} -${report.diff.deletions} in ${report.diff.files} file${report.diff.files === 1 ? "" : "s"}${report.diff.paths.length ? ` (${report.diff.paths.join(", ")})` : ""}`);
   if (report.checks?.length) lines.push(`checks: ${report.checks.map((check) => `${check.passed ? "passed" : "failed"} ${check.command.replace(/\n/g, " ")}`).join("; ")}`);
-  return [...lines, "", report.summary.trim() || "The thread gave no summary.", "", NOTE].join("\n");
+  if (report.review) lines.push(`review: ${report.review.checked ? "checked" : "not checked"}; sent back ${report.review.sentBack}${report.review.note ? `; ${report.review.note.replace(/\n/g, " ")}` : ""}`);
+  if (report.after) lines.push(`built on: ${report.after.replace(/\n/g, " ")}`);
+  return [...lines, "", report.summary.trim() || "The thread gave no summary.", "", report.review?.last ? `${NOTE}\n${LAST_NOTE}` : NOTE].join("\n");
 }
 
 export function isThreadReport(content: string): boolean { return content.startsWith(THREAD_REPORT_HEADER); }
@@ -48,8 +56,11 @@ export function parseThreadReport(content: string): ThreadReport | null {
     fix: field("fix"), chat: field("chat"), branch: field("branch"),
     status: field("status") === "failed" ? "failed" : "ready",
     working: Number(field("still working")) || 0,
-    summary: rest.filter((part) => part !== NOTE).join("\n\n").trim(),
+    summary: rest.filter((part) => !part.startsWith(NOTE)).join("\n\n").trim(),
   };
+  const review = /^(checked|not checked); sent back (\d+)(?:; (.*))?$/.exec(field("review"));
+  if (review) report.review = { checked: review[1] === "checked", sentBack: Number(review[2]), ...(review[3] ? { note: review[3] } : {}) };
+  if (field("built on")) report.after = field("built on");
   const changed = /^\+(\d+) -(\d+) in (\d+) files?(?: \((.*)\))?$/.exec(field("changed"));
   if (changed) report.diff = { additions: Number(changed[1]), deletions: Number(changed[2]), files: Number(changed[3]), paths: changed[4] ? changed[4].split(", ") : [] };
   const checks = field("checks");

@@ -139,8 +139,14 @@ export interface DriveFix {
   thread?: DriveThread;
   /// While running: the thread's chat waits on the person (an approval or a question).
   waiting?: boolean;
+  /// A thread's check when it comes back (pass 211): its files, its checks.
+  /// `sentBack` counts the times it was sent back to fix something, `note`
+  /// says what, and `checked` is set once it came back with nothing off.
+  review?: { sentBack: number; note?: string; checked?: boolean };
 }
-export interface DriveThread { brief: string; files: string[] }
+/// `after`: the id of the thread this one waits for. It starts on that
+/// thread's branch once that one is back and checked, and merges after it.
+export interface DriveThread { brief: string; files: string[]; after?: string }
 /// What a proposal run carries; the estimate and confidence let its outcome
 /// calibrate later rankings.
 export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why"> & Partial<Pick<DriveProposal, "minutes" | "confidence" | "check">>;

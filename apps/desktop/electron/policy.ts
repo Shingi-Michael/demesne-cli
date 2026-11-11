@@ -1,6 +1,5 @@
 import { isAbsolute, resolve, sep } from "node:path";
-import { assembledDocument } from "./foundry-assemble.ts";
-import { isReadyKind, KINDS_SCRIPT, KINDS_STYLE, renderReadyKind } from "./foundry-kinds.ts";
+import { isReadyKind, renderReadyKind } from "./foundry-kinds.ts";
 export const APP_URL = "demesne://app/index.html";
 /** Whether the window is glass, with the Glass slider in Settings: on the
  *  Mac, Windows and Linux alike. DEMESNE_GLASS=0 keeps Linux or Windows
@@ -68,21 +67,39 @@ export function foundryURL(value: string) {
  * folder, its type, and a file served after it. */
 export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: string }> = {
   "base.css": { path: "kit/base.css", type: "text/css; charset=utf-8" },
-  // anime.js, then the motion runtime (demesne.motion) that lets the pane scrub a page's motions.
+  // anime.js, then motion.js, which keeps older pages' demesne.motion() calls working.
   "anime.js": { path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8", then: "kit/motion.js" },
-  // Pick an option: pages that mark options with data-option get a Pick button on hover.
-  "pick.js": { path: "kit/pick.js", type: "application/javascript; charset=utf-8" },
   // Parts: frames, Demesne's own shell and pieces, icons, avatars, charts.
   "parts.js": { path: "kit/parts.js", type: "application/javascript; charset=utf-8" },
   // The ready kinds (foundry-kinds.ts): how a Deck, a Doc and a Dashboard look and move.
   "kinds.css": { path: "kit/kinds.css", type: "text/css; charset=utf-8" },
   "kinds.js": { path: "kit/kinds.js", type: "application/javascript; charset=utf-8" },
+  // Pages that remember: demesne.save / load / ask / pick. Demesne puts it in front of every page (withRemember).
+  "remember.js": { path: "kit/remember.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
-export const FOUNDRY_KIT_STYLE = "foundry://kit/base.css", FOUNDRY_KIT_SCRIPT = "foundry://kit/anime.js";
-export const FOUNDRY_PICK_SCRIPT = "foundry://kit/pick.js", FOUNDRY_PARTS_SCRIPT = "foundry://kit/parts.js";
-/** A page that marks options (data-option) gets the Pick runtime after it. */
-export const withPick = (html: string) => /\bdata-option\b/.test(html) ? `${html}\n<script src="${FOUNDRY_PICK_SCRIPT}"></script>` : html;
+/** A page's own calls to Demesne: foundry://data/<id> keeps what the page
+ * saves, foundry://ask/<id> asks the chat's model. Null for anything else. */
+export function foundryPageCall(value: string): { what: "data" | "ask"; id: string } | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "foundry:" || (url.hostname !== "data" && url.hostname !== "ask") || url.username || url.password || url.port || url.search) return null;
+    const id = decodeURIComponent(url.pathname.slice(1));
+    return /^[\w-]{1,200}$/.test(id) ? { what: url.hostname, id } : null;
+  } catch { return null; }
+}
+/** A page uses the remember runtime when it calls one of its four functions. */
+export const usesRemember = (html: string) => /\bdemesne\s*\.\s*(?:save|load|ask|pick)\s*\(/.test(html);
+/** A page that uses it gets the runtime first, before its own scripts run. With
+ * a page (its id and the key Demesne made for it) saves and asks reach
+ * Demesne; without one (the look window, an exported file) they stay in the
+ * page. A script before <html> would not change the document's mode once
+ * the doctype is read, so it goes straight after the doctype. */
+export function withRemember(html: string, runtime: string, page?: { id: string; key: string }) {
+  const script = `${page ? `<script>window.__demesnePage=${JSON.stringify(page).replace(/</g, "\\u003c")};</script>` : ""}<script>${runtime.replace(/<\//g, "<\\/")}</script>`;
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  return doctype ? `${doctype[0]}${script}${html.slice(doctype[0].length)}` : `${script}${html}`;
+}
 /** The kit file a foundry://kit/<file> address names, or null. */
 export function foundryKitFile(value: string): string | null {
   try {
@@ -92,36 +109,22 @@ export function foundryKitFile(value: string): string | null {
     return Object.hasOwn(FOUNDRY_KIT, name) ? name : null;
   } catch { return null; }
 }
-/** A page as it leaves Demesne (Export): the kit it leaned on is inlined,
- * so the file stands on its own. The fonts fall back to the system's. */
-export function exportedSource(source: string, kit: { style: string; script: string; parts?: string; kinds?: { style: string; script: string } }) {
-  const tag = (name: string, address: string) => new RegExp(`<${name}\\b[^>]*\\b(?:href|src)=["']?${address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']?[^>]*>(?:\\s*</${name}>)?`, "gi");
-  const style = kit.style.replace(/@font-face\{[^}]*foundry:\/\/kit\/[^}]*\}\n?/g, "");
-  return source
-    .replace(tag("link", FOUNDRY_KIT_STYLE), () => `<style>\n${style}</style>`)
-    .replace(tag("script", FOUNDRY_KIT_SCRIPT), () => `<script>${kit.script.replace(/<\//g, "<\\/")}</script>`)
-    .replace(tag("script", FOUNDRY_PARTS_SCRIPT), (found) => kit.parts === undefined ? found : `<script>${kit.parts.replace(/<\//g, "<\\/")}</script>`)
-    .replace(tag("link", KINDS_STYLE), (found) => kit.kinds === undefined ? found : `<style>\n${kit.kinds.style}</style>`)
-    .replace(tag("script", KINDS_SCRIPT), (found) => kit.kinds === undefined ? found : `<script>${kit.kinds.script.replace(/<\//g, "<\\/")}</script>`);
-}
 /** Where an artifact may load libraries and fonts from: the same short list
  * Claude's artifacts allow, so a chart, React or a real typeface works. */
 export const FOUNDRY_SCRIPT_HOSTS = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com"] as const;
 export const FOUNDRY_FONT_HOSTS = { styles: "https://fonts.googleapis.com", files: "https://fonts.gstatic.com" } as const;
 /** What an artifact frame may do: run its own inline code, load the kit,
  * pinned libraries from the hosts above and Google Fonts, and nothing
- * else: no fetch, no forms, no other origins. */
-export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
-/** The first show of a version assembles the page: anime.js and the
- * assembly script ride along, with the previous version to diff against. */
-export interface FoundryAssembly { library: string; previous: string | null }
+ * else: no forms, no other origins. Its only fetch is to foundry:, for
+ * what the page saves and asks (foundryPageCall). */
+export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; connect-src foundry:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
 /** The page an artifact frame shows: HTML as written, SVG as an image (so it runs no script). */
-export function foundryDocument(kind: string, source: string, title: string, assembly?: FoundryAssembly) {
+export function foundryDocument(kind: string, source: string, title: string) {
   const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);
   // A Deck, a Doc or a Dashboard: the content drawn by the app's own renderer.
   if (isReadyKind(kind)) return renderReadyKind(kind, source, title);
-  if (kind === "html") return withPick(assembly ? assembledDocument(source, assembly.library, assembly.previous) : source);
-  if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}${assembly ? "@media(prefers-reduced-motion:no-preference){img{animation:in 600ms cubic-bezier(.2,.8,.2,1)}@keyframes in{from{opacity:0;transform:scale(.6) rotate(-6deg)}}}" : ""}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
+  if (kind === "html") return source;
+  if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
   return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><pre style="white-space:pre-wrap;font:14px/1.6 system-ui;padding:24px">${esc(source)}</pre>`;
 }
 export const EVENTS = ["demesne:update", "demesne:desktop-error", "demesne:desktop-action"] as const;

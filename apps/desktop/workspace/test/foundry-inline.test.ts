@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chatArtifacts, makingTitle, type ChatArtifact } from "../foundry-inline.ts";
+import { chatArtifacts, type ChatArtifact } from "../foundry-inline.ts";
 import type { ToolEntry } from "@demesne/workbench/entries.ts";
 
 const save = (value: unknown, state: ToolEntry["state"] = "done") => ({ name: "foundry_save", state, message: JSON.stringify(value) });
@@ -39,20 +39,14 @@ test("a chip's words name the kind and the version", async () => {
   expect(chipWords({ ...artifact, kind: "markdown", version: 4 })).toBe("Document · v4");
 });
 
-test("an artifact keeps one chip, in the turn that first showed it; later turns that changed it are Edited lines", async () => {
-  const { editedIn } = await import("../foundry-inline.ts");
-  const garden = { id: "garden", title: "Garden", kind: "html" as const, version: 1 }, badge = { id: "badge", title: "Badge", kind: "svg" as const, version: 1 };
-  expect(editedIn([[garden], [], [{ ...garden, version: 2 }, badge], [{ ...badge, version: 2 }, { ...garden, version: 3 }]]).map((set) => [...set]))
-    .toEqual([[], [], ["garden"], ["badge", "garden"]]);
-});
 
-test("the title of the page Foundry is writing comes from the arguments still arriving", () => {
-  const draft = (draftArguments: string, extra: Partial<ToolEntry> = {}) => ({ name: "foundry_save", state: "running" as const, input: {}, drafting: true, draftArguments, ...extra });
-  expect(makingTitle([])).toBeNull();
-  expect(makingTitle([{ name: "foundry_save", state: "done", input: { title: "Done" } }])).toBeNull();
-  expect(makingTitle([draft('{"title": "Idea \\"garden\\"", "kind": "html", "source": "<!doctype')])).toBe('Idea "garden"');
-  expect(makingTitle([draft('{"kind": "html", "sou')])).toBe("Something new");
-  expect(makingTitle([draft("", { input: { title: "From input" }, drafting: false })])).toBe("From input");
-  // An edit of an open artifact is not a new page: the pane keeps what it shows.
-  expect(makingTitle([{ name: "foundry_edit", state: "running", input: { id: "garden" }, drafting: true, draftArguments: '{"title": "x"' }])).toBeNull();
+test("a chip carries the description and the version's name, and the pick leads (pass 208 A)", async () => {
+  const { chipWords } = await import("../foundry-inline.ts");
+  const calm = { ...artifact, id: "calm", title: "Calm", description: "Quiet plans.", note: "First take" };
+  const bold = { ...artifact, id: "bold", title: "Bold", description: "Loud plans.", recommended: true };
+  expect(chatArtifacts([save(calm), save(bold)])).toEqual([bold, calm]);
+  expect(chipWords(calm)).toBe("Prototype · v1 · First take");
+  // A lone mockup is never marked; a later fold without words keeps them.
+  expect(chatArtifacts([save(bold)])).toEqual([{ ...artifact, id: "bold", title: "Bold", description: "Loud plans." }]);
+  expect(chatArtifacts([save(calm), save({ ...artifact, id: "calm", title: "Calm" })])).toEqual([calm]);
 });

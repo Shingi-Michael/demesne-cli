@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DriveAwayRequest, DriveProposal } from "@demesne/protocol";
@@ -21,9 +21,31 @@ function setup(overrides: Partial<DriveAutoHost> = {}) {
   // The daemon has been up for a while.
   now -= 60 * 60_000;
   const auto = new DriveAutoRuns(file, host, () => now);
+  auto.set("/w", true);
   now += 60 * 60_000;
   return { auto, started, file, host, advance: (ms: number) => { now += ms; } };
 }
+
+test("Drive starts nothing on its own until you turn it on, even for a file that only listed projects turned off", () => {
+  let now = Date.parse("2026-10-21T10:00:00Z");
+  const started: unknown[] = [];
+  const host: DriveAutoHost = {
+    workspaces: () => ["/w"], trusted: () => true, busy: () => false,
+    lastActivity: () => now - 25 * 60_000,
+    ideas: () => ({ generatedAt: new Date(now - 60_000).toISOString(), proposals: [idea("A")], signals: [] }),
+    start: (request) => { started.push(request); },
+  };
+  const file = join(mkdtempSync(join(tmpdir(), "drive-auto-")), "drive-auto.json");
+  writeFileSync(file, JSON.stringify({ off: ["/other"], runs: [] }));
+  now -= 60 * 60_000;
+  const auto = new DriveAutoRuns(file, host, () => now);
+  now += 60 * 60_000;
+  expect(auto.state("/w").on).toBe(false);
+  expect(auto.tick()).toEqual([]);
+  expect(started).toEqual([]);
+  expect(auto.set("/w", true).on).toBe(true);
+  expect(auto.tick()).toEqual(["/w"]);
+});
 
 test("a quiet project runs its top idea on its own, one new idea each time", () => {
   const { auto, started } = setup();
@@ -82,6 +104,7 @@ test("a daemon that just started waits out its own quiet minutes first", () => {
     start: (request) => { started.push(request); },
   };
   const auto = new DriveAutoRuns(join(mkdtempSync(join(tmpdir(), "drive-auto-")), "drive-auto.json"), host, () => now);
+  auto.set("/w", true);
   expect(auto.tick()).toEqual([]);
   now += 19 * 60_000;
   expect(auto.tick()).toEqual([]);

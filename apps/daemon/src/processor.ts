@@ -62,7 +62,11 @@ export interface TurnProcessor {
 
 /// Per-call adjustments: Drive's cap on a single decision's output, or the
 /// model a sub-agent runs on (any configured provider's model).
-export interface InferenceOverrides { maxOutputTokens?: number; model?: string; reasoning?: string | null }
+export interface InferenceOverrides { maxOutputTokens?: number; model?: string; reasoning?: string | null;
+  /// A side job (Drive's ideas, Today posts, chat names, quick Foundry
+  /// answers): it runs at "low" effort when the model lists it, never at the
+  /// effort chosen for your chats, which can be xhigh.
+  light?: boolean }
 
 export function snapshotTurnInference(
   processor: TurnProcessor,

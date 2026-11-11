@@ -74,6 +74,14 @@ describe("loadConfig", () => {
     expect(() => validateConfigDocument({ agent: { subagent_model: 5 } })).toThrow();
   });
 
+  test("subagent_often is less, usual or more, from config or environment", () => {
+    const path = writeConfig(temporaryDirectory(), renderUserConfig({ agent: { subagentOften: "more" } }));
+    expect(readFileSync(path, "utf8")).toContain('subagent_often = "more"');
+    expect(loadConfig({ userConfigPath: path, env: {} }).config.agent).toEqual({ subagentOften: "more" });
+    expect(loadConfig({ userConfigPath: path, env: { DEMESNE_SUBAGENT_OFTEN: "less" } }).config.agent?.subagentOften).toBe("less");
+    expect(() => validateConfigDocument({ agent: { subagent_often: "always" } })).toThrow();
+  });
+
   test("agent allowances merge with environment precedence and round-trip through TOML", () => {
     const path = writeConfig(temporaryDirectory(), renderUserConfig({ agent: { maxModelRounds: 80, maxToolCalls: 320 } }));
     const project = writeConfig(temporaryDirectory(), "[agent]\nmax_tool_calls = 400\n");

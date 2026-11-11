@@ -2,11 +2,14 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PLAN_LIMIT_DRIVE_PAUSE, type DriveAuto, type DriveAwayRequest, type DriveProposal, type DriveSignal } from "@demesne/protocol";
 
-/// Drive on by default. Once a project has had no turn for a while, Drive
-/// runs its top Next idea in its own worktree, as an away run you never had
-/// to start. It stays inside fixed limits instead of asking: one run at a
-/// time, a few a day, only ideas it hasn't run lately, and only in a project
-/// you were working in today. One switch per project turns it off.
+/// Drive on its own, off until you turn it on. Once a project has had no
+/// turn for a while, Drive runs its top Next idea in its own worktree, as an
+/// away run you never had to start. It stays inside fixed limits instead of
+/// asking: one run at a time, a few a day, only ideas it hasn't run lately,
+/// and only in a project you were working in today. One switch per project
+/// turns it on. It used to be on by default, and those runs spent people's
+/// plans while they were away, so a project runs only once you said so
+/// (the old file's off list means nothing now).
 
 export const AUTO_QUIET_MINUTES = 20;
 export const AUTO_RUNS_PER_DAY = 3;
@@ -34,7 +37,7 @@ export interface DriveAutoHost {
 }
 
 interface Run { workspace: string; at: string; idea: string }
-interface Saved { off: string[]; runs: Run[] }
+interface Saved { on: string[]; runs: Run[] }
 
 export class DriveAutoRuns {
   private saved: Saved;
@@ -45,13 +48,13 @@ export class DriveAutoRuns {
     this.startedAt = now();
     try {
       const value = JSON.parse(readFileSync(file, "utf8")) as Partial<Saved>;
-      this.saved = { off: Array.isArray(value.off) ? value.off : [], runs: Array.isArray(value.runs) ? value.runs : [] };
-    } catch { this.saved = { off: [], runs: [] }; }
+      this.saved = { on: Array.isArray(value.on) ? value.on : [], runs: Array.isArray(value.runs) ? value.runs : [] };
+    } catch { this.saved = { on: [], runs: [] }; }
   }
 
   state(workspace: string): DriveAuto {
     const paused = this.planPaused();
-    return { workspace, on: !this.saved.off.includes(workspace), quietMinutes: AUTO_QUIET_MINUTES, perDay: AUTO_RUNS_PER_DAY, usedToday: this.today(workspace).length, ...(paused === null ? {} : { planPaused: paused }) };
+    return { workspace, on: this.saved.on.includes(workspace), quietMinutes: AUTO_QUIET_MINUTES, perDay: AUTO_RUNS_PER_DAY, usedToday: this.today(workspace).length, ...(paused === null ? {} : { planPaused: paused }) };
   }
 
   /// Near the end of your plan's window Drive leaves the rest to you.
@@ -61,8 +64,8 @@ export class DriveAutoRuns {
   }
 
   set(workspace: string, on: boolean): DriveAuto {
-    this.saved.off = this.saved.off.filter((item) => item !== workspace);
-    if (!on) this.saved.off.push(workspace);
+    this.saved.on = this.saved.on.filter((item) => item !== workspace);
+    if (on) this.saved.on.push(workspace);
     this.save();
     return this.state(workspace);
   }
@@ -83,7 +86,7 @@ export class DriveAutoRuns {
 
   /// The idea to run now, or null when this project should be left alone.
   private due(workspace: string): DriveAwayRequest["items"][number] | null {
-    if (this.saved.off.includes(workspace) || !this.host.trusted(workspace) || this.host.busy(workspace)) return null;
+    if (!this.saved.on.includes(workspace) || !this.host.trusted(workspace) || this.host.busy(workspace)) return null;
     if (this.today(workspace).length >= AUTO_RUNS_PER_DAY || this.planPaused() !== null) return null;
     const last = this.host.lastActivity(workspace);
     if (last === null || this.now() - last > AUTO_RECENT_HOURS * 3_600_000) return null;

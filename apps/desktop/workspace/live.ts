@@ -1,4 +1,5 @@
 import { resolveReasoningLevel } from "@demesne/protocol";
+import { quietDom } from "./quiet-dom.ts";
 import { THEMES } from "../../../packages/brand/src/theme.ts";
 import { matchedRanges, matchesWords } from "./model-search.ts";
 import { modelCardHTML } from "./model-card.ts";
@@ -23,29 +24,42 @@ import { subagentPhrase } from "@demesne/workbench/subagent-phrases.ts";
 import { fileName, readPaths, stretchWords, stretches } from "./steps-fold.ts";
 import { noteKey, notesMessage, reviewRows, type DiffNote } from "./turn-review.ts";
 import { pointLabel, pointMessage, type PointPick, type PointSource, type Pointed } from "./point.ts";
+import { linkMockups, mentionedMockups, mockupRefs, splitMockupRefs, type MockupName } from "./foundry-mention.ts";
 import { chatsPage as chatsPageHtml, type ChatsPageChat, type ChatsTab } from "./chats-page.ts";
 import { scheduledPage } from "./scheduled-page.ts";
 import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPage, unseenStories, whoName, type TodayUi } from "./today-page.ts";
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryPage, type FoundryUi } from "./foundry-page.ts";
-import { editedIn, FoundryChatArtifacts, makingTitle } from "./foundry-inline.ts";
+import { foundryOrder, foundryPage, shelfKey } from "./foundry-page.ts";
+import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
+import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
+import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
+import { waitingFor, waitRow } from "./wait-row.ts";
+import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
+import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
+import { researchRowHTML } from "./research-row.ts";
+import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
+import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
+import { chatShown, latestShown, shownCardHTML, SHOWN_CARD, type Shown } from "./shown-card.ts";
+import { fileChipHTML, isPicture, MAX_FILE_BYTES, refusal, sizeWord } from "./file-chips.ts";
+import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, usedSources, type SourcesView } from "./sources-card.ts";
+import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
+import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
+import { previewable, type FilePreview } from "@demesne/protocol";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
-import { FoundryPane, PANE_FRAME, buildRequest } from "./foundry-pane.ts";
-import { assembleDocument } from "./assemble.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { FoundryArtifact, FoundryArtifactDetail, PlanLimits, Routine } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, Routine } from "@demesne/protocol";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
@@ -59,7 +73,7 @@ import { whereCard } from "./where-card.ts";
 import { OpenTabs } from "./tabs.ts";
 import { GoogleAIForm } from "./google-ai-form.ts";
 import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
-import type { AppUpdate } from "./release-line.ts";
+import { updateCheckLine, type AppUpdate } from "./release-line.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -95,6 +109,7 @@ declare global {
     demesneInspect?: () => unknown;
   }
 }
+quietDom();
 const el = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id)! as T;
 const editor = document.querySelector<HTMLTextAreaElement>("textarea")!;
@@ -105,23 +120,6 @@ const composerHeight = windowsDesktopChat ? new ComposerHeight() : null;
 el("composer-talk").hidden = !(window.demesne.mode === "desktop" && /Mac/i.test(navigator.platform));
 /// Big pastes waiting in the composer, as chips.
 const pastes: Paste[] = [];
-/// Build this from Just a chat: the request waits (across the move to
-/// another project's window) until the chat is in a project, for ten minutes.
-const buildWaits = {
-  read: (): { sessionId: string; text: string; at: number } | null => {
-    try { const value = JSON.parse(localStorage.getItem("demesne-build-waits") ?? "null"); return value && Date.now() - value.at < 600_000 ? value : null; } catch { return null; }
-  },
-  write: (value: { sessionId: string; text: string; at: number } | null) => {
-    try { if (value) localStorage.setItem("demesne-build-waits", JSON.stringify(value)); else localStorage.removeItem("demesne-build-waits"); } catch {}
-  },
-};
-function sendWaitingBuild() {
-  const waiting = buildWaits.read();
-  if (!waiting || !state?.session || state.session.id !== waiting.sessionId || isPlain() || state.activeTurnId) return;
-  buildWaits.write(null);
-  followLatest();
-  void act(() => api("submit", { text: waiting.text }));
-}
 const h = (value: unknown) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -158,21 +156,39 @@ function workingLine(line: WorkingLine, run: WorkspaceRun) {
   const steps = tools(run), latest = steps.findLast((tool) => tool.state === "running" || tool.waiting);
   const fixed = pendingQuestion() ? "Waiting for your answer"
     : latest?.waiting ? `Waiting for your approval${latest.name === "run_command" ? "" : ` · ${verb(latest)}`}`
-      : latest?.drafting ? "Writing a command…" : undefined;
+      : latest?.drafting ? "Writing a command…"
+        : latest?.name === "wait_for" && latest.state === "running" ? `Waiting for ${waitingFor(latest.input.pattern)}`
+        : latest?.name === "look_at_page" && latest.state === "running" ? `Looking at ${pageName(latest.input.url)}`
+        : latest?.name === "agents" && latest.state === "running" && latest.input.action === "wait" ? `Waiting for ${backgroundNames(run, latest.input.ids)}` : undefined;
   const thinking = run.entries.findLast((entry) => entry.type === "reasoning");
   line.update(workingPhrases({
     fixed,
     thinking: thinking?.type === "reasoning" ? thinking.raw : null,
-    steps: steps.filter((tool) => !tool.drafting).map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running", files: tool.name === "read_files" ? readPaths(tool).length || 1 : 1 })),
+    steps: steps.filter((tool) => !tool.drafting && tool.name !== "agents").map((tool) => ({ verb: verb(tool), target: stepTarget(tool), startedAt: tool.startedAt, running: tool.state === "running", files: tool.name === "read_files" ? readPaths(tool).length || 1 : 1 })),
   }, Date.now()), fixed !== undefined);
+}
+/// Who a wait is for: background sub-agents are a1, a2… in the order the chat started them.
+function backgroundNames(run: WorkspaceRun, ids: unknown): string {
+  const crew = run.entries.filter((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "subagent" && entry.input.background === true);
+  const wanted = Array.isArray(ids) && ids.length ? ids.map((id) => crew[Number(String(id).replace(/\D/g, "")) - 1]).filter((one): one is ToolEntry => Boolean(one)) : crew.filter((one) => one.state === "running" && one.crew === "working");
+  const names = [...new Set(wanted.map((one) => { const agent = cliAgent(one); return agent ? CLI_NAMES[agent] ?? agent : "an agent"; }))];
+  return names.length === 1 ? names[0]! : names.length ? `${names.length} agents` : "the agents";
 }
 /// A step's target in a few words: a file's name, a command's program, a page's title.
 function stepTarget(tool: ToolEntry) {
   if (tool.name === "run_command") return (tool.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "");
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
+  if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
+  if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
+  if (tool.name === "look_at_page") return pageName(tool.input.url);
+  if (tool.name === "open") return [tool.input.target, tool.input.app].filter((one): one is string => typeof one === "string" && Boolean(one)).map((one) => /^[a-z][a-z0-9+.-]*:\/\//i.test(one) ? pageName(one) : one.split(/[\\/]/).at(-1) ?? one).join(" in ");
+  if (tool.name === "show") return typeof tool.input.url === "string" ? pageName(tool.input.url) : String(tool.input.title ?? tool.input.path ?? "").split("/").at(-1) ?? "";
+  if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
+  if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
+  if (tool.name === "read_source") return sourceName(tool);
   const path = String(tool.input.path ?? tool.detail ?? "");
-  return tool.name === "subagent" ? "" : path.split("/").at(-1) ?? path;
+  return isAgentStep(tool) ? "" : path.split("/").at(-1) ?? path;
 }
 /// The thinking level each /model row would switch to: picked with ←→,
 /// else the current choice for the current model, else the model's default.
@@ -268,6 +284,14 @@ const verb = (tool: ToolEntry) =>
     write_file: "Write",
     edit_file: "Edit",
     search_files: "Search",
+    web_search: "Searched the web",
+    web_fetch: "Read",
+    remember: "Remembered",
+    update_plan: "Planned",
+    wait_for: "Waited for",
+    look_at_page: "Opened",
+    open: "Opened",
+    show: "Showed",
     list_files: "List",
     move_path: "Move",
     delete_path: "Delete",
@@ -276,6 +300,7 @@ const verb = (tool: ToolEntry) =>
     git_history: "History",
     session_tools: "Tool",
     recall_turn: "Recalled",
+    read_source: "Read",
     subagent: "Agent",
     foundry_save: "Made",
     foundry_edit: "Changed",
@@ -322,7 +347,7 @@ let completionItems: {
     hint: string;
     group: string;
     value: string;
-    kind: "command" | "mention";
+    kind: "command" | "mention" | "mockup";
     icon?: string;
   }[] = [],
   completionIndex = 0,
@@ -333,6 +358,8 @@ let follow = true,
   noticeTimer: ReturnType<typeof setTimeout> | undefined,
   lastDraftVersion = -1,
   lastSession = "";
+/// Turns whose plan checklist is open; closed until you click Checklist.
+const planOpen = new Set<string>();
 const expanded = new Set<string>(),
   detailsOpen = new Set<string>(),
   detailsClosed = new Set<string>(),
@@ -345,15 +372,20 @@ const expanded = new Set<string>(),
       artifacts: FoundryChatArtifacts;
       working: WorkingLine;
       run?: WorkspaceRun;
+      index?: number;
       views: Map<number, MarkdownView>;
     }
   >();
+/// What every turn's look shares, as of the last conversation draw.
+let conversationShared = "", conversationHoused: unknown = null, conversationProcesses: unknown = null;
 /// The briefing line's unfolded parts above the composer (on the start
 /// screen, Drive's ideas under it); turns whose steps are open.
 let driveShown = false,
   ideasShown = false,
   brokeShown = false;
 let driveActionPending = "";
+/// Drive's sheet under its pill on the top bar is open (pass 198 A).
+let driveSheetOpen = false, driveSheetAt = 0;
 /// Each mission chat and the chat it was started from.
 function missionLinks() {
   const jobs = state ? [state.breakage.fix, ...state.breakage.inbox] : [];
@@ -673,7 +705,10 @@ function renderSidebar() {
   const housedIds = new Set(housed.flatMap((agent) => agent.sessionId ? [agent.sessionId] : []));
   // A mission's chat sits under the chat it was started from.
   const parentOf = missionLinks();
-  const signature = JSON.stringify([[...parentOf], sessions, projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()]]);
+  // The open chat's time moves with every streamed word; its row says it by
+  // the minute, so that's all the list redraws for.
+  const openId = state.session?.id;
+  const signature = JSON.stringify([[...parentOf], sessions.map((item) => item.id === openId ? { ...item, updatedAt: item.updatedAt?.slice(0, 16) } : item), projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()]]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -883,7 +918,7 @@ function renderSidebar() {
   }
   renderTabs();
   // The folded strip: Drive's dot while it works, and the branches waiting.
-  const driveButton = document.getElementById("rail-drive"), branchButton = document.getElementById("rail-review");
+  const branchButton = document.getElementById("rail-review");
   // Chats that need you count on the Dock icon.
   const needsYou = sessions.filter((item) => item.id === current?.id ? Boolean(waiting) : item.waiting).length;
   document.dispatchEvent(new CustomEvent("demesne:needs-you", { detail: needsYou }));
@@ -891,11 +926,6 @@ function renderSidebar() {
   const busyNow = Boolean(state?.activeTurnId || sessions.some((item) => item.status === "running" || item.status === "queued") || (pinned && pinned.status === "running"));
   document.dispatchEvent(new CustomEvent("demesne:working", { detail: busyNow }));
   if (branchButton) { branchButton.hidden = !review.length; branchButton.dataset.tip = `${review.length} branch${review.length === 1 ? "" : "es"} to review`; }
-  if (driveButton) {
-    const driving = Boolean(pinned && pinned.status === "running") || Boolean(run.fix || run.away);
-    driveButton.querySelector<HTMLElement>(".rail-badge")!.hidden = !driving;
-    driveButton.dataset.tip = driving ? "Drive · working" : ideas ? `Drive · ${ideas} idea${ideas === 1 ? "" : "s"}` : "Drive";
-  }
 }
 document.getElementById("sidebar-search")?.addEventListener("input", renderSidebar);
 // The list moves with the arrow keys, Home and End; Delete or Backspace
@@ -1197,26 +1227,34 @@ function worthCompacting(percentage: number | null | undefined) {
   return (percentage ?? 0) >= 50;
 }
 
-/// The context ring and the plan mark open one card (pass 112 A): what the
-/// chat holds and how long it lasts on top, your plan's windows below.
+/// The context word under the composer opens one card (pass 112 A, 177 C):
+/// what the chat holds and how long it lasts on top, your plan's windows
+/// below. The same card also sits in the right column once either is half
+/// used.
 function renderContextCard() {
-  const card = el("context-card"), ring = el("composer-context"), mark = el("composer-limit");
+  const card = el("context-card"), word = el("composer-context");
   const c = context(), limits = currentPlan();
   const showContext = inSession() && c.percentage != null, showPlan = Boolean(limits && planWindows(limits).length);
-  const open = contextCardOpen && (showContext || showPlan);
-  for (const node of [ring, mark]) {
-    node.setAttribute("aria-expanded", String(open));
-    node.classList.toggle("on", open);
-  }
+  const open = contextCardOpen && (showContext || showPlan) && !columnContextCard();
+  word.setAttribute("aria-expanded", String(open));
+  word.classList.toggle("on", open);
   card.hidden = !open;
   if (!open) return;
-  const compact = worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
-  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
-  const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
-  const html = halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
+  const html = contextCardHTML(c, limits, showContext, showPlan);
   if (html === card.dataset.html) return;
   card.innerHTML = html;
   card.dataset.html = html;
+}
+/// The context card in the right column, when it is on screen there.
+function columnContextCard() {
+  const node = document.querySelector<HTMLElement>("#cards [data-card=context]");
+  return node && node.offsetParent ? node : null;
+}
+function contextCardHTML(c: ReturnType<typeof context>, limits: PlanLimits | undefined, showContext: boolean, showPlan: boolean) {
+  const compact = showContext && worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
+  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
+  const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
+  return halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
 }
 /// What is in the chat, in words first: how many more turns like the last
 /// few fit, then the parts. Compaction's own notes (Keep, the turn lane) and
@@ -1268,18 +1306,66 @@ function planHalf(limits: PlanLimits) {
 }
 const capital = (word: string) => `${word[0]!.toUpperCase()}${word.slice(1)}`;
 const planName = (limits: PlanLimits) => `${capital(limits.provider)} plan`;
-/// The cards on the right: what this chat changed, its preview, its context
-/// once half full, the agents near its edits and the connectors it called.
-/// A card shows only while the chat uses it, and a chat that uses none has
-/// no column (pass 86 A); its header folds it to one line.
-const ICON_CHEVRON = '<svg class="ico card-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
-const cardsFolded = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-folded") ?? "[]") as string[]; } catch { return []; } })());
+/// The cards on the right (pass 169 A): they step back so the chat leads.
+/// The environment card says where this chat runs (pass 173 A); every other
+/// card is one dim line (what this chat changed, its preview, its context
+/// once half full, the agents near its edits, the connectors it called) that
+/// unfolds on hover, or stays open after a click. A card shows only while the
+/// chat uses it, and a chat that uses none has no column (pass 86 A). The
+/// only colour is a pink dot on what needs you.
+const CARD_ICON = {
+  context: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 7.6 10.5L12 12z"/></svg>',
+  changes: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14h6M12 11v6"/></svg>',
+  agents: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+  preview: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg>',
+  connectors: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>',
+} as const;
+const cardsOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-open") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
-/// The card whose body is unfolding now; only it animates.
-let cardUnfolding = "";
-function card(name: string, title: string, summary: string, body: string) {
-  const folded = cardsFolded.has(name);
-  return `<section class="card${folded ? " folded" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${!folded}"><span class="card-title">${title}</span>${ICON_CHEVRON}<span class="card-sum">${summary}</span></button>${folded ? "" : `<div class="card-body">${body}</div>`}</section>`;
+/// Screenshots from the capture keys (window-shots.ts), each its own card
+/// after the last card; the ones still to land, with where their window was.
+const windowShots: WindowShot[] = [];
+const shotsLanding = new Map<string, Rect | undefined>();
+const chatShots = () => windowShots.filter((shot) => shot.sessionId === state?.session?.id);
+/// The file open in its preview card (file-preview.ts), in the chat it was
+/// opened from.
+let preview: OpenPreview | null = null;
+const chatPreview = () => preview && preview.sessionId === state?.session?.id ? preview : null;
+/// The Sources card's field and drop state (sources-card.ts).
+const sourceView: Omit<SourcesView, "open"> = { field: false, dragging: false };
+let sourceText = "", sourceFocus = false, sourceFreshTimer: ReturnType<typeof setTimeout> | undefined;
+const sourceName = (tool: ToolEntry) => state?.sources.find((source) => source.id === tool.input.id)?.name ?? "a source";
+/// A step that read one of your sources says so, in pink.
+const yourSource = (tool: ToolEntry) => tool.state !== "failed" && tool.state !== "denied" && state?.sources.length && sourceOfStep(state.sources, tool) ? '<span class="your-source"> · your source</span>' : "";
+const cleanError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^.*?:\s*(?=[A-Z])/, "");
+/// Keeps a source, slides its row in, and opens the card to show it.
+async function keepSource(args: Record<string, unknown>) {
+  const source = await api<{ id: string }>("source-add", args);
+  sourceView.field = false; sourceView.error = undefined; sourceText = "";
+  if (source?.id) {
+    sourceView.fresh = source.id;
+    clearTimeout(sourceFreshTimer);
+    sourceFreshTimer = setTimeout(() => { sourceView.fresh = undefined; renderCards(); }, 1600);
+  }
+  renderCards();
+}
+async function dropSources(event: DragEvent) {
+  const files = [...event.dataTransfer?.files ?? []];
+  const pathFor = (window as { demesneDesktop?: { pathForFile?: (file: File) => string } }).demesneDesktop?.pathForFile;
+  if (files.length) {
+    for (const file of files) {
+      const path = pathFor?.(file) ?? "";
+      if (path) await keepSource({ path });
+      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`);
+    }
+    return;
+  }
+  const link = droppedLink(event.dataTransfer?.getData("text/uri-list") || event.dataTransfer?.getData("text/plain") || "");
+  if (link) await keepSource({ url: link });
+}
+function card(name: keyof typeof CARD_ICON, line: string, right: string, body: string, need = false) {
+  const open = cardsOpen.has(name);
+  return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
 }
 function renderCards() {
   // A page in place of the chat (Settings, Customize…) hides the chat's cards.
@@ -1299,49 +1385,77 @@ function renderCards() {
   const here = root && files.length ? s.agents.filter((agent) => agent.project === projectSlug(root)) : [];
   const servers = chatServers(s.connectors.servers, used.map((t) => t.name));
   const showContext = c.percentage != null && contextInUse(c.percentage);
-  // Where (pass 121 E) leads in a project chat; a plain chat only gets it
+  const limits = currentPlan(), planTop = limits && planUsed(limits);
+  const planHalfUsed = Boolean(planTop && planTop.window.usedPercent >= 50);
+  // The environment card leads in a project chat; a plain chat only gets it
   // while the daemon isn't fine, so the chat keeps its width otherwise.
-  const where = whereCard({ root, branch: s.session?.workspace?.gitBranch, model: housedHere(s) ? { id: housedHere(s)!.model, displayName: housedHere(s)!.name, provider: "run by Demesne" } : s.model, reasoning: housedHere(s) ? null : s.reasoning, connection: s.connection, server: s.server, changed: files.length, context: !showContext && c.percentage != null && c.used != null && c.capacity ? { percentage: c.percentage, used: c.used, capacity: c.capacity } : null });
+  const housed = housedHere(s), workspace = s.session?.workspace;
+  const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
-  if (!showWhere && !files.length && !previews.length && !showContext && !here.length && !servers.length) return hide();
+  // Screenshots waiting to go with your next message keep their own card;
+  // everything the chat has seen piles into one (pass 202 A).
+  const shots = chatShots();
+  const seenRuns = s.runs.filter((run) => !rewoundBy(run));
+  // What the chat opened or showed (pass 210 A): the newest in its own card,
+  // the earlier pictures in the pile.
+  const allShown = chatShown(seenRuns);
+  arrivedShown(s.session?.id ?? "", seenRuns, allShown);
+  const shownNow = latestShown(allShown, shownClosed);
+  const pile = chatPile(seenRuns, new Set([...pileHidden(s.session?.id ?? ""), ...(shownNow?.picture ? [shownNow.picture.id] : [])]));
+  const filePreview = chatPreview();
+  // What you keep with the chat (pass 204), and which the last answer used.
+  const sources = s.sources ?? [], dragging = sourceView.dragging && Boolean(s.session);
+  const sourcesUsed = usedSources(sources, seenRuns.length ? tools(seenRuns.at(-1)!) : []);
+  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview && !shownNow) return hide();
   app.classList.add("cards-on");
-  app.classList.toggle("cards-context", showContext);
+  app.classList.toggle("cards-wide", Boolean(filePreview?.wide) || Boolean(shownNow && shownBig));
+  app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsFolded], showWhere && where]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
   const out: string[] = [];
-  if (showWhere) out.push(card("where", where.head, where.summary, where.body).replace('<section class="card', `<section title="${h(where.title)}" class="card${where.state ? ` wh-${where.state}` : ""}`));
-  if (showContext && c.percentage != null) {
-    const capacity = c.capacity ?? 0;
-    const parts = plan
-      ? [{ name: "Chat", tokens: plan.estimatedMessageTokens, tone: "a" }, { name: "Tools", tokens: plan.estimatedToolDefinitionTokens, tone: "b" }, ...(c.fresh ? [{ name: "Kept free", tokens: plan.reserves.totalTokens ?? 0, tone: "c" }] : [])]
-      : [{ name: "Chat", tokens: c.used ?? 0, tone: "a" }];
-    const share = (tokens: number) => (capacity ? Math.min(100, (tokens / capacity) * 100) : 0);
-    out.push(card("context", "Context", `${c.percentage}%<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>`,
-      `<div class="context-bar">${parts.map((part) => `<i class="tone-${part.tone}" style="width:${share(part.tokens).toFixed(2)}%"></i>`).join("")}</div>` +
-      `<div class="card-legend">${parts.filter((part) => part.tokens > 0).map((part) => `<span><u class="tone-${part.tone}"></u>${part.name} ${tokensShort(part.tokens)}</span>`).join("")}</div>` +
-      `<div class="card-foot"><span>${c.estimated ? "~" : ""}${tokensShort(c.used ?? 0)} of ${capacity ? tokensShort(capacity) : "—"}</span>${worthCompacting(c.percentage) ? btn("compact", s.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link") : ""}</div>`));
+  if (showWhere) {
+    const open = cardsOpen.has("where");
+    out.push(`<section class="card env${open ? " open" : ""}${where.state ? ` env-${where.state}` : ""}" data-card="where"><button type="button" class="card-head" data-action="card-fold" data-args='{"name":"where"}' aria-expanded="${open}">${where.rows}</button>${where.state === "off" ? btn("start-daemon", "Start", {}, "env-start") : ""}<div class="card-body">${where.more}</div></section>`);
+  }
+  const sourcesCard = sourcesCardHTML(sources, sourcesUsed, { ...sourceView, dragging, open: cardsOpen.has(SOURCES_CARD) });
+  if (sourcesCard) out.push(sourcesCard);
+  // The context card itself (pass 177 C) once the chat or the plan is half
+  // used: one line like the others, the whole card when it opens; a short
+  // window folds its parts list away first.
+  if (showContext || planHalfUsed) {
+    const planWord = planHalfUsed ? ` · <span class="${planTop!.window.usedPercent >= PLAN_LIMIT_AMBER ? "warn" : ""}">plan ${Math.round(planTop!.window.usedPercent)}%</span>` : "";
+    out.push(card("context", `${c.percentage != null ? `${c.percentage}% context` : "Context"}${planWord}`, c.percentage != null ? `<span class="card-meter"><i style="width:${Math.min(100, c.percentage)}%"></i></span>` : "",
+      `<div class="ctx-card">${contextCardHTML(c, limits, c.percentage != null, planHalfUsed)}</div>`));
   }
   if (files.length) {
     const shownFiles = files.slice(0, 6);
-    out.push(card("changes", "Changes", counts(changes),
-      shownFiles.map((file) => row("", h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
-      `<div class="card-foot"><span>${files.length === 1 ? "1 file" : `${files.length} files`}${files.length > shownFiles.length ? ` · ${files.length - shownFiles.length} more` : ""} · not committed</span>${btn("ship", "Commit & PR", {}, "card-btn")}</div>`));
+    out.push(card("changes", files.length === 1 ? "1 file changed" : `${files.length} files changed`, counts(changes),
+      shownFiles.map((file) => row("", previewable(file.path) ? fileLink(file.path, file.path.split("/").at(-1) ?? file.path) : h(file.path.split("/").at(-1) ?? file.path), counts({ added: file.additions ?? 0, removed: file.deletions ?? 0 }), file.path)).join("") +
+      `<div class="card-foot"><span>${files.length > shownFiles.length ? `${files.length - shownFiles.length} more · ` : ""}not committed</span>${btn("ship", "Commit & PR", {}, "link")}</div>`, true));
   }
   if (here.length)
-    out.push(card("agents", "Agents", here.slice(0, 3).map(agentMark).join(""),
+    out.push(card("agents", here.length === 1 ? `${h(here[0]!.name)} ${h(agentPlace(here[0]!))}` : `${here.length} agents here`, here.slice(0, 3).map(agentMark).join(""),
       here.map((agent) => `<div class="card-row card-hover" title="${h(agent.address)}">${agentMark(agent)}<span class="card-label">${h(agent.name)}<em> · ${h(agentPlace(agent).replace(/^on /, ""))}</em></span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "card-act")}</div>`).join("")));
   if (previews.length)
-    out.push(card("preview", "Preview", h(new URL(previews[0]!.serves!).host),
-      previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "card-btn")}</div>`).join("")));
+    out.push(card("preview", h(new URL(previews[0]!.serves!).host), previews.length > 1 ? `${previews.length}` : '<span class="pv-live" aria-hidden="true"></span>',
+      previews.map((command) => `<div class="card-row"><span class="pv-live" aria-hidden="true"></span><span class="card-label">${h(new URL(command.serves!).host)}</span>${btn("open-link", "Open ↗", { url: command.serves }, "link")}</div>`).join("")));
   if (servers.length)
-    out.push(card("connectors", "Connectors", h(servers.map((server) => server.name).join(", ")),
+    out.push(card("connectors", h(servers.map((server) => server.name).join(", ")), servers.some((server) => server.state === "failed") ? '<span class="card-dot failed"></span>' : "",
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
+  // Every screenshot the chat has seen, in one pile.
+  if (pile.length) out.push(`<section class="card pile" data-card="pile">${pileHTML(pile, pileSrc, pileLanding(s.session?.id ?? "", pile.at(-1)?.id))}</section>`);
+  // Screenshots still to send come last, in the order they were taken.
+  for (const shot of shots) out.push(shotCardHTML(shot));
+  // What the chat opened or showed, then a file you opened, come last (pass 188 A).
+  if (shownNow) out.push(shownCardHTML(shownNow, pileSrc));
+  if (filePreview) out.push(previewCardHTML(filePreview));
   // Only the cards that changed are replaced, so the others keep their
   // hover and never repaint while the chat streams.
-  const next = new Map(out.map((html) => [/data-card="([a-z]+)"/.exec(html)![1]!, html]));
+  const next = new Map(out.map((html) => [/data-card="([a-z0-9-]+)"/.exec(html)![1]!, html]));
+  const landing: [HTMLElement, WindowShot][] = [];
   for (const node of [...aside.children] as HTMLElement[]) if (!next.has(node.dataset.card ?? "")) node.remove();
   let index = 0;
   for (const [key, html] of next) {
@@ -1351,15 +1465,18 @@ function renderCards() {
       fresh.innerHTML = html;
       const replacement = fresh.content.firstElementChild as HTMLElement;
       replacement.dataset.html = html;
+      const shot = shots.find((one) => shotKey(one) === key);
+      // A screenshot glides in from its window (window-shots.ts).
+      if (!node && shot && shotsLanding.has(shot.id)) landing.push([replacement, shot]);
       // A card the chat just started using slides in.
-      if (!node) {
+      else if (!node && key !== PREVIEW_CARD) {
         replacement.classList.add("arriving");
         replacement.addEventListener("animationend", () => replacement.classList.remove("arriving"), { once: true });
       }
-      if (key === cardUnfolding) {
-        replacement.classList.add("unfolding");
-        replacement.addEventListener("animationend", () => replacement.classList.remove("unfolding"), { once: true });
-      }
+      // A redrawn preview keeps its PDF pages until they're drawn again.
+      const pages = node?.querySelector("[data-pdf]"), into = replacement.querySelector("[data-pdf]");
+      if (pages && into) into.replaceChildren(...pages.childNodes);
+      if (!node && key === PREVIEW_CARD && filePreview?.landing) arrivingPreview = replacement;
       if (node) node.replaceWith(replacement);
       node = replacement;
     }
@@ -1367,8 +1484,143 @@ function renderCards() {
     if (node !== at) aside.insertBefore(node, at);
     index++;
   }
-  cardUnfolding = "";
+  for (const [node, shot] of landing) landWhenSeen(node, shot);
+  // Bigger in place, so a live page doesn't reload (pass 210 A).
+  aside.querySelector(`:scope > [data-card="${SHOWN_CARD}"]`)?.classList.toggle("wide", shownBig);
+  // The link field keeps what you typed across redraws.
+  const sourceInput = aside.querySelector<HTMLInputElement>(".src-input");
+  if (sourceInput) {
+    if (sourceInput.value !== sourceText) sourceInput.value = sourceText;
+    if (sourceFocus) { sourceInput.focus({ preventScroll: true }); sourceInput.setSelectionRange(sourceText.length, sourceText.length); }
+  }
+  sourceFocus = false;
+  if (arrivingPreview) void landPreview(arrivingPreview);
+  else if (filePreview?.data?.kind === "pdf") { const pages = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"] [data-pdf]`); if (pages) void drawPdf(pages, filePreview.data.data, filePreview.wide ? 30 : 3).catch(() => {}); }
 }
+
+// File previews (pass 188 A) ------------------------------------------------
+
+/// A file name a click previews: in answers (markdown.ts marks them), in
+/// the steps and in the Changes card.
+const fileLink = (path: string, label: string) => `<button type="button" class="file-link" data-action="preview-file" data-args="${h(JSON.stringify({ path }))}" data-preview-path="${h(path)}">${h(label)}</button>`;
+/// The name a preview came from, still on screen if it is.
+function previewName(path: string): HTMLElement | null {
+  const names = [...document.querySelectorAll<HTMLElement>("[data-preview-path]")].filter((name) => name.dataset.previewPath === path && name.offsetParent && !name.closest("#cards"));
+  const seen = names.filter((name) => { const r = name.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; });
+  return seen.at(-1) ?? names.at(-1) ?? null;
+}
+const wideEnough = () => matchMedia("(min-width: 1100px)").matches;
+async function openPreview(path: string, source?: Element) {
+  if (!state?.session) return;
+  const sessionId = state.session.id, from = source ? rectOfElement(source) : undefined;
+  if (preview?.sessionId === sessionId && preview.path === path) return closePreview();
+  // No room for the column: the file opens in its own app.
+  if (!wideEnough()) {
+    const data = await api<FilePreview>("file-preview", { path });
+    if (data?.absolute) await api("open-preview", { absolute: data.absolute });
+    return;
+  }
+  const loading = api<FilePreview>("file-preview", { path }).then((data) => ({ data }), (error: unknown) => ({ error: error instanceof Error ? error.message.replace(/^.*?:\s*(?=[A-Z])/, "") : String(error) }));
+  if (chatPreview()) await closePreview();
+  const got = await loading;
+  if (state?.session?.id !== sessionId) return;
+  preview = { sessionId, path, name: previewFileName(path), ...got, wide: false, sheet: 0, slide: 0, from, landing: true };
+  renderCards();
+}
+let arrivingPreview: HTMLElement | null = null;
+async function landPreview(card: HTMLElement) {
+  arrivingPreview = null;
+  const open = preview;
+  if (!open) return;
+  open.landing = false;
+  card.style.visibility = "hidden";
+  const pages = card.querySelector<HTMLElement>("[data-pdf]");
+  if (pages && open.data?.kind === "pdf") await drawPdf(pages, open.data.data, 3).catch(() => { pages.innerHTML = '<div class="fp-empty">This PDF couldn\u2019t be drawn. Open it to read it.</div>'; });
+  card.style.visibility = "";
+  if (!card.isConnected || !card.offsetParent) return;
+  const name = previewName(open.path);
+  await growPreview(card, name ? rectOfElement(name) : open.from, name);
+}
+/// Open and show (pass 210 A): closed cards, by the step that showed them,
+/// and the steps already acted on, so a file is put in its preview once.
+const shownClosed = new Set<string>(), shownSeen = new Set<string>(), shownChats = new Set<string>();
+let shownBig = false;
+/// A step that just showed something, in the chat's last turn: a file goes
+/// to the file preview card; anything else replaces the file preview. What a
+/// chat showed before it was opened here is only remembered.
+function arrivedShown(sessionId: string, runs: readonly WorkspaceRun[], all: readonly Shown[]) {
+  if (!sessionId || !runs.length) return;
+  if (!shownChats.has(sessionId)) { shownChats.add(sessionId); for (const one of all) shownSeen.add(one.id); return; }
+  const last = all.at(-1);
+  if (!last || shownSeen.has(last.id) || !chatShown([runs.at(-1)!]).some((one) => one.id === last.id)) return;
+  shownSeen.add(last.id);
+  shownBig = false;
+  if (last.shown === "file" && last.path) {
+    const open = chatPreview();
+    // No room for the column: it waits for a click, it never opens over the chat.
+    if (open?.path !== last.path && wideEnough()) queueMicrotask(() => void openPreview(last.path!));
+  } else if (chatPreview()) queueMicrotask(() => void closePreview());
+}
+function closeShown() {
+  const card = el("cards").querySelector<HTMLElement>(`[data-card="${SHOWN_CARD}"]`);
+  if (card?.dataset.shown) shownClosed.add(card.dataset.shown);
+  shownBig = false;
+  renderCards();
+}
+async function closePreview() {
+  const open = chatPreview();
+  if (!open) return;
+  const aside = el("cards"), card = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"]`), width = aside.offsetWidth;
+  const name = previewName(open.path);
+  if (card) await foldPreview(card, name ? rectOfElement(name) : open.from, name);
+  if (preview === open) preview = null;
+  renderCards();
+  if (open.wide && !aside.hidden) resizePreview(aside, width, null, undefined);
+}
+function widenPreview() {
+  const open = chatPreview();
+  if (!open || !open.data) return;
+  const aside = el("cards"), width = aside.offsetWidth;
+  const height = aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"] .fp-box`)?.offsetHeight;
+  open.wide = !open.wide;
+  renderCards();
+  resizePreview(aside, width, aside.querySelector<HTMLElement>(`[data-card="${PREVIEW_CARD}"]`), height);
+}
+/// A screenshot lands when the window can be seen: at once, or when you
+/// come back to Demesne if it was hidden.
+function landWhenSeen(node: HTMLElement, shot: WindowShot) {
+  const from = shotsLanding.get(shot.id);
+  shotsLanding.delete(shot.id);
+  const go = () => { if (node.isConnected && node.offsetParent) void landShot(node, from); };
+  if (document.visibilityState !== "hidden") { go(); return; }
+  node.style.visibility = "hidden";
+  document.addEventListener("visibilitychange", function seen() {
+    if (document.visibilityState === "hidden") return;
+    document.removeEventListener("visibilitychange", seen);
+    node.style.visibility = "";
+    requestAnimationFrame(go);
+  });
+}
+/// The capture keys took a window (electron/capture-keys.ts).
+document.addEventListener("demesne:window-shot", (event) => {
+  const shot = (event as CustomEvent<{ app?: string; title?: string; data?: string; text?: string; textNote?: string; from?: Rect; error?: string }>).detail;
+  if (shot.error) { notice(shot.error); return; }
+  if (!state?.session || !shot.data) { notice("Open a chat, then press the keys again to add the window."); return; }
+  const sessionId = state.session.id;
+  void act(async () => {
+    const bytes = Uint8Array.from(atob(shot.data!), (char) => char.charCodeAt(0));
+    const fitted = await fitImage(new Blob([bytes], { type: "image/png" }), { side: 4096, bytes: 15 * 1024 * 1024 });
+    const name = `${(shot.app || "window").replace(/[^\w .-]+/g, "").trim() || "window"}.png`;
+    const image = await api("attach", { name, mimeType: fitted.type, data: fitted.url.slice(fitted.url.indexOf(",") + 1) }) as { id: string } | undefined;
+    if (!image?.id) return;
+    attachmentPreviews.set(image.id, fitted.url);
+    windowShots.push({ id: image.id, sessionId, app: shot.app ?? "", title: shot.title ?? "", url: fitted.url, text: shot.text ?? "", textNote: shot.textNote, at: Date.now() });
+    shotsLanding.set(image.id, shot.from);
+    composerSignature = "";
+    renderComposer();
+    renderCards();
+  });
+});
 /// The sidebar's foot: who you are and what pays for the models, the theme
 /// switch, and Settings.
 const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
@@ -1454,7 +1706,7 @@ function renderStatus() {
   renderCards();
   const rim = rimState(phase);
   applyRim(rim);
-  renderPlanLimit();
+  renderContextWord();
   if (signature + JSON.stringify(rim) === statusSignature) return;
   statusSignature = signature + JSON.stringify(rim);
   // A quiet footer: a spinner while working, a word only when the state
@@ -1464,17 +1716,13 @@ function renderStatus() {
   // bar carries its live state, so a session has no status bar.
   el("status").dataset.quiet = String(phase === "ready");
   el("status").hidden = inSession();
-  // The context used, as a small ring; the numbers wait in its tooltip.
-  const c2 = c.percentage == null ? "" : `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span>`;
   const housedAgent = housedHere(), modelChip = el("composer-model");
   // An agent's chat runs that agent: its name, and no model to pick.
   modelChip.toggleAttribute("disabled", Boolean(housedAgent));
   modelChip.title = housedAgent ? `This chat runs ${housedAgent.name}, started by Demesne` : "Change model";
   if (housedAgent) modelChip.textContent = housedAgent.name;
   else el("composer-model").innerHTML = `${h(state.model.id ? modelWords({ id: state.model.id, displayName: state.model.displayName ?? models.find((model) => model.id === state!.model.id)?.displayName }) : "") || "Choose a model"}${state.reasoning ? `<span class="composer-effort">${h(state.reasoning[0]!.toUpperCase() + state.reasoning.slice(1))}</span>` : ""}`;
-  el("composer-context").innerHTML = c2;
-  el("composer-context").title = c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`;
-  el("composer-context").hidden = !inSession() || !c2;
+  renderContextWord();
   renderContextCard();
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Ctrl+,")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
@@ -1485,15 +1733,15 @@ function renderStatus() {
   renderTabs();
   el("header").innerHTML = inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : "";
 }
-/// Your plan's mark (pass 112 A): a small ring and the fuller window's
-/// percentage beside the context ring, from 0%, amber from 75%. It opens
-/// the context card, whose lower half gives each window and its reset.
-let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null, planLimitSignature = "";
+/// Your plan's limits (pass 112 A): the context word names the fuller
+/// window, and the context card gives each window and its reset.
+let planLimits: PlanLimits[] = [], planLimitsAt = 0, planLimitsTurn: string | null = null;
 async function loadPlanLimits() {
   planLimitsAt = Date.now();
   try { planLimits = await api<PlanLimits[]>("plan-limits") ?? []; } catch { return; }
-  renderPlanLimit();
+  renderContextWord();
   renderContextCard();
+  renderCards();
 }
 const currentPlan = () => (state ? planLimits.find((item) => item.provider === state!.model.provider) : undefined);
 const resetWords = (at: string | null) => {
@@ -1501,21 +1749,26 @@ const resetWords = (at: string | null) => {
   const date = new Date(at), time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `, resets ${date.getTime() - Date.now() < 86_400_000 ? time : `${date.toLocaleDateString([], { weekday: "short" })} ${time}`}`;
 };
-function renderPlanLimit() {
-  const node = document.getElementById("composer-limit");
+/// One dim word beside the model (pass 177 C): the context used, then your
+/// plan's fuller window, amber from 75%. It opens the context card.
+function renderContextWord() {
+  const node = document.getElementById("composer-context");
   if (!node || !state) return;
-  const limits = currentPlan();
-  const top = limits && planUsed(limits);
-  const used = top ? Math.round(top.window.usedPercent) : 0;
-  const signature = JSON.stringify([limits, used, Math.floor(Date.now() / 60_000)]);
-  if (signature === planLimitSignature) return;
-  planLimitSignature = signature;
-  node.hidden = !top;
-  if (!limits || !top) { node.innerHTML = ""; node.removeAttribute("title"); return; }
-  node.classList.toggle("warn", used >= PLAN_LIMIT_AMBER);
-  node.innerHTML = `<span class="ring" style="--usage:${used}%"></span>${used}%`;
-  node.title = `${planName(limits)}: ${used}% of your ${top.name} limit`;
-  node.setAttribute("aria-label", node.title);
+  const c = context(), limits = currentPlan(), top = limits && planUsed(limits);
+  const used = top ? Math.round(top.window.usedPercent) : null;
+  const parts = [
+    c.percentage == null ? "" : `<span class="cw-context">${c.percentage}%</span>`,
+    used == null ? "" : `<span class="cw-plan${used >= PLAN_LIMIT_AMBER ? " warn" : ""}">plan ${used}%</span>`,
+  ].filter(Boolean);
+  const html = inSession() ? parts.join('<span class="cw-dot"> · </span>') : "";
+  if (node.innerHTML !== html) node.innerHTML = html;
+  node.hidden = !html;
+  const title = [
+    c.percentage == null ? "" : `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of the context used`,
+    limits && top ? `${planName(limits)}: ${used}% of your ${top.name} limit` : "",
+  ].filter(Boolean).join("\n");
+  node.title = title;
+  node.setAttribute("aria-label", title || "Context used");
 }
 // Each answer brings fresh numbers: look right after a turn ends, every 20
 // seconds while one works, and every minute otherwise.
@@ -1617,10 +1870,12 @@ function renderTabs() {
   if (chatOpen && current!.id !== tabClosed && tabs.open(current!.id, tabOn)) tabsSignature = "";
   if (chatOpen) tabOn = current!.id;
   const call = waitingElsewhere();
-  const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? foundryOpen?.title ?? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen === "today" ? "Today" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
+  const here = pageOpen === "scheduled" ? "Scheduled" : pageOpen === "foundry" ? "Foundry" : pageOpen === "customize" ? "Customize" : pageOpen === "settings" ? "Settings" : pageOpen === "today" ? "Today" : pageOpen ? "All chats" : inAssistant() ? current?.title ?? "Assistant" : chatOpen ? "" : "New chat";
   const shown = tabs.ids.filter((id) => byId.has(id));
   const tones = shown.map((id) => chatTone(byId.get(id)!));
-  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
+  // The open chat's own time moves with every streamed word; its tab has no
+  // glance to key by it, so it doesn't redraw the strip.
+  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
   if (signature === tabsSignature) return;
   renderRailChats(shown.map((id, index) => ({ item: byId.get(id)!, tone: tones[index]!, on: chatOpen && id === current!.id })));
   tabsSignature = signature;
@@ -1641,8 +1896,11 @@ function renderTabs() {
   if (newTab) newTab.title = `New chat (${shortcut("Ctrl+T")})`;
   const callSlot = document.getElementById("workspace-call");
   if (callSlot) callSlot.innerHTML = callButton;
-  (strip.contains(document.activeElement) ? document.activeElement : selected)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // Scrolled into view only when it changes: scrolling asks the browser to lay out the page.
+  const focus = strip.contains(document.activeElement) ? document.activeElement as HTMLElement : selected;
+  if (focus && focus.id !== tabsInView) { tabsInView = focus.id; focus.scrollIntoView({ block: "nearest", inline: "nearest" }); }
 }
+let tabsInView = "";
 /// Closes a tab; the one you were on hands over to its neighbour, or Home.
 function closeTab(id: string): Promise<unknown> | void {
   if (!id) { if (pageOpen) return openPage(""); if (tabOn && tabs.has(tabOn)) return goChat(tabOn); return; }
@@ -1715,6 +1973,8 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
   if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
+  if (tool.name === "read_source") return h(sourceName(tool));
+  // A try names its steps: click “Add”, type “Milk”, press Enter.
   if (tool.name === "use_skill") return `<span class="step-skill">${h(String(tool.input.name ?? ""))}</span>`;
   const base = (tool.detail ?? tool.name).replace(/^\$\s*/, "");
   // A command by its program's name: the full path is on hover.
@@ -1723,10 +1983,10 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
   // files names each one. The full paths are on hover.
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? paths.map((path) => `<span class="name">${h(fileName(path))}</span>`).join(", ") : paths[0] ? fileFirst(paths[0]) : h(base); }
   if (FILE_TOOLS.has(tool.name) && !tool.drafting && base && !/\s/.test(base)) return fileFirst(base);
-  if (tool.name !== "subagent" || tool.state !== "running") return h(base);
+  if (!isAgentStep(tool) || tool.state !== "running") return h(base);
   // Still being written by the model: not running yet.
   if (tool.drafting) return `${h(base || "…")}<span class="muted"> · writing</span>`;
-  const slot = run.entries.filter((entry) => entry.type === "tool" && entry.name === "subagent").indexOf(tool);
+  const slot = run.entries.filter((entry) => entry.type === "tool" && isAgentStep(entry)).indexOf(tool);
   const model = tool.subagentModel ?? state!.model.id;
   const phrase = matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model);
   return `${h(base)}<span class="muted"> · </span><span class="phrase" data-subagent-phrase data-slot="${slot}" data-model="${h(model)}">${h(phrase)}</span>`;
@@ -1741,8 +2001,10 @@ function fileFirst(path: string) {
 /// A sub-agent running on one of your agent tools (Claude Code, Codex,
 /// Gemini): its id, from the "agent:<id> · " its progress lines carry.
 const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
+/// A sub-agent, or a hand-off (an agent tool making a change in its own copy).
+function isAgentStep(tool: ToolEntry) { return tool.name === "subagent" || tool.name === "hand_off"; }
 function cliAgent(tool: ToolEntry): string | null {
-  const id = tool.name === "subagent" && tool.subagentModel?.startsWith("agent:") ? tool.subagentModel.slice(6) : "";
+  const id = isAgentStep(tool) && tool.subagentModel?.startsWith("agent:") ? tool.subagentModel.slice(6) : "";
   return id && Object.hasOwn(CLI_NAMES, id) ? id : null;
 }
 /// "read live.ts" → "Read live.ts": a sub-agent's step as a line of words.
@@ -1754,7 +2016,7 @@ function helpingAgents(): Set<string> {
 }
 /// "3 steps": how far a sub-agent has got, on the right of its row.
 function subagentSteps(tool: ToolEntry) {
-  const steps = tool.name === "subagent" ? (tool.trace ?? []).length : 0;
+  const steps = isAgentStep(tool) ? (tool.trace ?? []).length : 0;
   return steps ? `${steps} step${steps === 1 ? "" : "s"}` : "";
 }
 /// One quiet line per step: an icon for the kind of work, the verb, the
@@ -1775,12 +2037,12 @@ const stepIconFor = (kind: string) => `<svg class="ico" viewBox="0 0 24 24" aria
 const stepIcon = (tool: ToolEntry) => {
   const kind = tool.name === "run_command" ? "run"
     : tool.phase === "change" ? "edit"
-    : tool.name === "search_files" ? "search"
+    : tool.name === "search_files" || tool.name === "web_search" ? "search"
     : tool.name === "list_files" ? "list"
-    : tool.name === "subagent" ? "agent"
+    : isAgentStep(tool) ? "agent"
     : tool.name === "ask_user" ? "ask"
     : tool.name === "heartbeat" ? "mail"
-    : ["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
+    : ["read_file", "read_files", "read_source", "web_fetch", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
     : "other";
   return stepIconFor(kind);
 };
@@ -1795,7 +2057,7 @@ const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><p
 const foldable = (tool: ToolEntry) =>
   (tool.phase === "change" && tool.state !== "running" && !tool.drafting && (Boolean(tool.changes?.length) || Boolean(tool.diff))) ||
   (tool.name === "run_command" && !tool.waiting && !tool.drafting && Boolean(tool.toolCallId)) ||
-  (tool.name === "subagent" && !tool.drafting && Boolean(tool.toolCallId));
+  (isAgentStep(tool) && !tool.drafting && Boolean(tool.toolCallId));
 /// A turn the answer to an open question started reads as that answer,
 /// not as a message you typed.
 function answerAsked(run: WorkspaceRun) {
@@ -1819,7 +2081,173 @@ function parkedLines(run: WorkspaceRun) {
   return (state?.questions ?? []).filter((q) => q.open && q.turnId === run.id && (q.answers?.length ?? 0) < q.questions.length && asked.indexOf(q.toolCallId) >= 0 && asked.indexOf(q.toolCallId) < last)
     .map((q) => btn("question-back", `<span class="ask-park" aria-hidden="true"></span><b>Waits for your answer</b><span class="ask-q-was">${h(q.questions[q.answers?.length ?? 0]!.question)}</span>`, { id: q.id }, "tool-row ask-parked")).join("");
 }
+/// Wait and watch: "Waiting for “ready” · bun run dev", then how it ended (wait-row.ts).
+function waitStep(run: WorkspaceRun, tool: ToolEntry) {
+  const at = run.entries.indexOf(tool);
+  const started = run.entries.slice(0, at < 0 ? undefined : at).findLast((entry): entry is ToolEntry => entry.type === "tool" && entry.name === "run_command" && entry.input.background === true);
+  const row = waitRow({ state: tool.drafting ? "running" : tool.state, pattern: tool.input.pattern, command: started ? stepTarget(started) : "", message: tool.message, durationMs: tool.durationMs, icon: "" });
+  return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
+    { runId: run.id, id: tool.id }, `tool-row wait-row ${row.tone}`) + row.tail;
+}
+/// Pictures removed from a chat's pile (pass 202 A), kept per chat.
+const PILE_HIDDEN = "demesne-pile-hidden";
+function pileHidden(sessionId: string): Set<string> {
+  try { return new Set((JSON.parse(localStorage.getItem(PILE_HIDDEN) ?? "{}") as Record<string, string[]>)[sessionId] ?? []); } catch { return new Set(); }
+}
+function hideFromPile(sessionId: string, id: string) {
+  try {
+    const all = JSON.parse(localStorage.getItem(PILE_HIDDEN) ?? "{}") as Record<string, string[]>;
+    all[sessionId] = [...new Set([...(all[sessionId] ?? []), id])].slice(-200);
+    localStorage.setItem(PILE_HIDDEN, JSON.stringify(all));
+  } catch { /* storage is off: it comes back next time */ }
+}
+/// The newest picture each chat's pile showed: a new one drops on top.
+/// It stays marked a moment, so a redraw doesn't cut its drop short.
+const pileTops = new Map<string, { id: string; at: number }>();
+function pileLanding(sessionId: string, top: string | undefined): string | undefined {
+  const before = pileTops.get(sessionId);
+  if (!top) return undefined;
+  if (!before) { pileTops.set(sessionId, { id: top, at: 0 }); return undefined; }
+  if (before.id !== top) pileTops.set(sessionId, { id: top, at: Date.now() });
+  return Date.now() - pileTops.get(sessionId)!.at < 1200 ? top : undefined;
+}
+const pileSrc = (id: string) => attachmentPreviews.get(id) ?? lookPicture(id);
+/// See the app: its pictures, fetched once from the chat's images and kept.
+const lookPictures = new Map<string, string>(), lookLoading = new Set<string>();
+function lookPicture(id: string): string | undefined {
+  const known = lookPictures.get(id);
+  if (known || lookLoading.has(id)) return known;
+  lookLoading.add(id);
+  void api<string>("tool-picture", { id }).then((src) => {
+    if (typeof src !== "string" || !src.startsWith("data:image/")) return;
+    lookPictures.set(id, src);
+    if (lookPictures.size > 60) lookPictures.delete(lookPictures.keys().next().value!);
+    document.querySelectorAll<HTMLImageElement>(`img[data-picture="${CSS.escape(id)}"]`).forEach((img) => { img.src = src; });
+  }).catch(() => {});
+  return undefined;
+}
+function lookStep(run: WorkspaceRun, tool: ToolEntry) {
+  const row = pageLookRow(tool, lookPicture);
+  return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
+    { runId: run.id, id: tool.id }, `tool-row wait-row look-row ${row.tone}`) + row.below;
+}
+/// Who you asked (pass 178 B): a turn's Heartbeat sends are one row.
+const askedOpen = new Set<string>();
+const isSend = (tool: ToolEntry) => tool.name === "heartbeat" && tool.input.action === "send";
+const firstSend = (run: WorkspaceRun, tool: ToolEntry) => isSend(tool) && run.entries.find((entry): entry is ToolEntry => entry.type === "tool" && isSend(entry)) === tool;
+function askedAnswers(run: WorkspaceRun) {
+  const asked = askedIn(run.entries);
+  if (!asked.length || !state) return { asked, answers: new Map<string, { text: string; performative: string }>() };
+  const at = state.runs.findIndex((other) => other.id === run.id);
+  return { asked, answers: answersAfter(state.runs, at, asked.map((item) => item.to)) };
+}
+function askStep(run: WorkspaceRun) {
+  const { asked, answers } = askedAnswers(run);
+  const housed = state?.housed ?? [];
+  return askRowHTML({ asked, answers, runId: run.id, open: asked.length ? askedOpen.has(`${run.id}:${asked[0]!.key}`) : false, mail: stepIconFor("mail"),
+    face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood === "focus" ? "focus" : "calm")}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
+    working: (agent) => housed.some((item) => item.id === agent && item.state === "working") });
+}
+/// Sub-agents at work (pass 183 A): a round of sub-agents is one line.
+const crewOpen = new Set<string>();
+/// When each sub-agent last took a step, for "the newest step any of them took".
+const crewSeen = new Map<string, { steps: number; at: number }>();
+const isSubagent = (entry: WorkspaceRun["entries"][number]): entry is ToolEntry => entry.type === "tool" && entry.name === "subagent";
+/// The sub-agents sent in one go with this one: the run of them around it.
+function crewOf(run: WorkspaceRun, tool: ToolEntry): ToolEntry[] {
+  const at = run.entries.indexOf(tool);
+  let start = at, end = at;
+  while (start > 0 && isSubagent(run.entries[start - 1]!)) start--;
+  while (end < run.entries.length - 1 && isSubagent(run.entries[end + 1]!)) end++;
+  return run.entries.slice(start, end + 1) as ToolEntry[];
+}
+const crewKey = (run: WorkspaceRun, members: ToolEntry[]) => `${run.id}:${members[0]!.id}`;
+function crewStep(run: WorkspaceRun, tool: ToolEntry) {
+  const members = crewOf(run, tool), key = crewKey(run, members);
+  let newest: { text: string; at: number } | null = null;
+  for (const member of members) {
+    const steps = member.trace?.length ?? 0, seen = crewSeen.get(member.toolCallId);
+    if (!seen || seen.steps !== steps) { if (crewSeen.size > 400) crewSeen.clear(); crewSeen.set(member.toolCallId, { steps, at: Date.now() }); }
+    const last = member.trace?.at(-1)?.text.replace(/^[^·]+ · /, "");
+    const at = crewSeen.get(member.toolCallId)!.at;
+    if (((member.state === "running" && !member.crew?.match(/reported|stopped/)) || member.drafting) && last && (!newest || at > newest.at)) newest = { text: nowWords(last), at };
+  }
+  const running = members.find((member) => member.state === "running" && member.crew !== "reported" && member.crew !== "stopped");
+  const slot = running ? run.entries.filter((entry) => entry.type === "tool" && isAgentStep(entry)).indexOf(running) : 0;
+  const model = running?.subagentModel ?? state!.model.id;
+  return crewRowHTML({
+    members: members.map((member) => ({
+      runId: run.id, id: member.id, agent: cliAgent(member), task: String(member.input.description ?? member.detail ?? "Sub-agent"),
+      state: member.state, drafting: member.drafting, steps: member.trace?.length ?? 0, durationMs: member.durationMs,
+      toolCallId: member.toolCallId, ...(member.crew ? { crew: member.crew } : {}), ...(member.asked?.length ? { asked: member.asked } : {}),
+      found: ["failed", "denied", "stopped"].includes(member.state) ? (member.message ?? "").replace(/^Error: (sub-agent failed: )?/, "") : member.report,
+      open: stepOpen.has(`${run.id}:${member.id}`), fold: stepOpen.has(`${run.id}:${member.id}`) ? agentFold(run, member) : undefined,
+    })),
+    key, open: crewOpen.has(key), newest: newest?.text,
+    phrase: running ? { slot, model, text: matchMedia("(prefers-reduced-motion: reduce)").matches ? "working" : subagentPhrase(slot, Date.now(), model) } : undefined,
+    face: (agent, mood) => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood)}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`,
+  });
+}
+/// A running crew changes in place: only its parts that changed are swapped.
+function patchCrew(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
+  const members = crewOf(run, tool), key = crewKey(run, members);
+  const was = [...content.querySelectorAll<HTMLElement>("[data-crew]")].find((node) => node.dataset.crew === key);
+  if (!was) return false;
+  const next = document.createElement("template");
+  next.innerHTML = crewStep(run, tool);
+  const now = next.content.firstElementChild as HTMLElement | null;
+  if (!now?.matches("[data-crew]")) return false;
+  const oldHead = was.querySelector<HTMLElement>(":scope > .crew-row"), newHead = now.querySelector<HTMLElement>(":scope > .crew-row");
+  if (!oldHead || !newHead) return false;
+  syncChildren(oldHead, newHead);
+  for (const attr of [...newHead.attributes]) if (oldHead.getAttribute(attr.name) !== attr.value) oldHead.setAttribute(attr.name, attr.value);
+  const oldLines = was.querySelector<HTMLElement>(":scope > .crew-lines"), newLines = now.querySelector<HTMLElement>(":scope > .crew-lines");
+  if (oldLines && newLines) {
+    // A line and an open guide keep their nodes: only what's inside them changes.
+    const old = [...oldLines.children] as HTMLElement[], fresh = [...newLines.children] as HTMLElement[];
+    fresh.forEach((node, i) => {
+      const before = old[i];
+      if (!before) oldLines.append(node);
+      else if (before.className === node.className && (node.matches(".crew-line") || node.matches(".agent-steps"))) {
+        syncChildren(before, node);
+        for (const attr of [...node.attributes]) if (before.getAttribute(attr.name) !== attr.value) before.setAttribute(attr.name, attr.value);
+      }
+      else if (steadyHTML(before) !== steadyHTML(node)) before.replaceWith(node);
+    });
+    for (const node of old.slice(fresh.length)) node.remove();
+  }
+  else if (newLines) was.append(newLines);
+  else oldLines?.remove();
+  return true;
+}
+/// Deep research (pass 182 A): one quiet line; click for who took what.
+const researchOpen = new Set<string>();
+const researchFace = (agent: string | null, mood: "focus" | "calm") => agent && CLI_NAMES[agent] ? `<span class="agent-face" data-provider="${h(agent)}">${agentFace(agent, mood)}</span>` : `<span class="ask-d"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span>`;
+function researchStep(run: WorkspaceRun, tool: ToolEntry) {
+  const key = `${run.id}:${tool.id}`;
+  return researchRowHTML({ research: tool.research, tool, open: researchOpen.has(key), key, face: researchFace, icon: stepIcon(tool) });
+}
+/// What the row shows depends on mail that came later: part of a turn's signature.
+function askedSignature(run: WorkspaceRun): string {
+  if (!run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
+  const { asked, answers } = askedAnswers(run);
+  return JSON.stringify([asked.map((item) => item.state), [...answers.keys()], [...askedOpen].filter((key) => key.startsWith(`${run.id}:`)),
+    (state?.housed ?? []).filter((item) => asked.some((one) => one.agent === item.id)).map((item) => item.state)]);
+}
+/// A step that read or wrote one file a preview can show: its path.
+const stepPreviewPath = (tool: ToolEntry) => ["read_file", "write_file", "edit_file"].includes(tool.name) && typeof tool.input.path === "string" && previewable(tool.input.path) ? tool.input.path : "";
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
+  // The plan is the ribbon; loading tools (tool_search) is plumbing; waiting
+  // on, asking or stopping background agents shows on their crew line.
+  if (tool.name === UPDATE_PLAN || tool.name === "tool_search" || tool.name === "agents") return "";
+  if (isSend(tool)) return firstSend(run, tool) ? askStep(run) : "";
+  // Finding who to ask is part of asking: no row of its own beside the one above.
+  if (tool.name === "heartbeat" && tool.input.action === "agents" && run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";
+  if (tool.name === "wait_for") return waitStep(run, tool);
+  if (tool.name === "look_at_page") return lookStep(run, tool);
+  if (tool.name === "research") return researchStep(run, tool);
+  // A round of sub-agents is one line, drawn at its first.
+  if (tool.name === "subagent") return crewOf(run, tool)[0] === tool ? crewStep(run, tool) : "";
   // An open question is a card at its step; one the turn waits on is asked
   // at the end of the conversation; an answered one folds into one line.
   if (tool.name === "ask_user") {
@@ -1840,7 +2268,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
         : now
           ? subagentSteps(tool) || ""
           : tool.state === "done"
-            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${tool.name === "subagent" && subagentSteps(tool) ? `${subagentSteps(tool)} · ` : ""}${duration(tool.durationMs)}`
+            ? `<span class="success">✓</span> ${tool.exitCode != null && tool.exitCode !== 0 ? `exit ${tool.exitCode} · ` : ""}${isAgentStep(tool) && subagentSteps(tool) ? `${subagentSteps(tool)} · ` : ""}${duration(tool.durationMs)}`
             : tool.state === "failed" || tool.state === "denied"
               ? `<span class="danger">×</span> ${tool.exitCode != null ? `exit ${tool.exitCode}` : h(tool.state)}`
               : `<span class="muted">${h(mark(tool.state))}</span> ${h(tool.state)}`;
@@ -1848,7 +2276,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     canFold ? "step" : "tool",
     // A running step keeps its own icon and plain words: the working line
     // under the turn carries the cube and the silver.
-    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target" title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
+    `${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, now ? "focus" : "calm")}</span>` : stepIcon(tool)}<span class="verb">${served ? "Serving" : cli ? h(CLI_NAMES[cli]!) : h(verb(tool))}</span><code class="target"${stepPreviewPath(tool) ? ` data-preview-path="${h(stepPreviewPath(tool))}"` : ""} title="${h(tool.name === "read_files" ? readPaths(tool).join("\n") || tool.detail || tool.name : tool.detail ?? tool.name)}">${toolTarget(run, tool)}</code>${yourSource(tool)}${cli && tool.subagentWhy ? `<span class="auto-chip" title="${h(tool.subagentWhy)}">auto</span>` : ""}${canFold ? CHEVRON : ""}<span class="sp"></span><small class="meta">${meta}</small>`,
     { runId: run.id, id: tool.id },
     `tool-row ${tool.state === "failed" ? "failed" : ""} ${tool.waiting ? "waiting" : ""} ${open ? "open" : ""}`,
   ).replace("<button ", `<button aria-expanded="${canFold ? open : "false"}" `);
@@ -1864,9 +2292,10 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // drawing itself is kept across repaints and dropped into this slot.
   const tree = tool.repo && tool.state === "done" ? repoSlot(tool) : "";
   // What a running sub-agent is on right now, on a quiet line under its row.
-  const last = tool.name === "subagent" && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
+  const last = isAgentStep(tool) && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
   const nowLine = last ? `<div class="agent-now">${h(nowWords(last))}</div>` : "";
-  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
+  const card = tool.handoff && tool.state !== "running" ? handoffCard(tool.handoff) : "";
+  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + card + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
 }
 const hasFileEdit = (tool: ToolEntry) => tool.phase === "change" && tool.state === "done" && Boolean(tool.changes?.length);
 const fileEditSlot = (tool: ToolEntry) => `<div data-file-edit="${h(tool.toolCallId)}"></div>`;
@@ -1989,7 +2418,7 @@ function rewindLine(rewind: Snapshot["rewinds"][number]) {
 /// command's recorded output (its tail), loaded when first opened, or a
 /// sub-agent's own guide.
 function stepFold(run: WorkspaceRun, tool: ToolEntry) {
-  if (tool.name === "subagent") return agentFold(run, tool);
+  if (isAgentStep(tool)) return agentFold(run, tool);
   if (tool.phase === "change") {
     if (tool.changes?.length) return `<div class="step-fold">${fileEditSlot(tool)}</div>`;
     const files = tool.changes?.length ? tool.changes.map((change) => ({ path: change.path, before: change.before ?? "", after: change.after ?? "" })) : tool.diff ? [{ path: String(tool.input.path ?? tool.detail ?? ""), before: tool.diff.oldText, after: tool.diff.newText }] : [];
@@ -2058,10 +2487,59 @@ function agentFold(run: WorkspaceRun, tool: ToolEntry) {
     body += `<div class="agent-found"><b><span class="danger">×</span> ${h(tool.state === "stopped" ? "Stopped" : "Failed")}</b>${tool.message ? ` · ${h(tool.message.replace(/^Error: (sub-agent failed: )?/, "").split("\n")[0] ?? "")}` : ""}</div>`;
   else if (tool.report) {
     const open = foundOpen.has(key), text = tool.report.trim(), clipped = !open && text.length > 240;
-    body += `<div class="agent-found"><b>Found</b> · ${h(clipped ? `${text.slice(0, 240).trimEnd()}…` : text)}${text.length > 240 ? btn("agent-found", open ? "less" : "more", { key }, "link agent-more") : ""}</div>`;
+    body += `<div class="agent-found"><b>${tool.name === "hand_off" ? "Said" : "Found"}</b> · ${h(clipped ? `${text.slice(0, 240).trimEnd()}…` : text)}${text.length > 240 ? btn("agent-found", open ? "less" : "more", { key }, "link agent-more") : ""}</div>`;
   }
   return `<div class="agent-steps" role="group">${body}</div>`;
 }
+/// A hand-off's change card (pass 165 A): what the agent changed in its own
+/// copy, with Bring it in, Ask for changes and Discard, and once brought in,
+/// Undo. Where it is now comes from the daemon (the turn's own record is how
+/// it was when the turn ended); the diff loads when a file is opened.
+const handoffNow = new Map<string, { status: string; error?: string; patch?: string }>();
+const handoffAsked = new Set<string>();
+const handoffOpenFile = new Map<string, string>();
+const handoffBusy = new Set<string>();
+function handoffFetch(id: string) {
+  if (handoffAsked.has(id)) return;
+  handoffAsked.add(id);
+  void api<{ handoff: { status: string; error?: string }; patch: string }>("handoff", { id }).then((found) => {
+    handoffNow.set(id, { status: found.handoff.status, ...(found.handoff.error ? { error: found.handoff.error } : {}), patch: found.patch });
+    follow = false;
+    renderConversation();
+  }).catch(() => { /* the turn's own record stands */ });
+}
+/// One file's part of a git patch, as colored lines.
+function patchFor(patch: string, path: string) {
+  const parts = patch.split(/^(?=diff --git )/m);
+  const part = parts.find((chunk) => chunk.startsWith(`diff --git a/${path} `) || chunk.includes(` b/${path}\n`)) ?? "";
+  const body = part.split("\n").filter((line) => !/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode|similarity|rename )/.test(line));
+  if (!body.length || !part) return '<div class="ho-diff muted">No diff to show</div>';
+  const shown = body.slice(0, 400);
+  return `<pre class="ho-diff">${shown.map((line) => `<span class="${line.startsWith("+") ? "a" : line.startsWith("-") ? "d" : line.startsWith("@@") ? "at" : ""}">${h(line)}</span>`).join("\n")}${body.length > shown.length ? `\n<span class="muted">… ${body.length - shown.length} more lines</span>` : ""}</pre>`;
+}
+function handoffCard(card: NonNullable<ToolEntry["handoff"]>) {
+  handoffFetch(card.id);
+  const now = handoffNow.get(card.id), status = now?.status ?? card.status, error = now ? now.error : card.error;
+  const name = CLI_NAMES[card.agent] ?? card.agent, busy = handoffBusy.has(card.id);
+  const added = card.files.reduce((sum, file) => sum + file.added, 0), removed = card.files.reduce((sum, file) => sum + file.removed, 0);
+  const open = handoffOpenFile.get(card.id);
+  const files = card.files.map((file) => btn("handoff-file", `${fileFirst(file.path)}<span class="sp"></span><small><span class="add">+${file.added}</span> <span class="del">−${file.removed}</span></small>`,
+    { id: card.id, path: file.path }, `ho-file ${open === file.path ? "open" : ""}`) + (open === file.path ? now?.patch !== undefined ? patchFor(now.patch, file.path) : '<div class="ho-diff muted">Loading…</div>' : "")).join("");
+  const state = status === "applied" ? `<span class="success">Brought in</span>` : status === "discarded" ? "Discarded" : status === "working" ? "Working…" : status === "failed" ? `<span class="danger">Didn't finish</span>` : "Not in your files yet";
+  const actions = status === "ready"
+    ? btn("handoff-act", "Bring it in", { id: card.id, action: "apply" }, "ho-go", busy) + btn("handoff-again", "Ask for changes", { id: card.id, agent: card.agent }, "ho-btn", busy) + btn("handoff-act", "Discard", { id: card.id, action: "discard" }, "ho-btn quiet", busy)
+    : status === "applied" ? btn("handoff-act", `${ICON_UNDO}Undo`, { id: card.id, action: "undo" }, "ho-btn", busy)
+    : status === "failed" && card.files.length ? btn("handoff-act", "Discard", { id: card.id, action: "discard" }, "ho-btn quiet", busy) : "";
+  const changed = card.files.length ? `${name} changed ${card.files.length} file${card.files.length === 1 ? "" : "s"}` : `${name} changed nothing`;
+  return `<div class="ho-card ${h(status)}" data-handoff="${h(card.id)}">
+    <div class="ho-h"><span class="agent-face step-face" data-provider="${h(card.agent)}" aria-hidden="true">${agentFace(card.agent, "calm")}</span><b>${h(changed)}</b>${card.files.length ? `<span class="add">+${added}</span><span class="del">−${removed}</span>` : ""}<span class="sp"></span><small>${state}</small></div>
+    ${files ? `<div class="ho-files">${files}</div>` : ""}
+    ${card.checks.length ? `<div class="ho-checks">Ran ${card.checks.slice(0, 4).map((check) => `<code>${h(check.length > 60 ? `${check.slice(0, 59)}…` : check)}</code>`).join(" ")}</div>` : ""}
+    ${error && status !== "applied" ? `<div class="ho-error">${h(error)}</div>` : ""}
+    ${actions ? `<div class="ho-actions">${actions}</div>` : ""}
+  </div>`;
+}
+
 /// Under the last turn that changed Demesne's own source: whether the app
 /// you're in runs it yet (its build is newer than the turn), and on a Mac,
 /// Rebuild and open. The open waits until nothing is working.
@@ -2090,10 +2568,13 @@ function rebuildWhenIdle() {
 }
 /// A sent message, its big pastes shown folded as they were in the composer.
 function requestText(content: string) {
-  return splitPastes(content).map((part) => part.kind === "text" ? h(part.text)
+  const { text, refs } = splitMockupRefs(content);
+  return splitPastes(text).map((part) => part.kind === "text" ? linkMockups(h(part.text), refs)
     : `<details class="paste-chip"><summary title="${h(part.text.split("\n").slice(0, 6).join("\n"))}">${PASTE_ICON}${h(pasteLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`).join("");
 }
 const PASTE_ICON = '<span class="pc-ic" aria-hidden="true">TXT</span>';
+/// The Foundry steps that make or change a page.
+const FOUNDRY_WORK = new Set(["foundry_save", "foundry_edit", "foundry_read", "foundry_try"]);
 function runHTML(run: WorkspaceRun, index: number) {
   const rewound = rewoundBy(run);
   if (rewound) return rewindLine(rewound);
@@ -2102,6 +2583,16 @@ function runHTML(run: WorkspaceRun, index: number) {
     const at = run.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === cut.toolCallId);
     if (at >= 0) run = { ...run, entries: run.entries.slice(0, at + 1) };
   }
+  // The plan is the ribbon at the top, never a step row of its own.
+  const plan = planOf(tools(run));
+  // Foundry works quietly (pass 192 A): once a page is being made, words
+  // between its steps are progress talk, and only the answer after the last
+  // step shows. The working line says what it is on meanwhile.
+  const making = run.entries.findIndex((entry) => entry.type === "tool" && FOUNDRY_WORK.has(entry.name));
+  const lastStep = run.entries.findLastIndex((entry) => entry.type === "tool");
+  const quiet = new Set(making < 0 ? [] : run.entries.flatMap((entry, at) => entry.type === "assistant" && at > making && at < lastStep ? [entry.id] : []));
+  // Foundry trying its own page is its business, never a step row.
+  run = { ...run, entries: run.entries.filter((entry) => entry.type !== "tool" || (entry.name !== UPDATE_PLAN && entry.name !== "foundry_try")) };
   const items = tools(run),
     files = new Set(
       items
@@ -2117,12 +2608,16 @@ function runHTML(run: WorkspaceRun, index: number) {
   // latest trace unless the reader explicitly collapses it.
   // A step serving a live page keeps the trace open so its preview shows.
   const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
-  let body = "", steps = "";
+  let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }).replace('<div class="plan-ribbon', `<div style="--pr-phase:-${Math.round(performance.now() % 1400)}ms" class="plan-ribbon`) : "", steps = "";
+  // Files sent with the message were read with it (pass 205 A): one line each.
+  const sentFiles = run.status === "queued" ? [] : (run.attachments ?? []).filter((one) => one.kind === "file");
+  if (sentFiles.length) body += `<div class="steps file-reads">${sentFiles.map((file) => `<div class="tool-row file-read">${stepIconFor("read")}<span class="verb">Read</span><code class="target"><span class="name">${h(file.filename)}</span></code><span class="sp"></span><small class="meta"><span class="success">✓</span> ${file.size != null ? h(sizeWord(file.size)) : ""}</small></div>`).join("")}</div>`;
   const flush = () => { if (steps) { body += `<div class="steps">${steps}</div>`; steps = ""; } };
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!,
       key = `${run.id}:${entry.id}`;
     if (entry.type === "assistant") {
+      if (quiet.has(entry.id)) continue;
       flush();
       body += `<div class="answer"><span class="answer-mark" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span><div class="markdown" data-answer="${h(run.id)}" data-entry="${entry.id}"></div></div>`;
     }
@@ -2130,6 +2625,11 @@ function runHTML(run: WorkspaceRun, index: number) {
       // Folded steps keep their trees: a commit or merge stays drawn.
       if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
       if (entry.type === "tool" && entry.name === "start_threads" && entry.state === "done") { flush(); body += THREADS_SLOT; }
+      if (entry.type === "tool" && entry.handoff) { flush(); body += handoffCard(entry.handoff); }
+      // Who this turn asked stays in sight, with how many have answered.
+      if (entry.type === "tool" && firstSend(run, entry)) { flush(); body += `<div class="steps">${askStep(run)}</div>`; }
+      // So does a research line: the work behind the report.
+      if (entry.type === "tool" && entry.name === "research") { flush(); body += `<div class="steps">${researchStep(run, entry)}</div>`; }
       if (entry.type === "tool" && hasFileEdit(entry) && fileEditsOpen.has(key)) { flush(); body += fileEditSlot(entry); }
       continue;
     }
@@ -2233,7 +2733,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   const asks = `<span class="ask-actions">${btn("edit-ask", "edit", { id: run.id })}${live || state!.activeTurnId ? "" : btn("retry-ask", "retry", { id: run.id })}${canRewind(run) ? btn("rewind", "rewind", { turnId: run.id }).replace("<button ", '<button title="Put the files and the chat back to just before this message" ') : ""}</span>`;
   const queued = live && state!.queue.trim() ? `<div class="next-line"><span class="next-label">NEXT</span><span class="next-text">${h(state!.queue.trim())}</span>${btn("queue-action", "edit", { action: "edit" })}${btn("queue-action", "send now", { action: "now" })}${btn("queue-action", "×", { action: "drop" }, "next-drop")}</div>` : "";
   const attached = run.attachments?.length
-    ? `<div class="request-att">${run.attachments.map((image) => attachmentPreviews.has(image.id)
+    ? `<div class="request-att">${run.attachments.map((image) => image.kind === "file" ? fileChipHTML(image, { small: true }) : attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
   const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? threadReport(run) ?? threadAsked(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${requestText(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
@@ -2445,16 +2945,22 @@ function runningRowOnly(entry: WorkspaceRun["entries"][number], previous: Worksp
   return entry.type === "tool" && previous.type === "tool" && entry.id === previous.id && entry.name === previous.name &&
     entry.phase === previous.phase && entry.state === "running" && previous.state === "running" &&
     !entry.drafting && !previous.drafting && !entry.waiting && !previous.waiting && !entry.repo && !previous.repo &&
-    !stepOpen.has(`${runId}:${entry.id}`);
+    // A sub-agent's guide grows in place when open (patchAgentLines).
+    (isAgentStep(entry) || !stepOpen.has(`${runId}:${entry.id}`));
 }
 function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry) {
+  if (tool.name === "subagent" && !tool.drafting) return patchCrew(content, run, tool);
   const args = JSON.stringify({ runId: run.id, id: tool.id });
   const row = [...content.querySelectorAll<HTMLButtonElement>("button.tool-row")].find((node) => node.dataset.args === args);
   if (!row) return !toolRow(run, tool);
   const next = document.createElement("template");
   next.innerHTML = toolRow(run, tool);
   const fresh = next.content.querySelector<HTMLButtonElement>("button.tool-row");
-  if (!fresh || next.content.childElementCount !== 1) return false;
+  // A running sub-agent also has the line under its row: what it's on now,
+  // or its own guide when open. Those are patched in place too.
+  const extras = [...next.content.children].slice(1);
+  if (!fresh || next.content.firstElementChild !== fresh || (extras.length && (!isAgentStep(tool) || extras.some((node) => !node.matches(".agent-now, .agent-steps"))))) return false;
+  if (isAgentStep(tool)) patchAgentLines(row, extras as HTMLElement[]);
   // Read before the swap below, which moves the fresh target into the row.
   const title = fresh.querySelector(".target")?.getAttribute("title") ?? "";
   // The shining verb keeps running; only the words that changed are swapped.
@@ -2469,10 +2975,63 @@ function patchDraftRow(content: HTMLElement, run: WorkspaceRun, tool: ToolEntry)
   for (const attr of [...fresh.attributes]) if (row.getAttribute(attr.name) !== attr.value) row.setAttribute(attr.name, attr.value);
   return true;
 }
+/// Under a working sub-agent's row: its "now" line, or its guide when open.
+/// Each step changes only the lines that changed, so the turn never redraws
+/// (it flickered on every step) and the last line keeps shining.
+function patchAgentLines(row: HTMLElement, fresh: HTMLElement[]) {
+  const kinds = [".agent-now", ".agent-steps"];
+  let at: Element = row;
+  for (const kind of kinds) {
+    const was = at.nextElementSibling?.matches(kind) ? at.nextElementSibling as HTMLElement : null;
+    const now = fresh.find((node) => node.matches(kind));
+    if (was && now) { syncChildren(was, now); at = was; }
+    else if (now) { at.after(now); at = now; }
+    else if (was) was.remove();
+  }
+}
+/// The shine's phase follows the clock, so lines compare without it.
+const steadyHTML = (node: Element) => node.outerHTML.replace(/ style="animation-delay:-\d+ms"/g, "");
+function syncChildren(was: HTMLElement, now: HTMLElement) {
+  if (!was.children.length && !now.children.length) { if (was.textContent !== now.textContent) was.textContent = now.textContent; return; }
+  const old = [...was.children], next = [...now.children];
+  next.forEach((node, i) => {
+    const before = old[i];
+    if (!before) was.append(node);
+    else if (steadyHTML(before) !== steadyHTML(node)) before.replaceWith(node);
+  });
+  for (const node of old.slice(next.length)) node.remove();
+}
 // Attach the new shell before moving retained answers. Chromium's state-
 // preserving move keeps streaming text animations alive through tool boundaries.
+/// Brings `old` to look like `fresh` while keeping its nodes, so what moves
+/// in it (a transition, a running animation) carries on instead of starting
+/// over. Children are matched by position; a different shape is swapped.
+function morph(old: Element, fresh: Element) {
+  for (const attr of [...old.attributes]) if (!fresh.hasAttribute(attr.name)) old.removeAttribute(attr.name);
+  for (const attr of [...fresh.attributes]) if (old.getAttribute(attr.name) !== attr.value) old.setAttribute(attr.name, attr.value);
+  const was = [...old.childNodes], now = [...fresh.childNodes];
+  const same = was.length === now.length && was.every((node, i) => node.nodeType === now[i]!.nodeType && (node.nodeType !== Node.ELEMENT_NODE || (node as Element).tagName === (now[i] as Element).tagName));
+  if (!same) { old.replaceChildren(...now); return; }
+  was.forEach((node, i) => {
+    const next = now[i]!;
+    if (node.nodeType === Node.ELEMENT_NODE) morph(node as Element, next as Element);
+    else if (node.nodeValue !== next.nodeValue) node.nodeValue = next.nodeValue;
+  });
+}
+/// What an open step shows, keyed by the step it belongs to.
+const foldKey = (fold: Element) => (fold.previousElementSibling as HTMLElement | null)?.dataset.args ?? "";
 function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, retained: Array<[HTMLElement, HTMLElement]>) {
   const old = [...content.childNodes];
+  // The checklist ribbon is the same element from step to step: its segments
+  // fill and its light keeps moving instead of being drawn anew (it stuttered).
+  const ribbon = content.querySelector(".plan-ribbon"), freshRibbon = fragment.querySelector(".plan-ribbon");
+  if (ribbon && freshRibbon && ribbon.classList.contains("ended") === freshRibbon.classList.contains("ended")) {
+    morph(ribbon, freshRibbon);
+    retained = [...retained, [freshRibbon as HTMLElement, ribbon as HTMLElement]];
+  }
+  // A step that was already open doesn't fade in again.
+  const shown = new Set([...content.querySelectorAll(".step-fold")].map(foldKey));
+  for (const fold of fragment.querySelectorAll<HTMLElement>(".step-fold")) if (shown.has(foldKey(fold))) fold.classList.add("steady");
   content.append(fragment);
   for (const [slot, element] of retained) {
     const parent = slot.parentElement!;
@@ -2481,6 +3040,13 @@ function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, reta
     slot.remove();
   }
   for (const node of old) if (!retained.some(([, element]) => element === node)) node.remove();
+}
+/// An open checklist longer than it shows scrolls to the step it is on.
+function planInView() {
+  for (const list of document.querySelectorAll<HTMLElement>(".plan-ribbon.open .pr-list")) {
+    const row = list.querySelector<HTMLElement>(".pr-row.n") ?? list.querySelector<HTMLElement>(".pr-row:not(.d)");
+    if (row && list.scrollHeight > list.clientHeight) list.scrollTop = Math.max(0, row.offsetTop - list.clientHeight / 2);
+  }
 }
 function revealCompactedTurn(id: string) {
   if (!state?.checkpoint) return;
@@ -2549,14 +3115,31 @@ function renderConversation() {
   const mountedAt = visible.findIndex((item) => runNodes.has(item.run.id));
   const prepending = !liveBefore && mountedAt > Math.max(0, first);
   const heightBefore = prepending ? stage.scrollHeight : 0;
+  // Everything a turn's look depends on besides the turn itself: while none
+  // of it changes, a turn whose record is the same object is left alone
+  // without working out its signature (a long chat streams far cheaper).
+  const shared = JSON.stringify([state.runs.length, [...expanded], [...stepsOpen], [...planOpen], [...askedOpen], [...crewOpen], [...researchOpen], [...fileEditsOpen], [...stepOpen], [...previewOutput], [...detailsOpen], [...reviewOpen], reviewVersion,
+    state.questions.length > 0, state.queue, state.steers, state.activeTurnId, Boolean(state.assistant?.phone), inAssistant(), state.rewinds, state.versions, lastAsk()?.id ?? null, state.model.id]);
+  const sharedSame = shared === conversationShared && state.housed === conversationHoused && state.processes === conversationProcesses;
+  conversationShared = shared; conversationHoused = state.housed; conversationProcesses = state.processes;
   for (const [place, { run, index, versions }] of visible.entries()) {
     if (place < first) continue;
     ids.add(run.id);
+    const kept = runNodes.get(run.id);
+    if (sharedSame && kept && kept.run === run && kept.index === index) {
+      if (root.children[position] !== kept.node) root.insertBefore(kept.node, root.children[position] ?? null);
+      position++;
+      continue;
+    }
     for (const entry of run.entries) if (entry.type === "tool" && entry.state === "running" && !entry.drafting) stepsSeenRunning.add(entry.toolCallId);
     const signature = JSON.stringify([
       index === state.runs.length - 1,
       expanded.has(run.id),
       stepsOpen.has(run.id),
+      planOpen.has(run.id),
+      askedSignature(run),
+      [...crewOpen].filter((key) => key.startsWith(`${run.id}:`)),
+      run.entries.flatMap((entry) => entry.type === "tool" && entry.name === "research" ? [JSON.stringify(entry.research ?? null), researchOpen.has(`${run.id}:${entry.id}`)] : []),
       [...fileEditsOpen].filter(key => key.startsWith(`${run.id}:`)),
       // Unfolded steps, and the recorded output a command's fold shows.
       [...stepOpen].filter((key) => key.startsWith(`${run.id}:`)).map((key) => {
@@ -2588,8 +3171,8 @@ function renderConversation() {
       const content = document.createElement("div");
       content.className = "turn-content";
       const artifacts = new FoundryChatArtifacts({
-        open: (artifact) => pane.show(artifact.id, artifact.version),
-        isOpen: (artifact) => pane.isOpen(artifact.id, artifact.version),
+        // The link takes you to the page in Foundry itself.
+        open: (artifact) => openFoundry(artifact.id, artifact.version),
       });
       // The working line stays out of the turn's repaints, so streaming never restarts it.
       const working = new WorkingLine(spinner);
@@ -2639,6 +3222,7 @@ function renderConversation() {
     workingLine(saved.working, run);
     saved.signature = signature;
     saved.run = run;
+    saved.index = index;
     changed = true;
   }
   for (const [id, saved] of runNodes)
@@ -2655,18 +3239,9 @@ function renderConversation() {
     if (!editKeys.has(key)) { view.dispose(); fileEditViews.delete(key); }
     else if (!view.element.isConnected) view.suspend();
   }
-  // While Foundry writes a page, the pane opens on its title; the page then
-  // assembles in it the moment the save lands.
-  const writing = state.activeTurnId ? state.runs.find((run) => run.id === state!.activeTurnId) : undefined;
-  pane.making(writing && writing.status === "running" ? makingTitle(tools(writing)) : null);
-  if (changed) {
-    // An artifact keeps its chip in the turn that first showed it; later changes are an "Edited" line.
-    const shown = state.runs.flatMap((run) => runNodes.get(run.id) ?? []);
-    editedIn(shown.map((item) => item.artifacts.artifacts)).forEach((edited, at) => shown[at]!.artifacts.shape(edited));
-    pane.refresh(shown.flatMap((item) => item.artifacts.artifacts));
-  }
   if (changed) placeQuestions();
   if (changed) fillThreadLists();
+  if (changed) planInView();
   if (changed) {
     if (liveBefore) stage.scrollTop = stage.scrollHeight;
     // Older turns mounted above keep what you're reading where it was.
@@ -2736,9 +3311,12 @@ function renderSakura(show: boolean) {
   }
   host.hidden = !show || !sakura;
   if (!sakura) return;
+  // Hidden, it only rests: reading the ink's colour asks the browser for
+  // styles, which in a chat cost more than anything else on each update.
+  if (!show) { sakura.pause(); return; }
   const dark = inkIsDark();
   if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
-  if (show) { sakura.resume(); sakura.refit(); } else sakura.pause();
+  sakura.resume(); sakura.refit();
 }
 /// When the window was last in front of you, kept on this computer: Home
 /// says what happened since.
@@ -3064,49 +3642,23 @@ async function commentOn(id: string, text: string) {
   finally { todayUi.sending = todayUi.sending.filter((item) => item !== id); renderPage(); }
 }
 /// Foundry: the gallery, the artifact open in it, and how it is shown.
-let foundryList: FoundryArtifact[] | null = null, foundryOpen: FoundryArtifactDetail | null = null, foundrySaves = -1;
-const foundryUi: FoundryUi = { tab: "all", view: "preview", width: "desktop", edit: null, draft: "", error: "", busy: false };
-/// The pane beside the conversation: one artifact open the way Claude
-/// shows one. Per chat; the chips in the chat open and mark it.
-const pane = new FoundryPane(el("pane"), {
-  read: (id, version) => api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id }),
-  markdown,
-  copy: (text) => api("copy", { text }),
-  export: async (id, version) => {
-    const result = await api<{ path: string } | null>("desktop-foundry-export", { id, version });
-    if (result?.path) notice(`Exported to ${result.path}`);
-  },
-  restore: (detail) => api<FoundryArtifactDetail>("foundry-save", { id: detail.id, source: detail.source }),
-  openFoundry: (id, version) => { void openFoundry(id, version); },
-  notice,
-  changed: () => {
-    el("app").classList.toggle("pane-on", pane.open);
-    runNodes.forEach((item) => item.artifacts.mark());
-  },
-  assembleDocument,
-  // Point at a part: it lands as a chip in the composer, and the words you type say what to change.
-  point: () => { void pointAt("foundry"); },
-  // A pick on the page goes to the chat as a message; while a turn works it waits for that turn.
-  pick: (option) => {
-    if (!state?.session) return;
-    followLatest();
-    void act(() => api("submit", { text: `I pick ${option}`, wait: Boolean(state?.activeTurnId) }));
-  },
-  // Build this: in a project the chat starts on it; a page from Just a chat
-  // first asks which project it's for, with the request waiting in the composer.
-  build: (detail, version) => {
-    if (!state?.session) return;
-    const text = buildRequest(detail.title, detail.id, version);
-    if (isPlain()) {
-      buildWaits.write({ sessionId: state.session.id, text, at: Date.now() });
-      toggleWhere("move");
-      notice("Which project is this page for? Once the chat moves there, it starts building.");
-      return;
-    }
-    followLatest();
-    void act(() => api("submit", { text, wait: Boolean(state?.activeTurnId) }));
-  },
-});
+let foundryList: FoundryArtifact[] | null = null, foundryVersions: FoundryShelfVersion[] | null = null, foundrySaves = -1;
+/// Mockups by name, for "@" in the composer (pass 208 A); read again after a save.
+let foundryNames: MockupName[] = [], foundryNamesAt = -2;
+function ensureMockupNames() {
+  const saves = foundrySaveCount();
+  if (foundryNamesAt === saves) return;
+  foundryNamesAt = saves;
+  void api<FoundryArtifact[]>("foundry-list").then((list) => {
+    foundryNames = list.map(({ id, title, version, description, kind }) => ({ id, title, version, description: description ?? "", kind }));
+    renderCompletion();
+  }).catch(() => { foundryNamesAt = -2; });
+}
+/// The version a chat link asked for: the long page scrolls to it once drawn.
+let foundryFocus: { id: string; version?: number; quiet?: boolean } | null = null;
+/// Documents on the long page, rendered once they scroll near ("id:version").
+const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
+const foundryUi = { error: "" };
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
@@ -3162,13 +3714,15 @@ document.addEventListener("demesne:app-update", (event) => {
   appUpdate = (event as CustomEvent<AppUpdate>).detail;
   if (pageOpen === "settings") renderPage();
 });
-/// The Updates row: only on a release build, with the version and where it stands.
-function updatesSetting(): { on: boolean; line: string } | undefined {
+/// The Updates rows: only on a release build. The switch, then the version
+/// with when it last looked and Check now (pass 193 A).
+function updatesSetting(): { on: boolean; line: string; check: NonNullable<ReturnType<typeof updateCheckLine>> } | undefined {
   const update = appUpdate;
   if (!update || update.state === "off") return undefined;
+  const check = updateCheckLine(update);
+  if (!check) return undefined;
   const on = update.state !== "idle" || update.enabled;
-  const where = update.state === "downloading" ? `downloading ${update.to}` : update.state === "ready" ? `${update.to} is ready, it goes in when you restart` : update.state === "failed" ? update.error : on ? "up to date" : "off";
-  return { on, line: `Demesne ${update.version}, ${where}. It never restarts while something works.` };
+  return { on, line: on ? "Looks every 4 hours and downloads in the background. It never restarts while something works." : "Off: it only looks when you check", check };
 }
 try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
 /// Settings › Appearance › Glass and Ink, kept on this device.
@@ -3303,23 +3857,46 @@ function renderLastChat() {
   }
   if (session && inSession()) try { localStorage.setItem("demesne-last-chat", JSON.stringify({ id: session.id, path: session.workspace?.root ?? null })); } catch {}
 }
+/// Where you were in the chat when a page (Foundry, Settings, …) covered it:
+/// the page scrolls the same stage, so closing it puts the chat back there.
+let chatPlace: { id: string; top: number; follow: boolean } | null = null;
 function openPage(kind: "" | PageKind) {
   const was = pageOpen;
+  const stage = document.getElementById("stage");
+  if (!was && kind && stage && state?.session) chatPlace = { id: state.session.id, top: stage.scrollTop, follow };
+  if (kind && stage && kind !== was) stage.scrollTop = 0;
   if (was === "settings" && kind !== "settings") clearGoogleAIForm();
   pageOpen = kind;
   sidebarSignature = heroSignature = "";
+  // The rail on the edge is Foundry's alone.
+  if (kind !== "foundry") { railQuery = ""; paintRail(); }
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
-  if (kind === "foundry") { if (was !== "foundry") Object.assign(foundryUi, { edit: null, error: "" }); foundrySaves = foundrySaveCount(); void loadFoundry(); }
+  if (kind === "foundry") {
+    if (was !== "foundry") {
+      foundryUi.error = "";
+      // Back to the mockup you were on, unless a link asked for another.
+      if (!foundryFocus && foundryPlace) foundryFocus = { id: foundryPlace, quiet: true };
+    }
+    foundrySaves = foundrySaveCount(); void loadFoundry();
+  }
   if (kind === "settings" && was !== "settings") { Object.assign(settingsUi, { query: "", fold: "", error: "" }); loadSettings(); }
   if (kind === "today") { if (was !== "today") Object.assign(todayUi, { replying: "", error: "", picking: "", profile: null }); todayDot.clear(); void loadSocials(); }
   if (state) renderState({ ...state });
   if (kind === "active" || kind === "archived") document.querySelector<HTMLElement>("#page .cp-tab.on")?.focus({ preventScroll: true });
   if (kind === "scheduled") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
-  if (kind === "foundry" && !foundryOpen) document.querySelector<HTMLInputElement>("#foundry-make input")?.focus({ preventScroll: true });
   if (kind === "settings" && was !== "settings") document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
   if (!kind && was === "settings") document.querySelector<HTMLElement>(".sidebar-settings")?.focus({ preventScroll: true });
+  if (!kind && was) {
+    const place = chatPlace;
+    chatPlace = null;
+    if (place && stage && place.id === state?.session?.id) {
+      const put = () => { follow = place.follow; stage.scrollTop = place.follow ? stage.scrollHeight : place.top; lastStageTop = stage.scrollTop; };
+      put();
+      requestAnimationFrame(put);
+    }
+  }
 }
 /// Foundry saves seen in this window's chats: a new one refreshes the page.
 function foundrySaveCount() {
@@ -3327,38 +3904,138 @@ function foundrySaveCount() {
 }
 async function loadFoundry() {
   try {
-    foundryList = await api<FoundryArtifact[]>("foundry-list");
-    // The open artifact follows its newest version unless an older one or an edit is on screen.
-    const open = foundryOpen, latest = open && foundryList.find((item) => item.id === open.id);
-    if (open && !latest) foundryOpen = null;
-    else if (open && latest && foundryUi.edit === null && open.version === open.versions[0]?.version && latest.version !== open.version) await openFoundry(open.id);
+    const shelf = await api<FoundryListResponse>("foundry-shelf");
+    foundryList = shelf.artifacts;
+    foundryVersions = shelf.versions ?? shelf.artifacts.map((item) => ({ artifactId: item.id, version: item.version, createdAt: item.updatedAt, sessionId: item.sessionId, note: "" }));
+    foundryNames = shelf.artifacts.map(({ id, title, version, description, kind }) => ({ id, title, version, description: description ?? "", kind }));
     foundryUi.error = "";
   } catch (error) {
     foundryList = foundryList ?? [];
+    foundryVersions = foundryVersions ?? [];
     foundryUi.error = errorWords(error);
   }
   renderPage();
+  showFoundryFocus();
 }
-async function openFoundry(id: string, version?: number) {
-  try {
-    const found = await api<FoundryArtifactDetail>("foundry-get", version ? { id, version } : { id });
-    if (foundryOpen?.id !== found.id) Object.assign(foundryUi, { view: "preview", edit: null });
-    foundryOpen = found;
-    foundryUi.error = "";
-  } catch (error) { foundryUi.error = errorWords(error); }
-  if (pageOpen !== "foundry") openPage("foundry"); else { renderPage(); if (state) renderState({ ...state }); }
-  document.getElementById("page")?.scrollTo({ top: 0 });
+/// A chat link opens Foundry's long page at that mockup (its newest version
+/// unless the link names one).
+function openFoundry(id: string, version?: number) {
+  foundryFocus = { id, ...(version ? { version } : {}) };
+  if (pageOpen !== "foundry") openPage("foundry"); else { renderPage(); showFoundryFocus(); }
+}
+function showFoundryFocus() {
+  const focus = foundryFocus, root = document.getElementById("page");
+  if (!focus || pageOpen !== "foundry" || !root || !foundryVersions) return;
+  const version = focus.version ?? foundryVersions.find((item) => item.artifactId === focus.id)?.version;
+  const target = version ? root.querySelector<HTMLElement>(`[data-fd="${CSS.escape(shelfKey(focus.id, version))}"]`) : null;
+  if (!target) return;
+  foundryFocus = null;
+  target.scrollIntoView({ block: "start" });
+  paintRail();
+  if (focus.quiet) return;
+  target.classList.add("fd-here");
+  setTimeout(() => target.classList.remove("fd-here"), 1600);
+}
+/// Snap to past mockups (pass 209 A): the rail on Foundry's edge, a tick per
+/// mockup, the one on screen lit. It opens into names while pointed at or
+/// while you type a name; a click, ↑ ↓ or Enter snaps the page to one.
+/// Leaving Foundry and coming back returns to the mockup you were on.
+let rail: RailMark[] = [], railHere: string | null = null, railQuery = "", railHTMLNow = "", railFrame = 0;
+/// The mockup you were on when you left Foundry.
+let foundryPlace: string | null = null;
+function railCurrent(): string | null {
+  const stage = el("stage"), top = stage.getBoundingClientRect().top + 120;
+  let here: string | null = null;
+  for (const item of document.querySelectorAll<HTMLElement>("#page .fd-item")) {
+    if (item.getBoundingClientRect().top > top) break;
+    here = item.dataset.fd!.slice(0, item.dataset.fd!.lastIndexOf(":"));
+  }
+  return here ?? rail[0]?.id ?? null;
+}
+function paintRail() {
+  railFrame = 0;
+  const node = el("foundry-rail"), stage = el("stage");
+  const on = pageOpen === "foundry" && rail.length > 1;
+  if (node.hidden === on) node.hidden = !on;
+  if (!on) return;
+  node.style.top = `${stage.offsetTop + 14}px`;
+  node.style.height = `${Math.max(0, stage.clientHeight - 28)}px`;
+  railHere = railCurrent();
+  if (railHere) foundryPlace = railHere;
+  node.classList.toggle("open", Boolean(railQuery) || node.matches(":hover"));
+  const html = railHTML(rail, railHere, railQuery);
+  if (html !== railHTMLNow) { node.querySelector(".fr-in")!.innerHTML = railHTMLNow = html; }
+}
+const repaintRail = () => { if (!railFrame) railFrame = requestAnimationFrame(paintRail); };
+function setRail() {
+  rail = railMarks(foundryOrder(foundryList, foundryVersions));
+  repaintRail();
+}
+/// The page snaps to the mockup (its newest version), with no flash: the
+/// lit tick already says where you are.
+function railGo(id: string) {
+  railQuery = "";
+  foundryFocus = { id, quiet: true };
+  showFoundryFocus();
+}
+el("foundry-rail").addEventListener("pointerenter", () => { el("foundry-rail").classList.add("open"); });
+el("foundry-rail").addEventListener("pointerleave", () => { if (!railQuery) el("foundry-rail").classList.remove("open"); });
+el("foundry-rail").addEventListener("click", (event) => {
+  const tick = (event.target as HTMLElement).closest<HTMLElement>("[data-rail]");
+  if (tick) railGo(tick.dataset.rail!);
+});
+el("stage").addEventListener("scroll", () => { if (pageOpen === "foundry") repaintRail(); }, { passive: true });
+new ResizeObserver(() => { if (pageOpen === "foundry") repaintRail(); }).observe(el("stage"));
+/// On Foundry, ↑ and ↓ step between mockups, and typing a name finds one.
+document.addEventListener("keydown", (event) => {
+  if (pageOpen !== "foundry" || rail.length < 2 || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || overlay) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']")) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const next = railStep(railQuery ? railMatches(rail, railQuery) : rail, railCurrent(), event.key === "ArrowDown" ? 1 : -1);
+    if (!next) return;
+    event.preventDefault();
+    if (railQuery) { railQuery = ""; }
+    railGo(next.id);
+    return;
+  }
+  if (event.key === "Escape" && railQuery) { event.preventDefault(); railQuery = ""; paintRail(); return; }
+  if (event.key === "Enter" && railQuery) {
+    event.preventDefault();
+    const first = railMatches(rail, railQuery)[0];
+    if (first) railGo(first.id); else { railQuery = ""; paintRail(); }
+    return;
+  }
+  if (event.key === "Backspace" && railQuery) { event.preventDefault(); railQuery = railQuery.slice(0, -1); paintRail(); return; }
+  if (event.key.length === 1 && (railQuery || /\S/.test(event.key))) {
+    event.preventDefault();
+    railQuery = (railQuery + event.key).slice(0, 60);
+    paintRail();
+  }
+});
+/// Documents render through the app's sanitizer when they scroll near.
+let foundryDocWatch: IntersectionObserver | null = null;
+function watchFoundryDocs(root: HTMLElement) {
+  foundryDocWatch?.disconnect();
+  const docs = root.querySelectorAll<HTMLElement>(".fd-doc[data-md]");
+  if (!docs.length) return;
+  const fill = (element: HTMLElement) => {
+    // A version changes in place while its ask fixes it, so the cache goes by when.
+    const shelf = element.dataset.md!, key = `${shelf}@${element.dataset.at ?? ""}`, known = foundryDocs.get(key);
+    if (known !== undefined) { element.innerHTML = known; return; }
+    if (foundryDocsLoading.has(key)) return;
+    foundryDocsLoading.add(key);
+    const at = shelf.lastIndexOf(":"), id = shelf.slice(0, at), version = Number(shelf.slice(at + 1));
+    void api<FoundryArtifactDetail>("foundry-get", { id, version }).then((found) => {
+      foundryDocs.set(key, markdown(found.source));
+      document.querySelectorAll<HTMLElement>(`#page .fd-doc[data-md="${CSS.escape(shelf)}"]`).forEach((item) => { item.innerHTML = foundryDocs.get(key)!; });
+    }).catch(() => {}).finally(() => foundryDocsLoading.delete(key));
+  };
+  docs.forEach((element) => { if (foundryDocs.has(`${element.dataset.md!}@${element.dataset.at ?? ""}`)) fill(element); });
+  foundryDocWatch = new IntersectionObserver((entries) => entries.forEach((entry) => { if (entry.isIntersecting) fill(entry.target as HTMLElement); }), { rootMargin: "800px 0px" });
+  docs.forEach((element) => foundryDocWatch!.observe(element));
 }
 const errorWords = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^.*?: /, "");
-async function foundryMake(text: string) {
-  foundryUi.busy = true; renderPage();
-  try {
-    await api("foundry-make", { text });
-    foundryUi.draft = foundryUi.error = "";
-    openPage("");
-  } catch (error) { foundryUi.error = errorWords(error); }
-  finally { foundryUi.busy = false; renderPage(); }
-}
 async function loadArchived() {
   try {
     const result = await api<{ sessions: Array<{ id: string; title: string; archivedAt: string; workspace?: string }> }>("archived-list");
@@ -3394,13 +4071,9 @@ function renderPage() {
     if (document.activeElement?.closest("#routine-new")) routineUi.draft = (document.activeElement as HTMLInputElement).value;
     html = scheduledPage({ routines: routinesHere, auto: isPlain() || inAssistant() ? null : state.breakage.auto, here: isPlain() ? "" : here, assistant: inAssistant(), error: routineUi.error, draft: routineUi.draft });
   } else if (pageOpen === "foundry") {
-    // Source being edited keeps its words through a redraw.
-    const area = root.querySelector<HTMLTextAreaElement>(".fd-source textarea:not([readonly])");
-    if (area && foundryUi.edit !== null) foundryUi.edit = area.value;
-    if (document.activeElement?.closest("#foundry-make")) foundryUi.draft = (document.activeElement as HTMLInputElement).value;
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
-    html = foundryPage({ list: foundryList, open: foundryOpen, ui: foundryUi, here: isPlain() ? "" : here, markdownHtml: markdown });
+    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
@@ -3424,6 +4097,7 @@ function renderPage() {
   root.innerHTML = html;
   root.dataset.html = html;
   if (pageOpen === "today") mountReel(root);
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.googleProvider!;
@@ -3455,7 +4129,6 @@ document.getElementById("page")?.addEventListener("paste", (event) => {
 });
 document.getElementById("page")?.addEventListener("change", (event) => {
   const input = event.target as HTMLElement;
-  if (input instanceof HTMLSelectElement && input.matches("[data-foundry-version]") && foundryOpen) return void openFoundry(foundryOpen.id, Number(input.value));
   if (input instanceof HTMLInputElement && input.matches("[data-glass]")) try { localStorage.setItem("demesne-glass", String(glassLevel)); } catch {}
 });
 // A number in Settings saves on Enter, or when you leave it.
@@ -3546,13 +4219,6 @@ document.getElementById("page")?.addEventListener("submit", (event) => {
     if (text) void commentOn(form.dataset.id ?? "", text);
     return;
   }
-  if (form.id === "foundry-make") {
-    event.preventDefault();
-    const text = form.querySelector("input")?.value.trim() ?? "";
-    foundryUi.draft = text;
-    if (text && !foundryUi.busy) void foundryMake(text);
-    return;
-  }
   if (form.id !== "routine-new") return;
   event.preventDefault();
   const text = form.querySelector("input")?.value.trim() ?? "";
@@ -3584,6 +4250,8 @@ let composerSession: string | null = null, heldChatDraft: string | null = null;
 /// question doesn't hold the composer: you answer it in its card.
 function pendingQuestion() { return state?.questions.find((q) => !q.open); }
 const questionById = (id: unknown) => state?.questions.find((q) => q.id === id);
+/// An open question still waiting: the composer's words answer it too.
+function openQuestion() { return state?.questions.find((q) => q.open && q.status === "waiting" && (q.answers?.length ?? 0) < q.questions.length); }
 function questionIndex() { return pendingQuestion()?.answers?.length ?? 0; }
 function replyCacheKey(id: string,index: number) { return `demesne-question-draft:${id}:${index}`; }
 function cachedReply(id: string,index: number): {text:string;version:number} | null {
@@ -3617,7 +4285,6 @@ async function answerQuestion(value: string | null, source: "typed" | "suggestio
 /// Images for the next message: previews stay here, the host holds the
 /// uploaded artifacts.
 const attachmentPreviews = new Map<string, string>();
-const ATTACHABLE = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
 /// A picture fitted for sending (fit-image.ts). An iPhone photo (HEIC) the
 /// window can't draw is turned into a JPEG by the Mac first.
 async function readPicture(file: File, options: { side: number; bytes: number }): Promise<{ url: string; type: string }> {
@@ -3627,9 +4294,25 @@ async function readPicture(file: File, options: { side: number; bytes: number })
   const jpeg = await api<string>("image-convert", { data: raw });
   return fitImage(await (await fetch(jpeg)).blob(), options);
 }
+/// Files the daemon couldn't read: their chips say why, and they aren't sent.
+let refusedFiles: { id: string; filename: string; why: string }[] = [];
+/// A file that isn't a picture (pass 205 A): sent whole, read by the daemon.
+async function attachFile(file: File) {
+  const refuse = (why: string) => { refusedFiles = [...refusedFiles, { id: crypto.randomUUID(), filename: file.name || "file", why }]; composerSignature = ""; renderComposer(); };
+  if (file.size > MAX_FILE_BYTES) return refuse("too big · up to 20 MB");
+  let data: string;
+  try {
+    const url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+    data = url.slice(url.indexOf(",") + 1);
+  } catch { return refuse(file.size ? "can’t be read" : "a folder? drop it on Sources"); }
+  try {
+    await api("attach", { name: file.name || "file", mimeType: file.type && !isPicture(file) ? file.type : "application/octet-stream", data });
+    composerSignature = ""; renderComposer();
+  } catch (error) { refuse(refusal(error instanceof Error ? error.message : String(error), file.name)); }
+}
 async function attachFiles(files: File[]) {
-  const images = files.filter((file) => ATTACHABLE.includes(file.type) || /\.hei[cf]$/i.test(file.name));
-  if (images.length < files.length) notice("Only PNG, JPEG, WebP and HEIC images can be attached.");
+  const images = files.filter(isPicture);
+  for (const file of files.filter((one) => !isPicture(one))) await attachFile(file);
   for (const file of images) {
     // Big photos and screenshots are redrawn to fit (fit-image.ts), never refused for size.
     let fitted: { url: string; type: string };
@@ -3752,8 +4435,16 @@ function renderPlainLine() {
 function renderComposer() {
   if (!state) return;
   const width = editor.clientWidth;
+  composerFrame(width);
+  composerDraft(width);
+}
+/// What the composer looks like around the text: rebuilt only when something
+/// other than the words changes, so a keystroke never redraws the whole box
+/// (that was most of a key's cost on a slow CPU).
+function composerFrame(width: number) {
+  if (!state) return;
   const signature = JSON.stringify([
-    editor.value,
+    Boolean(editor.value.trim()),
     Boolean(state.activeTurnId),
     state.queue,
     state.restored,
@@ -3762,7 +4453,7 @@ function renderComposer() {
     state.connection,
     state.busy,
     state.approvals.length,
-    state.questions.length,
+    state.questions.map((q) => [q.id, q.status, q.answers?.length]),
     state.session?.autoApprove,
     state.session?.acceptEdits,
     state.planOnly,
@@ -3774,6 +4465,7 @@ function renderComposer() {
     pointed.map((point) => point.id).join(),
     state.attachments.map((image) => image.id).join(),
     pastes.map((paste) => paste.id).join(),
+    refusedFiles.map((file) => file.id).join(),
   ]);
   if (
     signature === composerSignature &&
@@ -3822,13 +4514,13 @@ function renderComposer() {
     : question
     ? answered ? "Your answers are saved. Choose Resume to continue." : question.status === "paused" ? "Type your answer to carry on…" : question.questions[questionIndex()]?.suggestions?.length ? "Answer, or pick one above…" : "Type your answer…"
     : inSession()
-    ? state.questions.length
-      ? "Reply… the question stays in the chat"
+    ? openQuestion()
+      ? openQuestion()!.questions[openQuestion()!.answers?.length ?? 0]?.suggestions?.length ? "Answer in your own words, or pick one above…" : "Type your answer…"
       : state.activeTurnId
       ? "Steer it while it works…"
-      : suggestion ? `${suggestion}   Alt+→` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
-    : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…");
-  composerDOM.property(editor, "disabled",
+      : suggestion ? `${suggestion}   Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
+    : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
+  editor.disabled =
     state.connection !== "online" ||
     state.busy ||
     answeringQuestion ||
@@ -3840,11 +4532,15 @@ function renderComposer() {
   const armed = Date.now() < stopArmed;
   const draft = Boolean(editor.value.trim()) || diffNotes.size > 0 || pointed.length > 0 || state.attachments.length > 0 || pastes.length > 0, session = inSession();
   const attachRow = el("attach-row");
-  composerDOM.property(attachRow, "hidden", (!state.attachments.length && !pastes.length) || Boolean(question));
-  composerDOM.html(attachRow, state.attachments.map((image) => {
+  attachRow.hidden = (!state.attachments.length && !pastes.length && !refusedFiles.length) || Boolean(question);
+  // A screenshot from the capture keys shows in its card; here only a note.
+  // (A narrow window has no card column: then it's an ordinary picture chip.)
+  const waitingShots = getComputedStyle(el("cards")).display === "none" ? [] : chatShots().filter((shot) => state!.attachments.some((image) => image.id === shot.id));
+  attachRow.innerHTML = shotsNote(waitingShots) + state.attachments.filter((image) => !waitingShots.some((shot) => shot.id === image.id)).map((image) => {
+    if (image.kind === "file") return fileChipHTML(image, { remove: "detach" });
     const preview = attachmentPreviews.get(image.id);
-    return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
-  }).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join(""));
+    return `<span class="att" title="${h(`${image.filename} · ${image.width}×${image.height}`)}">${preview ? `<img src="${preview}" alt="${h(image.filename)}">` : `<span class="att-name">${h(image.filename)}</span>`}${btn("source-keep", "Keep", { id: image.id }, "att-keep").replace("<button ", `<button title="Keep it with this chat as a source" `)}${btn("detach", "×", { id: image.id }, "att-x").replace("<button ", `<button aria-label="Remove ${h(image.filename)}" `)}</span>`;
+  }).join("") + refusedFiles.map((file) => fileChipHTML(file, { remove: "unrefuse", bad: file.why })).join("") + pastes.map((paste) => `<span class="att paste" title="${h(paste.text.split("\n").slice(0, 8).join("\n"))}">${PASTE_ICON}<span class="att-name">${h(pasteLabel(paste.text))}</span>${btn("unpaste", "×", { id: paste.id }, "att-x").replace("<button ", '<button aria-label="Remove the pasted text" ')}</span>`).join("");
   // While a turn runs the send button is Stop; Enter queues what you type.
   composerDOM.html(el("send-label"), question ? "answer" : state.activeTurnId
     ? armed ? `Press ${k("Esc")} again to stop` : `${draft ? `<span class="queue-hint">${asking ? `${k("Enter")} send instead` : `${k("↵")} steer · ${k("⌥↵")} after this turn`}</span>` : ""}<span class="stop-word">■ Stop</span>`
@@ -3852,26 +4548,41 @@ function renderComposer() {
   // The send mark sits in the box's corner, faint until there is something
   // to send; while a turn runs it is Stop.
   const send = form.querySelector<HTMLButtonElement>(".send")!;
-  composerDOM.property(send, "hidden", Boolean(question) && !draft);
-  composerDOM.attribute(send, "aria-label", state.activeTurnId && !question ? "Stop" : "Send");
-  composerDOM.toggle(form, "has-draft", draft);
-  composerDOM.property(form.querySelector<HTMLElement>(".hints")!, "hidden", Boolean(state.activeTurnId) || (session && draft));
-  composerDOM.property(send, "disabled", state.connection !== "online" || state.busy || answeringQuestion);
-  composerDOM.property(form.querySelector<HTMLElement>(".send>kbd")!, "hidden", Boolean(state.activeTurnId && !question));
-  composerDOM.text(el("tokens"), `~${num(Math.ceil(new TextEncoder().encode(editor.value).length / 3))} tok`);
-  if (composerHeight) composerHeight.resize(editor);
-  else {
-    editor.style.height = "20px";
-    editor.style.height = `${Math.min(132, Math.max(20, editor.scrollHeight))}px`;
-  }
+  send.hidden = Boolean(question) && !draft;
+  send.setAttribute("aria-label", state.activeTurnId && !question ? "Stop" : "Send");
+  form.classList.toggle("has-draft", draft);
+  form.querySelector<HTMLElement>(".hints")!.hidden = Boolean(state.activeTurnId) || (session && draft);
+  (form.querySelector(".send") as HTMLButtonElement).disabled =
+    state.connection !== "online" || state.busy || answeringQuestion;
+  form.querySelector<HTMLElement>(".send>kbd")!.hidden = Boolean(
+    state.activeTurnId && !question,
+  );
+  composerDraftKey = "";
+}
+let composerDraftKey = "", composerChipsHTML = "";
+/// What follows the words themselves: the token count, the box's height and
+/// the @file chips. Each keystroke only does this.
+function composerDraft(width: number) {
+  if (!state) return;
+  const question = pendingQuestion(), key = `${editor.value}\u0000${width}\u0000${Boolean(question)}`;
+  if (key === composerDraftKey) return;
+  // Typing on at the end only ever grows the box: measure without shrinking it first.
+  const [before, ...rest] = composerDraftKey.split("\u0000"), sized = rest.length > 0 && rest.join() === key.split("\u0000").slice(1).join() && editor.value.startsWith(before!);
+  composerDraftKey = key;
+  const tokens = `~${num(Math.ceil(new TextEncoder().encode(editor.value).length / 3))} tok`, count = el("tokens");
+  if (count.textContent !== tokens) count.textContent = tokens;
+  if (!sized) editor.style.height = "20px";
+  const height = `${Math.min(132, Math.max(20, editor.scrollHeight))}px`;
+  if (editor.style.height !== height) editor.style.height = height;
   const mentions = [...editor.value.matchAll(/(?:^|\s)@([^\s]+)/g)]
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
   const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
-  composerDOM.html(el("mention-chips"), points + notes + [...new Set(mentions)]
+  const chips = points + notes + [...new Set(mentions)]
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
-    .join(""));
+    .join("");
+  if (chips !== composerChipsHTML) el("mention-chips").innerHTML = composerChipsHTML = chips;
 }
 /// An approval is one amber row above the composer: what the model wants
 /// ("Run bun run check", "Edit hello.ts"), a short note, then Allow /
@@ -4030,22 +4741,24 @@ function questionCard(question: WorkspaceQuestion): string {
   const answered = index >= total, item = question.questions[Math.min(index, total - 1)]!;
   const paused = question.status === "paused", interview = question.mode === "interview";
   const id = question.id, picks = questionPicks.get(id) ?? new Set<number>();
-  const tag = question.open ? "The agent asks · it keeps working meanwhile" : interview ? "The agent asks" : "The agent is waiting on you";
   const trail = question.questions.slice(0, Math.min(index, total)).map((asked, n) =>
     `<li><span>${h(asked.question)}</span><b>${h(question.answers?.[n]?.answer ?? "Let it decide")}</b></li>`).join("");
   const choices = answered ? [] : item.suggestions ?? [];
   const words = h(item.question).split(" ").map((word) => `<span class="w">${word} </span>`).join("");
+  // One row per answer (pass 192): the words, one dim line on what it means,
+  // and the agent's recommendation (always its first) marked.
   const choice = (label: string, n: number) => btn(item.multiple ? "question-toggle" : "question-pick",
-    `<kbd>${n + 1}</kbd><span class="tx"><b>${h(label)}</b>${item.details?.[n] ? `<span>${h(item.details[n]!)}</span>` : ""}</span>${n === 0 && choices.length > 1 ? '<span class="rec">Suggested</span>' : ""}`,
-    { id, n, text: label }, `ask-choice${picks.has(n) ? " on" : ""}`).replace("<button ", `<button aria-pressed="${item.multiple ? picks.has(n) : false}" `);
-  const own = answered ? "" : `<label class="ask-own"><input data-ask-own="${h(id)}" maxlength="2000" placeholder="${choices.length ? "Or type your own answer" : "Type your answer"}" aria-label="Your own answer">${btn("question-own", "↵", { id }, "ask-send")}</label>`;
+    `<kbd>${n + 1}</kbd><span class="tx"><b>${h(label)}</b>${item.details?.[n] ? `<span>${h(item.details[n]!)}</span>` : ""}</span>${n === 0 && choices.length > 1 ? '<span class="rec">Recommended</span>' : ""}`,
+    { id, n, text: label }, `ask-choice${n === 0 && choices.length > 1 ? " first" : ""}${picks.has(n) ? " on" : ""}`).replace("<button ", `<button aria-pressed="${item.multiple ? picks.has(n) : false}" `);
+  const decide = answered || paused || interview || item.multiple ? "" : btn("question-skip", '<kbd></kbd><span class="tx"><b>Let it decide</b></span>', { id }, "ask-choice ask-decide");
+  const rows = choices.length ? `<div class="ask-choices">${choices.map(choice).join("")}${decide}</div>` : "";
   const foot = answered || paused
-    ? `<span>${answered ? "Answered" : "Paused"}</span>${btn("question-control", "Resume", { id, action: "resume" }, "ask-link")}`
+    ? [`<span>${answered ? "Answered" : "Paused"}</span>`, btn("question-control", "Resume", { id, action: "resume" }, "ask-link")]
     : [item.multiple ? btn("question-multi", picks.size ? `Done · ${picks.size} picked` : "Pick any that apply", { id }, "ask-done-btn", !picks.size) : "",
       index > 0 ? btn("question-control", "Back", { id, action: "back" }, "ask-link ask-prev") : "",
-      interview ? "" : btn("question-skip", "Let it decide", { id }, "ask-link"),
-      question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean).join("");
-  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}"><div class="ask-tag"><i></i>${tag}${total > 1 ? `<span>${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<p class="ask-text">${words}</p>${item.reason ? `<p class="ask-why">${h(item.reason)}</p>` : ""}${choices.length ? `<div class="ask-choices">${choices.map(choice).join("")}</div>` : ""}${own}<div class="ask-foot">${foot}</div></div>`;
+      !choices.length && !interview ? btn("question-skip", "Let it decide", { id }, "ask-link") : "",
+      question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean);
+  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}">${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<div class="ask-q"><i aria-hidden="true"></i><p class="ask-text">${words}</p>${total > 1 ? `<span class="ask-n">${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${rows}${foot.length ? `<div class="ask-foot">${foot.join("")}</div>` : ""}</div>`;
 }
 function renderQuestion() {
   if (!state) return;
@@ -4065,17 +4778,14 @@ function renderQuestion() {
     if (!card) { const node = document.createElement("div"); node.className = "ask-slot-card"; card = { node, signature: "" }; questionCards.set(question.id, card); }
     if (card.signature === signature) continue;
     const step = card.signature && JSON.parse(card.signature)[2]?.length !== question.answers?.length;
-    const own = card.node.querySelector<HTMLInputElement>("[data-ask-own]")?.value ?? "";
     card.signature = signature;
     card.node.innerHTML = questionCard(question);
-    const input = card.node.querySelector<HTMLInputElement>("[data-ask-own]");
-    if (input) input.value = step ? question.draft ?? "" : own;
     if (isNew || step) {
       const root = card.node.firstElementChild!;
       if (isNew && !settled) snap(root, { opacity: [0, 1], y: [12, 0], scale: [0.98, 1] });
       if (!settled || step) {
         snap(root.querySelectorAll(".ask-text .w"), { opacity: [0, 1], y: [10, 0], delay: stagger(22) });
-        snap(root.querySelectorAll(".ask-choice, .ask-own"), { opacity: [0, 1], y: [12, 0], delay: stagger(45, { start: 120 }) });
+        snap(root.querySelectorAll(".ask-choice"), { opacity: [0, 1], y: [12, 0], delay: stagger(45, { start: 120 }) });
       }
       if (isNew) fresh = card.node;
     }
@@ -4089,20 +4799,19 @@ function renderQuestion() {
 /// screen (a waiting interview, a turn that stopped) sits at the end.
 function placeQuestions() {
   if (!state) return;
-  const focused = document.activeElement instanceof HTMLInputElement && document.activeElement.matches("[data-ask-own]") ? document.activeElement : null;
   for (const question of state.questions) {
     const card = questionCards.get(question.id);
     if (!card) continue;
     const slot = document.querySelector<HTMLElement>(`#conversation [data-ask-slot="${CSS.escape(question.toolCallId)}"]`) ?? el("question");
     if (card.node.parentElement !== slot) slot.append(card.node);
   }
-  if (focused && !focused.isConnected) return;
-  if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
 }
 /// The way back to an open question you've scrolled past.
 function renderQuestionBack() {
   let back = document.getElementById("ask-back");
   const open = state?.questions.filter((question) => question.open) ?? [];
+  // Nothing open: no need to measure the page (which makes the browser lay it out).
+  if (!open.length) { if (back) back.hidden = true; return; }
   const stage = el("stage").getBoundingClientRect();
   const away = open.find((question) => {
     const rect = questionCards.get(question.id)?.node.getBoundingClientRect();
@@ -4182,7 +4891,7 @@ function renderBriefing() {
     inSession(), review.map((job) => [job.id, job.status, job.title, job.diff]), reviewShown, away?.status,
     pinned && [pinned.status, pinned.mission, pinned.homeSessionId, activeMinutes(pinned), stoppedReason(pinned)], state.session?.id,
     run.fix && [run.fix.title, run.fix.status], run.away && [run.away.auto, run.away.items.map((item) => item.state)], state.breakage.auto,
-    state.breakage.signals, state.breakage.busy, state.breakage.message, inSession(), run.fix?.activity, [...detailsOpen].filter((key) => key.startsWith("branch:")), brokeShown, driveShown, ideasShown, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending,
+    state.breakage.signals, state.breakage.busy, state.breakage.message, inSession(), run.fix?.activity, [...detailsOpen].filter((key) => key.startsWith("branch:")), brokeShown, driveShown, ideasShown, next.proposals, next.error, next.loading, next.generatedAt && age(next.generatedAt), driveActionPending, driveSheetOpen,
   ]);
   if (signature === briefingSignature) return;
   briefingSignature = signature;
@@ -4194,17 +4903,22 @@ function renderBriefing() {
   if (!broke) brokeShown = false;
   const mark = (kind: "spin" | "idea" | "amber" | "ok" | "bad" | "hollow") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
   let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
+  // The pill on the top bar: Drive's mark and two or three words.
+  let pill = "";
+  const pillWord = (word: string, tone = "", about = "") => `<span class="dp-word${tone ? ` ${tone}` : ""}">${h(word)}</span>${about ? `<span class="dp-about">· ${h(about)}</span>` : ""}`;
   // Branches to review are the sidebar's Review line; Drive's place names
   // them only while that line has unfolded them here.
   if (review.length && !broke && reviewShown) {
     const about = away && away.status !== "running" ? "Drive ran them while you were away" : "";
     parts.push(`${mark("ok")}${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review`, {}, "bf-word")}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
+    pill = `${mark("ok")}${pillWord("Drive", "", `${review.length} to review`)}`;
   }
   const label = (drive: NonNullable<Snapshot["drive"]>) => drive.status === "blocked" ? "Drive stopped" : drive.status === "paused" ? "Drive is paused" : "Drive is working";
   if (broke) {
     const first = signals[0]!, ci = /CI failure on (\S+)/.exec(first.title);
     const word = signals.length > 1 ? `${signals.length} things broke` : ci ? `CI failed on ${ci[1]}` : first.source === "checks" ? "A check is failing" : first.title;
     const about = signals.length > 1 ? "" : first.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "");
+    pill = `${mark("bad")}${pillWord(signals.length > 1 ? `${signals.length} things broke` : ci ? "CI failed" : "Something broke", "bad")}`;
     parts.push(`${mark("bad")}${btn("broke-show", word, {}, "bf-word bad")}${about && !brokeShown ? `<span class="bf-about">${h(about)}</span>` : ""}`);
     toggle = { action: "broke-show", open: brokeShown };
     if (brokeShown) {
@@ -4221,6 +4935,8 @@ function renderBriefing() {
     const working = pinned.status === "running" || pinned.status === "waiting", stopped = pinned.status === "blocked";
     const about = [missionTitle(pinned), driveProgress(pinned)].filter(Boolean).join(" · ");
     const word = working ? shine("Drive is working") : label(pinned);
+    const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
+    pill = `${driveRing(pinned)}${stopped ? pillWord("Drive stopped", "amber") : pillWord(pinned.status === "paused" ? "Drive paused" : "Drive", "", tasks.length > 1 ? `${Math.min(done, tasks.length)} of ${tasks.length}` : working ? "working" : "")}`;
     parts.push(`${driveRing(pinned)}<span class="bf-word${stopped ? " amber" : ""}"${stopped ? ` title="${h(stoppedReason(pinned))}"` : ""}>${word}</span><span class="bf-about" title="${h(missionTitle(pinned))}">${h(about)}</span>`);
     const watch = pinned.homeSessionId !== state.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "bf-pill") : "";
     const acts = stopped
@@ -4229,28 +4945,30 @@ function renderBriefing() {
     parts.push(`<span class="bf-acts">${acts.filter(Boolean).join("")}</span>`);
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
+    pill = `${mark("idea")}${pillWord("Drive", "", "working")}`;
     parts.push(`${mark("spin")}${btn("drive-show", run.away?.auto ? "Drive is working on its own" : "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
     if (run.fix) {
       toggle = { action: "drive-show", open: driveShown };
       if (driveShown) fold = `${branchRows([run.fix])}${run.away ? `<p class="bf-foot">${btn("breakage-away-stop", "Stop after this one", {}, "link", Boolean(state.breakage.busy))}</p>` : ""}`;
     }
   } else if (next.error && !next.proposals.length) {
+    pill = `${mark("amber")}${pillWord("Drive")}`;
     parts.push(`${mark("amber")}<span class="bf-word">Drive couldn't look for ideas</span>${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}`);
   } else if (next.proposals.length) {
     const count = next.proposals.length, auto = state.breakage.auto;
     const title = `${count === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][count] ?? count} things`} I could do next`;
     const ideasWord = `${count} idea${count === 1 ? "" : "s"}`;
+    pill = `${mark("idea")}${pillWord("Drive", "", ideasWord)}`;
+    parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${ideasWord}`, {}, "bf-word")}`);
     if (auto && !auto.on) {
-      // Off here: it only runs what you start.
-      parts.push(`${mark("hollow")}<b class="bf-word">Drive is off here</b>`, btn("ideas-show", ideasShown ? title : ideasWord, {}, "bf-word"), btn("drive-auto", "Turn on", { on: true }, "link"));
-    } else {
-      parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${ideasWord}`, {}, "bf-word")}`);
-      // On by default: the line says what Drive will do before it does it.
-      if (auto) {
-        const limits = `Up to ${auto.perDay} runs a day in this project, one at a time. Each run is in its own worktree; it never pushes or opens a PR. ${auto.usedToday} of ${auto.perDay} used today.`;
-        const when = auto.planPaused ? `waits while your plan is at ${auto.planPaused}%` : auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
-        parts.push(`<span class="bf-about" title="${h(limits)}">${when}</span>`, btn("drive-auto", "Turn off", { on: false }, "link"));
-      }
+      // Off until you turn it on: it only runs what you start, so it spends
+      // nothing of your plan while you're away.
+      parts.push(`<span class="bf-about">runs only what you start</span>`, btn("drive-auto", "Run on its own", { on: true }, "link"));
+    } else if (auto) {
+      // On: the line says what Drive will do before it does it.
+      const limits = `Up to ${auto.perDay} runs a day in this project, one at a time. Each run is in its own worktree; it never pushes or opens a PR. ${auto.usedToday} of ${auto.perDay} used today.`;
+      const when = auto.planPaused ? `waits while your plan is at ${auto.planPaused}%` : auto.usedToday >= auto.perDay ? "done for today" : `starts the first after ${auto.quietMinutes} quiet minutes`;
+      parts.push(`<span class="bf-about" title="${h(limits)}">${when}</span>`, btn("drive-auto", "Turn off", { on: false }, "link"));
     }
     toggle = { action: "ideas-show", open: ideasShown };
     if (ideasShown) {
@@ -4274,6 +4992,18 @@ function renderBriefing() {
   done.hidden = !outcome;
   // A chat with no project has no Drive, and neither has the assistant's.
   node.hidden = !inSession() || !parts.length || isPlain() || inAssistant();
+  const pillNode = el("drive-pill"), sheet = el("drive-sheet");
+  const pillFrom = pillNode.querySelector<HTMLElement>(".bf-ring")?.dataset.fill;
+  pillNode.hidden = node.hidden;
+  pillNode.innerHTML = node.hidden ? "" : pill || `${mark("hollow")}${pillWord("Drive")}`;
+  easeRing(pillNode, pillFrom);
+  placeThreadTabs();
+  // A sheet just asked for (/drive starting a mission) waits a moment for Drive to have something to say.
+  if (node.hidden && Date.now() - driveSheetAt > 15_000) driveSheetOpen = false;
+  const sheetOpen = !node.hidden && (driveSheetOpen || Boolean(fold));
+  sheet.hidden = !sheetOpen;
+  pillNode.setAttribute("aria-expanded", String(sheetOpen));
+  pillNode.title = node.hidden ? "" : sheetOpen ? "Hide Drive" : `Drive (${/Mac/i.test(navigator.platform) ? "⌥J" : "Alt+J"})`;
   // The folded reply empties too, so no stale control (a Pause after Stop) waits in it.
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").innerHTML = ""; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
@@ -4310,7 +5040,9 @@ function renderBriefing() {
 }
 /// Folds Drive's reply away if it is open; true when it was.
 function closeBriefingCard() {
-  if (!el("briefing").classList.contains("open")) return false;
+  if (!el("briefing").classList.contains("open") && !driveSheetOpen) return false;
+  driveSheetOpen = false;
+  reviewShown = false;
   driveShown = false;
   ideasShown = false;
   brokeShown = false;
@@ -4980,7 +5712,21 @@ function renderCompletion() {
   completionItems = [];
   if (mention) {
     const query = mention[1]!.toLowerCase();
-    completionItems = state.files
+    ensureMockupNames();
+    // Mockups first (pass 208 A): "@" a mockup and the model gets that one.
+    const mockups = foundryNames
+      .filter((item) => item.title.toLowerCase().includes(query) || item.title.toLowerCase().replace(/\s+/g, "").includes(query))
+      .slice(0, 6)
+      .map((item) => ({
+        label: item.title,
+        description: `v${item.version}${item.description ? ` · ${item.description}` : ""}`,
+        hint: "",
+        group: "MOCKUPS",
+        value: item.id,
+        kind: "mockup" as const,
+        icon: "mockup",
+      }));
+    completionItems = [...mockups, ...state.files
       .filter(
         (file) =>
           !/[\s]/.test(file.path) && file.path.toLowerCase().includes(query),
@@ -4994,9 +5740,9 @@ function renderCompletion() {
         hint: "",
         group: "FILES",
         value: file.path,
-        kind: "mention",
+        kind: "mention" as const,
         icon: "file",
-      }));
+      }))];
   } else if (command) {
     const row = (item: Snapshot["commands"][number], group = sectionTitle(item.section)) => ({
       label: plainName(item.name),
@@ -5060,7 +5806,7 @@ function renderCompletion() {
     })
     .join("");
   const more = !mention && completionMore ? btn("completion-more", `<span>${completionMore} more</span><span>›</span>`, {}, "cm-more") : "";
-  el("completion").innerHTML = `<div class="cm-list" id="completion-list" role="listbox" aria-label="${mention ? "Files" : "Commands"}">${rows}</div>${more}`;
+  el("completion").innerHTML = `<div class="cm-list" id="completion-list" role="listbox" aria-label="${mention ? "Mockups and files" : "Commands"}">${rows}</div>${more}`;
   // A multiline textbox controlling a listbox: keep the caret in the editor
   // while exposing the same active option that the arrow keys highlight.
   editor.setAttribute("aria-autocomplete", "list");
@@ -5071,7 +5817,10 @@ function renderCompletion() {
     .querySelector(".selected")
     ?.scrollIntoView({ block: "nearest" });
 }
+/// When you last typed in the composer, and last sent from it.
+let draftTypedAt = 0, draftSentAt = 0;
 function changedDraft() {
+  draftTypedAt = Date.now();
   const question=pendingQuestion();
   if (question) {
     completionDismissed=true;hideCompletion();renderComposer();
@@ -5104,12 +5853,12 @@ function setDraft(text: string) {
 async function chooseCompletion(index = completionIndex) {
   const item = completionItems[index];
   if (!item) return;
-  if (item.kind === "mention") {
+  if (item.kind === "mention" || item.kind === "mockup") {
     const caret = editor.selectionStart,
       match = /(?:^|\s)@([^\s]*)$/.exec(editor.value.slice(0, caret));
     if (!match) return;
     const start = caret - match[1]!.length - 1;
-    editor.setRangeText(`@${item.value} `, start, caret, "end");
+    editor.setRangeText(`@${item.kind === "mockup" ? item.label : item.value} `, start, caret, "end");
     editor.focus();
     changedDraft();
   } else {
@@ -5131,7 +5880,6 @@ async function chooseCompletion(index = completionIndex) {
 /// element, the host finds the code behind it, and it lands as a chip.
 /// The Point button changes in place, so the page in the frame keeps its state.
 function pointButton(key: string) {
-  if (key === "foundry") return pane.setPointing(pointing === key);
   const button = document.querySelector<HTMLElement>(`[data-preview="${CSS.escape(key)}"] .pv-btn[data-action="preview-point"]`);
   if (!button) return;
   button.classList.toggle("on", pointing === key);
@@ -5144,25 +5892,37 @@ async function pointAt(key: string) {
   pointing = key;
   pointButton(key);
   let pick: PointPick | null = null;
-  // The pane's Foundry page: the artifact and version shown when it was picked.
-  const foundry = key === "foundry" && pane.state && pane.detail ? { id: pane.detail.id, title: pane.detail.title, version: pane.state.version, kind: pane.detail.kind } : undefined;
-  try { pick = await api<PointPick | null>("desktop-point", { frame: foundry ? PANE_FRAME : `pv-${key}` }); }
+  try { pick = await api<PointPick | null>("desktop-point", { frame: `pv-${key}` }); }
   catch (error) { notice(error instanceof Error ? error.message : String(error)); }
   finally { if (pointing === key) pointing = null; pointButton(key); }
   if (!pick) return;
   let source: PointSource | null = null;
-  if (foundry) pick = { ...pick, foundry };
-  else try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
+  try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
   pointed.push({ ...pick, id: `${Date.now()}:${pointed.length}`, source });
   renderComposer();
   editor.focus();
 }
 async function submitText(value = editor.value, wait = false) {
+  draftSentAt = Date.now();
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
   const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
+  // Mockups named with "@" go with it by id, so the model reads that one.
+  const named = value.startsWith("/") ? "" : mockupRefs(mentionedMockups(value, foundryNames));
   // Folded pastes go after the words, whole.
   if (pastes.length && !value.startsWith("/")) { value = withPastes(value, pastes); pastes.length = 0; }
+  if (named) value = `${value}\n\n${named}`;
+  // Files that couldn't be read aren't sent; their chips go with the message.
+  if (!value.startsWith("/")) refusedFiles = [];
+  // A screenshot's window text goes folded after them. Once sent, its picture
+  // is in your bubble, so its card goes; so does a file preview you looked at.
+  const going = value.startsWith("/") || pendingQuestion() ? [] : chatShots().filter((shot) => state!.attachments.some((image) => image.id === shot.id));
+  if (going.length) {
+    value = withPastes(value, going.map(shotPaste).filter((paste): paste is Paste => paste !== null));
+    for (const shot of going) windowShots.splice(windowShots.indexOf(shot), 1);
+    renderCards();
+  }
+  if (!value.startsWith("/") && !pendingQuestion() && chatPreview()) void closePreview();
   if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;
@@ -5172,6 +5932,13 @@ async function submitText(value = editor.value, wait = false) {
     renderConversation();
   }
   if (pendingQuestion()) return answerQuestion(value);
+  // Your own words answer an open question, as its rows would.
+  const open = openQuestion();
+  if (open && value.trim() && !value.startsWith("/") && !notes && !state.attachments.length) {
+    editor.value = "";
+    renderComposer();
+    return answerQuestion(value, "typed", open);
+  }
   if (state.activeTurnId) {
     // Enter while a turn runs steers it; ⌥↵ queues the next message.
     if (value.startsWith("/")) return;
@@ -5310,6 +6077,8 @@ async function submitText(value = editor.value, wait = false) {
       // Drive is doing, or its ideas.
       if (argument) {
         driveShown = true;
+        driveSheetOpen = true;
+        driveSheetAt = Date.now();
         await api("drive", { text: argument });
       } else await dispatch("drive-open", {});
       clear();
@@ -5369,12 +6138,9 @@ function followLatest() {
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
-/// Foundry's buttons: the gallery, one artifact, and handing it to a chat.
+/// Foundry's long page: links from the chat, and the day strip. You only look here.
 async function foundryAction(action: string, args: Record<string, any>) {
-  const open = foundryOpen;
-  const redraw = () => { renderPage(); if (state) renderState({ ...state }); };
-  if (action === "foundry-tab") { foundryUi.tab = args.tab; return renderPage(); }
-  if (action === "foundry-open") return openFoundry(String(args.id));
+  if (action === "foundry-open") return openFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
   if (action === "foundry-open-step") {
     // A new artifact's id is in the tool's result; a revision names it in its input.
     let id = typeof args.id === "string" ? args.id : "";
@@ -5383,69 +6149,10 @@ async function foundryAction(action: string, args: Record<string, any>) {
       const list = await api<FoundryArtifact[]>("foundry-list").catch(() => [] as FoundryArtifact[]);
       id = list.find((item) => item.title === args.title)?.id ?? "";
     }
-    if (id) return pane.show(id);
+    if (id) return openFoundry(id);
     return openPage("foundry");
   }
-  if (action === "foundry-close") { foundryOpen = null; foundryUi.edit = null; redraw(); void loadFoundry(); return; }
-  if (action === "foundry-view") { foundryUi.view = args.view === "source" ? "source" : "preview"; return renderPage(); }
-  if (action === "foundry-width") { foundryUi.width = args.width; return renderPage(); }
-  if (!open) return;
-  if (action === "foundry-version") return openFoundry(open.id, Number(args.version));
-  if (action === "foundry-reload") { const frame = document.querySelector<HTMLIFrameElement>("#page .fd-frame"); if (frame) frame.src = frame.src; return; }
-  if (action === "foundry-edit") { foundryUi.edit = open.source; foundryUi.view = "source"; renderPage(); document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea")?.focus(); return; }
-  if (action === "foundry-edit-cancel") { foundryUi.edit = null; return renderPage(); }
-  if (action === "foundry-edit-save" || action === "foundry-restore") {
-    const area = document.querySelector<HTMLTextAreaElement>("#page .fd-source textarea:not([readonly])");
-    const source = action === "foundry-restore" ? open.source : area?.value ?? foundryUi.edit ?? "";
-    try {
-      foundryOpen = await api<FoundryArtifactDetail>("foundry-save", { id: open.id, source });
-      Object.assign(foundryUi, { edit: null, view: "preview", error: "" });
-    } catch (error) { foundryUi.error = errorWords(error); }
-    return renderPage();
-  }
-  if (action === "foundry-copy") { await act(() => api("copy", { text: open.source })); return notice("Copied the source"); }
-  if (action === "foundry-export") {
-    const saved = await act(() => api<{ path: string } | null>("desktop-foundry-export", { id: open.id, version: open.version }));
-    if (saved && typeof saved === "object" && "path" in saved) notice(`Exported to ${saved.path}`);
-    return;
-  }
-  if (action === "foundry-delete") {
-    if (!confirm(`Delete "${open.title}" and all ${open.versions.length} version${open.versions.length === 1 ? "" : "s"}?`)) return;
-    await act(() => api("foundry-delete", { id: open.id }));
-    pane.forget(open.id);
-    foundryOpen = null;
-    redraw();
-    return loadFoundry();
-  }
-  if (action === "foundry-revise") {
-    await act(() => api("foundry-revise", { id: open.id, title: open.title, chat: open.sessionId }));
-    openPage("");
-    editor.focus({ preventScroll: true });
-  }
 }
-// Double-click an artifact's title to rename it; Enter keeps it, Esc puts it back.
-document.getElementById("page")?.addEventListener("dblclick", (event) => {
-  const title = (event.target as HTMLElement).closest<HTMLElement>("[data-foundry-title]");
-  if (!title || !foundryOpen || title.isContentEditable) return;
-  const before = foundryOpen.title, id = foundryOpen.id;
-  title.contentEditable = "plaintext-only";
-  title.focus();
-  getSelection()?.selectAllChildren(title);
-  const finish = async (keep: boolean) => {
-    title.removeEventListener("keydown", keys);
-    title.contentEditable = "false";
-    const next = (title.textContent ?? "").trim();
-    if (!keep || !next || next === before) { title.textContent = before; return; }
-    try { await api("foundry-rename", { id, title: next }); if (foundryOpen?.id === id) foundryOpen = { ...foundryOpen, title: next }; void loadFoundry(); }
-    catch (error) { title.textContent = before; notice(errorWords(error)); }
-  };
-  const keys = (key: KeyboardEvent) => {
-    if (key.key === "Enter") { key.preventDefault(); title.blur(); }
-    if (key.key === "Escape") { key.preventDefault(); key.stopPropagation(); void finish(false); }
-  };
-  title.addEventListener("keydown", keys);
-  title.addEventListener("blur", () => void finish(true), { once: true });
-});
 async function dispatch(
   action: string,
   args: Record<string, any>,
@@ -5542,6 +6249,7 @@ async function dispatch(
     const path=args.enabled===true ? document.querySelector<HTMLInputElement>('#system-theme-source [name="path"]')?.value.trim() ?? source.path : source.path;
     return saveSystemThemeSource(args.enabled===true,path);
   }
+  if (action === "update-check") { document.dispatchEvent(new Event("demesne:check-update")); return; }
   if (action === "settings-local") {
     if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
     if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }
@@ -5558,6 +6266,8 @@ async function dispatch(
     return renderPage();
   }
   if (action === "settings-command") { openPage(""); return setDraft(String(args.text)); }
+  if (action === "agent-choice") return settingsCall("agent-choice", args);
+  if (action === "subagent-often") return settingsCall("subagent-often", { often: args.often });
   if (action === "subagent-model") { settingsUi.fold = ""; return settingsCall("subagent-model", { model: args.model ?? null }); }
   if (["settings-config", "allow-rule-remove", "trusted-forget", "mcp-remove"].includes(action)) return settingsCall(action, args);
   if (action === "restart-daemon") {
@@ -5692,18 +6402,74 @@ async function dispatch(
   }
   if (action === "card-fold") {
     const name = String(args.name);
-    if (cardsFolded.has(name)) { cardsFolded.delete(name); cardUnfolding = name; } else cardsFolded.add(name);
-    try { localStorage.setItem("demesne-cards-folded", JSON.stringify([...cardsFolded])); } catch {}
+    if (cardsOpen.has(name)) cardsOpen.delete(name); else cardsOpen.add(name);
+    try { localStorage.setItem("demesne-cards-open", JSON.stringify([...cardsOpen])); } catch {}
     renderCards();
     document.querySelector<HTMLButtonElement>(`#cards [data-card="${name}"] .card-head`)?.focus({ preventScroll: true });
     return;
   }
+  // Sources (pass 204): the + field, Choose…, open, take off, Keep.
+  if (action === "source-field") {
+    sourceView.field = !sourceView.field; sourceView.error = undefined;
+    sourceFocus = sourceView.field;
+    return renderCards();
+  }
+  if (action === "source-choose") {
+    const path = await api<string | null>("desktop-pick-source");
+    if (path) await keepSource({ path });
+    return;
+  }
+  if (action === "source-open") {
+    const source = state?.sources.find((one) => one.id === args.id);
+    if (!source) return;
+    if (source.kind === "file" && previewable(source.target)) return openPreview(source.target, target);
+    return api("source-open", { id: source.id });
+  }
+  if (action === "source-remove") return api("source-remove", { id: args.id });
+  if (action === "unrefuse") { refusedFiles = refusedFiles.filter((file) => file.id !== args.id); composerSignature = ""; renderComposer(); return; }
+  if (action === "source-keep") return keepSource({ attachmentId: args.id });
   if (action === "cycle-mode") return cycleMode();
   if (action === "attach-pick") { el<HTMLInputElement>("attach-input").click(); return; }
-  if (action === "detach") return api("detach", { id: args.id });
+  if (action === "detach") {
+    const at = windowShots.findIndex((shot) => shot.id === args.id);
+    if (at >= 0) { windowShots.splice(at, 1); renderCards(); }
+    return api("detach", { id: args.id });
+  }
+  if (action === "preview-file") return openPreview(String(args.path ?? ""), target);
+  if (action === "preview-close") return closePreview();
+  if (action === "shown-close") return closeShown();
+  if (action === "shown-big") { shownBig = !shownBig; return renderCards(); }
+  if (action === "shown-front") return api("bring-to-front", { app: args.app });
+  if (action === "preview-wide") return widenPreview();
+  if (action === "preview-open") { const open = chatPreview(); return open?.data ? api("open-preview", { absolute: open.data.absolute }) : undefined; }
+  if (action === "preview-sheet" || action === "preview-slide") {
+    const open = chatPreview();
+    if (open) { if (action === "preview-sheet") open.sheet = Number(args.index) || 0; else open.slide = Number(args.index) || 0; renderCards(); }
+    return;
+  }
+  if (action === "shot-big") {
+    const shot = windowShots.find((one) => one.id === args.id);
+    if (shot) shot.big = !shot.big;
+    renderCards();
+    return;
+  }
   if (action === "unpaste") { const at = pastes.findIndex((paste) => paste.id === args.id); if (at >= 0) pastes.splice(at, 1); renderComposer(); return; }
   if (action === "context-card") {
-    contextCardOpen = !contextCardOpen;
+    // The card already sits in the column: open it there, never show it twice.
+    let inColumn = columnContextCard();
+    if (inColumn) {
+      contextCardOpen = false;
+      if (!cardsOpen.has("context")) {
+        cardsOpen.add("context");
+        try { localStorage.setItem("demesne-cards-open", JSON.stringify([...cardsOpen])); } catch {}
+        renderCards();
+        inColumn = columnContextCard()!;
+      }
+      inColumn.classList.remove("pointed");
+      void inColumn.offsetWidth;
+      inColumn.classList.add("pointed");
+      inColumn.scrollIntoView({ block: "nearest" });
+    } else contextCardOpen = !contextCardOpen;
     renderContextCard();
     return;
   }
@@ -5741,11 +6507,6 @@ async function dispatch(
     const item = q?.questions[q.answers?.length ?? 0];
     if (!q || !item || !picks.length) return;
     return answerQuestion(picks.map((n) => item.suggestions[n]).filter(Boolean).join("; "), "suggestion", q);
-  }
-  if (action === "question-own") {
-    const q = questionById(args.id), input = document.querySelector<HTMLInputElement>(`[data-ask-own="${CSS.escape(String(args.id))}"]`);
-    if (!q || !input?.value.trim()) return input?.focus();
-    return answerQuestion(input.value, "typed", q);
   }
   if (action === "question-back") {
     const card = questionCards.get(String(args.id))?.node;
@@ -5871,8 +6632,14 @@ async function dispatch(
   }
   // /drive and Alt+J open what Drive has (its mission or its ideas) where it
   // lives: the line at the conversation's end, or under the start composer.
+  if (action === "drive-sheet") {
+    if (driveSheetOpen || el("briefing").classList.contains("open")) closeBriefingCard();
+    else { driveSheetOpen = true; renderBriefing(); }
+    return;
+  }
   if (action === "drive-open") {
     const run = worktreeRun(), busy = Boolean(pinnedMission() || run.fix || run.away);
+    if (inSession()) { driveSheetOpen = args.toggle ? !driveSheetOpen : true; driveSheetAt = Date.now(); }
     if (busy) driveShown = args.toggle ? !driveShown : true;
     else if (state?.driveNext.proposals.length) ideasShown = args.toggle ? !ideasShown : true;
     else return driveAction("next-refresh");
@@ -5880,6 +6647,35 @@ async function dispatch(
     else {
       heroSignature = "";
       renderHero();
+    }
+    return;
+  }
+  if (action === "handoff-file") {
+    const id = String(args.id), path = String(args.path);
+    handoffOpenFile.get(id) === path ? handoffOpenFile.delete(id) : handoffOpenFile.set(id, path);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "handoff-again") {
+    setDraft(`Ask ${CLI_NAMES[String(args.agent)] ?? "the agent"} to change hand-off ${String(args.id)}: `);
+    return;
+  }
+  if (action === "handoff-act") {
+    const id = String(args.id), verb = String(args.action);
+    if (handoffBusy.has(id)) return;
+    handoffBusy.add(id);
+    follow = false;
+    renderConversation();
+    try {
+      const done = await api<{ handoff: { status: string; error?: string } }>("handoff-act", { id, action: verb });
+      handoffNow.set(id, { ...handoffNow.get(id), status: done.handoff.status, error: undefined });
+      notice(verb === "apply" ? "Brought in: the change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded");
+    } catch (error) {
+      notice(error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error));
+    } finally {
+      handoffBusy.delete(id);
+      renderConversation();
     }
     return;
   }
@@ -5949,6 +6745,52 @@ async function dispatch(
     reviewVersion++;
     renderConversation();
     return renderComposer();
+  }
+  // Stop on a background sub-agent's line (pass 190 A).
+  if (action === "stop-agent") {
+    void act(() => api("stop-agent", { toolCallId: String(args.toolCallId) }));
+    return;
+  }
+  if (action === "toggle-crew") {
+    const key = String(args.id);
+    crewOpen.has(key) ? crewOpen.delete(key) : crewOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "toggle-research") {
+    const key = String(args.id);
+    researchOpen.has(key) ? researchOpen.delete(key) : researchOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "toggle-asked") {
+    const key = String(args.id);
+    askedOpen.has(key) ? askedOpen.delete(key) : askedOpen.add(key);
+    follow = false;
+    renderConversation();
+    return;
+  }
+  if (action === "pile-open") {
+    const s = state;
+    if (!s?.session) return;
+    const sessionId = s.session.id;
+    const pile = chatPile(s.runs.filter((run) => !rewoundBy(run)), pileHidden(sessionId));
+    if (pile.length) showPile(pile, Number(args.index) || 0, pileSrc, (id) => { hideFromPile(sessionId, id); renderCards(); });
+    return;
+  }
+  if (action === "look-picture") {
+    const src = lookPictures.get(String(args.id));
+    if (src) showPicture(src, String(args.caption ?? ""));
+    return;
+  }
+  if (action === "toggle-plan") {
+    planOpen.has(args.id) ? planOpen.delete(args.id) : planOpen.add(args.id);
+    follow = false;
+    renderConversation();
+    planInView();
+    return;
   }
   if (action === "toggle-steps") {
     stepsOpen.has(args.id) ? stepsOpen.delete(args.id) : stepsOpen.add(args.id);
@@ -6078,7 +6920,7 @@ async function dispatch(
   if (action === "edit-ask" || action === "retry-ask") {
     const run = state!.runs.find((run) => run.id === args.id);
     if (!run) return;
-    if (action === "edit-ask") return setDraft(run.content);
+    if (action === "edit-ask") return setDraft(splitMockupRefs(run.content).text);
     if (state!.activeTurnId) return;
     return submitText(run.content);
   }
@@ -6289,7 +7131,8 @@ function placeThreadTabs() {
   if (!host || !pane || !bar || host.hidden || pane.hidden) return;
   const barBox = bar.getBoundingClientRect(), paneLeft = pane.getBoundingClientRect().left;
   const right = parseFloat(getComputedStyle(bar).paddingRight) || 0, gap = parseFloat(getComputedStyle(bar).columnGap) || 0;
-  const tail = header && header.offsetParent ? header.getBoundingClientRect().width + gap : 0;
+  const drive = document.getElementById("bar-drive");
+  const tail = (header && header.offsetParent ? header.getBoundingClientRect().width + gap : 0) + (drive && drive.offsetParent ? drive.getBoundingClientRect().width + gap : 0);
   host.style.width = `${Math.max(120, barBox.right - right - tail - paneLeft)}px`;
 }
 window.addEventListener("resize", () => placeThreadTabs());
@@ -6441,7 +7284,6 @@ function renderState(next: Snapshot) {
     runNodes.clear();
     mountFrom = null; cancelIdleCallback(mountIdle); mountIdle = 0;
     heroSignature = overlaySignature = sidebarSignature = "";
-    pane.switchSession(next.session?.id ?? "");
   }
   const question=next.questions.find((q) => !q.open), slot=question ? `${question.id}:${question.answers?.length ?? 0}` : "chat";
   if (slot !== composerSlot) {
@@ -6462,7 +7304,10 @@ function renderState(next: Snapshot) {
     lastDraftVersion=next.draftVersion;
   } else if (!question && lastDraftVersion !== next.draftVersion) {
     lastDraftVersion = next.draftVersion;
-    composerDOM.property(editor, "value", next.draft);
+    // The host clearing the message you sent can land after you began the
+    // next one: what you typed since stays (and becomes the draft).
+    if (!next.draft && editor.value.trim() && draftTypedAt > draftSentAt && next.session?.id === composerSession) changedDraft();
+    else editor.value = next.draft;
   }
   composerSession=next.session?.id ?? null;
   applyPalette(next);
@@ -6501,7 +7346,6 @@ function renderState(next: Snapshot) {
   renderSetup();
   renderNotifications();
   rebuildWhenIdle();
-  sendWaitingBuild();
   if (
     !editor.disabled &&
     !overlay &&
@@ -6527,6 +7371,12 @@ function renderState(next: Snapshot) {
   }
 }
 new ResizeObserver(() => renderComposer()).observe(editor);
+// A press anywhere but Drive's pill, its sheet or the sidebar's Review line folds Drive's sheet away.
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target as Element;
+  if (el("drive-sheet").hidden || target.closest?.('#bar-drive, [data-action="review-open"]')) return;
+  closeBriefingCard();
+}, true);
 document.addEventListener("click", (event) => {
   const summary = (event.target as Element).closest("summary");
   const detail = summary?.parentElement as HTMLDetailsElement | undefined;
@@ -6539,6 +7389,13 @@ document.addEventListener("click", (event) => {
       detailsClosed.delete(id);
       detailsOpen.add(id);
     }
+  }
+  // A file name in a step previews the file instead of unfolding the step.
+  const named = (event.target as Element).closest<HTMLElement>(".tool-row [data-preview-path]");
+  if (named) {
+    event.preventDefault();
+    void act(() => openPreview(named.dataset.previewPath!, named));
+    return;
   }
   const target = (event.target as Element).closest<HTMLElement>(
     "[data-action]",
@@ -6740,11 +7597,14 @@ function paintTimeline() {
   const long = Boolean(state) && !conversation.hidden && stage.scrollHeight > stage.clientHeight + 40;
   line.hidden = !long;
   if (!long) { timeline = []; return; }
-  line.style.top = `${stage.offsetTop + 14}px`;
-  line.style.height = `${Math.max(0, stage.clientHeight - 28)}px`;
+  // Only what moved is written, so a scroll doesn't make the browser work
+  // out styles twice in one frame.
+  const set = (node: HTMLElement, name: "top" | "height", value: string) => { if (node.style[name] !== value) node.style[name] = value; };
+  set(line, "top", `${stage.offsetTop + 14}px`);
+  set(line, "height", `${Math.max(0, stage.clientHeight - 28)}px`);
   const view = line.querySelector<HTMLElement>(".tl-view")!;
-  view.style.top = `${(stage.scrollTop / stage.scrollHeight) * 100}%`;
-  view.style.height = `${(stage.clientHeight / stage.scrollHeight) * 100}%`;
+  set(view, "top", `${((stage.scrollTop / stage.scrollHeight) * 100).toFixed(2)}%`);
+  set(view, "height", `${((stage.clientHeight / stage.scrollHeight) * 100).toFixed(2)}%`);
   if (!line.classList.contains("on")) return;
   timeline = timelineMarks(timelineFacts(stage), stage.scrollHeight);
   line.querySelector(".tl-marks")!.innerHTML = timeline.map((mark) =>
@@ -6805,24 +7665,60 @@ editor.addEventListener("paste", (event) => {
 });
 let dragDepth = 0;
 const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") === true;
+/// Files, folders and links can be dropped on the Sources line (pass 204).
+const carriesSource = (event: DragEvent) => carriesFiles(event) || event.dataTransfer?.types.includes("text/uri-list") === true;
+const onSourceLine = (event: DragEvent) => event.target instanceof Element && Boolean(event.target.closest("[data-source-drop]"));
+const dragging = (on: boolean) => {
+  if (sourceView.dragging === on) return;
+  sourceView.dragging = on;
+  renderCards();
+};
 document.addEventListener("dragenter", (event) => {
-  if (!carriesFiles(event) || !state?.session) return;
+  if (!carriesSource(event) || !state?.session) return;
   dragDepth++;
-  el("drop-zone").hidden = false;
+  dragging(true);
+  if (carriesFiles(event)) el("drop-zone").hidden = false;
 });
 document.addEventListener("dragleave", (event) => {
-  if (!carriesFiles(event)) return;
+  if (!carriesSource(event)) return;
   dragDepth = Math.max(0, dragDepth - 1);
-  if (!dragDepth) el("drop-zone").hidden = true;
+  if (!dragDepth) { el("drop-zone").hidden = true; dragging(false); }
 });
-document.addEventListener("dragover", (event) => { if (carriesFiles(event)) event.preventDefault(); });
-document.addEventListener("drop", (event) => {
-  if (!carriesFiles(event)) return;
+document.addEventListener("dragover", (event) => {
+  if (!carriesSource(event)) return;
   event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = onSourceLine(event) || carriesFiles(event) ? "copy" : "none";
+});
+// The Sources field: Return keeps the link, Escape closes it.
+document.addEventListener("input", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.classList.contains("src-input")) sourceText = event.target.value;
+});
+document.addEventListener("keydown", (event) => {
+  if (!(event.target instanceof HTMLInputElement) || !event.target.classList.contains("src-input") || event.isComposing) return;
+  if (event.key === "Escape") {
+    event.preventDefault(); event.stopPropagation();
+    sourceView.field = false; sourceView.error = undefined; sourceText = "";
+    renderCards();
+    return;
+  }
+  if (event.key !== "Enter") return;
+  event.preventDefault(); event.stopPropagation();
+  const asked = fieldLink(sourceText);
+  if ("error" in asked) { sourceView.error = asked.error; sourceFocus = true; renderCards(); return; }
+  void keepSource({ url: asked.url }).catch((error: unknown) => { sourceView.error = cleanError(error); sourceFocus = true; renderCards(); });
+}, true);
+document.addEventListener("dragend", () => { dragDepth = 0; el("drop-zone").hidden = true; dragging(false); });
+document.addEventListener("drop", (event) => {
+  if (!carriesSource(event)) return;
+  event.preventDefault();
+  const kept = onSourceLine(event);
   dragDepth = 0;
   el("drop-zone").hidden = true;
+  dragging(false);
+  if (!state?.session) return;
+  if (kept) { void act(() => dropSources(event)); return; }
   const files = [...event.dataTransfer?.files ?? []];
-  if (files.length && state?.session) void act(() => attachFiles(files));
+  if (files.length) void act(() => attachFiles(files));
 });
 document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;
@@ -6855,16 +7751,10 @@ document.addEventListener("keydown", (event) => {
     else { settingsUi.fold = ""; renderPage(); }
     return;
   }
-  // Esc in an open artifact goes back to Foundry's gallery first.
-  if (key === "escape" && !ctrl && pageOpen === "foundry" && foundryOpen && !field) {
-    event.preventDefault();
-    if (foundryUi.edit !== null) foundryUi.edit = null; else foundryOpen = null;
-    renderPage();
-    if (state) renderState({ ...state });
-    return;
-  }
   // Esc over a picture or a story on Today closes that, not the page.
   if (key === "escape" && pageOpen === "today" && (event.defaultPrevented || todayUi.zoom || todayUi.story)) return;
+  // Esc while finding a mockup on Foundry clears the name, not the page.
+  if (key === "escape" && pageOpen === "foundry" && event.defaultPrevented) return;
   if (key === "escape" && !ctrl && pageOpen && (!field || (event.target as HTMLElement).id === "settings-search")) {
     event.preventDefault();
     openPage("");
@@ -6878,15 +7768,10 @@ document.addEventListener("keydown", (event) => {
     document.querySelector<HTMLElement>("#settings-nav .st-nav.on")?.focus({ preventScroll: true });
     return;
   }
-  if ((event.target as HTMLElement).matches?.("[data-ask-own]") && key === "enter" && !event.shiftKey) {
-    event.preventDefault();
-    (event.target as HTMLElement).parentElement?.querySelector<HTMLElement>(".ask-send")?.click();
-    return;
-  }
   // 1, 2, 3… pick the model's suggested answers while nothing is typed.
   if (!ctrl && !event.altKey && /^[1-9]$/.test(key) && (!field || (event.target === editor && !editor.value))) {
     const cards = document.querySelectorAll<HTMLElement>(".ask-card"), card = cards[cards.length - 1];
-    const choice = card?.querySelectorAll<HTMLElement>(".ask-choice")[Number(key) - 1];
+    const choice = card?.querySelectorAll<HTMLElement>(".ask-choice:not(.ask-decide)")[Number(key) - 1];
     if (choice) { event.preventDefault(); choice.click(); return; }
   }
   if ((event.target as HTMLElement).id === "rv-note-input" && (key === "enter" || key === "escape")) {
@@ -7120,12 +8005,13 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (
-    key === "arrowright" && event.altKey && !ctrl &&
+    (key === "tab" && !event.altKey || key === "arrowright" && event.altKey) && !ctrl &&
     !event.shiftKey &&
     event.target === editor &&
     !editor.value && !pendingQuestion() && !state.approvals.length
   ) {
-    // Accept a visible suggestion explicitly; Tab remains focus navigation.
+    // Tab (or Alt+→) takes the suggested prompt shown in the empty composer.
+    // With nothing suggested, Tab still moves focus as usual.
     const suggestion = nextSuggestion();
     if (suggestion) run(() => setDraft(suggestion));
     return;
@@ -7261,14 +8147,41 @@ function resyncState() {
       if (received && stateReceiver.needsReset) resyncState();
     });
 }
+// Updates arrive up to 40 times a second while a turn streams: the window
+// draws the newest once per frame, so typing and clicks get the time between
+// (a hidden window, which gets no frames, still draws within 100ms).
+// A slow computer (Low Power Mode) paces itself: once redraws take long, the
+// next waits three times as long as the last took (50 to 100ms, so 10 to 20
+// redraws a second), leaving the time between for typing, scrolling and clicks.
+let pendingState: Snapshot | null = null, stateFrame = 0, stateTimer: ReturnType<typeof setTimeout> | undefined;
+let drawnAt = 0, drawCost = 0;
+const SLOW_DRAW = 8;
+function drawPendingState() {
+  cancelAnimationFrame(stateFrame); clearTimeout(stateTimer); stateFrame = 0; stateTimer = undefined;
+  const next = pendingState; pendingState = null;
+  if (!next) return;
+  const start = performance.now();
+  renderState(next);
+  drawnAt = performance.now();
+  // Smoothed, so one slow redraw (a chat opening) doesn't hold back the next ones for long.
+  drawCost = drawCost * .6 + (drawnAt - start) * .4;
+}
+function redrawGap(cost: number): number { return cost < SLOW_DRAW ? 0 : Math.min(100, Math.max(50, cost * 3)); }
+function scheduleDraw() {
+  if (stateFrame || stateTimer) return;
+  const wait = drawnAt + redrawGap(drawCost) - performance.now();
+  const frame = () => { stateTimer = undefined; stateFrame = requestAnimationFrame(drawPendingState); stateTimer = setTimeout(drawPendingState, 100); };
+  if (wait > 4) stateTimer = setTimeout(frame, wait); else frame();
+}
 window.demesne.subscribe((update) => {
   const next = stateReceiver.apply(update);
-  if (next) renderState(next);
+  if (next) { pendingState = next; scheduleDraw(); }
   if (stateReceiver.needsReset) resyncState();
 });
 void window.demesne
   .request<Snapshot>("bootstrap")
   .then((snapshot) => {
+    performance.mark("demesne-chat");
     const next = stateReceiver.seed(snapshot);
     if (next) renderState(next);
     if (stateReceiver.needsReset) resyncState();
@@ -7285,13 +8198,20 @@ void window.demesne
 // only while marks are on the page (each new one wakes it): a loop that never
 // stops keeps the window drawing frames when nothing changes.
 function wakeCubes() { if (!cubeFrame) cubeFrame = requestAnimationFrame(drawCubes); }
+let cubeDrawn = 0;
 function drawCubes(now: number) {
   cubeFrame = 0;
   if (!cubeMarks.length || reducedMotion()) return;
   cubeFrame = requestAnimationFrame(drawCubes);
   const marks = [...cubeMarks];
+  // 30 frames a second is plenty for a mark this small; a 120Hz screen
+  // otherwise rebuilds its picture 120 times a second. A slow computer
+  // (redraws taking long, see drawCost) turns it at 8 a second instead:
+  // each frame rebuilds the mark's drawing, which then has to be laid out.
+  if (now - cubeDrawn < (drawCost >= SLOW_DRAW ? 125 : 33)) return;
   cube = advance(cube, now);
   if (!moving(cube, now) && marks[0]!.dataset.at === String(cube.beatAt)) return;
+  cubeDrawn = now;
   const frame = cubeSvg(cube, now);
   for (const mark of marks) { mark.innerHTML = frame; mark.dataset.at = String(cube.beatAt); }
 }

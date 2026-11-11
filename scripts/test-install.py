@@ -38,7 +38,7 @@ class InstallerTests(unittest.TestCase):
         self.data.mkdir()
         (self.data / "sessions.fixture").write_text("keep me")
         self.env = {k: v for k, v in os.environ.items()
-                    if not k.startswith("DEMESNE_") and k not in ("USER", "BASH_ENV", "ENV")}
+                    if not k.startswith("DEMESNE_") and k not in ("USER", "BASH_ENV", "ENV", "GH_TOKEN", "GITHUB_TOKEN")}
         self.env.update(HOME=str(self.home), XDG_DATA_HOME=str(self.home / "share"),
                         DEMESNE_HOME=str(self.app), DEMESNE_RELEASE_URL="https://fixture.invalid",
                         FIXTURE_ASSETS=str(self.assets), FIXTURE_ROOT=str(self.root),
@@ -53,6 +53,24 @@ args = sys.argv[1:]
 if "-o" in args:
     out = args[args.index("-o") + 1]
     name = args[-1].rsplit("/", 1)[-1]
+    if args[-1].startswith("https://api.github.com/"):
+        # The GitHub API, as for a private repository: the login must come in a header file.
+        headers = [args[i + 1] for i, a in enumerate(args) if a == "-H"]
+        files = [pathlib.Path(h[1:]).read_text() for h in headers if h.startswith("@")]
+        if "Authorization: Bearer fixture-token\\n" not in files or any("fixture-token" in a for a in args):
+            print("401", end="")
+            sys.exit(22)
+        assets = sorted(p.name for p in pathlib.Path(os.environ["FIXTURE_ASSETS"]).iterdir())
+        if "/releases/assets/" in args[-1]:
+            name = assets[int(name)]
+        else:
+            import json
+            pathlib.Path(out).write_text(json.dumps({"url": "https://api.github.com/repos/x/y/releases/1", "name": "v1",
+                "author": {"url": "https://api.github.com/users/bot"},
+                "assets": [{"url": f"https://api.github.com/repos/x/y/releases/assets/{i}", "id": i, "name": n,
+                            "uploader": {"url": "https://api.github.com/users/bot"}} for i, n in enumerate(assets)]}, indent=2))
+            print("200", end="")
+            sys.exit(0)
     with open(pathlib.Path(os.environ["FIXTURE_ROOT"], "downloads"), "a") as log:
         log.write(name + "\\n")
     mode = os.environ.get("CHECKSUM_FAILURE", "") if name.endswith(".sha256") else os.environ.get("ASSET_FAILURE", "")
@@ -178,6 +196,27 @@ else:
         self.assertFalse(self.app.exists())
         self.assertFalse(desktop.exists())
         self.assertEqual((self.data / "sessions.fixture").read_text(), "keep me")
+
+    def test_private_repository_downloads_with_login(self):
+        self.tool("gh", '#!/bin/sh\n[ "$1 $2" = "auth token" ] && echo fixture-token\n')
+        del self.env["DEMESNE_RELEASE_URL"]
+        self.assert_ok(self.run_installer())
+        self.assertTrue((self.app / "demesne").is_file())
+        downloads = (self.root / "downloads").read_text().splitlines()
+        self.assertEqual(downloads, ["demesne-linux-x64.tar.gz", "demesne-linux-x64.tar.gz.sha256"])
+        self.tool("gh", "#!/bin/sh\nexit 1\n")
+        self.env["GH_TOKEN"] = "fixture-token"
+        self.assert_ok(self.run_installer("--version", "v1"))
+
+    def test_private_repository_without_login_says_so(self):
+        self.tool("gh", "#!/bin/sh\nexit 1\n")
+        self.tool("git", "#!/bin/sh\nexit 1\n")
+        self.env["DEMESNE_RELEASE_URL"] = ""
+        for name in os.listdir(self.assets):
+            os.remove(self.assets / name)
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gh auth login", result.stdout + result.stderr)
 
     def test_checksum_failure_preserves_install(self):
         self.assert_ok(self.run_installer())

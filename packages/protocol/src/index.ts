@@ -2,6 +2,7 @@ export const PROTOCOL_VERSION = 1 as const;
 export * from "./drive.ts";
 export * from "./panels.ts";
 export * from "./plan-limits.ts";
+export * from "./file-preview.ts";
 import { isPullRequestUrl } from "./pull-requests.ts";
 
 export type EventType =
@@ -81,6 +82,21 @@ export interface RepoResult {
   totals: { added: number; removed: number };
 }
 export interface RepoFlow { command: "commit" | "merge"; before: RepoSnapshot; after: RepoSnapshot; result?: RepoResult }
+/// A hand-off's change card (pass 165 A): what one of your agent tools
+/// changed in its own worktree. `status` is as the turn left it; the card
+/// asks /v1/handoffs/:id for where it is now.
+/// A deep research run as it goes (research tool): each researcher's
+/// question and who has it (agent null: a sub-agent on the chat's model),
+/// then the judge's check. The window draws it as one quiet line.
+export interface ResearchLane { question: string; agent: "claude" | "codex" | "gemini" | null; state: "running" | "done" | "failed"; pages: number }
+export interface ResearchCheck { claim: string; agent: "claude" | "codex" | "gemini" | null; verdict: "running" | "confirmed" | "refuted" | "unclear" }
+export interface ResearchState {
+  topic: string; phase: "researching" | "judging" | "checking" | "done";
+  pages: number; lanes: ResearchLane[]; checks: ResearchCheck[];
+  agree?: number; disagree?: number; judge: "claude" | "codex" | "gemini" | null;
+}
+
+export interface HandoffCard { id: string; agent: string; status: string; files: { path: string; added: number; removed: number }[]; checks: string[]; error?: string }
 
 export interface ToolFileChange {
   path: string;
@@ -376,7 +392,29 @@ export interface Turn {
   attachments?: TurnAttachment[];
 }
 
-export interface TurnAttachment { id: string; filename: string; width: number; height: number }
+export interface TurnAttachment {
+  id: string; filename: string; width: number; height: number;
+  /// A file that isn't a picture (pass 205 A): its text goes with the message
+  /// and it is kept with the chat as a source. Width and height are 0.
+  kind?: "file";
+  size?: number;
+  /// Its source once sent.
+  sourceId?: string;
+}
+
+/// A current file that a completed read in this turn actually returned.
+/// IDs are scoped to the session/turn; the content route never accepts paths.
+export interface SourceDocument {
+  id: string;
+  filename: string;
+  path: string;
+  mimeType: "application/pdf" | "text/plain";
+  byteLength: number | null;
+  revision: string | null;
+  issue: "missing" | "unavailable" | "unsupported" | "too_large" | null;
+}
+
+export interface SourceDocumentList { documents: SourceDocument[] }
 
 export interface SessionCheckpoint {
   id: string;
@@ -416,6 +454,9 @@ export interface Workspace {
   /// checkout. Populated by the daemon when session state is read; absent for
   /// non-repositories and detached HEADs.
   gitBranch?: string;
+  /// Commits the branch is ahead of and behind its upstream; absent without one.
+  gitAhead?: number;
+  gitBehind?: number;
 }
 
 export interface PendingPermissionSnapshot {
@@ -554,6 +595,25 @@ export interface SessionStateResponse {
   rewinds?: SessionRewindState[];
   /// Asked again: the answers that share one spot, and the one in force.
   versions?: TurnVersions[];
+  /// Sources the person keeps with this chat, newest first (pass 204).
+  sources?: ChatSource[];
+}
+
+/// A source kept with a chat (pass 204): a file, a folder or a link. A file
+/// in the project stays where it is; one from elsewhere is copied in.
+export interface ChatSource {
+  id: string;
+  kind: "file" | "folder" | "link";
+  /// An absolute path, or the link.
+  target: string;
+  name: string;
+  /// One dim line: where it is ("in this project · db/"), or the page's title.
+  detail: string;
+  /// Its path in the project, when it is in the project.
+  inProject?: string;
+  /// Copied into the chat from elsewhere.
+  copied?: boolean;
+  addedAt: string;
 }
 
 /// Ask again (pass 115): one message answered more than once, oldest first.
@@ -617,6 +677,9 @@ export interface SubmitTurnRequest {
   content: string;
   /// Images uploaded to this session's artifacts first (at most 6).
   attachmentIds?: string[];
+  /// Opt in to requiring actual pixel input, rather than attachment names.
+  /// The daemon rechecks the turn's effective provider before consuming uploads.
+  requireImageInput?: boolean;
   permissionMode?: PermissionMode;
   thinkingEnabled?: boolean;
   planOnly?: boolean;
@@ -627,6 +690,18 @@ export interface SubmitTurnRequest {
 export interface SubmitTurnResponse {
   turn: Turn;
   eventId: number;
+}
+
+export interface SessionInputCapabilities {
+  sessionId: string;
+  provider: string;
+  model: string;
+  images: {
+    enabled: boolean;
+    mimeTypes: string[];
+    maxBytes: number;
+    maxCount: number;
+  };
 }
 
 export interface CancelTurnResponse {
@@ -872,6 +947,9 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
   if (!Array.isArray(attachmentIds) || attachmentIds.length > 6 || attachmentIds.some((id) => typeof id !== "string" || !id || id.length > 64)) {
     throw new ProtocolValidationError("attachmentIds must be at most 6 artifact ids");
   }
+  if (value.requireImageInput !== undefined && typeof value.requireImageInput !== "boolean") {
+    throw new ProtocolValidationError("requireImageInput must be a boolean");
+  }
   return {
     content,
     ...(value.permissionMode ? { permissionMode: value.permissionMode } : {}),
@@ -879,6 +957,7 @@ export function parseSubmitTurnRequest(value: unknown): SubmitTurnRequest {
     ...(value.planOnly !== undefined ? { planOnly: value.planOnly } : {}),
     ...(value.fromDrive ? { fromDrive: true } : {}),
     ...(attachmentIds.length ? { attachmentIds } : {}),
+    ...(value.requireImageInput !== undefined ? { requireImageInput: value.requireImageInput } : {}),
   };
 }
 
@@ -1071,6 +1150,7 @@ export * from "./next-prompt.ts";
 export * from "./heartbeat-mail.ts";
 export * from "./drive-report.ts";
 export * from "./thread-report.ts";
+export * from "./foundry-try.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 
@@ -1090,6 +1170,7 @@ export function derivePersistedRule(toolName: string | undefined, rawArguments: 
     if (!argv.every((entry) => typeof entry === "string" && entry.length > 0 && !/\s/.test(entry))) return null;
     return `run_command:${argv.join(" ")}`;
   }
+  if (toolName === "open") { const key = openAppKey(input); return key ? `open:${key}` : null; }
   const target = pathFrom(input, toolName === "move_path" ? "from" : "path");
   if (!target) return null;
   const normalized = target.split("\\").join("/").replace(/^\.\//, "").replace(/\/+$/, "");
@@ -1097,6 +1178,23 @@ export function derivePersistedRule(toolName: string | undefined, rawArguments: 
   const segments = normalized.split("/").filter(Boolean);
   segments.pop();
   return `${toolName}:${segments.join("/") || normalized}`;
+}
+
+/// What an `open` is approved by (pass 210 A): the app it opens, so
+/// "Always" covers that app. A link with no app is "web links" (or
+/// "<scheme> links"); a file with no app is its default app, by its ending
+/// (".pdf files"); a folder "folders".
+export function openAppKey(input: unknown): string | null {
+  const args = parseRuleArguments(input);
+  const app = typeof args.app === "string" ? args.app.trim().toLowerCase() : "";
+  if (app) return app;
+  const target = typeof args.target === "string" ? args.target.trim() : "";
+  if (!target) return null;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(target);
+  if (scheme && !/^[a-z]:[\\/]/i.test(target)) return /^https?$/i.test(scheme[1]!) ? "web links" : `${scheme[1]!.toLowerCase()} links`;
+  const name = target.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+  const ending = /\.([a-z0-9]{1,12})$/i.exec(name);
+  return ending ? `.${ending[1]!.toLowerCase()} files` : "folders";
 }
 
 function pathFrom(input: Record<string, unknown>, key: string): string | null {
@@ -1122,6 +1220,8 @@ function parseRuleArguments(value: unknown): Record<string, unknown> {
 export type FoundryKind = "html" | "svg" | "markdown" | "deck" | "doc" | "dashboard";
 export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown", "deck", "doc", "dashboard"];
 export const FOUNDRY_MAX_SOURCE_BYTES = 512 * 1024;
+/// What one page may keep with demesne.save, all names together.
+export const FOUNDRY_MAX_DATA_BYTES = 256 * 1024;
 
 export interface FoundryVersion {
   version: number;
@@ -1129,7 +1229,10 @@ export interface FoundryVersion {
   /// The chat and turn that saved it; null when saved by the person.
   sessionId: string | null;
   turnId: string | null;
+  /// The version's short name (pass 208 A), "vN · <note>".
   note: string;
+  /// The one the model would use, among what one ask made.
+  recommended: boolean;
   byteLength: number;
 }
 
@@ -1143,6 +1246,10 @@ export interface FoundryArtifact {
   createdAt: string;
   updatedAt: string;
   version: number;
+  /// What it is and what to look at, in a sentence or two (pass 208 A).
+  description: string;
+  /// The mockup it was made from, when it was.
+  basedOn: { id: string; version: number } | null;
 }
 
 export interface FoundryArtifactDetail extends FoundryArtifact {
@@ -1150,8 +1257,22 @@ export interface FoundryArtifactDetail extends FoundryArtifact {
   versions: FoundryVersion[];
 }
 
+/// One saved version, for Foundry's long page (pass 196 A): every version
+/// of every mockup, newest first.
+export interface FoundryShelfVersion {
+  artifactId: string;
+  version: number;
+  createdAt: string;
+  sessionId: string | null;
+  /// The ask that made it: what one ask made is shown together.
+  turnId?: string | null;
+  note: string;
+  recommended?: boolean;
+}
+
 export interface FoundryListResponse {
   artifacts: FoundryArtifact[];
+  versions?: FoundryShelfVersion[];
 }
 
 /// Medium wherever supported; never invent an effort for a model without one.

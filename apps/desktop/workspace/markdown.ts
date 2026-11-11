@@ -1,10 +1,47 @@
+import { previewable } from "@demesne/protocol";
 import { marked, Renderer, type Token, type TokensList } from "marked";
 import DOMPurify from "dompurify";
-import hljs from "highlight.js/lib/common";
-import katex from "katex";
 import { decorateTables } from "./md-table.ts";
 import { markMarkdownFade, reconcileMarkdownNodes } from "./markdown-reconcile.ts";
 
+// Math and code colouring are big (about 430 KB of the window's code): they
+// load the first time an answer has a formula or a code block, not at launch.
+// Until then a formula shows as its source and code as plain text; both are
+// filled in where they stand once the library is in.
+type Katex = typeof import("katex").default;
+type Hljs = typeof import("highlight.js/lib/common").default;
+let katex: Katex | null = null, hljs: Hljs | null = null;
+let katexLoading: Promise<void> | null = null, hljsLoading: Promise<void> | null = null;
+const KATEX = { throwOnError: false, output: "htmlAndMathml", strict: "ignore", trust: false } as const;
+function renderMath(element: HTMLElement) {
+  if (!katex) return;
+  // A formula KaTeX cannot parse stays readable as its source.
+  katex.render(element.dataset.math ?? "", element, { ...KATEX, displayMode: element.dataset.display === "1" });
+  element.classList.add("math-done");
+}
+function colourCode(code: HTMLElement) {
+  const language = /language-([^ ]+)/.exec(code.className)?.[1] ?? "code";
+  if (hljs?.getLanguage(language)) code.innerHTML = hljs.highlight(code.textContent ?? "", { language, ignoreIllegals: true }).value;
+  code.classList.add("code-done");
+}
+/// Loads what an answer needs, then fills in what is already on the page
+/// (and forgets answers drawn without it).
+function needMath() {
+  katexLoading ??= import("katex").then((module) => {
+    katex = module.default; cache.clear(); cacheSize = 0;
+    for (const element of document.querySelectorAll<HTMLElement>(".math[data-math]:not(.math-done)")) renderMath(element);
+  });
+  return katexLoading;
+}
+function needCode() {
+  hljsLoading ??= import("highlight.js/lib/common").then((module) => {
+    hljs = module.default; cache.clear(); cacheSize = 0;
+    for (const code of document.querySelectorAll<HTMLElement>("pre > code:not(.code-done)")) if (code.parentElement?.querySelector(".code-header")) colourCode(code);
+  });
+  return hljsLoading;
+}
+/// Both libraries, for anything that needs the finished look at once.
+export const loadMarkdownExtras = () => Promise.all([needMath(), needCode()]);
 const escape = (value: string) =>
   value.replace(
     /[&<>"']/g,
@@ -57,8 +94,13 @@ marked.use({
 // From marked's defaults, which carry the math extensions registered above:
 // lexer() and parser() use exactly the options they are given.
 export const options = { ...marked.defaults, async: false as const, gfm: true, renderer };
-function decorate(parsed: string): string {
-  const safe = DOMPurify.sanitize(parsed, {
+// Its own sanitizer, configured once: passing the settings with every call
+// made DOMPurify work them out again for each block of every answer. It
+// hands back nodes, so the answer isn't serialized and parsed again.
+let purify: ReturnType<typeof DOMPurify> | null = null;
+const sanitizer = () => purify ??= configured(DOMPurify(window));
+const configured = (instance: ReturnType<typeof DOMPurify>) => { instance.setConfig({
+    RETURN_DOM_FRAGMENT: true,
     ALLOWED_TAGS: [
       "p",
       "br",
@@ -89,28 +131,25 @@ function decorate(parsed: string): string {
       "input",
     ],
     ALLOWED_ATTR: ["href", "title", "class", "start", "data-math", "data-display", "type", "checked", "disabled", "align"],
-  });
+  }); return instance; };
+function decorate(parsed: string): string {
   const wrapper = document.createElement("div");
-  wrapper.innerHTML = safe;
+  wrapper.append(sanitizer().sanitize(parsed) as unknown as DocumentFragment);
   // Task-list boxes are display-only.
   for (const box of wrapper.querySelectorAll("input"))
     if (box.type !== "checkbox") box.remove();
     else box.disabled = true;
   for (const element of wrapper.querySelectorAll<HTMLElement>("[data-math]")) {
-    const display = element.dataset.display === "1";
-    // A formula KaTeX cannot parse stays readable as its source.
-    katex.render(element.dataset.math ?? "", element, { displayMode: display, throwOnError: false, output: "htmlAndMathml", strict: "ignore", trust: false });
+    if (katex) renderMath(element);
+    else { const fence = element.dataset.display === "1" ? "$$" : "$"; element.textContent = fence + (element.dataset.math ?? "") + fence; void needMath(); }
   }
   decorateTables(wrapper);
+  markFiles(wrapper);
   for (const block of wrapper.querySelectorAll("pre")) {
     const code = block.querySelector("code");
     if (!code) continue;
     const language = /language-([^ ]+)/.exec(code.className)?.[1] ?? "code";
-    if (hljs.getLanguage(language))
-      code.innerHTML = hljs.highlight(code.textContent ?? "", {
-        language,
-        ignoreIllegals: true,
-      }).value;
+    if (hljs) colourCode(code); else void needCode();
     const head = document.createElement("div");
     head.className = "code-header";
     const label = document.createElement("span");
@@ -136,7 +175,7 @@ export function markdown(raw: string): string {
   const result = decorate(marked.parse(raw, options));
   const size = (raw.length + result.length) * 2;
   if (size <= CACHE_LIMIT) {
-    while (cacheSize + size > CACHE_LIMIT || cache.size >= 64) {
+    while (cacheSize + size > CACHE_LIMIT || cache.size >= 256) {
       const key = cache.keys().next().value!;
       cacheSize -= (key.length + cache.get(key)!.length) * 2;
       cache.delete(key);
@@ -217,6 +256,16 @@ export class MarkdownView {
   private lastUpdate = 0;
   constructor(private readonly settings: { preserveNodes?: boolean } = {}) {
     this.element.className = "markdown";
+    // A word that has faded in is done: it loses its fade, or moving the
+    // answer (each time the turn around it redraws, as on every step) would
+    // play the fade again and the text would blink.
+    this.element.addEventListener("animationend", (event) => {
+      const span = event.target;
+      if (event.animationName !== "md-in" || !(span instanceof HTMLElement) || !span.classList.contains("md-in")) return;
+      span.classList.remove("md-in");
+      span.style.removeProperty("animation-duration");
+      span.style.removeProperty("animation-delay");
+    });
   }
   /// `fade` while the answer streams: new words fade in (see wrapFades).
   update(raw: string, fade = false): boolean {
@@ -282,5 +331,27 @@ export class MarkdownView {
     this.links = links;
     this.raw = raw;
     return mutated;
+  }
+}
+
+/// File names a click previews (pass 188 A): `q3-budget.xlsx` in code, or a
+/// link to a file rather than a page.
+function markFiles(root: HTMLElement) {
+  const mark = (element: HTMLElement, path: string) => {
+    element.classList.add("file-link");
+    element.dataset.action = "preview-file";
+    element.dataset.args = JSON.stringify({ path });
+    element.dataset.previewPath = path;
+  };
+  for (const code of root.querySelectorAll<HTMLElement>("code")) {
+    const text = code.textContent?.trim() ?? "";
+    if (!code.closest("pre, a") && text.length < 300 && !text.includes("\n") && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && previewable(text)) mark(code, text);
+  }
+  for (const link of root.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const href = link.getAttribute("href") ?? "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("file://")) continue;
+    let path = href.replace(/^file:\/\//, "").replace(/[?#].*$/, "");
+    try { path = decodeURI(path); } catch { /* keep it as written */ }
+    if (path && previewable(path)) mark(link, path);
   }
 }

@@ -8,7 +8,7 @@
 /// A chat is an agent's when its model is `agent:<id>`. The tool runs its own
 /// tools under its own rules; Demesne shows what it did as the turn's
 /// working lines and its last message as the answer.
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -126,7 +126,8 @@ export function agyModelList(output: string): AgentModelOption[] {
 /// `allow` is Antigravity's permission rules for this run (agyAllow).
 export function agentArgs(id: AgentId, prompt: string, resume: { id: string; fresh: boolean } | null, choice: AgentChoice = {}, allow: string[] = []): string[] {
   const model = choice.model && MODEL_NAME.test(choice.model) ? choice.model : null;
-  if (id === "claude") return ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
+  // --allowedTools takes several values: one comma-joined value, before the other flags.
+  if (id === "claude") return ["-p", ...(allow.length ? ["--allowedTools", allow.join(",")] : []), "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
     ...(model ? ["--model", model] : []), ...(resume ? [resume.fresh ? "--session-id" : "--resume", resume.id] : []), prompt];
   if (id === "codex") {
     // Config overrides (-c) hold for `exec resume` too.
@@ -149,12 +150,45 @@ export function subagentArgs(id: AgentId, prompt: string, choice: AgentChoice = 
     const overrides = [...(model ? ["-c", `model="${model}"`] : []), ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : [])];
     return ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", ...overrides, prompt];
   }
-  return ["-p", prompt, "--output-format", "stream-json", ...(root ? ["--settings", JSON.stringify({ permissions: { allow: [`read_file(${root})`] } })] : []), ...(model ? ["--model", model] : [])];
+  return ["-p", prompt, "--output-format", "stream-json", ...(root ? ["--settings", JSON.stringify({ permissions: { allow: [`read_file(${root})`, ...AGY_LOOK_COMMANDS] } })] : []), ...(model ? ["--model", model] : [])];
 }
 
+/// A research run (research.ts): read-only as a sub-agent, with the tool's
+/// own web search on. Claude Code may search and fetch pages in plan mode;
+/// Codex gets live web search in its read-only sandbox; Antigravity reads
+/// the project and uses whatever web tools its own settings allow.
+export function researchArgs(id: AgentId, prompt: string, choice: AgentChoice = {}, root = ""): string[] {
+  const model = choice.model && MODEL_NAME.test(choice.model) ? choice.model : null;
+  if (id === "claude") return ["-p", "--allowedTools", "WebSearch,WebFetch", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", ...(model ? ["--model", model] : []), prompt];
+  if (id === "codex") {
+    const effort = choice.effort && AGENT_EFFORTS.includes(choice.effort) ? choice.effort : null;
+    const overrides = [...(model ? ["-c", `model="${model}"`] : []), ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []), "-c", `web_search="live"`];
+    return ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", ...overrides, prompt];
+  }
+  return subagentArgs(id, AGY_RESEARCH + prompt, choice, root);
+}
+
+/// Antigravity as a researcher: like AGY_READ_ONLY, but the web is the point.
+const AGY_RESEARCH = "You are a read-only researcher. Use your web search and page reading tools. Run no shell commands, never edit or create files, never start subagents. Always finish with a text answer.\n\n";
+
+/// Commands that only look, as Antigravity rules. Since agy 1.5.2 a
+/// headless run starts with `ls -la` even when told to use its read tools,
+/// and one denied command ends the turn with no answer. A bare
+/// command(<name>) allows that command with any arguments; agy denies the
+/// same command chained (&&, ;) with anything else. Nothing here can write:
+/// no find (-delete, -exec), sed (-i) or tee.
+export const AGY_LOOK_COMMANDS: readonly string[] = ["ls", "cat", "head", "tail", "wc", "grep", "rg", "pwd", "tree", "file", "git status", "git diff", "git log", "git show", "git branch", "git ls-files"]
+  .map((command) => `command(${command})`);
+
+/// Antigravity ends its turn with no answer the moment a headless run is
+/// denied anything (a command, a write, a read outside the project), so as
+/// a sub-agent it is pointed at its own read tools and told never to try
+/// the rest. The read_file(<root>) rule alone is what keeps it read-only.
+const AGY_READ_ONLY = "You are a read-only helper working in the current folder. To see what is there, call list_dir on the folder (or run ls); to search, use grep_search (or grep); to read, use view_file (or cat). Run no other shell commands, never chain commands, never edit or create files, never start subagents, and never search the web. If the request asks for changes, do not attempt them: describe the change in your answer instead. Always finish with a text answer.\n\n";
+
 /// The brief a CLI sub-agent is given around the main agent's own prompt.
-export function subagentBrief(prompt: string, root: string): string {
-  return `You are a read-only sub-agent working for another coding agent in ${root}. Do not change any files or run anything that changes state.
+export function subagentBrief(prompt: string, root: string, id?: AgentId): string {
+  return `${id === "gemini" ? AGY_READ_ONLY : ""}You are a read-only sub-agent working for another coding agent in ${root}. Do not change any files or run anything that changes state.
 Investigate the task below with your read and search tools, and stop as soon as the evidence answers it.
 Your final message is returned verbatim to the other agent, which cannot see your steps. Make it a self-contained report: the answer first, then the supporting facts with workspace-relative file paths and line numbers, and anything you could not determine.
 
@@ -172,15 +206,26 @@ export function subagentStep(line: string): string {
 
 /// What Antigravity may do in a headless run, where it can't ask: like
 /// Claude Code's accept-edits, read and change files in the project, and
-/// run only the commands your own Antigravity settings already allow.
+/// run only commands that look (AGY_LOOK_COMMANDS) and the ones your own
+/// Antigravity settings already allow.
 /// Rules take the folder's real path (agy checks /private/var, not /var)
 /// and a bare folder covers what's inside it; globs don't work.
 export function agyAllow(root: string, home: string): string[] {
   let own: unknown = [];
   try { own = (JSON.parse(readFileSync(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8")) as { permissions?: { allow?: unknown } }).permissions?.allow ?? []; } catch { /* none */ }
   const yours = Array.isArray(own) ? own.filter((rule): rule is string => typeof rule === "string") : [];
-  return [...new Set([`read_file(${root})`, `write_file(${root})`, ...yours])];
+  return [...new Set([`read_file(${root})`, `write_file(${root})`, ...AGY_LOOK_COMMANDS, ...yours])];
 }
+
+/// The checks Claude Code may run in a hand-off's worktree without asking
+/// (in -p nobody can approve them): tests, type checks and linters, on top
+/// of whatever your own Claude Code settings allow. Nothing that pushes,
+/// installs or deletes.
+export const HANDOFF_CHECKS: readonly string[] = [
+  ...["bun test", "bun run test", "bun run typecheck", "bun run lint", "bun run check", "bunx tsc", "npm test", "npm run test", "npm run lint", "npm run typecheck", "npm run check", "npx tsc",
+    "pnpm test", "pnpm run test", "pnpm lint", "pnpm typecheck", "yarn test", "yarn lint", "yarn typecheck", "tsc", "cargo test", "cargo check", "cargo clippy", "go test", "go vet", "pytest", "python -m pytest", "ruff check", "mypy"].map((command) => `Bash(${command}:*)`),
+  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+];
 
 /// What one line of a tool's output means for the turn.
 export interface AgentLine { session?: string; step?: string; said?: string; answer?: string; error?: string }
@@ -226,8 +271,22 @@ export function parseAgentLine(id: AgentId, line: string, cwd: string, state: Ag
       return (Array.isArray(content) ? content : []).flatMap((part): AgentLine[] => {
         const block = record(part);
         if (block.type === "text" && typeof block.text === "string" && block.text.trim()) return [{ said: block.text }];
-        if (block.type === "tool_use" && typeof block.name === "string") return [{ step: stepLine(block.name, record(block.input), cwd) }];
+        if (block.type === "tool_use" && typeof block.name === "string") {
+          const step = stepLine(block.name, record(block.input), cwd);
+          if (typeof block.id === "string") (state.calls ??= {})[block.id] = step;
+          return [{ step }];
+        }
         return [];
+      });
+    }
+    // A call it wasn't allowed (in -p nobody can approve it) says so.
+    if (type === "user") {
+      const content = record(event.message).content;
+      return (Array.isArray(content) ? content : []).flatMap((part): AgentLine[] => {
+        const block = record(part);
+        const said = typeof block.content === "string" ? block.content : Array.isArray(block.content) ? block.content.map((item) => String(record(item).text ?? "")).join(" ") : "";
+        const step = typeof block.tool_use_id === "string" ? state.calls?.[block.tool_use_id] : undefined;
+        return block.type === "tool_result" && block.is_error === true && step && /requires approval|permission|not allowed|denied/i.test(said) ? [{ step: `${step} (not allowed)` }] : [];
       });
     }
     if (type === "result") {
@@ -256,7 +315,9 @@ export function parseAgentLine(id: AgentId, line: string, cwd: string, state: Ag
   return parseAgyLine(event, cwd, state);
 }
 
-export interface AgyState { words: Record<number, string> }
+/// Words streamed so far by step (Antigravity), and each Claude Code tool
+/// call's line by its id, so a refused one can say so.
+export interface AgyState { words: Record<number, string>; calls?: Record<string, string> }
 
 /// Antigravity's stream-json: `init` names the conversation, `step_update`s
 /// stream words (text_delta) and tools by step, and `result` is the answer.
@@ -288,7 +349,12 @@ function parseAgyLine(event: Record<string, unknown>, cwd: string, state: AgySta
   if (kind === "result") {
     const result = record(event.result);
     if (result.status !== "SUCCESS") return [{ error: String(record(result.error).message ?? result.error ?? result.status ?? "Antigravity failed") }];
-    return typeof result.response === "string" ? [{ answer: result.response.trim() }] : [];
+    const answer = typeof result.response === "string" ? result.response.trim() : "";
+    // A denied action in headless mode ends Antigravity's turn with nothing
+    // said; that is a failed run, not an empty answer.
+    const denied = Array.isArray(result.denied_actions) ? result.denied_actions.map((item) => String(record(item).display_name ?? record(item).action ?? "")).filter(Boolean) : [];
+    if (!answer && denied.length) return [{ error: `Antigravity stopped: it wasn't allowed to ${[...new Set(denied)].join(", ")}` }];
+    return typeof result.response === "string" ? [{ answer }] : [];
   }
   if (kind === "error") return [{ error: String(record(event.error).message ?? event.message ?? "Antigravity failed") }];
   return [];
@@ -334,8 +400,27 @@ async function tail(stream: ReadableStream<Uint8Array>): Promise<string> {
   try { return (await new Response(stream).text()).trim().slice(-600); } catch { return ""; }
 }
 
+/// Where agent tools install themselves. An app opened from the Dock or
+/// Finder starts the daemon with a short PATH (/usr/bin:/bin…), so Codex from
+/// Homebrew or npm, and the node it runs on, are looked for here as well.
+export function toolDirs(home = homedir(), platform = process.platform): string[] {
+  if (platform === "win32") return [join(home, "AppData", "Roaming", "npm"), join(home, ".bun", "bin"), join(home, ".local", "bin")];
+  const nvm = join(home, ".nvm", "versions", "node");
+  let nvmBins: string[] = [];
+  try { nvmBins = readdirSync(nvm).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((version) => join(nvm, version, "bin")); } catch { /* no nvm */ }
+  return [join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", join(home, ".npm-global", "bin"), join(home, ".bun", "bin"),
+    join(home, ".volta", "bin"), ...nvmBins, join(home, ".cargo", "bin"), "/home/linuxbrew/.linuxbrew/bin"];
+}
+
+/// PATH with the tool folders after what was already there, so a tool's
+/// `#!/usr/bin/env node` finds node from an app-started daemon too.
+export function toolPath(path = process.env.PATH ?? "", home = homedir(), platform = process.platform): string {
+  const separator = platform === "win32" ? ";" : ":";
+  return [...new Set([...path.split(separator).filter(Boolean), ...toolDirs(home, platform)])].join(separator);
+}
+
 function defaultSpawn(argv: string[], cwd: string): AgentProcess {
-  const child = Bun.spawn(argv, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+  const child = Bun.spawn(argv, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: toolPath(), NO_COLOR: "1" } });
   return { stdout: child.stdout, stderr: child.stderr, exited: child.exited, kill: () => child.kill() };
 }
 
@@ -361,13 +446,16 @@ export class AgentCli {
   private readonly agyModels: (path: string) => string;
   private agyListed: AgentModelOption[] | null = null;
 
-  /// A tool on PATH, or in ~/.local/bin, where Antigravity installs itself
-  /// (an app-started daemon's PATH may not have it).
+  /// A tool on PATH, or where tools install themselves (toolDirs): an
+  /// app-started daemon's PATH has none of Homebrew, npm or ~/.local/bin.
   private find(command: string): string | null {
     const found = this.which(command);
     if (found || this.whichGiven) return found;
-    const local = join(this.home, ".local", "bin", command);
-    return existsSync(local) ? local : null;
+    for (const dir of toolDirs(this.home)) {
+      const candidate = join(dir, process.platform === "win32" ? `${command}.cmd` : command);
+      if (existsSync(candidate)) return candidate;
+    }
+    return null;
   }
 
   private choices(): Partial<Record<AgentId, AgentChoice>> {
@@ -455,13 +543,15 @@ export class AgentCli {
   /// One read-only sub-agent run for another chat's turn: its steps go to
   /// `step` as they happen, its last message is the report. Throws when the
   /// tool isn't here, fails, or says nothing.
-  async subagent(id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void): Promise<string> {
+  /// With `web`, a research run: the prompt is the whole brief and the
+  /// tool's web search is on (researchArgs).
+  async subagent(id: AgentId, prompt: string, cwd: string, signal: AbortSignal, step: (line: string) => void, web = false): Promise<string> {
     const kind = AGENT_KINDS.find((item) => item.id === id)!;
     const path = this.find(kind.command);
     if (!path) throw new Error(`${kind.name} isn't installed on this machine`);
     let root = cwd;
     try { root = realpathSync(cwd); } catch { /* as given */ }
-    const child = this.spawn([path, ...subagentArgs(id, subagentBrief(prompt, cwd), this.choice(id), root)], cwd);
+    const child = this.spawn([path, ...(web ? researchArgs(id, prompt, this.choice(id), root) : subagentArgs(id, subagentBrief(prompt, cwd, id), this.choice(id), root))], cwd);
     const stop = () => child.kill();
     signal.addEventListener("abort", stop, { once: true });
     const stderr = tail(child.stderr);
@@ -482,6 +572,48 @@ export class AgentCli {
       const final = (answer ?? said).trim();
       if (error || !final) throw new Error(`${kind.name} stopped${code ? ` (exit ${code})` : ""}: ${error ?? (await stderr || "no report")}`);
       return final;
+    } finally {
+      signal.removeEventListener("abort", stop);
+      child.kill();
+    }
+  }
+
+  /// One editing run for a hand-off (handoff.ts), in its own worktree: the
+  /// tool's accept-edits mode, as an agent chat runs, carrying on `resume`
+  /// (its own session) when the change is sent back. Returns its report and
+  /// session. Throws when the tool isn't here, fails, or says nothing.
+  async edit(id: AgentId, prompt: string, cwd: string, resume: string | null, signal: AbortSignal, step: (line: string) => void): Promise<{ report: string; session: string | null }> {
+    const kind = AGENT_KINDS.find((item) => item.id === id)!;
+    const path = this.find(kind.command);
+    if (!path) throw new Error(`${kind.name} isn't installed on this machine`);
+    let root = cwd;
+    try { root = realpathSync(cwd); } catch { /* as given */ }
+    // Claude Code takes the session id we give it; Codex and Antigravity name their own.
+    const fresh = !resume && id === "claude" ? randomUUID() : null;
+    let session = resume ?? fresh;
+    const allow = id === "gemini" ? agyAllow(root, this.home) : id === "claude" ? [...HANDOFF_CHECKS] : [];
+    const child = this.spawn([path, ...agentArgs(id, prompt, session ? { id: session, fresh: Boolean(fresh) } : null, this.choice(id), allow)], cwd);
+    const stop = () => child.kill();
+    signal.addEventListener("abort", stop, { once: true });
+    const stderr = tail(child.stderr);
+    let said = "", answer: string | null = null, error: string | null = null;
+    const state: AgyState = { words: {} };
+    try {
+      for await (const line of lines(child.stdout)) {
+        if (signal.aborted) throw signal.reason;
+        for (const item of parseAgentLine(id, line, cwd, state)) {
+          if (item.session) session = item.session;
+          if (item.step) step(item.step);
+          if (item.said) said = item.said;
+          if (item.answer !== undefined) answer = item.answer;
+          if (item.error) error = item.error;
+        }
+      }
+      const code = await child.exited;
+      if (signal.aborted) throw signal.reason;
+      const final = (answer ?? said).trim();
+      if (error || (code !== 0 && !final)) throw new Error(`${kind.name} stopped${code ? ` (exit ${code})` : ""}: ${error ?? (await stderr || "no output")}`);
+      return { report: final || `${kind.name} finished without a message.`, session };
     } finally {
       signal.removeEventListener("abort", stop);
       child.kill();

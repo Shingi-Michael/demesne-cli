@@ -1,18 +1,19 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, screen, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { createHmac, randomBytes } from "node:crypto";
 import { homedir, release } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
-import { isReadyKind } from "./foundry-kinds.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, exportedSource, FOUNDRY_CSP, FOUNDRY_KIT, FOUNDRY_KIT_SCRIPT, foundryKitFile, liquidGlass, macVibrancy, notchInset, type FoundryAssembly, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { startCaptureKeys } from "./capture-keys.ts";
+import { githubToken, installFor, Updater } from "./updater.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
-protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
 const lookJob = lookJobPath(process.argv);
@@ -21,6 +22,12 @@ if (lookJob) runFoundryLook(lookJob);
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");
 if (userData && isAbsolute(userData)) app.setPath("userData", userData);
+/// Stops the capture keys (capture-keys.ts) when the app quits.
+let stopCaptureKeys: (() => void) | undefined;
+/// How long each step of a launch took, from the process starting (ms), for
+/// one line in desktop.log once the window shows: where a slow start went.
+const startup: Array<[string, number]> = [];
+const startupMark = (name: string) => { if (startup.length < 16) startup.push([name, Math.round(performance.now())]); };
 let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
@@ -41,6 +48,7 @@ async function quit() {
   log("exit requested");
   try { unlinkSync(join(homedir(), ".demesne", "desktop.pid")); } catch {}
   updater?.stop();
+  stopCaptureKeys?.();
   await backend?.close();
   exited = true;
   app.quit();
@@ -60,6 +68,7 @@ function launchToFront() {
 }
 
 if (!lookJob) void app.whenReady().then(async () => {
+  startupMark("ready");
   const base = app.getAppPath();
   const resources = app.isPackaged ? process.resourcesPath : join(base, "..");
   const runtime = join(resources, "backend");
@@ -72,7 +81,11 @@ if (!lookJob) void app.whenReady().then(async () => {
     install: installFor(process.platform, process.arch, process.execPath), current: app.getVersion(), release: releaseBuild,
     dir: join(app.getPath("userData"), "updates"), pid: process.pid,
     relaunch: [process.execPath, ...(app.commandLine.hasSwitch("no-sandbox") ? ["--no-sandbox"] : []), ...(userData && isAbsolute(userData) ? [`--user-data-dir=${userData}`] : [])],
-    fetch: (url, init) => net.fetch(url, init), emit: status => emit("demesne:app-update", status), log, quit: () => void quit(),
+    // A request with the GitHub token goes through Node's fetch, which drops
+    // the token when GitHub redirects a download to its signed file link;
+    // Electron's keeps it, and can't follow a redirect by hand.
+    fetch: (url, init) => init?.headers?.Authorization ? fetch(url, init) : net.fetch(url, init), emit: status => emit("demesne:app-update", status), log, quit: () => void quit(),
+    token: () => githubToken(),
   });
   if (updater.status.state === "off") log(`Updates off: ${updater.status.why}.`);
   // A download finished last time: it goes in before the window opens.
@@ -149,6 +162,7 @@ if (!lookJob) void app.whenReady().then(async () => {
   const clear = liquidGlass(process.platform, release(), process.env);
   const liquidAddon = join(base, "liquid-glass.node"), liquidVariant = Number(process.env.DEMESNE_GLASS_VARIANT);
   const liquid = clear && process.env.DEMESNE_GLASS_VARIANT !== undefined && Number.isInteger(liquidVariant) && liquidVariant >= 0 && existsSync(liquidAddon);
+  startupMark("window");
   window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
@@ -181,37 +195,46 @@ if (!lookJob) void app.whenReady().then(async () => {
   // Foundry: an artifact renders in its own frame, served here with a policy
   // that allows only pinned libraries and fonts from a short list of hosts;
   // the frame is sandboxed without the app's origin.
-  // The first show of a version carries ?assemble=1: the page is served with
-  // anime.js (bundled with the app, never fetched) and the assembly script,
-  // and a revision gets the version before it to find what changed. A page
-  // that loads the kit's anime.js moves by itself and is served plain: the
-  // assembly animating the same pieces would cancel the page's own motion
-  // and leave it faded.
-  let assembleLibrary: string | undefined;
+  // The first show of a version carries ?first=1: a revision gets the
+  // version before it, to outline what changed.
   const kitFile = (name: string) => { const file = FOUNDRY_KIT[name]!; return Buffer.concat([readFileSync(join(base, "ui", file.path)), ...(file.then ? [Buffer.from("\n"), readFileSync(join(base, "ui", file.then))] : [])]); };
+  // Pages that remember: each page Demesne shows gets a key made from its id
+  // and a secret that lives only as long as the app, so a page can reach its
+  // own saves and asks and no other artifact's.
+  const pageSecret = randomBytes(32), pageKey = (id: string) => createHmac("sha256", pageSecret).update(id).digest("base64url");
+  const pageCall = async (call: { what: "data" | "ask"; id: string }, request: Request) => {
+    const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+    if (request.method !== "POST") return reply({ error: "Not found" }, 404);
+    let body: Record<string, unknown>;
+    try { const text = await request.text(); if (text.length > 300_000) return reply({ error: "That is too much to save; a page keeps up to 256 KB" }, 413); body = JSON.parse(text); }
+    catch { return reply({ error: "Bad request" }, 400); }
+    if (!body || typeof body !== "object" || body.page !== pageKey(call.id)) return reply({ error: "This page can't reach Demesne" }, 403);
+    try {
+      if (call.what === "ask") return reply(await backend!.request("foundry-ask", { id: call.id, question: String(body.question ?? "") }));
+      if (typeof body.name === "string") return reply(await backend!.request("foundry-data-set", { id: call.id, name: body.name, value: body.value ?? null }));
+      return reply(await backend!.request("foundry-data", { id: call.id }));
+    } catch (error) { return reply({ error: error instanceof Error ? error.message : String(error) }, 400); }
+  };
   await session.protocol.handle("foundry", async request => {
     // The kit: the frames' origins are opaque, so the fonts need the CORS header.
     const kit = foundryKitFile(request.url);
     if (kit) return new Response(kitFile(kit), { headers: { "Content-Type": FOUNDRY_KIT[kit]!.type, "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff", "Cache-Control": "max-age=3600" } });
+    const call = foundryPageCall(request.url);
+    if (call) return pageCall(call, request);
     if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
     try {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
       const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
       const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number };
-      // A new version's first show: the previous version rides along, for the
-      // assembly (a page that doesn't move by itself) and for outlining what changed.
-      const first = url.searchParams.get("assemble") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
+      // A new version's first show: the previous version rides along, for outlining what changed.
+      const first = url.searchParams.get("first") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
       let before: { kind: string; source: string; title: string } | null = null;
       if (first && drawn && found.version > 1) {
         try { before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string; title: string }; } catch {}
       }
-      let assembly: FoundryAssembly | undefined;
-      if (first && !(found.kind === "html" && found.source.includes(FOUNDRY_KIT_SCRIPT)) && !isReadyKind(found.kind)) {
-        assembleLibrary ??= readFileSync(join(base, "ui", "vendor", "anime.umd.min.js"), "utf8");
-        assembly = { library: assembleLibrary, previous: found.kind === "html" && before?.kind === "html" ? before.source : null };
-      }
-      let page = foundryDocument(found.kind, found.source, found.title, assembly);
+      let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
+      if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });
@@ -269,14 +292,26 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
-    if (method === "desktop-ready") { window?.show(); window?.focus(); launchToFront(); if (updater && !readied) { readied = true; updater.started(); updater.schedule(); } return null; }
+    if (method === "desktop-ready") {
+      window?.show(); window?.focus(); launchToFront();
+      if (startup.length && !readied) {
+        startupMark("shown");
+        // The page's own steps, on its clock (from when it began loading).
+        const marks = (args as { marks?: unknown }).marks, page = marks && typeof marks === "object" ? Object.entries(marks).filter(([name, at]) => /^[a-z-]{1,24}$/.test(name) && typeof at === "number" && Number.isFinite(at)).slice(0, 12) : [];
+        log(`Startup: ${startup.map(([name, at]) => `${name} ${at}ms`).join(" · ")}${page.length ? ` (page: ${page.map(([name, at]) => `${name} ${Math.round(at as number)}ms`).join(" · ")})` : ""}`);
+      }
+      if (updater && !readied) { readied = true; updater.started(); updater.schedule(); }
+      // The capture keys start once the page can take a screenshot card.
+      stopCaptureKeys ??= startCaptureKeys({ window: () => window, emit: value => emit("demesne:desktop-action", value), log, cacheDir: join(app.getPath("userData"), "screen") });
+      return null;
+    }
     // The release line and Settings: where an update stands, Restart, and the switch.
     if (method === "desktop-update") {
       const action = (args as Record<string, unknown>).action;
       if (!updater) return { state: "off", why: "starting" };
       if (action === "restart") return updater.restart();
       if (action === "on" || action === "off") return updater.setEnabled(action === "on");
-      if (action === "check") return updater.check();
+      if (action === "check") return updater.check(true);
       return updater.status;
     }
     if (method === "quit" || method === "desktop-quit") { void quit(); return null; }
@@ -376,26 +411,6 @@ if (!lookJob) void app.whenReady().then(async () => {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { ...args as Record<string, unknown>, path: selected.filePaths[0] });
     }
-    // Foundry › Export: the artifact's source, saved where you choose. A
-    // page leaves with the kit inlined; a deck, doc or dashboard leaves as
-    // the drawn page, or as a PDF when that's the file type picked.
-    if (method === "desktop-foundry-export") {
-      const { id, version } = args as Record<string, unknown>;
-      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" ? { version } : {}) }) as { kind: string; source: string; title: string; version: number };
-      const ready = isReadyKind(found.kind);
-      const extension = ready ? "html" : ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
-      const name = `${found.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim().slice(0, 80) || "artifact"}`;
-      const selected = await dialog.showSaveDialog(window!, { title: "Export from Foundry", defaultPath: join(app.getPath("downloads"), `${name}.${ready && found.kind === "deck" ? "pdf" : extension}`),
-        ...(ready ? { filters: found.kind === "deck" ? [{ name: "PDF", extensions: ["pdf"] }, { name: "Web page", extensions: ["html"] }] : [{ name: "Web page", extensions: ["html"] }, { name: "PDF", extensions: ["pdf"] }] } : {}) });
-      if (selected.canceled || !selected.filePath) return null;
-      if (ready && /\.pdf$/i.test(selected.filePath)) {
-        await writeFile(selected.filePath, await foundryPDF(session, String(id), found.version, found.kind));
-        return { path: selected.filePath };
-      }
-      const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") } };
-      await writeFile(selected.filePath, found.kind === "html" ? exportedSource(found.source, kit) : ready ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit) : found.source, "utf8");
-      return { path: selected.filePath };
-    }
     // Today › Save video: the Friday reel's clip, saved where you choose.
     if (method === "desktop-save-reel") {
       const { id, week } = args as Record<string, unknown>;
@@ -405,6 +420,12 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (selected.canceled || !selected.filePath) return null;
       await writeFile(selected.filePath, Buffer.from(url.slice(url.indexOf(",") + 1), "base64"));
       return { path: selected.filePath };
+    }
+    // A file or folder to keep with a chat (Sources, pass 204). Only the Mac
+    // picks either in one dialog; elsewhere it's a file (folders drop in).
+    if (method === "desktop-pick-source") {
+      const selected = await dialog.showOpenDialog(window!, { title: "Keep a file or folder with this chat", buttonLabel: "Keep", properties: process.platform === "darwin" ? ["openFile", "openDirectory"] : ["openFile"] });
+      return selected.canceled ? null : selected.filePaths[0] ?? null;
     }
     // A folder for a chat to move into: the path, or null when cancelled.
     if (method === "desktop-pick-folder") {
@@ -451,6 +472,7 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (process.platform === "darwin") window?.hide(); else void quit();
   });
   await window.loadURL(APP_URL);
+  startupMark("page");
   if (liquid) {
     try {
       const addon = { exports: {} as { LiquidGlassNative: new () => { addView(handle: Buffer, options: object): number; setVariant(id: number, variant: number): void } } };
@@ -472,17 +494,3 @@ if (!lookJob) void app.whenReady().then(async () => {
   window.show();
 }).catch(error => { log(String(error)); dialog.showErrorBox("Demesne could not start", String(error)); void quit(); });
 
-/// A deck, doc or dashboard as a PDF: drawn off screen in the window's own
-/// session (so foundry:// and the kit load as in the pane), then printed. A
-/// deck prints a slide a page at 16:9 (kinds.css @page); the others on A4.
-async function foundryPDF(session: Electron.Session, id: string, version: number, kind: string) {
-  const win = new BrowserWindow({ show: false, width: 1280, height: 800, webPreferences: { session, sandbox: true, contextIsolation: true, nodeIntegration: false } });
-  try {
-    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    win.webContents.on("will-navigate", (event) => event.preventDefault());
-    await win.loadURL(`foundry://artifact/${encodeURIComponent(id)}?v=${version}`);
-    await Promise.race([win.webContents.executeJavaScript("document.fonts.ready.then(() => true)"), new Promise((done) => setTimeout(done, 3000))]);
-    await new Promise((done) => setTimeout(done, 300));
-    return await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: kind === "deck", ...(kind === "deck" ? {} : { pageSize: "A4" as const, margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } }) });
-  } finally { win.destroy(); }
-}

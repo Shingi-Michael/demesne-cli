@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installFor, newerVersion, parseChecksum, pickRelease, swapScript, Updater, UPDATE_REPO, type UpdateStatus } from "../electron/updater.ts";
-import { releaseLine } from "../workspace/release-line.ts";
+import { checkProblem, ghCandidates, githubToken, installFor, newerVersion, parseChecksum, pickRelease, swapScript, Updater, UPDATE_REPO, type UpdateStatus } from "../electron/updater.ts";
+import { checkResult, releaseLine, updateCheckLine } from "../workspace/release-line.ts";
 
 const temp = () => mkdtempSync(join(tmpdir(), "demesne-update-"));
 
@@ -65,7 +65,7 @@ function fakeGitHub(bytes: Uint8Array, sum = createHash("sha256").update(bytes).
   return { fetch, calls };
 }
 
-function updater(dir: string, fetch: (url: string) => Promise<Response>, extra: Partial<ConstructorParameters<typeof Updater>[0]> = {}) {
+function updater(dir: string, fetch: (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>, extra: Partial<ConstructorParameters<typeof Updater>[0]> = {}) {
   const seen: UpdateStatus[] = [], spawned: string[][] = [];
   let quits = 0;
   const root = join(dir, "install", "demesne");
@@ -111,6 +111,36 @@ test("a source build, or updates switched off, never looks", async () => {
   expect(github.calls.filter((url) => url.endsWith("/latest"))).toEqual([]);
 });
 
+test("a check you ask for runs even with updates off, says it's looking, and keeps why it failed", async () => {
+  const dir = temp(), github = fakeGitHub(new Uint8Array([1]));
+  const { it, seen } = updater(dir, async () => { throw new TypeError("fetch failed"); });
+  expect(await it.check(true)).toMatchObject({ state: "idle", problem: "Couldn't reach GitHub" });
+  expect(seen[0]).toMatchObject({ state: "idle", checking: true });
+  const off = updater(temp(), github.fetch);
+  off.it.setEnabled(false);
+  await off.it.check(true);
+  expect(github.calls.filter((url) => url.endsWith("/latest")).length).toBe(1);
+  expect(checkProblem(new Error("GitHub answered 404 (the repository is private and there is no GitHub login; run `gh auth login`)"))).toBe("GitHub needs a login: run gh auth login");
+  expect(checkProblem(new Error("GitHub answered 503"))).toBe("GitHub answered 503");
+  expect(checkProblem(new Error("the download didn't match its checksum"))).toBe("The download didn't match its checksum");
+});
+
+test("the release line checks when clicked, and says what it found", () => {
+  const idle = { state: "idle" as const, version: "0.8.8", enabled: true };
+  expect(releaseLine(idle).html).toContain("data-update-check");
+  expect(releaseLine({ ...idle, checking: true })).toMatchObject({ state: "checking" });
+  expect(releaseLine({ ...idle, checking: true }).html).toContain("Checking for updates…");
+  expect(checkResult({ ...idle, checking: true })).toBeNull();
+  expect(checkResult(idle)).toEqual({ text: "Up to date · 0.8.8", ok: true });
+  expect(checkResult({ ...idle, problem: "Couldn't reach GitHub" })).toEqual({ text: "Couldn't reach GitHub", ok: false });
+  expect(releaseLine(idle, { text: "Up to date · 0.8.8", ok: true }).html).toContain("Up to date · 0.8.8");
+  expect(releaseLine({ state: "off", why: "built from source" }).html).not.toContain("button");
+  // Settings: the version, when it last looked, and Check now.
+  expect(updateCheckLine({ ...idle, checked: 1_000 }, 1_000 + 12 * 60_000)).toEqual({ title: "Demesne 0.8.8", line: "Checked 12 min ago · this is the newest", tone: "", can: true });
+  expect(updateCheckLine({ ...idle, problem: "Couldn't reach GitHub" })).toMatchObject({ tone: "bad", can: true });
+  expect(updateCheckLine({ state: "downloading", version: "0.8.8", to: "0.8.9", progress: 0.2 })).toMatchObject({ can: false });
+});
+
 test("a finished download goes in the next time it opens, unless that version failed", async () => {
   const dir = temp(), github = fakeGitHub(await portableTarball(dir, "new"));
   await updater(dir, github.fetch).it.check();
@@ -124,7 +154,7 @@ test("a finished download goes in the next time it opens, unless that version fa
   expect(third.it.status).toMatchObject({ state: "failed", to: "0.4.52" });
 });
 
-test("the swap script moves the new app in, and puts the old one back if it never starts", async () => {
+test("the swap script moves the new app in, deletes the old one once it starts, and puts it back if it never does", async () => {
   for (const starts of [true, false]) {
     const dir = temp(), root = join(dir, "demesne"), staged = join(dir, "staged");
     mkdirSync(root); writeFileSync(join(root, "which"), "old");
@@ -140,7 +170,7 @@ test("the swap script moves the new app in, and puts the old one back if it neve
     expect(run.exitCode).toBe(0);
     expect(readFileSync(join(root, "which"), "utf8")).toBe(starts ? "new" : "old");
     expect(existsSync(failed)).toBe(!starts);
-    if (starts) expect(readFileSync(join(`${root}.prev`, "which"), "utf8")).toBe("old");
+    expect(existsSync(`${root}.prev`)).toBe(false);
   }
 });
 
@@ -149,4 +179,44 @@ test("the release line shows the name, the download, then Restart", () => {
   expect(releaseLine({ state: "downloading", version: "0.4.51", to: "0.4.52", progress: 0.45 }).html).toContain('width:45%');
   expect(releaseLine({ state: "ready", version: "0.4.51", to: "0.4.52" }).html).toContain("data-update-restart");
   expect(releaseLine({ state: "ready", version: "0.4.51", to: "0.4.52", waiting: true }).html).toContain("restarts when this finishes");
+});
+
+/// A private repository: the API answers only with a token, and files come
+/// through their API links, never the public download links.
+function privateGitHub(bytes: Uint8Array) {
+  const tag = "v0.4.52", api = `https://api.github.com/repos/${UPDATE_REPO}/releases/assets/`;
+  const names = ["demesne-linux-x64.tar.gz", "demesne-linux-x64.tar.gz.sha256"];
+  const body = { ...release(tag, names), assets: release(tag, names).assets.map((asset, i) => ({ ...asset, url: `${api}${100 + i}` })) };
+  const calls: { url: string; auth?: string; accept?: string }[] = [];
+  const fetch = async (url: string, init?: { headers?: Record<string, string> }) => {
+    const auth = init?.headers?.Authorization, accept = init?.headers?.Accept;
+    calls.push({ url, auth, accept });
+    if (auth !== "Bearer secret") return new Response("Not Found", { status: 404 });
+    if (url.endsWith("/releases/latest")) return Response.json(body);
+    if (url === `${api}101` && accept === "application/octet-stream") return new Response(`${createHash("sha256").update(bytes).digest("hex")}  demesne-linux-x64.tar.gz\n`);
+    if (url === `${api}100` && accept === "application/octet-stream") return new Response(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+    return new Response("Not Found", { status: 404 });
+  };
+  return { fetch, calls };
+}
+
+test("a private repository updates with the computer's GitHub login", async () => {
+  const dir = temp(), github = privateGitHub(await portableTarball(dir, "new"));
+  const logs: string[] = [];
+  const without = updater(dir, github.fetch, { log: (line) => logs.push(line), token: async () => null });
+  expect(await without.it.check()).toMatchObject({ state: "idle" });
+  expect(logs.join("\n")).toContain("gh auth login");
+  const { it } = updater(dir, github.fetch, { token: async () => " secret\n" });
+  expect(await it.check()).toMatchObject({ state: "ready", to: "0.4.52" });
+  expect(github.calls.filter((call) => call.auth).every((call) => call.url.startsWith("https://api.github.com/"))).toBe(true);
+});
+
+test("the token comes from the environment, else from gh", async () => {
+  expect(await githubToken({ GH_TOKEN: " a " }, () => false)).toBe("a");
+  expect(await githubToken({ GITHUB_TOKEN: "b" }, () => false)).toBe("b");
+  expect(await githubToken({ PATH: "/nowhere" }, () => false)).toBeNull();
+  const dir = temp(), gh = join(dir, "gh");
+  writeFileSync(gh, `#!/bin/sh\n[ "$1 $2" = "auth token" ] && echo from-gh\n`, { mode: 0o755 });
+  expect(await githubToken({ PATH: dir }, (path) => path === gh)).toBe("from-gh");
+  expect(ghCandidates({ PATH: "" }, "darwin")).toContain("/opt/homebrew/bin/gh");
 });

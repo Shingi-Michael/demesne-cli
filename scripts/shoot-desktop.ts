@@ -127,8 +127,9 @@ if (!readme) {
   await shot("02-turn");
   await page.locator("#sidebar-sessions .sidebar-item").first().hover(); await page.waitForTimeout(300);
   await shot("02-sidebar-delete");
-  // Drive's line at the sidebar's foot, each part opened; then the
+  // Drive's pill on the top bar and its sheet, each part opened; then the
   // sidebar folded to its rail, and the project switcher.
+  if (await page.locator("#drive-pill").isVisible()) { await page.locator("#drive-pill").click(); await page.waitForTimeout(400); await shot("02-drive"); }
   await toggle('#briefing [data-action="review-open"]:visible', "02-review-open");
   await toggle('#briefing [data-action="ideas-show"]:visible', "02-ideas");
   await toggle('.turn-receipt button[data-action="toggle-steps"]', "02-steps");

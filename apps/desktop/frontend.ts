@@ -1,6 +1,7 @@
 import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
+performance.mark("demesne-script");
 import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
-import { releaseLine, type AppUpdate } from "./workspace/release-line.ts";
+import { checkResult, releaseLine, type AppUpdate } from "./workspace/release-line.ts";
 
 interface DesktopBootstrap {
   workspace: string | null;
@@ -99,6 +100,7 @@ function renderProjects() {
 }
 async function applyBootstrap(result: DesktopBootstrap) {
   if (fatal) return;
+  if (!mounted) performance.mark("demesne-host");
   document.body.dataset.user = result.userName ?? "";
   const previous = workspace;
   workspace = result.workspace;
@@ -118,6 +120,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
   if (!mounted) {
     mounted = true;
     await import("./workspace/live.ts");
+    performance.mark("demesne-ui");
   }
   setBusy(false, "");
 }
@@ -171,7 +174,7 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab" | "notify-answer"; sessionId?: string; path?: string; on?: boolean; top?: number; dark?: boolean; key?: string; index?: number; text?: string }>("demesne:desktop-action", (event) => {
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab" | "notify-answer" | "window-shot"; sessionId?: string; path?: string; on?: boolean; top?: number; dark?: boolean; key?: string; index?: number; text?: string }>("demesne:desktop-action", (event) => {
         if(event.payload.action==="appearance")void updateAppearance(event.payload.dark===true).catch(showActionError);
         else if (event.payload.action === "fullscreen") {
           document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
@@ -184,6 +187,8 @@ async function start() {
           document.dispatchEvent(new CustomEvent("demesne:open-chat", { detail: { sessionId: event.payload.sessionId, path: event.payload.path } }));
         else if (event.payload.action === "notify-answer" && mounted && !fatal)
           document.dispatchEvent(new CustomEvent("demesne:notify-answer", { detail: { key: event.payload.key, index: event.payload.index, text: event.payload.text } }));
+        else if (event.payload.action === "window-shot" && mounted && !fatal)
+          document.dispatchEvent(new CustomEvent("demesne:window-shot", { detail: event.payload }));
         else if (event.payload.action === "close-tab" && mounted && !fatal)
           document.dispatchEvent(new Event("demesne:close-tab"));
         else if (event.payload.action === "settings" && mounted && !fatal && !busy)
@@ -198,18 +203,38 @@ async function start() {
     await applyBootstrap(await request<DesktopBootstrap>("desktop-bootstrap"));
   } catch (error) { showError(error); }
 }
-/// The release line says where an update stands (pass 153 A), and Settings hears it too.
+/// The release line says where an update stands (pass 153 A), and Settings
+/// hears it too. Clicking it checks now (pass 193 A); what an asked-for
+/// check found stays on the line for a few seconds.
 const releaseEl = document.querySelector<HTMLElement>(".sidebar-release");
+let lastUpdate: AppUpdate | null = null, updateAsked = false, updateSaid: ReturnType<typeof checkResult> = null;
+let saidTimer: ReturnType<typeof setTimeout> | undefined;
 function showAppUpdate(update: AppUpdate) {
+  lastUpdate = update;
+  if (updateAsked && update.state !== "off" && !(update.state === "idle" && update.checking)) {
+    updateAsked = false;
+    updateSaid = checkResult(update);
+    clearTimeout(saidTimer);
+    if (updateSaid) saidTimer = setTimeout(() => { updateSaid = null; if (lastUpdate) showAppUpdate(lastUpdate); }, updateSaid.ok ? 3200 : 5000);
+  }
+  if (update.state !== "idle") updateSaid = null;
   document.dispatchEvent(new CustomEvent("demesne:app-update", { detail: update }));
   if (!releaseEl) return;
-  const line = releaseLine(update);
+  const line = releaseLine(update, updateSaid);
   if (releaseEl.dataset.html !== line.html) { releaseEl.innerHTML = line.html; releaseEl.dataset.html = line.html; }
   releaseEl.title = line.title;
   releaseEl.dataset.state = line.state;
 }
+/// Check for an update now, from the release line or Settings.
+function checkForUpdate() {
+  updateAsked = true; updateSaid = null; clearTimeout(saidTimer);
+  void request<AppUpdate>("desktop-update", { action: "check" }).then(showAppUpdate, (error) => { updateAsked = false; showActionError(error); });
+}
+document.addEventListener("demesne:check-update", checkForUpdate);
 releaseEl?.addEventListener("click", (event) => {
-  if (!(event.target as HTMLElement).closest("[data-update-restart]")) return;
+  const target = event.target as HTMLElement;
+  if (target.closest("[data-update-check]")) { checkForUpdate(); return; }
+  if (!target.closest("[data-update-restart]")) return;
   void request<AppUpdate>("desktop-update", { action: "restart" }).then(showAppUpdate, showActionError);
 });
 setBusy(true);

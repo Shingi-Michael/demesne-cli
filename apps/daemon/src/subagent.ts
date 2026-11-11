@@ -12,7 +12,7 @@ export const SUBAGENT_TOOL = "subagent";
 /// What a sub-agent may use: reading and searching only. It cannot edit, run
 /// commands, ask the person, or start sub-agents of its own, so it never needs
 /// an approval and several can run at once.
-export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history"]);
+export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history", "web_search", "web_fetch"]);
 
 export const SUBAGENT_LIMITS = { rounds: 16, toolCalls: 48, toolResultBytes: 32 * 1024, reportBytes: 16 * 1024 } as const;
 
@@ -30,6 +30,8 @@ export const subagentDefinition: ProviderToolDefinition = {
     properties: {
       description: { type: "string", minLength: 1, maxLength: 80, description: "A 3–6 word label for the user, e.g. \"Find session restore code\"." },
       prompt: { type: "string", minLength: 1, maxLength: 16_000, description: "The complete task: what to find out, where to look, and what the report must contain." },
+      background: { type: "boolean", description: "Start it and return at once, so you keep working while it looks. Its report arrives with a later tool result; use agents to wait for it, ask it a follow-up or stop it. Any still working when you write your answer are stopped." },
+      kind: { type: "string", enum: ["find", "trace", "review", "read"], description: "What kind of job this is: find (where something lives), trace (follow a flow across files), review (judge changes or a diff), read (take in a lot of files at once). Picks which of the user's agent tools runs it." },
     },
   },
 };
@@ -47,14 +49,19 @@ export function subagentDefinitionFor(models: readonly SubagentModel[], defaultM
       description: `Optional: the model this sub-agent runs on. When the user names a model or provider for sub-agents, pass the matching id; otherwise omit it to use the default, ${defaultModel}. Available: ${models.map((model) => `${model.id} (${model.provider})`).join(", ")}.` } } } };
 }
 
-export function parseSubagentInput(input: unknown): { description: string; prompt: string; model?: string } {
+export const SUBAGENT_KINDS = ["find", "trace", "review", "read"] as const;
+export type SubagentKind = typeof SUBAGENT_KINDS[number];
+
+export function parseSubagentInput(input: unknown): { description: string; prompt: string; model?: string; kind?: SubagentKind } {
   if (!isRecord(input) || typeof input.description !== "string" || typeof input.prompt !== "string")
     throw new Error("subagent needs a description and a prompt");
   const description = input.description.trim(), prompt = input.prompt.trim();
   if (!description || description.length > 80) throw new Error("description must be 1–80 characters");
   if (!prompt || prompt.length > 16_000) throw new Error("prompt must be 1–16,000 characters");
   if (input.model !== undefined && (typeof input.model !== "string" || !input.model.trim() || input.model.length > 200)) throw new Error("model must be a configured model id");
-  return { description, prompt, ...(typeof input.model === "string" ? { model: input.model.trim() } : {}) };
+  // A kind the tool doesn't know is ignored: the label and brief decide then.
+  const kind = SUBAGENT_KINDS.find((known) => known === input.kind);
+  return { description, prompt, ...(typeof input.model === "string" ? { model: input.model.trim() } : {}), ...(kind ? { kind } : {}) };
 }
 
 const instructions = (workspaceRoot: string) => `You are a Demesne sub-agent: a focused, read-only researcher working for the main coding agent in ${workspaceRoot}.
@@ -80,6 +87,10 @@ export async function runSubagent(options: {
   limits?: ProviderStreamLimits;
   /// Stable for this run, so its rounds can reuse the provider's prompt cache.
   cacheKey?: string;
+  /// In place of the coding researcher's instructions (research.ts).
+  system?: string;
+  /// Which read-only tools it may use; default all of SUBAGENT_TOOLS. Empty: it only answers.
+  toolNames?: ReadonlySet<string>;
 }): Promise<string> {
   try {
     return await runSubagentInference(options);
@@ -90,9 +101,10 @@ export async function runSubagent(options: {
 
 async function runSubagentInference(options: Parameters<typeof runSubagent>[0]): Promise<string> {
   const { inference, signal } = options;
-  const definitions = options.tools.definitions().filter((definition) => SUBAGENT_TOOLS.has(definition.name));
+  const allowed = options.toolNames ?? SUBAGENT_TOOLS;
+  const definitions = options.tools.definitions().filter((definition) => SUBAGENT_TOOLS.has(definition.name) && allowed.has(definition.name));
   const streamLimits = providerStreamLimits(inference.maxOutputTokens, options.limits);
-  const messages: ProviderMessage[] = [{ role: "system", content: instructions(options.workspaceRoot) }, { role: "user", content: options.prompt }];
+  const messages: ProviderMessage[] = [{ role: "system", content: options.system ?? instructions(options.workspaceRoot) }, { role: "user", content: options.prompt }];
   const used = new Map<string, number>();
   let toolCalls = 0, reasoning = 0;
   for (let round = 0; round <= SUBAGENT_LIMITS.rounds; round++) {
@@ -185,8 +197,9 @@ export async function runReadOnlyTool(call: ProviderToolCall, options: { workspa
 /// `read src/app.ts`, `search "restoreSession"`: what the card shows live.
 export function describeCall(name: string, input: unknown): string {
   const record = isRecord(input) ? input : {};
-  const verb = name === "search_files" ? "search" : name.startsWith("read_") ? "read" : name === "list_files" ? "list" : name.replace("_", " ");
+  const verb = name === "search_files" || name === "web_search" ? "search" : name.startsWith("read_") ? "read" : name === "list_files" ? "list" : name.replace("_", " ");
   const target = typeof record.path === "string" ? record.path
+    : typeof record.url === "string" ? record.url
     : typeof record.query === "string" ? `"${record.query}"`
     : typeof record.pattern === "string" ? `"${record.pattern}"`
     : Array.isArray(record.files) ? `${record.files.length} files` : "";

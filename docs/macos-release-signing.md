@@ -9,7 +9,7 @@ Existing releases must not be described as Developer ID signed or notarized.
 
 The current path is:
 
-- `.github/workflows/release.yml` builds on `macos-14` with `bun run build:desktop`.
+- `.github/workflows/release.yml` builds on `macos-15` with `bun run build:desktop`.
 - `scripts/build-desktop.ts` prepares the app, then invokes Electron Builder with
   `apps/desktop/electron-builder.json` and `--publish never`.
 - That configuration sets `mac.identity` to `null`, explicitly disabling signing.

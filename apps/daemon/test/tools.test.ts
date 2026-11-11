@@ -318,6 +318,28 @@ describe("built-in tools", () => {
     expect(filtered.matches).toEqual(["src/a.ts:1:const needle = 1;"]);
   });
 
+  test("search_files takes a regular expression, matches case, and shows lines around a match", async () => {
+    const root = workspace();
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "a.ts"), "one\ntwo\nfunction readTool() {}\nthree\nfour\nfive\nsix\nfunction ReadTool() {}\nseven\n");
+    const tools = new ToolRegistry();
+    const context = { workspaceRoot: root, signal: new AbortController().signal };
+    const search = async (input: Record<string, unknown>) => JSON.parse(await tools.get("search_files")!.execute(input, context)).matches;
+
+    expect(await search({ query: "function \\w+Tool\\(", regex: true })).toEqual(["src/a.ts:3:function readTool() {}", "src/a.ts:8:function ReadTool() {}"]);
+    expect(await search({ query: "readtool", caseSensitive: true })).toEqual([]);
+    expect(await search({ query: "ReadTool", caseSensitive: true })).toEqual(["src/a.ts:8:function ReadTool() {}"]);
+    expect(await search({ query: "ReadTool", context: 1 })).toEqual([
+      "src/a.ts-2-two\nsrc/a.ts:3:function readTool() {}\nsrc/a.ts-4-three",
+      "src/a.ts-7-six\nsrc/a.ts:8:function ReadTool() {}\nsrc/a.ts-9-seven",
+    ]);
+    // Overlapping stretches are one block.
+    expect(await search({ query: "ReadTool", context: 3 })).toHaveLength(1);
+    // A lookahead (not ripgrep's syntax) still works, through the plain walk.
+    expect(await search({ query: "function (?=Read)", regex: true, caseSensitive: true })).toEqual(["src/a.ts:8:function ReadTool() {}"]);
+    await expect(search({ query: "([", regex: true })).rejects.toThrow("BAD_REGEX");
+  });
+
   test("list and search defaults are bounded but accept explicit limits", async () => {
     const root = workspace();
     for (let index = 1; index <= 220; index += 1) {

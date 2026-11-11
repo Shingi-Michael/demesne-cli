@@ -1,13 +1,14 @@
 /// Auto for sub-agents: which of your agent tools (Claude Code, Codex,
 /// Gemini) runs a sub-agent, picked by the kind of job and by how each tool
 /// has done on that kind of job on this machine. Nothing here calls a model.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, type Dirent } from "node:fs";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import type { AgentId } from "./agent-cli.ts";
 
-export type JobKind = "find" | "trace" | "review" | "read";
+/// "fix" is a hand-off (handoff.ts): the agent makes a change in its own copy.
+export type JobKind = "find" | "trace" | "review" | "read" | "fix" | "research";
 
-export const JOB_WORDS: Record<JobKind, string> = { find: "finding code", trace: "tracing a flow across files", review: "reviewing changes", read: "reading a lot at once" };
+export const JOB_WORDS: Record<JobKind, string> = { find: "finding code", trace: "tracing a flow across files", review: "reviewing changes", read: "reading a lot at once", fix: "making a change", research: "researching on the web" };
 const NAMES: Record<AgentId, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
 
 /// Who to try first for each kind before there's any history: Claude Code
@@ -18,6 +19,8 @@ const FIRST: Record<JobKind, AgentId[]> = {
   trace: ["codex", "claude", "gemini"],
   review: ["claude", "codex", "gemini"],
   read: ["gemini", "claude", "codex"],
+  fix: ["claude", "codex", "gemini"],
+  research: ["claude", "codex", "gemini"],
 };
 
 /// The kind of job, from its label and brief.
@@ -29,7 +32,8 @@ export function jobKind(description: string, prompt: string): JobKind {
   return "find";
 }
 
-/// Each tool's finished and failed sub-agents by kind, and when a tool that
+/// Each tool's good and failed sub-agents by kind (good: the report points at
+/// real files, see grounded), and when a tool that
 /// ran out of room may be tried again.
 export interface RouteRecord { jobs: Partial<Record<AgentId, Partial<Record<JobKind, { ok: number; failed: number }>>>>; restUntil: Partial<Record<AgentId, number>> }
 
@@ -56,7 +60,7 @@ export function pickAgent(kind: JobKind, available: readonly AgentId[], record: 
   });
   const agent = ranked[0]!, { ok, failed } = tally(agent);
   const why = ok + failed >= ENOUGH
-    ? `${NAMES[agent]}: ${JOB_WORDS[kind]}, ${ok} of ${ok + failed} finished on this machine`
+    ? `${NAMES[agent]}: ${JOB_WORDS[kind]}, ${ok} of ${ok + failed} good reports on this machine`
     : `${NAMES[agent]}: ${JOB_WORDS[kind]} suits it${ok + failed ? ` (${ok} of ${ok + failed} so far)` : ""}`;
   return { agent, why };
 }
@@ -85,3 +89,38 @@ export class RouteBook {
     } catch { /* the pick still works without it */ }
   }
 }
+
+/// Whether a report is grounded: it names at least one file that really is
+/// in the project ("apps/x.ts", "x.ts:12", an absolute path inside it). A
+/// report that names none is how a sub-agent says it didn't find anything,
+/// or made it up, so it counts against the tool.
+export function grounded(report: string, root: string): boolean {
+  const candidates = report.match(/\/?(?:[\w.@~-]+\/)*[\w.@-]+\.[A-Za-z][\w]{0,9}(?=[:#)\]`'",\s]|$)/g) ?? [];
+  for (const candidate of new Set(candidates)) {
+    if (!candidate.includes(".") || /^\d/.test(candidate)) continue;
+    const path = isAbsolute(candidate) ? candidate : join(root, candidate);
+    const inside = relative(root, path);
+    if (inside.startsWith("..") || isAbsolute(inside)) continue;
+    try { if (statSync(path).isFile()) return true; } catch { /* not here */ }
+    // A bare name ("live.ts") is good when it is unique enough to find.
+    if (!candidate.includes("/") && findByName(root, candidate)) return true;
+  }
+  return false;
+}
+
+/// A file of that name anywhere in the project, a bounded walk that skips
+/// dependency and build folders.
+function findByName(root: string, name: string, budget = { left: 4000 }): boolean {
+  const walk = (folder: string): boolean => {
+    let entries: Dirent[];
+    try { entries = readdirSync(folder, { withFileTypes: true }); } catch { return false; }
+    for (const entry of entries) {
+      if (--budget.left < 0) return false;
+      if (entry.isFile() && entry.name === name) return true;
+      if (entry.isDirectory() && !SKIP.has(entry.name) && !entry.name.startsWith(".") && walk(join(folder, entry.name))) return true;
+    }
+    return false;
+  };
+  return walk(root);
+}
+const SKIP = new Set(["node_modules", "dist", "build", "release", "target", "out", "coverage"]);

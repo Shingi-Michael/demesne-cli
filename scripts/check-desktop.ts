@@ -360,7 +360,9 @@ async function type(text: string) {
   await page.locator("textarea").fill(text); await page.locator("textarea").press("Enter");
 }
 async function textIncludes(text: string) {
-  return until(() => page.locator("body").innerText().then(body => body.includes(text)), `visible text ${text}`);
+  // A turn scrolled out of view isn't drawn (content-visibility), so its
+  // words count from the conversation's text.
+  return until(() => page.evaluate(text => document.body.innerText.includes(text) || Boolean(document.getElementById("conversation")?.textContent?.includes(text)), text), `visible text ${text}`);
 }
 async function capture(name: string) {
   const bytes = await page.screenshot({ animations: "disabled" }), metadata = await sharp(bytes).metadata(), statistics = await sharp(bytes).stats();
@@ -488,7 +490,7 @@ try {
   await click("toggle-steps");
   assert.equal(await page.locator("#conversation .thinking").count(), 0, "opened steps show no thinking either");
   await click("toggle-steps");
-  // A project chat that uses no other card has only Where on the right (pass 121 E).
+  // A project chat that uses no other card has only the environment card on the right (pass 173 A).
   assert.deepEqual(await evaluate<string[]>("return [...document.querySelectorAll('#cards > .card')].map(card => card.dataset.card);"), ["where"], "a chat that uses no card has only Where on the right");
   // Native notifications: record them in the main process, and look away from the window.
   // The Dock's working bar: record what the window sets.
@@ -550,7 +552,8 @@ try {
   assert.equal(completedSession.turns.at(-1)?.status, "completed");
   const commands = await f.client.commands(sessionId);
   assert(commands.commands.some(command => command.status === "completed" && command.exitCode === 0 && command.stdout.includes("DESKTOP_CHECK_PASSED")), "Approved command output was recorded");
-  assert(await evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
+  // Math renders once KaTeX has loaded, which can land after the words.
+  await until(() => evaluate<boolean>("return !!document.querySelector('.katex') && !!document.querySelector('pre code');"), "Markdown, code and math rendered in Chromium");
   const turnId = completedSession.turns.at(-1)!.id;
   // The edge is a timeline: a long chat shows its shape on the panel's right edge.
   // Padding grows the conversation without changing its content box, so a scroll tells the edge.
@@ -918,7 +921,7 @@ try {
   await page.locator("#settings-nav .st-nav.on").filter({ hasText: "Overview" }).waitFor();
   assert(await page.locator("#sidebar-projects").isHidden(), "the sidebar holds Settings' list instead of the chats");
   assert.equal(await page.locator("#workspace-title").innerText(), "Settings", "the title bar says Settings");
-  assert.equal(await page.locator("#settings-nav .st-nav").count(), 9, "nine sections");
+  assert.equal(await page.locator("#settings-nav .st-nav").count(), 14, "fourteen sections in four categories");
   await page.locator("#page .ov-say").filter({ hasText: "Answers come from" }).waitFor();
   assert.equal(await page.locator("#page .ov-tile").count(), 6, "six tiles");
   await capture("02-settings-overview");
@@ -932,10 +935,12 @@ try {
   await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "last"), "Open on remembers Last chat");
   await page.locator("#page .st-row").filter({ hasText: "Open on" }).getByRole("button", { name: "Home" }).click();
   await until(() => page.evaluate("localStorage.getItem('demesne-open-on')").then(value => value === "home"), "Open on goes back to Home");
-  // Notifications live on General now (pass 154 B); every control ends on one edge.
+  // Notifications have their own page again (pass 207), with a banner; every control ends on one edge.
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Notifications" }).click();
   await page.getByRole("switch", { name: "A chat finishes" }).waitFor();
+  await page.locator("#page .nt-banner").waitFor();
   const edges = await page.locator("#page .st-group .st-ctl").evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().right)));
-  assert(new Set(edges).size === 1, `every control on General ends on one edge: ${[...new Set(edges)].join(", ")}`);
+  assert(new Set(edges).size === 1, `every control on Notifications ends on one edge: ${[...new Set(edges)].join(", ")}`);
   assert(await page.locator("#status").isHidden(), "the chat's status bar stays off Settings");
   // Every kind starts on (#302), so the first click turns this one off.
   await page.getByRole("switch", { name: "A chat finishes" }).click();
@@ -1015,12 +1020,12 @@ try {
   const rowHeights = await page.locator("#page .pm-rule").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
   assert(rowHeights.every((height) => height <= 33), "each unfolded rule is one line, the full text on hover");
   await capture("02-permissions-rules");
-  await page.locator("#settings-nav .st-nav").filter({ hasText: "Overview" }).click();
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Usage" }).click();
   await page.locator("#page .st-head").filter({ hasText: "Turns by model" }).waitFor();
   await capture("02-usage");
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Keyboard shortcuts" }).click();
   assert(await page.locator("#page .st-keys").count() > 10, "the shortcuts are listed");
-  await page.locator("#settings-nav .st-nav").filter({ hasText: "Models" }).click();
+  await page.locator("#settings-nav .st-nav").filter({ hasText: "Accounts" }).click();
   await page.locator("#page .st-row").filter({ hasText: "Provider setup" }).waitFor();
   await capture("02-providers");
   await page.locator("#page .st-row").filter({ hasText: "Provider setup" }).getByRole("button", { name: "Open" }).click();
@@ -1148,22 +1153,29 @@ try {
   await page.locator(`#turn-${editTurn} .rw-redo`).click();
   await until(() => page.locator(`#turn-${editTurn} .request`).count().then(count => count === 1), "Redo brings the turn back");
   assert.equal(readFileSync(join(f.workspace, "hello.ts"), "utf8"), "export const greeting = 'after';\n", "Redo puts the edit back");
-  // An agent is one step on the guide, like a read: its task, "✓ 1 step" on
-  // the right, and its own guide unfolding under it with what it found. No
-  // trace box, and nothing the agent thought.
+  // Sub-agents at work (pass 183 A): an agent is one crew line with its
+  // face (the d. on your own model, no light bulb), "Agent found it" and its
+  // steps; it opens to a line for the agent with the first line of what it
+  // found, and that line opens the agent's own steps. No trace box, and
+  // nothing the agent thought.
   await type(agentPrompt);
   await textIncludes(agentDone);
   await page.locator(".receipt-steps", { hasText: "1 step" }).last().click();
-  const agentStep = page.locator(".steps .tool-row", { hasText: agentTask }).last();
-  await until(() => agentStep.locator(".meta").innerText().then(text => /✓ 1 step · /.test(text)), "the agent's row ends in its step count and time");
+  const agentStep = page.locator(".steps .crew-row").last();
+  await until(() => agentStep.innerText().then(text => text.includes("Agent found it") && /1 step/.test(text)), "the agent's line says it found it, with its step count");
+  assert.equal(await agentStep.locator(".ask-d").count(), 1, "an agent on your own model wears the d.");
   assert.equal(await page.locator(".steps details.thinking").count(), 0, "no trace box under the agent");
   assert.equal(await page.locator(".steps .agent-steps").count(), 0, "the agent's guide waits folded");
   await agentStep.click();
+  const agentLine = page.locator(".steps .crew-line", { hasText: agentTask }).last();
+  await agentLine.waitFor();
+  assert((await page.locator(".steps .crew-said").last().innerText()).includes(agentFound), "its line says what it found");
+  await agentLine.click();
   await until(() => page.locator(".steps .agent-steps .tool-row.quiet .target").last().innerText().then(text => text === "hello.ts"), "the agent's own read unfolds as a quiet line");
   assert((await page.locator(".steps .agent-found").last().innerText()).includes(`Found · ${agentFound}`), "the guide ends in what the agent found");
   assert(!(await page.locator("#stage").innerText()).includes(agentThought), "the agent's thinking never reaches the window");
   await capture("02-agent-step");
-  await agentStep.click();
+  await page.locator(".steps .crew-line", { hasText: agentTask }).last().click();
   await until(() => page.locator(".steps .agent-steps").count().then(count => count === 0), "a second click folds the agent's guide");
   // The mode word under the composer: Alt+M steps Ask → Accept edits → Plan → Auto → Orchestrate → Ask.
   await page.locator("textarea").focus();
@@ -1177,7 +1189,8 @@ try {
     }, `daemon policy for ${word}`);
     if (word === "Plan") {
       assert(await page.locator("#composer-mode.open").isVisible(), "the mode word opens into the five modes");
-      assert.equal(await page.locator("#composer-mode .mode-opt:visible").count(), 5, "all five modes are in the bar of a project chat");
+      // The words widen in over 240ms, so wait for them rather than sample mid-way.
+      await until(() => page.locator("#composer-mode .mode-opt:visible").count().then(count => count === 5), "all five modes are in the bar of a project chat");
       await capture("03-mode-plan");
     }
   }
@@ -1226,21 +1239,26 @@ try {
   }
   await page.locator(".header-more").click();
   await page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).click();
-  const compacted = (await f.client.getSessionState(sessionId)).checkpoint!;
-  assert(compacted && compacted.afterTokens < compacted.beforeTokens);
+  const compacted = await until(async () => (await f.client.getSessionState(sessionId)).checkpoint, "the chat compacts");
+  assert(compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
-  // The cards on the right show only what this chat uses (pass 86 A): its
-  // own edit brings Changes in; Where leads in a project chat (pass 121 E),
-  // there is no switch, and Context waits until half full, so the composer's
-  // ring stays.
-  await until(() => page.locator("#cards [data-card=changes]").innerText().then(text => text.includes("+1") && text.includes("−1") && text.includes("Commit & PR")), "the Changes card lists what this chat changed");
+  // The cards on the right show only what this chat uses (pass 86 A) and
+  // step back (pass 169 A): its own edit brings a dim Changes line with a
+  // pink dot; the environment card leads in a project chat (pass 173 A),
+  // and Context waits until half full, so the composer's ring stays.
+  const changesCard = page.locator("#cards [data-card=changes]");
+  await until(() => changesCard.locator(".card-head").innerText().then(text => text.includes("1 file changed") && text.includes("+1") && text.includes("−1")), "the Changes line says what this chat changed");
+  assert.equal(await changesCard.locator(".card-need").count(), 1, "uncommitted changes carry the pink dot");
+  assert.equal(await changesCard.locator(".card-body").isVisible(), false, "a line keeps its details until you hover it");
+  await changesCard.hover();
+  await until(() => changesCard.locator(".card-body").innerText().then(text => text.includes("Commit & PR")), "hover unfolds the line with Commit & PR");
   assert.equal(await page.locator("#cards [data-card=environment]").count(), 0, "there is no Environment card");
   const where = page.locator("#cards [data-card=where]");
-  assert.equal(await page.locator("#cards > .card").first().getAttribute("data-card"), "where", "Where is the first card");
-  assert.equal(await where.locator(".wh-tile").innerText(), "W", "the monogram is the project's letter");
-  assert.equal(await where.locator(".wh-who .wh-name").innerText(), "workspace", "the project's name");
-  assert.match(await where.locator(".wh-lines").innerText(), /Branch[\s\S]*1 changed[\s\S]*Runs on\s*This computer\s*online/, "the branch with what this chat changed, and where it runs");
-  assert.equal(await where.locator(".wh-note").count(), 0, "the daemon says nothing while it's fine");
+  assert.equal(await page.locator("#cards > .card").first().getAttribute("data-card"), "where", "the environment card is first");
+  assert.equal(await where.locator(".wh-tile").count(), 0, "no monogram tile: it doesn't greet you");
+  assert.match(await where.locator(".card-head").innerText(), /This computer[\s\S]*master[\s\S]*uncommitted/, "where it runs and the branch with what's uncommitted");
+  assert.equal(await where.locator(".env-dot.on").count(), 1, "the daemon is a quiet dot while it's fine");
+  assert.equal(await where.locator(".env-start").count(), 0, "Start shows only when the daemon is off");
   await capture("02-where");
   assert.equal(await page.locator(".header-cards").count(), 0, "the top bar has no cards switch");
   if (percentage < 50) assert.equal(await page.locator("#cards [data-card=context]").count(), 0, "Context waits until the chat is half full");
@@ -1251,12 +1269,15 @@ try {
   });
   assert.equal(cardInsets.top, cardInsets.right, "the cards have matching top and right insets");
   await capture("04-cards");
-  await page.locator("#cards [data-card=changes] .card-head").click();
-  await until(() => page.locator("#cards [data-card=changes].folded").count().then(count => count === 1), "a card folds to one line");
-  await page.locator("#cards [data-card=changes] .card-head").click();
-  await page.locator("#cards [data-card=changes] .card-body").waitFor();
-  await until(() => evaluate<string>("return document.getElementById('composer-context').title + ' ' + (document.querySelector('#composer-context .ring')?.style.getPropertyValue('--usage') ?? '');").then(text => text.includes(`${percentage}%`)), "composer context ring updates");
-  // The ring unfolds the context breakdown above it until Esc.
+  await changesCard.locator(".card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].open").count().then(count => count === 1), "a click keeps a line open");
+  await page.mouse.move(5, 5);
+  assert.equal(await changesCard.locator(".card-body").isVisible(), true, "an opened line stays open without hover");
+  await changesCard.locator(".card-head").click();
+  await until(() => page.locator("#cards [data-card=changes].open").count().then(count => count === 0), "a second click closes it");
+  await until(() => page.locator("#composer-context").innerText().then(text => text.trim() === `${percentage}%`), "the composer's context word updates");
+  assert.equal(await page.locator("#composer-context .ring, #composer-limit").count(), 0, "no rings under the composer");
+  // The word unfolds the context breakdown above it until Esc.
   await page.locator("#composer-context").click();
   await until(() => page.locator("#context-card").innerText().then(text => text.includes("Instructions") && text.includes("Your messages and replies") && text.includes("Tools") && text.includes(`${percentage}%`)), "context breakdown unfolds");
   if (percentage < 50) assert.equal(await page.locator("#context-card .context-compact").count(), 0, "Compact now waits until the context is half full");
@@ -1300,19 +1321,21 @@ try {
   await page.getByRole("button", { name: "Expand full history", exact: true }).waitFor();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0, "Reopening starts with compacted history collapsed");
   await page.getByRole("button", { name: "Expand full history", exact: true }).click();
-  await textIncludes(completed);
+  // The earlier turns mount above the view (off screen, so not drawn yet).
+  await until(() => page.locator(`#turn-${firstTurnId}`).count().then(async n => n > 0 && Boolean((await page.locator("#conversation").textContent())?.includes(completed))), "Expanding mounts the earlier turns");
   await page.getByRole("button", { name: "Collapse older conversation", exact: true }).click();
   const preferences = JSON.parse(readFileSync(join(f.home, ".demesne/desktop-ui.json"), "utf8"));
   assert.equal(preferences.lastWorkspace, f.workspace);
   await capture("05-restored");
-  assert(await page.locator("#composer-limit").isHidden(), "no plan word while the plan says nothing");
+  assert.equal(await page.locator("#composer-context .cw-plan").count(), 0, "no plan in the word while the plan says nothing");
   await type(followUp);
   await textIncludes("The daemon is still working.");
   // Words arrive softly: the streaming answer's new words fade in, then settle at full.
   const fading = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#conversation .markdown .md-in")].map((span) => span.textContent ?? "").join(""));
   assert.ok(fading.includes("daemon is still working"), `streamed words fade in: ${fading}`);
   await page.waitForTimeout(500);
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("#conversation .markdown .md-in")!).opacity), "1", "faded words settle at full");
+  // A word that finished fading drops its fade (#560), so none is left part-way.
+  assert.ok(await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#conversation .markdown .md-in")].every((span) => getComputedStyle(span).opacity === "1")), "faded words settle at full");
   await until(async () => (await f.client.getSessionState(sessionId)).session.turns.at(-1)?.status === "running", "daemon turn running");
   await close();
   release!();
@@ -1327,21 +1350,25 @@ try {
   const caughtUp = page.locator("#conversation .catch-up");
   await until(() => caughtUp.isVisible(), "a chat that worked while you were away says what happened since you looked");
   assert.match(await caughtUp.innerText(), /^Since you looked · it finished a turn/, "the line says what happened");
-  // Your plan's mark: the fuller window beside the context ring, amber from 75%.
-  const limitWord = page.locator("#composer-limit");
-  await limitWord.waitFor();
-  assert.equal((await limitWord.textContent())?.trim(), "78%", "the plan's fuller window shows under the composer");
-  assert.match(await limitWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
-  assert.equal(await limitWord.getAttribute("title"), "Test plan: 78% of your 5-hour limit", "the mark names the plan and its window");
-  // It opens the context card, whose lower half gives each window, its reset and Drive's rule.
-  await limitWord.click();
-  const contextCard = page.locator("#context-card");
-  await contextCard.waitFor();
-  const cardText = (await contextCard.innerText()).replace(/\s+/g, " ");
+  // One word beside the model: the context, then the plan's fuller window, amber from 75%.
+  const contextWord = page.locator("#composer-context"), planWord = contextWord.locator(".cw-plan");
+  await planWord.waitFor();
+  assert.equal((await planWord.textContent())?.trim(), "plan 78%", "the plan's fuller window shows in the composer's word");
+  assert.match(await planWord.getAttribute("class") ?? "", /\bwarn\b/, "amber from 75%");
+  assert.match(await contextWord.getAttribute("title") ?? "", /Test plan: 78% of your 5-hour limit/, "the word's title names the plan and its window");
+  // Past half, the same card also sits in the right column (pass 177 C): one line like the others.
+  const columnContext = page.locator("#cards [data-card=context]"), columnCard = columnContext.locator(".ctx-card");
+  await until(() => columnContext.locator(".card-head").innerText().then(text => /context · plan 78%/.test(text)), "the plan past half puts a context line in the column");
+  assert.equal(await page.locator("#cards > .card").nth(1).getAttribute("data-card"), "context", "the context line comes right after the environment");
+  assert.equal(await columnCard.isVisible(), false, "the context line keeps its card folded like the others");
+  await capture("06-context-folded");
+  // With the card in the column, the word opens it there instead of a second copy.
+  await contextWord.click();
+  await until(() => page.locator("#cards [data-card=context].open.pointed").count().then(count => count === 1), "the word opens the card in the column");
+  const cardText = (await columnCard.innerText()).replace(/\s+/g, " ");
   assert.match(cardText, /Test plan Plus 5-hour window 78% used · resets .+ This week 41% used Drive pauses its own runs at 90%/, `the plan's half of the card: ${cardText}`);
+  assert(await page.locator("#context-card").isHidden(), "the card never shows twice");
   await capture("06-context-and-plan");
-  await page.keyboard.press("Escape");
-  await until(() => contextCard.isHidden(), "Esc closes the context card");
   assert.equal((await f.client.planLimits()).limits[0]?.primary?.usedPercent, 78, "the daemon serves the provider's numbers");
   await capture("06-plan-limit");
   await capture("06-work-survived-close");
@@ -1406,19 +1433,51 @@ try {
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();
   await capture("07-project-groups");
-  // Drive has no page: it speaks from a line at the foot of the sidebar.
-  const line = page.locator("#briefing");
+  // Where you are (pass 201 A): the chat you're in is a filled row, and the other projects step back.
+  const whereYouAre = await page.evaluate(() => {
+    const row = document.querySelector<HTMLElement>("#desktop-sidebar .sidebar-session.selected");
+    const other = document.querySelector<HTMLElement>("#sidebar-sessions .sidebar-project:not(:has(.sidebar-session.selected)) .sidebar-project-name");
+    const mine = row?.closest(".sidebar-project")?.querySelector<HTMLElement>(".sidebar-project-name");
+    return { fill: row ? getComputedStyle(row).backgroundColor : "", other: other ? getComputedStyle(other).color : "", mine: mine ? getComputedStyle(mine).color : "" };
+  });
+  assert(whereYouAre.fill && !/rgba?\(0, 0, 0, 0\)|transparent/.test(whereYouAre.fill), `the chat you're in is a filled row: ${whereYouAre.fill}`);
+  if (whereYouAre.other && whereYouAre.mine) assert.notEqual(whereYouAre.other, whereYouAre.mine, "the other projects step back a shade");
+  // A page over the chat (Foundry here) hands the chat back where you left it, not at its top.
+  // Scrolled up the way a person does it (a wheel), so the chat stops following its end.
+  const stageBox = (await page.locator("#stage").boundingBox())!;
+  await page.mouse.move(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
+  await page.evaluate(() => { const stage = document.getElementById("stage")!; stage.scrollTop = stage.scrollHeight; });
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -1200);
+  await page.waitForTimeout(400);
+  const midway = await page.evaluate(() => document.getElementById("stage")!.scrollTop);
+  assert(midway > 100 && await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollHeight - stage.clientHeight - stage.scrollTop > 200; }), `the chat is scrolled up somewhere in the middle: ${midway}`);
+  const foundryRow = page.locator('.sidebar-nav [data-action="page-open"]', { hasText: "Foundry" });
+  await foundryRow.click();
+  await until(() => page.locator('#page[data-kind="foundry"]').isVisible(), "Foundry opens over the chat");
+  await foundryRow.click();
+  await until(() => page.locator("#page").isHidden(), "Foundry folds away");
+  await page.waitForTimeout(150);
+  const back = await page.evaluate(() => document.getElementById("stage")!.scrollTop);
+  assert(Math.abs(back - midway) <= 4, `the chat comes back where you left it: ${back} vs ${midway}`);
+  // Drive has no page: its pill sits on the top bar, and drops a sheet with its line (pass 198 A).
+  const line = page.locator("#briefing"), pill = page.locator("#drive-pill");
+  const openDrive = async () => { if (await page.locator("#drive-sheet").isHidden()) await pill.click(); await page.locator("#drive-sheet").waitFor(); };
   const pressAction = (action: string) => evaluate(`const b = document.createElement("button"); b.dataset.action = ${JSON.stringify(action)}; document.body.append(b); b.click(); b.remove();`);
   failSuggestions = true;
   await pressAction("next-refresh");
   await until(() => line.innerText().then(text => text.includes("Drive couldn't look for ideas")), "idea failures show on Drive's line");
   failSuggestions = false;
+  await openDrive();
   await line.getByRole("button", { name: "look again", exact: true }).click();
-  await until(() => line.isHidden(), "look again recovers, and the line goes quiet with nothing to offer");
+  await until(() => pill.isHidden(), "look again recovers, and the line goes quiet with nothing to offer");
   await page.locator("textarea").fill("/drive --bounded Verify the Drive controls");
   await page.locator("textarea").press("Enter");
   const control = (name: string) => page.locator('[data-action="drive-control"]').filter({ hasText: new RegExp(`^${name}$`, "i") }).first();
   await control("pause").waitFor();
+  assert(await pill.isVisible() && await page.evaluate(() => Boolean(document.querySelector("#desktop-toolbar #bar-drive > #drive-pill"))), "Drive's pill sits on the top bar");
+  assert((await pill.innerText()).includes("Drive"), "the pill names Drive");
+  assert.equal(await page.locator("#drive-pill .bf-ring.work").count(), 1, "the pill carries Drive's ring");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");
   assert.equal(await page.locator(".sidebar-project.active").getAttribute("data-project"), f.workspace);
   await capture("08-drive-working");
@@ -1437,8 +1496,14 @@ try {
   await page.locator("textarea").press("Enter");
   await until(async () => (await f.client.listSessions()).length > 0 && (await page.locator("textarea").inputValue()) === "", "the note is sent");
   await capture("08-drive-tell");
-  // Drive has no tab of its own on the bar (it lives at the sidebar's foot).
+  // Drive has no tab of its own on the bar (it is a pill before ⋯).
   assert.equal(await page.locator(".header-drive").count(), 0, "no pinned Drive tab");
+  // A level top bar (pass 199 A): the sidebar button, +, Drive's pill and ⋯ sit on the tab names' line.
+  const levels = await page.evaluate(() => {
+    const mid = (selector: string) => { const box = document.querySelector(selector)?.getBoundingClientRect(); return box && box.height ? box.top + box.height / 2 : null; };
+    return { tab: mid("#workspace-tabs .bar-tab.on .bar-tab-name"), toggle: mid("#desktop-toggle-sidebar"), plus: mid("#workspace-new-tab"), drive: mid("#drive-pill"), more: mid("#desktop-toolbar .header-more") };
+  });
+  for (const [name, y] of Object.entries(levels)) if (y !== null && levels.tab !== null) assert(Math.abs(y - levels.tab) <= 1.5, `the top bar is level: ${name} at ${y} vs tab names at ${levels.tab}`);
   // Its own chat opens as a tab; your chat's tab goes back.
   const chatTab = (name: string) => page.locator("#workspace-tabs .bar-tab[data-tab]", { hasText: name });
   await page.locator('#briefing [data-action="select-session"]', { hasText: "Watch" }).click();
@@ -1452,6 +1517,7 @@ try {
   await chatTab("Drive mission").locator(".bar-tab-close").click();
   await until(() => chatTab("Drive mission").count().then(count => count === 0), "the mission's tab closes");
   assert.equal(await page.locator(".header-drive").count(), 0, "and no Drive tab takes its place");
+  await openDrive();
   await control("pause").click();
   await control("resume").waitFor();
   await until(() => page.locator("#briefing .bf-ring.pause").count().then(count => count === 1), "a paused mission's ring holds still");
@@ -1496,27 +1562,32 @@ try {
   await until(() => page.locator("#branch-done").innerText().then(text => text.includes("Discarded Verify the Drive controls")), "what Discard did is its own quiet line");
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
-  assert(await page.evaluate(() => Boolean(document.querySelector("#sidebar-drive > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing")), "Drive's line sits at the sidebar's foot, not over the composer");
-  // Drive is on by default: the line says when it starts on its own, and one word turns it off.
-  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes")), "Drive's line says it starts on its own");
-  await capture("10-drive-auto");
-  await page.locator("#briefing").getByRole("button", { name: "Turn off", exact: true }).click();
-  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive is off here") && text.includes("3 ideas")), "Turn off says Drive is off here");
+  assert(await page.evaluate(() => Boolean(document.querySelector("#desktop-toolbar #drive-sheet > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing, #desktop-sidebar #briefing")), "Drive's line sits in its sheet on the top bar, not over the composer or in the sidebar");
+  assert((await pill.innerText()).includes("3 ideas"), "the pill counts Drive's ideas");
+  // Drive runs nothing on its own until you turn it on here (its own runs
+  // spent plans while people were away); Turn off puts it back.
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("runs only what you start")), "Drive runs only what you start until you turn it on");
   await capture("10-drive-off");
-  await page.locator("#briefing").getByRole("button", { name: "Turn on", exact: true }).click();
-  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas") && text.includes("Turn off")), "Turn on brings it back");
+  await page.locator("#briefing").getByRole("button", { name: "Run on its own", exact: true }).click();
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("starts the first after 20 quiet minutes") && text.includes("Turn off")), "Run on its own says when Drive starts");
+  await capture("10-drive-auto");
+  await openDrive();
+  await page.locator("#briefing").getByRole("button", { name: "Turn off", exact: true }).click();
+  await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas") && text.includes("runs only what you start")), "Turn off puts it back to what you start");
   await page.locator("#briefing .bf-chev").click();
   await until(() => page.locator("#briefing .bf-word").innerText().then(text => text.includes("Three things I could do next")), "the line becomes Drive's reply");
   await until(() => page.locator("#drive-reply.open .bf-row").count().then(count => count === 3), "Drive's ideas unfold under its line");
   assert(await page.locator("#drive-reply .bf-row .bf-meta").first().innerText().then(text => text.includes("check bun test")), "each idea names the check that proves it");
   await page.waitForTimeout(400);
-  assert(await page.evaluate(() => { const reply = document.getElementById("drive-reply")!.getBoundingClientRect(), foot = document.querySelector(".sidebar-foot")!.getBoundingClientRect(); return reply.top >= 0 && reply.bottom <= foot.top + 1; }), "the reply unfolds in the sidebar, above you and Settings");
+  assert(await page.evaluate(() => { const reply = document.getElementById("drive-reply")!.getBoundingClientRect(), bar = document.getElementById("desktop-toolbar")!.getBoundingClientRect(); return reply.top >= bar.bottom && reply.bottom <= innerHeight && reply.right <= innerWidth; }), "the reply unfolds in the sheet under the top bar, inside the window");
   await page.locator("#drive-reply .bf-row").first().hover();
   await capture("10-drive-reply");
   await page.keyboard.press("Escape");
   await until(() => page.locator("#drive-reply.open").count().then(count => count === 0), "Escape folds the reply away");
   await page.waitForTimeout(400);
   await capture("10-drive-line");
+  await until(() => page.locator("#drive-sheet").isHidden(), "Escape puts the sheet away");
+  await openDrive();
   await page.locator("#briefing .bf-word").click();
   await until(() => page.locator("#drive-reply.open").count().then(count => count === 1), "the chip's word opens it again");
   await page.locator("#briefing .bf-chev").click();
@@ -1613,15 +1684,17 @@ try {
   await page.evaluate(() => { document.hasFocus = () => true; });
   assert.equal(await page.locator(".tool-row", { hasText: "ask_user" }).count(), 0, "no step row names the tool");
   assert(!(await page.locator("#stage").innerText()).toLowerCase().includes("interview"), "nothing says interview");
-  assert.equal(await ask.locator(".ask-choice").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await ask.locator(".ask-choice:not(.ask-decide)").count(), 3, "the suggestions are answers to pick");
+  assert.equal(await ask.locator(".ask-choice.first .rec").innerText(), "Recommended", "the first answer is the recommended one");
+  assert.equal(await ask.locator(".ask-decide").count(), 1, "Let it decide is the last row");
   assert.equal(await parked.count(), 0, "a finished turn leaves only the card");
   assert.equal(await ask.locator(".ask-prev").count(), 0, "a first question has no Back");
-  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Reply… the question stays in the chat");
+  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Answer in your own words, or pick one above…");
   await page.waitForTimeout(500);
   await capture("13-question");
   assert(await page.evaluate(() => { const stage = document.getElementById("stage")!; return stage.scrollWidth <= stage.clientWidth && stage.scrollLeft === 0; }), "the question never pushes the chat sideways");
   assert(!(await page.locator("#briefing").innerText()).includes("Discarded"), "Drive's line only says what Drive is doing");
-  // Typing in the composer is a message, not an answer; the card holds still.
+  // Typing in the composer never redraws the card; Enter would answer it.
   await page.evaluate(() => document.querySelector("#stage .ask-card")!.setAttribute("data-held", "1"));
   await page.locator("textarea").pressSequentially("war", { delay: 40 });
   await page.waitForTimeout(300);
@@ -1679,7 +1752,9 @@ try {
   await click("permission", { decision: "allow_once" });
   await textIncludes("The check fails now.");
   const broke = page.locator("#briefing .bf-word.bad");
-  await until(() => broke.isVisible(), "Drive's line says the check broke", 30_000);
+  await until(() => page.locator("#drive-pill .dp-word.bad").isVisible(), "Drive's pill says the check broke", 30_000);
+  await openDrive();
+  await until(() => broke.isVisible(), "Drive's line says the check broke");
   assert.equal(await page.locator("#breakage, .breakage-card").count(), 0, "Drive's branches never float as cards");
   await broke.click();
   await until(() => page.locator("#drive-reply.open button", { hasText: "Fix in a worktree" }).isVisible(), "it unfolds with the fix");

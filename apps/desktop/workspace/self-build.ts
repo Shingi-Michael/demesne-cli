@@ -56,9 +56,10 @@ export function swapScript(pid: number, installed: string, built: string, keep: 
     "#!/bin/sh",
     `while kill -0 ${pid} 2>/dev/null; do sleep 0.3; done`,
     `rm -rf ${q(keep)}`,
-    // The old app is only ever moved aside; a failed copy puts it back.
+    // The old app is moved aside while the new one is copied in: a failed
+    // copy puts it back, a good one deletes it, so no old copy is kept.
     `mv ${q(installed)} ${q(keep)} || { open ${q(installed)}; exit 1; }`,
-    `cp -R ${q(built)} ${q(installed)} || { rm -rf ${q(installed)}; mv ${q(keep)} ${q(installed)}; }`,
+    `if cp -R ${q(built)} ${q(installed)}; then rm -rf ${q(keep)}; else rm -rf ${q(installed)}; mv ${q(keep)} ${q(installed)}; fi`,
     `open ${q(installed)}`,
   ].join("\n") + "\n";
 }

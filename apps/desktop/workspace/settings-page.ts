@@ -34,7 +34,9 @@ export interface SettingsInfo {
   allow: { rule: string; mine: boolean }[];
   /// Folders you trust, or null when the daemon can't say.
   trusted: string[] | null;
-  subagent: { model: string | null; models: { id: string; provider: string }[] };
+  subagent: { model: string | null; often?: string; models: { id: string; provider: string }[] };
+  /// Which agents may work, and where; null when the daemon can't say.
+  agents?: { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[] }[] } | null;
   agent: { maxModelRounds: number; maxToolCalls: number };
   drive: { maxActiveMinutes: number; maxTokens: number; maxTasks: number };
   /// Null when no image service is set up.
@@ -45,29 +47,42 @@ export interface SettingsInfo {
   restart: string[];
 }
 
-export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "providers" | "connectors" | "heartbeat" | "data";
+export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "agents" | "providers" | "connectors" | "heartbeat" | "data";
 const icon = (path: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${path}</svg>`;
-/// Settings › the list (pass 154 B): nine pages, each worth opening. The
+/// Settings › the list (pass 154 B; Agents from pass 206 A): ten pages, each worth opening. The
 /// sections that held a row or two live inside another page now, and their
 /// ids still open it (SETTINGS_HOME), so links and search keep working.
 export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = [
   ["", [
     ["overview", "Overview", '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'],
+  ]],
+  ["Personal", [
     ["general", "General", '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'],
+    ["notifications", "Notifications", '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5h4"/>'],
     ["appearance", "Appearance", '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z"/>'],
+    ["keys", "Keyboard shortcuts", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>'],
+  ]],
+  ["How it works", [
     ["models", "Models", '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 2v4M14 2v4M10 18v4M14 18v4M2 10h4M2 14h4M18 10h4M18 14h4"/>'],
+    ["providers", "Accounts", '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1-3.5 3.8-5 7-5s6 1.5 7 5"/>'],
+    ["agents", "Agents", '<circle cx="9" cy="9" r="3.5"/><circle cx="16.5" cy="10.5" r="2.5"/><path d="M3 19c.8-3 3.2-4.5 6-4.5s5.2 1.5 6 4.5M15 15.2c2.6-.3 4.8.9 5.5 3.3"/>'],
     ["permissions", "Permissions", '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/>'],
     ["drive", "Drive", '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>'],
+  ]],
+  ["Integrations", [
     ["connectors", "Connections", '<path d="M9 7 4 12l5 5M15 7l5 5-5 5"/>'],
-    ["keys", "Keyboard shortcuts", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>'],
-    ["data", "Data", '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'],
+  ]],
+  ["This computer", [
+    ["usage", "Usage", '<path d="M4 20V11M10 20V5M16 20v-6M21 20H3"/>'],
+    ["archived", "Chats", '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4 3v-3h-.5A2.5 2.5 0 0 1 4 14.5z"/>'],
+    ["data", "Data and daemon", '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'],
   ]],
 ];
-export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { notifications: "general", providers: "models", heartbeat: "connectors", archived: "data", usage: "overview" };
+export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { heartbeat: "connectors" };
 /// The page a section is drawn on.
 export const settingsHome = (id: SettingsSection): SettingsSection => SETTINGS_HOME[id] ?? id;
 export const SETTINGS_ORDER = SETTINGS_GROUPS.flatMap(([, items]) => items.map(([id]) => id));
-const ALL_SECTIONS: SettingsSection[] = ["overview", "general", "notifications", "appearance", "keys", "archived", "usage", "permissions", "drive", "models", "providers", "connectors", "heartbeat", "data"];
+const ALL_SECTIONS: SettingsSection[] = ["overview", "general", "notifications", "appearance", "keys", "archived", "usage", "permissions", "drive", "models", "agents", "providers", "connectors", "heartbeat", "data"];
 export const isSettingsSection = (value: unknown): value is SettingsSection => ALL_SECTIONS.includes(value as SettingsSection);
 
 /// Native desktop notifications, each kind with its own switch.
@@ -161,7 +176,7 @@ export interface SettingsView {
   error: string;
   /// The row whose words are unfolded, like "theme" or "subagent".
   fold: string;
-  general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string } };
+  general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string; check: { title: string; line: string; tone: "" | "bad"; can: boolean } } };
   notify: Record<NotifyKind, boolean>;
   appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
@@ -202,7 +217,7 @@ export const GLASS_DEFAULT = 15;
 /// starts more solid so words stay readable over a sharp wallpaper.
 export const GLASS_SHARP_DEFAULT = 70;
 
-export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string }
+export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string; tone?: "" | "bad" }
 /// A hidden group is only for search: its page draws the same things its own way.
 interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string; hidden?: boolean }
 interface Page { id: SettingsSection; title: string; sub: string; groups: Group[]; note?: string; html?: string }
@@ -234,9 +249,46 @@ function shortcuts(mac: boolean): Group[] {
   return [
     { name: "Anywhere", rows: [row("New chat", `${cmd}N`), row("Search chats", `${cmd}K`), row("Open a folder", `${cmd}O`), row("Settings", `${cmd},`), row("Next and previous chat", "Ctrl+Tab Ctrl+⇧Tab"), row("Drive", `${alt}J`, "Its line, or its ideas"), row("Text size", `${cmd}+ ${cmd}− ${cmd}0`), row("Undo a delete", `${cmd}Z`)] },
     { name: "On a tab", rows: [row("Move focus between tabs", "← → Home End", "Enter or Space opens the focused chat; Tab leaves the tab strip")] },
-    { name: "In the composer", rows: [row("Send", "↵"), row("Steer the turn that is running", "↵", "Delivered after its next step"), row("Queue for after it", `${alt}↵`), row("Change mode", `${alt}M`, "Ask, Accept edits, Plan, Auto"), row("Commands", "/"), row("Files", "@"), row("Accept a suggestion", `${alt}→`, "When the empty composer shows a suggested prompt or Drive idea"), row("Complete a command or file", "Tab", "While its suggestions are open; Shift+Tab moves focus backward"), row("Where a new chat lives", `${alt}P`, "On Home")] },
+    { name: "In the composer", rows: [row("Send", "↵"), row("Steer the turn that is running", "↵", "Delivered after its next step"), row("Queue for after it", `${alt}↵`), row("Change mode", `${alt}M`, "Ask, Accept edits, Plan, Auto"), row("Commands", "/"), row("Files", "@"), row("Accept a suggestion", "Tab", `When the empty composer shows a suggested prompt; ${alt}→ works too`), row("Complete a command or file", "Tab", "While its suggestions are open; Shift+Tab moves focus backward"), row("Where a new chat lives", `${alt}P`, "On Home")] },
     { name: "Answering", rows: [row("Pick a choice", "1 9", "On a question or an approval"), row("Close a page or a sheet", "Esc")] },
   ];
+}
+
+/// The agent tools' names, as a sentence: "Claude Code, Codex and Gemini".
+const listWords = (items: string[]) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+const folderName = (root: string) => root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
+
+/// Settings › Agents (pass 206 A): one switch for every agent, then each
+/// agent everywhere, in some projects (ticked under it), or off.
+function agentsPage(view: SettingsView): Page {
+  const choice = view.info?.agents;
+  const sub = "The agent tools on this computer. They can be opened as chats, used for side work, and they post on Today.";
+  if (!choice) return { id: "agents", title: "Agents", sub, groups: [{ name: "Agents", rows: [{ title: view.info ? "The daemon can't say" : "Reading…", line: view.info ? "Restart the daemon to choose agents here" : "", keywords: "agents claude code codex gemini" }] }] };
+  const found = choice.agents.map((agent) => agent.name);
+  if (!found.length) return { id: "agents", title: "Agents", sub, groups: [{ name: "Agents", rows: [{ title: "No agent tools found", line: "Install Claude Code, Codex or Gemini and they show here", keywords: "agents claude code codex gemini install" }] }] };
+  const on = !choice.off;
+  // Projects to tick: the folders you trust, then any kept that you don't.
+  const projects = [...new Set([...(view.info?.trusted ?? []), ...choice.agents.flatMap((agent) => agent.projects)])];
+  const rows: SettingsRow[] = choice.agents.map((agent) => {
+    const where = agent.mode === "every" ? "In every project" : agent.mode === "off" ? "Off everywhere" : agent.projects.length ? `In ${listWords(agent.projects.map(folderName))}` : "In no projects yet. Tick one below";
+    const pick = (mode: "every" | "some" | "off") => ({ agent: agent.id, mode });
+    return {
+      title: agent.name,
+      line: on ? where : "Off, with every agent",
+      control: on ? segments([["Everywhere", agent.mode === "every", "agent-choice", pick("every")], ["Some projects", agent.mode === "some", "agent-choice", pick("some")], ["Off", agent.mode === "off", "agent-choice", pick("off")]], `Where ${agent.name} works`) : "",
+      keywords: `agents agent project ${agent.name.toLowerCase()} off on`,
+      fold: on && agent.mode === "some" ? (projects.length
+        ? choices(`Projects for ${agent.name}`, projects.map((root): [string, boolean, string, Record<string, unknown>] => {
+          const kept = agent.projects.includes(root);
+          return [`${kept ? "✓ " : ""}${folderName(root)}`, kept, "agent-choice", { agent: agent.id, mode: "some", projects: kept ? agent.projects.filter((item) => item !== root) : [...agent.projects, root] }];
+        }))
+        : `<p class="st-hint">Open a project once and it shows here to tick.</p>`) : "",
+    };
+  });
+  return { id: "agents", title: "Agents", sub, groups: [
+    { name: "All agents", rows: [{ title: "Agents", line: on ? `On: ${listWords(found)} ${found.length === 1 ? "was" : "were"} found on this computer` : "Off: no agent chats, side work, hand-offs or Today posts", control: toggle(on, "agent-choice", { off: on }, "Agents"), keywords: "agents off on turn off disable" }] },
+    { name: "Each agent", rows, hint: "Where one is off, side work and hand-offs run on the chat’s own model and it leaves the Agents list. Its old chats stay readable." },
+  ] };
 }
 
 function pages(view: SettingsView): Page[] {
@@ -253,6 +305,7 @@ function pages(view: SettingsView): Page[] {
     ], hint: "Closing the window leaves the daemon running, so Drive, routines and mail carry on." },
     ...(view.general.updates ? [{ name: "Updates", rows: [
       { title: "Update Demesne by itself", line: view.general.updates.line, control: toggle(view.general.updates.on, "settings-local", { key: "updates", value: !view.general.updates.on }, "Update Demesne by itself"), keywords: "update upgrade version release download restart" },
+      { title: view.general.updates.check.title, line: view.general.updates.check.line, tone: view.general.updates.check.tone, control: view.general.updates.check.can ? link("update-check", "Check now") : "", keywords: "update check now version newest latest" },
     ] }] : []),
   ] });
   out.push({ id: "notifications", title: "Notifications", sub: view.desktop ? "System notifications on Linux, macOS and Windows while the app is out of focus. Each kind has its own switch." : "Banners come from the desktop app.", groups: [
@@ -282,7 +335,7 @@ function pages(view: SettingsView): Page[] {
   const scores = (view.usage ?? []).filter((score) => score.turns > 0).sort((a, b) => b.turns - a.turns);
   const most = Math.max(1, ...scores.map((score) => score.turns));
   const runs = scores.reduce((sum, score) => sum + score.driveRuns, 0), landed = scores.reduce((sum, score) => sum + score.driveLanded, 0);
-  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, counted from your own chats on this computer, and what your plan has left.", html: usageTop(view, scores, false), groups: [
+  out.push({ id: "usage", title: "Usage", sub: "The last 30 days, counted from your own chats on this computer, and what your plan has left.", html: usageTop(view, scores), groups: [
     { name: "Turns by model", right: scores.length ? `${scores.reduce((sum, score) => sum + score.turns, 0)} turns` : "", rows: view.usage === null ? [{ title: "Counting…" }] : scores.length ? scores.map((score) => {
       const ended = score.finished + score.failed;
       return { title: view.modelWords({ id: score.model }), line: [`${score.provider}`, `${score.turns} ${score.turns === 1 ? "turn" : "turns"}`, ended ? `${Math.round((score.finished / ended) * 100)}% finished` : "", score.tokensPerSecond ? `${Math.round(score.tokensPerSecond)} tok/s` : ""].filter(Boolean).join(" · "), control: `<span class="st-bar" aria-hidden="true"><i style="width:${Math.max(3, Math.round((score.turns / most) * 100))}%"></i></span><span class="st-count">${score.turns}</span>`, keywords: "usage turns tokens speed model" };
@@ -315,7 +368,8 @@ function pages(view: SettingsView): Page[] {
       { title: "Model", line: `${view.model.words}${view.model.provider ? ` from ${view.model.provider}` : ""}${view.model.reasoning ? `, ${view.model.reasoning} thinking` : ""}. This chat uses it`, control: link("overlay", "Change", { name: "models" }), keywords: "model reasoning thinking effort" },
       ...(view.model.chatgpt !== null ? [{ title: "ChatGPT plan", line: `Usage counts against ${view.model.chatgpt || "your"} plan`, control: link("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }), keywords: "usage billing account chatgpt" }] : []),
       ...(subagent ? [{ title: "Subagents run on", line: "Helpers a turn starts for side work. Auto runs them on Claude Code, Codex or Gemini when you have them", control: word("subagent", subagentLabel, view.fold === "subagent"), keywords: "subagent helper model",
-        fold: view.fold === "subagent" ? choices("Subagent model", [["Auto · your agents", !subagent.model || subagent.model === "auto", "subagent-model", { model: null }], ["Same as the chat", subagent.model === "same", "subagent-model", { model: "same" }], ...subagent.models.map((model): [string, boolean, string, Record<string, unknown>] => [model.id.startsWith("agent:") ? agentWords(model.id) : view.modelWords({ id: model.id }), subagent.model === model.id, "subagent-model", { model: model.id }])]) : "" }] : []),
+        fold: view.fold === "subagent" ? choices("Subagent model", [["Auto · your agents", !subagent.model || subagent.model === "auto", "subagent-model", { model: null }], ["Same as the chat", subagent.model === "same", "subagent-model", { model: "same" }], ...subagent.models.map((model): [string, boolean, string, Record<string, unknown>] => [model.id.startsWith("agent:") ? agentWords(model.id) : view.modelWords({ id: model.id }), subagent.model === model.id, "subagent-model", { model: model.id }])]) : "" },
+        { title: "How often", line: "How readily a turn hands bigger lookups to subagents instead of reading everything itself. Less is how it used to be", control: segments((["less", "usual", "more"] as const).map((often): [string, boolean, string, Record<string, unknown>] => [often === "less" ? "Less" : often === "usual" ? "Usual" : "More", (subagent.often ?? "usual") === often, "subagent-often", { often }]), "How often subagents are sent"), keywords: "subagent helper delegate often more less" }] : []),
       ...(info?.images ? [{ title: "Images", line: "The model that makes pictures when you ask for one", control: `<form class="st-text" data-key="images.model"><input value="${h(info.images.model ?? "")}" aria-label="Image model" autocomplete="off" spellcheck="false"></form>`, keywords: "image picture generation" }] : []),
     ] },
     { name: "Limits for one turn", rows: info ? [
@@ -323,8 +377,9 @@ function pages(view: SettingsView): Page[] {
       { title: "Tool calls", line: "And after this many tool calls", control: number("agent.max_tool_calls", info.agent.maxToolCalls, "", "Tool calls", AGENT_DEFAULTS.maxToolCalls), keywords: "limit tools turn" },
     ] : [{ title: "Reading…" }], hint: "The daemon reads these when it starts." },
   ] });
+  out.push(agentsPage(view));
   out.push({ id: "providers", title: "Providers", sub: "Where models come from: accounts, API keys and model servers on this computer.", groups: [
-    { name: "Accounts", rows: [
+    { name: "Sign-ins and keys", rows: [
       ...view.providers.items.map((item) => {
         if (item.kind === "google") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
           control: link("google-ai-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("google-ai-disconnect", "Remove saved key", { key: item.key }, " quiet") : ""),
@@ -369,14 +424,63 @@ function pages(view: SettingsView): Page[] {
       { title: "Clean up", line: "Delete empty, quick and old chats; you choose which first", control: link("overlay", "Review", { name: "cleanup" }), keywords: "delete clean sessions" },
     ] },
   ] });
-  return merged(out);
+  return merged(sorted(out, view));
+}
+
+/// Pass 207: each row on the page it's about. Side work joins Agents, your
+/// chats join the archived ones on Chats, Appearance's rows split into the
+/// window and the System palette, and Notifications and Data get a picture.
+function sorted(out: Page[], view: SettingsView): Page[] {
+  const page = (id: SettingsSection) => out.find((item) => item.id === id);
+  const models = page("models"), agents = page("agents");
+  const side = models?.groups[0]?.rows.filter((row) => row.title === "Subagents run on" || row.title === "How often") ?? [];
+  if (models && agents && side.length) {
+    models.groups[0]!.rows = models.groups[0]!.rows.filter((row) => !side.includes(row));
+    agents.groups.push({ name: "Side work", rows: side });
+  }
+  const data = page("data"), chats = page("archived");
+  const yours = data?.groups.find((group) => group.name === "Conversations");
+  if (data && chats && yours) {
+    data.groups = data.groups.filter((group) => group !== yours);
+    chats.groups.unshift({ ...yours, name: "Your chats" });
+  }
+  const look = page("appearance");
+  if (look?.groups[0]) {
+    const rows = look.groups[0].rows, palette = rows.filter((row) => /palette/i.test(row.title)), theme = rows.filter((row) => row.title === "Theme");
+    look.groups = [
+      { name: "Window", rows: rows.filter((row) => !palette.includes(row) && !theme.includes(row)) },
+      ...(palette.length ? [{ name: "System palette", rows: palette, hint: "For a desktop themed by one tool: Demesne takes its colours from a file when the System theme is picked." }] : []),
+      { name: "Theme", hidden: true, rows: theme },
+    ];
+  }
+  const notify = page("notifications");
+  if (notify && view.desktop) notify.html = notifyBanner();
+  if (data) {
+    data.html = daemonCard(view);
+    // The card says it now; its rows stay for search.
+    for (const group of data.groups) if (group.name === "The daemon") group.hidden = true;
+  }
+  return out;
+}
+
+/// Notifications: what a banner looks like, so the switches below read as
+/// "when do I get one of these".
+const notifyBanner = () => `<div class="nt-scene" aria-hidden="true"><div class="nt-banner"><span class="nt-mark">d.</span><span class="nt-words"><b>Demesne</b><small>Fix the login redirect is waiting on you</small></span><span class="nt-when">now</span></div></div>`;
+
+/// Data and daemon: whether the daemon runs, at the top, with its restart.
+function daemonCard(view: SettingsView): string {
+  const info = view.info, waiting = info?.restart.includes("app.update") ? "A newer daemon came with this app. It restarts by itself once nothing is working" : info?.restart.length ? "Settings you changed wait for a restart" : "";
+  const where = info ? info.server.replace(/^https?:\/\//, "").replace(/\/$/, "") : "";
+  return `<div class="dm-card${view.online ? "" : " off"}"><span class="dm-pulse" aria-hidden="true"><i></i></span><span class="dm-words"><b>${view.online ? "The daemon is running" : "The daemon isn’t answering"}</b><small>${h(waiting || (view.online ? `It runs your chats, and keeps going when you close the window${where ? ` · ${where}` : ""}` : "Chats and Drive wait until it’s back"))}</small></span>${link("restart-daemon", "Restart")}</div>`;
 }
 
 /// Pass 154 B: the small pages join a bigger one, in the list's order.
 const RENAME: Partial<Record<SettingsSection, { title: string; sub: string }>> = {
-  models: { title: "Models", sub: "Which model answers, where models come from, and how far one turn may go." },
-  connectors: { title: "Connections", sub: "Tools from MCP servers, and agents nearby that can message your chats. Everything here runs on this computer." },
-  data: { title: "Data", sub: "Where Demesne keeps your chats, the daemon that runs them, and the chats you put away." },
+  models: { title: "Models", sub: "Which model answers, and how far one turn may go." },
+  providers: { title: "Accounts", sub: "Where models come from: sign-ins, API keys and model servers on this computer." },
+  connectors: { title: "Connections", sub: "Things outside Demesne that it talks to: servers that add tools to every chat, and agents nearby that can message your chats." },
+  archived: { title: "Chats", sub: "Every conversation on this computer, and the ones you put away." },
+  data: { title: "Data and daemon", sub: "The background program that runs your chats, and where Demesne keeps things." },
 };
 const GROUP_NAMES: Record<string, string> = { "Tell me when": "Notifications", "Archived": "Archived chats" };
 function merged(out: Page[]): Page[] {
@@ -533,7 +637,7 @@ function words(text: string, marks: string[]) {
   }).join("");
 }
 const rowHtml = (row: SettingsRow, marks: string[]) =>
-  `<div class="st-row${row.fold ? " has-fold" : ""}"><div class="st-tx"><b>${words(row.title, marks)}</b>${row.line ? `<small>${words(row.line, marks)}</small>` : ""}</div>${row.control ? `<div class="st-ctl">${row.control}</div>` : ""}</div>${row.fold ? `<div class="st-fold">${row.fold}</div>` : ""}`;
+  `<div class="st-row${row.fold ? " has-fold" : ""}"><div class="st-tx"><b>${words(row.title, marks)}</b>${row.line ? `<small${row.tone ? ` class="${row.tone}"` : ""}>${words(row.line, marks)}</small>` : ""}</div>${row.control ? `<div class="st-ctl">${row.control}</div>` : ""}</div>${row.fold ? `<div class="st-fold">${row.fold}</div>` : ""}`;
 const groupHtml = (group: Group, marks: string[]) =>
   `<div class="st-head"><span>${h(group.name)}</span>${group.right ? `<span>${h(group.right)}</span>` : ""}</div><div class="st-group">${group.rows.map((row) => rowHtml(row, marks)).join("")}</div>${group.hint ? `<p class="st-hint">${h(group.hint)}</p>` : ""}`;
 

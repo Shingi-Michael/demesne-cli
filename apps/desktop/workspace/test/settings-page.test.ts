@@ -45,7 +45,8 @@ test("notifications carry over the old single choice", () => {
 test("notification settings describe native delivery on every desktop platform", () => {
   for (const mac of [true, false]) {
     const html = settingsPage(view({ section: "notifications", mac }));
-    expect(html).toContain('<h1 class="cp-title">General</h1>');
+    expect(html).toContain('<h1 class="cp-title">Notifications</h1>');
+    expect(html).toContain('class="nt-banner"');
     expect(html).toContain("Linux, macOS and Windows");
     expect(html).toContain("out of focus");
     expect(html).toContain("A chat waits on you");
@@ -79,15 +80,25 @@ test("numbers are typed as you would say them", () => {
   expect(homeWords("/Users/mike/projects/x", "/Users/mike")).toBe("~/projects/x");
 });
 
-test("every section draws, and the list has nine with Overview first", () => {
-  expect(SETTINGS_ORDER).toEqual(["overview", "general", "appearance", "models", "permissions", "drive", "connectors", "keys", "data"]);
+test("every section draws, in four categories with Overview first (pass 207)", () => {
+  expect(SETTINGS_ORDER).toEqual(["overview", "general", "notifications", "appearance", "keys", "models", "providers", "agents", "permissions", "drive", "connectors", "usage", "archived", "data"]);
   for (const section of SETTINGS_ORDER) expect(settingsPage(view({ section }))).toContain('class="cp-title"');
-  // The small pages live inside a bigger one, and their ids still open it.
-  expect(settingsPage(view({ section: "providers" }))).toContain('<h1 class="cp-title">Models</h1>');
-  expect(settingsPage(view({ section: "providers" }))).toContain("Accounts");
+  expect(settingsPage(view({ section: "providers" }))).toContain('<h1 class="cp-title">Accounts</h1>');
   expect(settingsPage(view({ section: "heartbeat" }))).toContain('<h1 class="cp-title">Connections</h1>');
-  expect(settingsPage(view({ section: "archived" }))).toContain("Archived chats");
-  expect(settingsNav({ section: "notifications", query: "", archived: [], info })).toMatch(/st-nav on"[^>]*>.*General<\/span>/);
+  // Chats: your chats first, then the archived ones; the daemon has its card.
+  const chats = settingsPage(view({ section: "archived" }));
+  expect(chats).toContain('<h1 class="cp-title">Chats</h1>');
+  expect(chats.indexOf("Your chats")).toBeLessThan(chats.indexOf("Archived"));
+  const data = settingsPage(view({ section: "data" }));
+  expect(data).toContain('<h1 class="cp-title">Data and daemon</h1>');
+  expect(data).toContain('class="dm-card"');
+  expect(data).not.toContain("All conversations");
+  // Usage is its own page; the Overview keeps its tiles.
+  expect(settingsPage(view({ section: "overview" }))).not.toContain("Turns by model");
+  expect(settingsPage(view({ section: "usage" }))).toContain('<h1 class="cp-title">Usage</h1>');
+  const list = settingsNav({ section: "notifications", query: "", archived: [], info });
+  expect(list).toMatch(/st-nav on"[^>]*>.*Notifications<\/span>/);
+  for (const name of ["Personal", "How it works", "Integrations", "This computer"]) expect(list).toContain(`<div class="st-nav-group">${name}</div>`);
   const nav = settingsNav({ section: "permissions", query: "", archived: [], info });
   expect(nav).toContain("Back to chats");
   expect(nav).toMatch(/st-nav on"[^>]*>.*Permissions<\/span><span class="st-nav-n">2</);
@@ -216,12 +227,13 @@ test("System palette errors and paths are safely escaped in Settings",()=>{
   expect(html).not.toContain("<script>");
   expect(html).toContain("&quot;&lt;palette&gt;");
 });
-test("composer shortcuts reserve Tab traversal and describe explicit mode and suggestion actions", () => {
+test("composer shortcuts: Tab takes a suggestion, Shift+Tab moves focus back, Alt+M changes mode", () => {
   for (const mac of [true, false]) {
     const html = settingsPage(view({ section: "keys", mac }));
     expect(html).toContain(mac ? "⌥M" : "Alt+M");
     expect(html).toContain(mac ? "⌥→" : "Alt+→");
     expect(html).toContain("Shift+Tab moves focus backward");
+    expect(html).toMatch(/Accept a suggestion.*?<kbd>Tab<\/kbd>/s);
     expect(html).not.toContain("⇧⇥");
     expect(html).not.toContain("Take Drive&#39;s idea");
   }
@@ -253,3 +265,34 @@ test("Google API key setup stays separate from browser sign-in and never interpo
   expect(connected).toContain('data-action="google-ai-disconnect"');
   expect(connected).toContain("Remove saved key");
 });
+test("Agents › Side work has How often for subagents, Usual unless set", () => {
+  expect(settingsPage(view({ section: "models" }))).not.toContain("How often");
+  const usual = settingsPage(view({ section: "agents" }));
+  expect(usual).toContain("Side work");
+  expect(usual).toContain("How often");
+  expect(usual).toMatch(/class="on" aria-pressed="true" data-action="subagent-often" data-args="[^"]*usual/);
+  const more = settingsPage(view({ section: "agents", info: { ...info, subagent: { ...info.subagent, often: "more" } } }));
+  expect(more).toMatch(/class="on" aria-pressed="true" data-action="subagent-often" data-args="[^"]*more/);
+});
+
+test("Settings › Agents: one switch, then each agent everywhere, some projects or off (pass 206 A)", () => {
+  const agents = { off: false, agents: [
+    { id: "claude", name: "Claude Code", mode: "every" as const, projects: [] },
+    { id: "codex", name: "Codex", mode: "some" as const, projects: ["/Users/mike/projects/demesne-cli"] },
+    { id: "gemini", name: "Gemini", mode: "off" as const, projects: [] },
+  ] };
+  const html = settingsPage(view({ section: "agents", info: { ...info, trusted: ["/Users/mike/projects/demesne-cli", "/Users/mike/projects/acme-web"], agents } }));
+  expect(html).toContain('<h1 class="cp-title">Agents</h1>');
+  expect(html).toContain("On: Claude Code, Codex and Gemini were found on this computer");
+  expect(html).toContain("In every project");
+  expect(html).toContain("In demesne-cli");
+  expect(html).toContain("Off everywhere");
+  // Some projects unfolds the projects to tick; ticking acme-web adds it.
+  expect(html).toContain("✓ demesne-cli");
+  expect(html).toContain(h('{"agent":"codex","mode":"some","projects":["/Users/mike/projects/demesne-cli","/Users/mike/projects/acme-web"]}'));
+  const off = settingsPage(view({ section: "agents", info: { ...info, agents: { ...agents, off: true } } }));
+  expect(off).toContain("Off: no agent chats, side work, hand-offs or Today posts");
+  expect(off).not.toContain("Some projects");
+  expect(settingsPage(view({ section: "agents", info: { ...info, agents: { off: false, agents: [] } } }))).toContain("No agent tools found");
+});
+const h = (text: string) => text.replace(/"/g, "&quot;");

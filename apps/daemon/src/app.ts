@@ -1,4 +1,6 @@
+import { previewFile, PreviewError } from "./file-preview.ts";
 import { collectDriveReview } from "./drive-review.ts";
+import { listSourceDocuments, sourceDocumentResponse } from "./source-documents.ts";
 import { collectDriveFacts, driveTrackedPaths } from "./drive-facts.ts";
 import { CommandMonitor } from "./command-monitor.ts";
 import { workspaceReview } from "./workspace-review.ts";
@@ -6,8 +8,15 @@ import { parseMailTurn } from "@demesne/protocol";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
-import { foundryEditTool, foundryReadTool, foundrySaveTool } from "./foundry.ts";
-import { electronLook, lookCommand, type FoundryLook } from "./foundry-look.ts";
+import { webFetchTool, webSearchTool } from "./web.ts";
+import { fileText, linkTitle, MAX_COPY_BYTES, SourceError, SourceStore } from "./sources.ts";
+import { rememberTool } from "./remember.ts";
+import { updatePlanTool } from "./plan.ts";
+import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
+import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
+import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
+import { openTool, showTool } from "./open-show.ts";
+import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
   encodeServerSentEvent,
   isRecord,
@@ -36,6 +45,7 @@ import {
   type DaemonStatusResponse,
   type EventEnvelope,
   type SubmitTurnResponse,
+  type SessionInputCapabilities,
   type Turn,
   type TurnAttachment,
   type TurnChangesResponse,
@@ -63,7 +73,7 @@ import { ThemeStore } from "./themes.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { WorkspaceTrust } from "./workspace-trust.ts";
 import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
-import { detectGitBranch } from "./git-branch.ts";
+import { detectGitBranch, detectGitSync } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
 import { DRIVE_QUICK_TOKENS, DRIVE_THOUGHT_TOKENS, planDrive } from "./drive-planner.ts";
@@ -89,18 +99,20 @@ import { driveStream } from "./drive-stream.ts";
 import { buildTurnChanges } from "./turn-changes.ts";
 import { McpManager } from "./mcp.ts";
 import { RouteBook } from "./subagent-route.ts";
+import { AgentChoice, type AgentMode } from "./agent-choice.ts";
+import { Handoffs } from "./handoff.ts";
 import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
-import { captureWindowTool } from "./window-capture.ts";
+import { captureWindowTool, windowCaptureSupported } from "./window-capture.ts";
 import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
 import { loadConfig, type LoadedConfig } from "@demesne/config";
-import type { AgentConfig, HeartbeatConfig, ImageGenerationConfig } from "@demesne/config";
+import { SUBAGENT_OFTEN, type AgentConfig, type HeartbeatConfig, type ImageGenerationConfig, type SubagentOften } from "@demesne/config";
 import type { McpServerConfig } from "@demesne/config";
 import { backgroundProcesses } from "./background.ts";
 import { InferenceScheduler, InferenceSchedulers } from "./inference-scheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
@@ -174,6 +186,8 @@ export function createDaemonApp(options: {
   /// Your phone, through ntfy: routines push their answers to it, and chats
   /// get a notify_phone tool.
   phone?: Phone;
+  /// false leaves out web_search and web_fetch.
+  web?: boolean;
   /// The model the assistant's chat always runs on. The picker switches the
   /// daemon's model for every other chat; your personal files never follow
   /// it to another provider.
@@ -191,8 +205,16 @@ export function createDaemonApp(options: {
   /// external GitHub queries from the caller's account and CI environment.
   driveSignals?: typeof collectDriveSignals;
   providerVision?: boolean;
+  /// Tool search (tool-search.ts): rarely used tools wait behind tool_search.
+  deferTools?: boolean;
   /// Renders a saved Foundry page for the model to look at (tests); by default the desktop app does it when present.
   foundryLook?: FoundryLook;
+  /// Runs foundry_try's steps (tests pass a fake; otherwise the app that looks).
+  foundryTry?: FoundryTry;
+  /// Opens the app being built for look_at_page (tests pass a fake; the daemon uses the desktop app).
+  pageLook?: PageLook;
+  /// The open and show tools (pass 210 A); on unless false.
+  openShow?: boolean;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
   /// Agent socials: the agents post about the day (the daemon on; tests off).
@@ -200,6 +222,7 @@ export function createDaemonApp(options: {
   agent?: AgentConfig;
   /// Persists the sub-agent default chosen at runtime (null clears it).
   saveSubagentModel?: (model: string | null) => void;
+  saveSubagentOften?: (often: SubagentOften) => void;
   /// Where breakage fixes get their git worktrees (default: beside the data directory).
   worktreeRoot?: string;
   /// The user config file to re-read on reload; null skips config re-loading.
@@ -301,8 +324,10 @@ export function createDaemonApp(options: {
   }
   // Models a sub-agent can run on, and your agent tools (agent-cli.ts) as
   // `agent:<id>`, read-only.
+  // Which agents you let work, and where (agent-choice.ts, pass 206 A).
+  const agentChoice = new AgentChoice(join(dirname(options.databasePath), "agent-choice.json"));
   const subagentModels = () => [...processor.availableModels?.() ?? [{ id: processor.modelId, provider: processor.providerId }],
-    ...(cliSubagentsOn ? agentCli.agents() : []).map((agent) => ({ id: agent.model, provider: `${agent.name} on this machine` }))];
+    ...(cliSubagentsOn ? agentCli.agents().filter((agent) => agentChoice.allows(agent.id)) : []).map((agent) => ({ id: agent.model, provider: `${agent.name} on this machine` }))];
   // Under `bun test`, only a test that brings its own agent tools gets them,
   // so a Claude Code installed on the machine never runs in a test.
   const cliSubagentsOn = Boolean(options.agentCli) || process.env.NODE_ENV !== "test";
@@ -330,16 +355,31 @@ export function createDaemonApp(options: {
   });
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
     tools.register(viewImageTool());
-    if (process.platform === "darwin") tools.register(captureWindowTool());
+    if (windowCaptureSupported()) tools.register(captureWindowTool());
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   // Pages are looked at after each save when the desktop app is there to render them.
+  const askLimits = new AskLimits();
   const lookWith = options.foundryLook === undefined ? lookCommand() : null;
   const look = options.foundryLook ?? (lookWith ? electronLook(lookWith) : undefined), looks = new Map<string, number>();
   tools.register(useSkillTool());
+  // Search the web and read pages: in every chat, projectless ones too.
+  if (options.web !== false) { tools.register(webSearchTool()); tools.register(webFetchTool()); }
+  // "Always …": a standing rule, saved to the project's DEMESNE.md.
+  tools.register(rememberTool());
+  // The plan checklist the chat shows as a ribbon on a turn of several steps.
+  tools.register(updatePlanTool());
   tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store, look, looks));
+  // Trying a page needs the app that renders it, like the look.
+  const tryer = options.foundryTry ?? (lookWith ? electronTry(lookWith) : undefined);
+  if (tryer) tools.register(foundryTryTool(store, tryer));
+  // Seeing the app being built: the same hidden window, opened on a local address.
+  const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
+  if (pageLook) tools.register(lookAtPageTool(pageLook));
+  // Open it behind Demesne, and show it on the right (pass 210 A).
+  if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index
   // over them, brought up to date at start and every ten minutes.
   let personalIndex: PersonalIndex | undefined;
@@ -374,6 +414,11 @@ export function createDaemonApp(options: {
     : Promise.resolve();
   const commands=new CommandMonitor(store);
   const agentCli = new AgentCli(dirname(options.databasePath), options.agentCli);
+  // Hand-offs (handoff.ts): a change one of your agent tools makes in its
+  // own worktree, beside Drive's, until you bring it in or discard it.
+  const subagentBook = new RouteBook(join(dirname(options.databasePath), "subagent-route.json"));
+  const handoffs = new Handoffs(join(dirname(options.databasePath), "handoffs.json"), options.worktreeRoot ?? join(dirname(dirname(options.databasePath)), ".demesne-worktrees"),
+    (agent, prompt, cwd, resume, signal, step) => agentCli.edit(agent, prompt, cwd, resume, signal, step));
   /// Codex's models on Demesne's own Codex plan, for its model picker
   /// (best effort: none when the plan can't be listed in a few seconds).
   const codexPlan = async (agent: string): Promise<string[]> => {
@@ -400,6 +445,7 @@ export function createDaemonApp(options: {
     },
     // An agent tool's chat answers its mail by itself: the answer goes back.
     answersMail: isAgentChat,
+    agentOf: (sessionId) => agentIdOf(store.getSession(sessionId)?.preferredModel),
     answerOf: (turnId) => {
       const turn = store.getTurn(turnId);
       if (turn?.status !== "completed") return null;
@@ -427,6 +473,7 @@ export function createDaemonApp(options: {
     } });
   }
   const keepEdits = new KeepEdits(join(dirname(options.databasePath), "keep"));
+  const sources = new SourceStore(join(dirname(options.databasePath), "sources"));
   const engine = new AgentEngine(
     store,
     tools,
@@ -439,20 +486,28 @@ export function createDaemonApp(options: {
       providerRequestTimeoutMs: options.providerRequestTimeoutMs,
       providerEventLimit: options.providerEventLimit,
       providerVision: options.providerVision,
+      deferTools: options.deferTools,
       nameChats: options.nameChats,
       questions,
       themes,
       commands,
-      inferenceFor: (model, thinkingEnabled) => snapshotTurnInference(processor, thinkingEnabled, { model }),
+      inferenceFor: (model, thinkingEnabled, light) => snapshotTurnInference(processor, thinkingEnabled, { model, ...(light ? { light } : {}) }),
       fallbackInference: (current, tried) => processor.createFallbackInference?.(current.thinkingEnabled, tried) ?? null,
       subagentModels: () => subagentModels(),
       cliSubagents: cliSubagentsOn ? {
-        available: () => agentCli.agents().map((agent) => agent.id),
-        run: (id, prompt, cwd, signal, step) => agentCli.subagent(id, prompt, cwd, signal, step),
-        book: new RouteBook(join(dirname(options.databasePath), "subagent-route.json")),
+        available: (root) => agentChoice.filter(agentCli.agents().map((agent) => agent.id), root),
+        run: (id, prompt, cwd, signal, step, web) => agentCli.subagent(id, prompt, cwd, signal, step, web),
+        book: subagentBook,
+      } : undefined,
+      handoffs: cliSubagentsOn ? {
+        available: (root) => agentChoice.filter(agentCli.agents().map((agent) => agent.id), root),
+        offer: (root) => !root.split(/[\\/]/).includes(".demesne-worktrees") && !inDriveWorktree(root),
+        book: subagentBook,
+        store: handoffs,
       } : undefined,
       sessionTools: new SessionToolStore(join(dirname(options.databasePath), "session-tools")),
       keepEdits,
+      sources,
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
       hiddenTools: (sessionId: string) => driveFixes.isThread(sessionId) ? THREAD_HIDDEN_TOOLS : null,
@@ -464,7 +519,7 @@ export function createDaemonApp(options: {
   // Agent socials (socials.ts): the agents post about the day you have
   // together, written by the default model with thinking off.
   const socials = options.socials ? new SocialFeed(join(dirname(options.databasePath), "socials.json"), {
-    agents: () => agentCli.agents().map((agent) => agent.id),
+    agents: () => agentChoice.filter(agentCli.agents().map((agent) => agent.id)),
     // Pictures of their day (social-pictures.ts), from the [images] model.
     picture: options.images ? pictureMaker(options.images, { facePng: (svg) => svgToPng(svg, 512), shrink: (data) => feedPicture(data, 768) }) : null,
     // The Friday reel's opening clip (social-reel.ts), from the video model.
@@ -484,7 +539,7 @@ export function createDaemonApp(options: {
       };
     },
     write: async (messages) => {
-      const inference = snapshotTurnInference(processor, false);
+      const inference = snapshotTurnInference(processor, false, { light: true });
       const leaseId = `socials:${randomUUID()}`;
       const lease = await scheduler.for(inference.providerId).acquire(leaseId, new AbortController().signal);
       try { return await writeOnce((items, signal) => inference.stream(items, [], signal), messages); } finally { lease.release(); }
@@ -529,7 +584,7 @@ export function createDaemonApp(options: {
   const activeControllers = new Map<string, AbortController>();
   const activeStreamClosers = new Set<() => void>();
   const driveLifecycle = new AbortController();
-  // Drive on by default: a quiet project's top idea runs in a worktree on its own.
+  // Drive on its own, once turned on: a quiet project's top idea runs in a worktree.
   const driveAuto = new DriveAutoRuns(join(dirname(options.databasePath), "drive-auto.json"), {
     workspaces: () => (store.database.query("SELECT root FROM workspaces").all() as { root: string }[]).map((row) => row.root),
     trusted: (workspace) => workspaceTrust.isTrusted(workspace),
@@ -668,6 +723,11 @@ export function createDaemonApp(options: {
     } catch (error) {
       throw new Error(`The assistant's chat runs only on ${options.assistantModel} ([assistant] model, or the [provider] model), which no configured provider serves: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+  function acceptsImageInput(inference: TurnInference): boolean {
+    // Native CLI agents currently receive a plain-text prompt. Hydrating the
+    // engine's messages cannot make that separate transport pass image pixels.
+    return inference.external !== true && (inference.vision === true || options.providerVision === true);
   }
   function queueTurn(turn: Turn, inference: TurnInference): Promise<void> {
     const controller = new AbortController();
@@ -1073,7 +1133,7 @@ export function createDaemonApp(options: {
         // git and gh run only in a workspace this daemon already knows.
         const known = store.database.query("SELECT 1 FROM workspaces WHERE root = ?").get(body.workspace);
         if (!known) return apiError("not_found", "Unknown workspace", 404);
-        const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS });
+        const inference = snapshotTurnInference(processor, true, { maxOutputTokens: DRIVE_THOUGHT_TOKENS, light: true });
         const contextKey = JSON.stringify([body.workspace, body.memory ?? [], inference.providerId, inference.modelId]);
         const pendingKey = `${contextKey}:${Boolean(body.force)}`;
         const pending = driveNextRuns.get(pendingKey);
@@ -1160,7 +1220,7 @@ export function createDaemonApp(options: {
       if (request.method === "GET" && url.pathname === "/v1/limits") {
         return json({ limits: processor.planLimits?.() ?? [] } satisfies PlanLimitsResponse);
       }
-      // Drive on by default, and the one switch per project that turns it off.
+      // Drive on its own, and the one switch per project that turns it on.
       if (request.method === "GET" && url.pathname === "/v1/drive/auto") {
         return json({ auto: driveAuto.state(url.searchParams.get("workspace") ?? "") } satisfies DriveAutoResponse);
       }
@@ -1342,13 +1402,31 @@ export function createDaemonApp(options: {
         }
       }
 
+      // Which agents may work, and where (pass 206 A): the agent tools on
+      // this machine with your choice for each, and changing one.
+      if (url.pathname === "/v1/agent-choice" && (request.method === "GET" || request.method === "POST")) {
+        if (request.method === "POST") {
+          const body = await readJson(request) as { off?: unknown; agent?: unknown; mode?: unknown; projects?: unknown };
+          if (typeof body.off === "boolean") agentChoice.setOff(body.off);
+          if (body.agent !== undefined) {
+            const agent = agentCli.agents().find((item) => item.id === body.agent);
+            if (!agent) return apiError("agent_not_found", `${String(body.agent)} isn't installed on this machine`, 404);
+            if (body.mode !== "every" && body.mode !== "some" && body.mode !== "off") return apiError("invalid_request", "mode is every, some or off", 400);
+            if (body.projects !== undefined && !(Array.isArray(body.projects) && body.projects.every((root) => typeof root === "string"))) return apiError("invalid_request", "projects is a list of folders", 400);
+            agentChoice.set(agent.id, body.mode as AgentMode, body.projects as string[] | undefined);
+          }
+        }
+        const record = agentChoice.read();
+        return json({ off: record.off, agents: agentCli.agents().map((agent) => ({ id: agent.id, name: agent.name, mode: record.agents[agent.id]?.mode ?? "every", projects: record.agents[agent.id]?.projects ?? [] })) });
+      }
+
       // Other agents Heartbeat sees, for the sidebar's project lines.
       // Agents that live in Demesne (agent-cli.ts): the agent tools on this
       // machine, each with its chat in the project asked about.
       if (request.method === "GET" && url.pathname === "/v1/agents") {
         const root = url.searchParams.get("workspace");
         const chats = root ? store.listSessions(500).filter((session) => session.workspace?.root === root) : [];
-        const agents = agentCli.agents().map((agent) => {
+        const agents = agentCli.agents().filter((agent) => agentChoice.allows(agent.id, root)).map((agent) => {
           const chat = chats.find((session) => session.preferredModel === agent.model);
           const busy = chat?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
           return { ...agent, sessionId: chat?.id ?? null, state: busy ? "working" : "ready", address: chat ? heartbeat?.address(chat.id) ?? null : null };
@@ -1363,6 +1441,7 @@ export function createDaemonApp(options: {
         let root: string;
         try { root = canonicalWorkspace(body.workspacePath); } catch (error) { return apiError("invalid_workspace", error instanceof Error ? error.message : "Invalid workspace", 400); }
         if (!workspaceTrust.isTrusted(root)) return apiError("workspace_untrusted", `Do you trust the files in ${root}?`, 403);
+        if (!agentChoice.allows(agent.id, root)) return apiError("agent_off", `${agent.name} is off in this project. Turn it on in Settings › Agents`, 403);
         let session = store.listSessions(500).find((item) => item.workspace?.root === root && item.preferredModel === agent.model) ?? null;
         if (!session) {
           session = store.createSession(agent.name, root).session;
@@ -1414,12 +1493,41 @@ export function createDaemonApp(options: {
         return json(response);
       }
 
+      // A hand-off's card: where it is now, its diff, and Bring it in /
+      // Undo / Discard (Ask for changes goes through the chat).
+      if (path[0] === "v1" && path[1] === "handoffs" && path.length === 3) {
+        const item = handoffs.get(path[2]!);
+        if (!item) return apiError("not_found", "No such hand-off", 404);
+        if (request.method === "GET") return json({ handoff: item, patch: handoffs.patch(item.id).slice(0, 200_000) });
+        if (request.method === "POST") {
+          const body = await readJson(request);
+          const action = isRecord(body) ? body.action : undefined;
+          if (action !== "apply" && action !== "undo" && action !== "discard") return apiError("invalid_request", "action must be apply, undo or discard", 400);
+          if (action !== "discard" && commands.runningInWorkspace(item.root)) return apiError("invalid_state", "Wait for running commands in the project first", 409);
+          try {
+            const done = action === "apply" ? await handoffs.apply(item.id) : action === "undo" ? await handoffs.undo(item.id) : await handoffs.discard(item.id);
+            return json({ handoff: done });
+          } catch (error) {
+            return apiError("conflict", error instanceof Error ? error.message : String(error), 409);
+          }
+        }
+      }
+
       // The model sub-agents run on when the agent doesn't name one: null or
       // "auto" means one of your agent tools picked per job (subagent-route.ts),
       // "same" the conversation's own model. Applies to the next sub-agent and is saved.
       if (url.pathname === "/v1/subagent-model" && (request.method === "GET" || request.method === "POST")) {
         if (request.method === "POST") {
           const body = await readJson(request);
+          // How often: a separate field, sent on its own.
+          if (isRecord(body) && body.often !== undefined && body.model === undefined) {
+            if (typeof body.often !== "string" || !(SUBAGENT_OFTEN as readonly string[]).includes(body.often))
+              return apiError("invalid_request", `often must be one of ${SUBAGENT_OFTEN.join(", ")}`, 400);
+            engine.setSubagentOften(body.often as SubagentOften);
+            let saved = true;
+            try { options.saveSubagentOften?.(body.often as SubagentOften); } catch { saved = false; }
+            return json({ model: engine.subagentModel ?? null, often: engine.subagentOften, models: subagentModels(), saved });
+          }
           if (!isRecord(body) || !(body.model === null || typeof body.model === "string" && body.model.trim()))
             return apiError("invalid_request", "model must be a model id or null", 400);
           const model = typeof body.model === "string" ? body.model.trim() : null;
@@ -1428,9 +1536,9 @@ export function createDaemonApp(options: {
           engine.setSubagentModel(model ?? undefined);
           let saved = true;
           try { options.saveSubagentModel?.(model); } catch { saved = false; }
-          return json({ model, models: subagentModels(), saved });
+          return json({ model, often: engine.subagentOften, models: subagentModels(), saved });
         }
-        return json({ model: engine.subagentModel ?? null, models: subagentModels() });
+        return json({ model: engine.subagentModel ?? null, often: engine.subagentOften, models: subagentModels() });
       }
 
       // Providers changed (signed in or out): rebuild them without a restart.
@@ -1529,6 +1637,14 @@ export function createDaemonApp(options: {
         return json({ sessions: query ? store.searchSessions(query) : store.listSessions() });
       }
 
+      if (request.method === "GET" && (path.length === 6 || path.length === 8) && path[0] === "v1" && path[1] === "sessions" && path[3] === "turns" && path[5] === "sources") {
+        const turn = store.getTurn(path[4]!);
+        if (!turn || turn.sessionId !== path[2]) return apiError("not_found", "Turn not found in session", 404);
+        const context = { store, folders: options.assistantFolders ?? {}, trusted: (root: string) => workspaceTrust.isTrusted(root) };
+        if (path.length === 6) return json({ documents: listSourceDocuments(context, path[2]!, turn.id) });
+        if (path[7] === "content") return sourceDocumentResponse(context, path[2]!, turn.id, path[6]!, url.searchParams.get("revision"));
+      }
+
       if (request.method === "PATCH" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
         const body = parseUpdateSessionRequest(await readJson(request));
         let session = store.getSession(path[2]!);
@@ -1603,7 +1719,7 @@ export function createDaemonApp(options: {
 
       // Foundry: artifacts the agent made, with every version kept.
       if (path[0] === "v1" && path[1] === "foundry") {
-        if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts() });
+        if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts(), versions: store.listFoundryVersions() });
         const id = path[2];
         if (request.method === "POST" && path.length === 2) {
           const body = await readJson(request);
@@ -1611,7 +1727,8 @@ export function createDaemonApp(options: {
           try {
             return json(store.saveFoundryArtifact({ id: typeof body.id === "string" ? body.id : undefined, title: typeof body.title === "string" ? body.title : undefined,
               kind: typeof body.kind === "string" ? body.kind as never : undefined, workspace: typeof body.workspace === "string" ? body.workspace : null,
-              note: typeof body.note === "string" ? body.note.slice(0, 300) : "Edited by you", source: body.source }), 201);
+              note: typeof body.note === "string" ? body.note.slice(0, 300) : "Edited by you", source: body.source,
+              ...(typeof body.description === "string" ? { description: body.description.slice(0, 600) } : {}) }), 201);
           } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
         }
         if (id && path.length === 3 && request.method === "GET") {
@@ -1626,6 +1743,32 @@ export function createDaemonApp(options: {
           catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
         }
         if (id && path.length === 3 && request.method === "DELETE") return store.deleteFoundryArtifact(id) ? json({ deleted: true }) : apiError("not_found", "Foundry artifact not found", 404);
+        // Pages that remember: what a page saved, one named value at a time,
+        // and a question the page asks the chat's model (thinking off, no tools).
+        if (id && path.length === 4 && path[3] === "data") {
+          try {
+            if (request.method === "GET") return json({ data: store.getFoundryData(id) });
+            if (request.method === "POST") {
+              const body = await readJson(request);
+              if (!isRecord(body) || typeof body.name !== "string") return apiError("invalid_request", "A saved value needs a name", 400);
+              return json({ data: store.setFoundryData(id, body.name, body.value ?? null) });
+            }
+          } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
+        }
+        if (id && path.length === 4 && path[3] === "ask" && request.method === "POST") {
+          const body = await readJson(request);
+          const question = isRecord(body) && typeof body.question === "string" ? body.question.trim() : "";
+          if (!question) return apiError("invalid_request", "Ask a question", 400);
+          const artifact = store.getFoundryArtifact(id);
+          if (!artifact) return apiError("not_found", "Foundry artifact not found", 404);
+          const wait = askLimits.take(id);
+          if (wait) return apiError("rate_limited", wait, 429);
+          const inference = snapshotTurnInference(processor, false, { light: true });
+          const lease = await scheduler.for(inference.providerId).acquire(`foundry-ask:${randomUUID()}`, request.signal);
+          try { return json({ answer: await askOnce((messages, signal) => inference.stream(messages, [], signal), artifact.title, question) }); }
+          catch (error) { return apiError("ask_failed", error instanceof Error ? error.message : String(error), 502); }
+          finally { lease.release(); }
+        }
         return apiError("not_found", "Unknown Foundry request", 404);
       }
 
@@ -1640,6 +1783,22 @@ export function createDaemonApp(options: {
         }catch(error){return apiError("invalid_request",error instanceof Error?error.message:String(error),400);}
       }
 
+      // Read-only capability of the chat's actual inference route, including
+      // the Assistant's pinned model and native-agent transport limitations.
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "input-capabilities") {
+        if (!store.getSession(path[2]!)) return apiError("not_found", "Session not found", 404);
+        try {
+          const inference = inferenceIn(path[2]!, undefined);
+          return json({
+            sessionId: path[2]!, provider: inference.providerId, model: inference.modelId,
+            images: { enabled: acceptsImageInput(inference), mimeTypes: ["image/png", "image/jpeg", "image/webp"],
+              maxBytes: 20 * 1024 * 1024, maxCount: 6 },
+          } satisfies SessionInputCapabilities);
+        } catch (error) {
+          return apiError("not_supported", error instanceof Error ? error.message : "Image input capability is unavailable", 400);
+        }
+      }
+
       // An image the person attaches to their next message: checked and held
       // here until the message names it in attachmentIds, then saved as an
       // image artifact of that turn.
@@ -1647,7 +1806,34 @@ export function createDaemonApp(options: {
         const session = store.getSession(path[2]!);
         if (!session) return apiError("not_found", "Session not found", 404);
         const mimeType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-        if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) return apiError("invalid_request", "Attach a PNG, JPEG or WebP image", 400);
+        // Any other file (pass 205 A): kept if its text can be read, so the
+        // message can carry it; refused with why when it can't.
+        if (mimeType.startsWith("image/") && !["image/png", "image/jpeg", "image/webp", "image/svg+xml"].includes(mimeType)) return apiError("invalid_request", "Attach a PNG, JPEG or WebP image", 400);
+        if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) {
+          if (Number(request.headers.get("content-length") ?? 0) > MAX_COPY_BYTES) return apiError("invalid_request", "Files can be at most 30 MB", 400);
+          const data = Buffer.from(await request.arrayBuffer());
+          if (!data.byteLength) return apiError("invalid_request", "That file is empty", 400);
+          if (data.byteLength > MAX_COPY_BYTES) return apiError("invalid_request", "Files can be at most 30 MB", 400);
+          let filename = "file";
+          try { filename = decodeURIComponent(request.headers.get("x-demesne-filename") ?? "file"); } catch { /* keep the default */ }
+          filename = filename.replace(/[\u0000-\u001f/\\]/g, "").slice(0, 200) || "file";
+          // A name with no ending takes one from its type, so it's read as what it is.
+          const ending = ({ "application/pdf": ".pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx", "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx" } as Record<string, string>)[mimeType];
+          if (ending && !/\.[a-z0-9]{1,5}$/i.test(filename)) filename += ending;
+          const scratch = mkdtempSync(join(tmpdir(), "demesne-file-"));
+          try {
+            const at = join(scratch, filename);
+            writeFileSync(at, data, { mode: 0o600 });
+            await fileText(at);
+          } catch (error) {
+            return apiError("invalid_request", `${filename} can't be read: ${error instanceof Error ? error.message : String(error)}`, 400);
+          } finally { rmSync(scratch, { recursive: true, force: true }); }
+          const attachment: TurnAttachment = { id: randomUUID(), filename, width: 0, height: 0, kind: "file", size: data.byteLength };
+          uploads.set(attachment.id, { sessionId: session.id, data, mimeType, attachment });
+          for (const id of uploads.keys()) { if (uploads.size <= 24) break; uploads.delete(id); }
+          return json(attachment, 201);
+        }
         if (Number(request.headers.get("content-length") ?? 0) > 20 * 1024 * 1024) return apiError("invalid_request", "Images can be at most 20 MB", 400);
         const data = Buffer.from(await request.arrayBuffer());
         if (!data.byteLength || data.byteLength > 20 * 1024 * 1024) return apiError("invalid_request", "Images can be at most 20 MB", 400);
@@ -1662,6 +1848,52 @@ export function createDaemonApp(options: {
           for (const id of uploads.keys()) { if (uploads.size <= 24) break; uploads.delete(id); }
           return json(attachment, 201);
         } catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
+      }
+
+      // Sources kept with a chat (pass 204): a file or folder by its path, a
+      // link, or a picture from the composer by its upload id.
+      if (path.length >= 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "sources") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        try {
+          if (request.method === "GET" && path.length === 4) return json({ sources: sources.list(session.id) });
+          if (request.method === "DELETE" && path.length === 5) return json({ sources: sources.remove(session.id, path[4]!) });
+          if (request.method === "POST" && path.length === 4) {
+            const body = await readJson(request);
+            const field = (key: string) => isRecord(body) && typeof body[key] === "string" && (body[key] as string).trim() ? (body[key] as string).trim() : undefined;
+            const url = field("url"), file = field("path"), attachmentId = field("attachmentId");
+            let source;
+            if (url) source = await sources.addLink(session.id, url, (link) => linkTitle(tools.get("web_fetch"), link));
+            else if (file) source = sources.addPath(session.id, file, session.workspace?.root);
+            else if (attachmentId) {
+              const upload = uploads.get(attachmentId);
+              if (!upload || upload.sessionId !== session.id) return apiError("not_found", "That picture isn't waiting to be sent any more", 404);
+              const name = upload.attachment.filename, ending = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp" }[upload.mimeType] ?? "";
+              source = sources.addData(session.id, /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name}${ending}`, upload.data);
+            } else return apiError("invalid_request", "Pass url, path or attachmentId", 400);
+            return json({ source, sources: sources.list(session.id) }, 201);
+          }
+        } catch (error) {
+          if (error instanceof SourceError) return apiError("invalid_request", error.message, 400);
+          throw error;
+        }
+        return apiError("not_found", "Not found", 404);
+      }
+
+      // Stop on a background sub-agent's line (pass 190 A).
+      if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "agents" && path[4] === "stop") {
+        if (!store.getSession(path[2]!)) return apiError("not_found", "Session not found", 404);
+        const body = await request.json().catch(() => null) as { toolCallId?: unknown } | null;
+        if (typeof body?.toolCallId !== "string") return apiError("invalid_request", "toolCallId is required", 400);
+        return json({ stopped: engine.stopAgent(body.toolCallId) });
+      }
+
+      // A file shown in its preview card (pass 188 A).
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "preview") {
+        const session = store.getSession(path[2]!);
+        if (!session) return apiError("not_found", "Session not found", 404);
+        try { return json(previewFile(session.workspace?.root ?? null, url.searchParams.get("path") ?? "")); }
+        catch (error) { return apiError("preview_unavailable", error instanceof Error ? error.message : String(error), error instanceof PreviewError ? error.status : 400); }
       }
 
       if (request.method === "GET" && path[0] === "v1" && path[1] === "sessions" && path[3] === "artifacts") {
@@ -1730,11 +1962,12 @@ export function createDaemonApp(options: {
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
         const state = store.getSessionState(path[2]!);
         if (!state) return apiError("not_found", "Session not found", 404);
-        const branch = state.session.workspace ? await detectGitBranch(state.session.workspace.root) : null;
+        const root = state.session.workspace?.root;
+        const [branch, sync] = root ? await Promise.all([detectGitBranch(root), detectGitSync(root)]) : [null, null];
         const session = state.session.workspace && branch
-          ? { ...state.session, workspace: { ...state.session.workspace, gitBranch: branch } }
+          ? { ...state.session, workspace: { ...state.session.workspace, gitBranch: branch, ...(sync ? { gitAhead: sync.ahead, gitBehind: sync.behind } : {}) } }
           : state.session;
-        return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!) });
+        return json({ ...state, session, sessionGrants: permissions.listGrants(path[2]!), sources: sources.list(path[2]!) });
       }
 
       // The chat's Keep list: add a line, or take one off (pass 114).
@@ -1771,12 +2004,18 @@ export function createDaemonApp(options: {
           const message = error instanceof Error ? error.message : "Turn processor cannot snapshot inference configuration";
           return apiError("not_supported", message, 400);
         }
+        if (body.requireImageInput === true && (body.attachmentIds ?? []).some((id) => uploads.get(id)?.attachment.kind !== "file") && !acceptsImageInput(inference)) {
+          return apiError("image_input_unavailable", "This chat's current model isn't set up to read images. Choose an image-capable setup on your PC and try again.", 400);
+        }
         const held = (body.attachmentIds ?? []).map((id) => {
           const upload = uploads.get(id);
           if (!upload || upload.sessionId !== path[2]) throw new ProtocolValidationError("An attached image is missing; attach it again");
           return upload;
         });
-        const attachments = held.map((upload) => upload.attachment);
+        // A file goes with its message and stays with the chat as a source.
+        const attachments = held.map((upload) => upload.attachment.kind === "file"
+          ? { ...upload.attachment, sourceId: sources.addData(path[2]!, upload.attachment.filename, upload.data).id }
+          : upload.attachment);
         const { turn, event } = store.createTurn(
           path[2]!,
           body.content,
@@ -1789,6 +2028,7 @@ export function createDaemonApp(options: {
         );
         for (const upload of held) {
           uploads.delete(upload.attachment.id);
+          if (upload.attachment.kind === "file") continue;
           // A failed save leaves the message's text naming the image; the
           // model just doesn't receive its pixels.
           await ingestImage(store, { data: upload.data, mimeType: upload.mimeType, filename: upload.attachment.filename },

@@ -170,9 +170,9 @@ export interface DriveAway {
 }
 export interface DriveAwayRequest { workspace: string; items: Pick<DriveAwayItem, "proposal" | "signals">[]; minutes?: number }
 export interface DriveAwayResponse { away: DriveAway | null }
-/// Drive on by default: once a project has been quiet for `quietMinutes`,
+/// Drive on its own (off until turned on): once a project has been quiet for `quietMinutes`,
 /// Drive runs its top Next idea in a worktree on its own, at most `perDay`
-/// times a day. One switch per project turns it off.
+/// times a day. One switch per project turns it on.
 export interface DriveAuto { workspace: string; on: boolean; quietMinutes: number; perDay: number; usedToday: number;
   /// Set while your plan's window is this full (90% or more): Drive starts no runs of its own.
   planPaused?: number }

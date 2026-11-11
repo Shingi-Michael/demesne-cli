@@ -292,3 +292,14 @@ test("direct stream and inference snapshot both retain explicit processor effort
   for await (const _ of processor.createTurnInference(false).stream([], [], new AbortController().signal)) { /* consume */ }
   expect(efforts).toEqual(["high", "high"]);
 });
+
+test("a side job runs at low effort only when the model lists low", async () => {
+  const efforts: Array<string | undefined> = [];
+  const models = [{ id: "listed", reasoningLevels: ["low", "medium", "xhigh"], defaultReasoningLevel: "medium" }, { id: "unlisted" }];
+  const provider: ProviderAdapter = { id: "test", async listModels() { return models as never; }, async *stream(request) { efforts.push(request.reasoningLevel); } };
+  const processor = new ProviderTurnProcessor(provider, "listed", { reasoningLevel: "xhigh" });
+  await processor.listModels();
+  for (const [model, light] of [["listed", true], ["listed", false], ["unlisted", true]] as const)
+    for await (const _ of processor.createTurnInference(false, { model, light }).stream([], [], new AbortController().signal)) { /* consume */ }
+  expect(efforts).toEqual(["low", "xhigh", "xhigh"]);
+});

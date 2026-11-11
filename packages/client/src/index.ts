@@ -1,7 +1,9 @@
-import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent} from "@demesne/protocol";
+import type {ReviewScope, ReviewResponse, CommandsResponse, NearbyAgent, FilePreview, ChatSource} from "@demesne/protocol";
 import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
+/// Which agents may work, and where (the daemon's agent-choice.ts).
+export interface AgentChoiceView { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[] }[] }
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean; callback?: string }
 export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }
@@ -167,11 +169,28 @@ export class DemesneClient {
     return this.request(`/v1/permissions/asks?workspace=${encodeURIComponent(workspace)}`);
   }
   /// The model sub-agents run on (null: the chat's own), and the ones they may.
-  async subagentModel(): Promise<{ model: string | null; models: { id: string; provider: string }[] }> {
+  async setSubagentOften(often: "less" | "usual" | "more"): Promise<{ model: string | null; often: string; saved: boolean }> {
+    return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ often }) });
+  }
+  /// A hand-off (pass 165 A): its record and its diff, or act on it.
+  async handoff(id: string): Promise<{ handoff: { id: string; agent: string; status: string; files: { path: string; added: number; removed: number }[]; checks: string[]; error?: string; root: string }; patch: string }> {
+    return this.request(`/v1/handoffs/${encodeURIComponent(id)}`);
+  }
+  async handoffAct(id: string, action: "apply" | "undo" | "discard"): Promise<{ handoff: { id: string; status: string; error?: string } }> {
+    return this.request(`/v1/handoffs/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ action }) });
+  }
+  async subagentModel(): Promise<{ model: string | null; often?: string; models: { id: string; provider: string }[] }> {
     return this.request("/v1/subagent-model");
   }
   async setSubagentModel(model: string | null): Promise<{ model: string | null; models: { id: string; provider: string }[]; saved: boolean }> {
     return this.request("/v1/subagent-model", { method: "POST", body: JSON.stringify({ model }) });
+  }
+  /// Which agents may work, and where (pass 206 A).
+  async agentChoice(): Promise<AgentChoiceView> {
+    return this.request("/v1/agent-choice");
+  }
+  async setAgentChoice(change: { off?: boolean; agent?: string; mode?: "every" | "some" | "off"; projects?: string[] }): Promise<AgentChoiceView> {
+    return this.request("/v1/agent-choice", { method: "POST", body: JSON.stringify(change) });
   }
   /// The folders you trust, and taking one back.
   async trusted(): Promise<import("@demesne/protocol").TrustedResponse> {
@@ -184,7 +203,7 @@ export class DemesneClient {
   async planLimits(): Promise<import("@demesne/protocol").PlanLimitsResponse> {
     return this.request("/v1/limits");
   }
-  /// Drive on by default: whether it starts on its own in this project.
+  /// Drive on its own: whether it starts on its own in this project.
   async driveAuto(workspace: string): Promise<import("@demesne/protocol").DriveAutoResponse> {
     return this.request(`/v1/drive/auto?workspace=${encodeURIComponent(workspace)}`);
   }
@@ -219,11 +238,21 @@ export class DemesneClient {
   async foundryGet(id: string, version?: number): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}`);
   }
-  async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; source: string }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
+  async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; description?: string; source: string }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request("/v1/foundry", { method: "POST", body: JSON.stringify(body) });
   }
   async foundryRename(id: string, title: string): Promise<import("@demesne/protocol").FoundryArtifact> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+  }
+  /// Pages that remember: what a page saved, and a question it asks the model.
+  async foundryData(id: string): Promise<{ data: Record<string, unknown> }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/data`);
+  }
+  async foundrySetData(id: string, name: string, value: unknown): Promise<{ data: Record<string, unknown> }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/data`, { method: "POST", body: JSON.stringify({ name, value }) });
+  }
+  async foundryAsk(id: string, question: string): Promise<{ answer: string }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/ask`, { method: "POST", body: JSON.stringify({ question }) });
   }
   async foundryDelete(id: string): Promise<{ deleted: boolean }> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -351,6 +380,10 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/replay?after=${after}&through=${through}`, { signal });
   }
 
+  /// A file for its preview card: relative to the chat's folder, or absolute.
+  async preview(sessionId: string, path: string): Promise<FilePreview> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/preview?${new URLSearchParams({ path })}`);
+  }
   async review(sessionId:string,scope:ReviewScope,turnId?:string):Promise<ReviewResponse>{
     const query=new URLSearchParams({scope});if(turnId)query.set("turn",turnId);
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/review?${query}`);
@@ -509,6 +542,20 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/keep`, { method: "POST", body: JSON.stringify(change) });
   }
 
+  /// Sources kept with a chat (pass 204), newest first.
+  async listSources(sessionId: string): Promise<{ sources: ChatSource[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sources`);
+  }
+
+  /// Keeps a link, a file or folder by its full path, or a picture waiting in the composer.
+  async addSource(sessionId: string, source: { url: string } | { path: string } | { attachmentId: string }): Promise<{ source: ChatSource; sources: ChatSource[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sources`, { method: "POST", body: JSON.stringify(source) });
+  }
+
+  async removeSource(sessionId: string, sourceId: string): Promise<{ sources: ChatSource[] }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sources/${encodeURIComponent(sourceId)}`, { method: "DELETE" });
+  }
+
   async compactSession(sessionId: string, request: CompactSessionRequest = {}): Promise<SubmitTurnResponse> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/compact`, { method: "POST", body: JSON.stringify(request) });
   }
@@ -533,6 +580,11 @@ export class DemesneClient {
 
   async rewind(sessionId: string, request: RewindSessionRequest): Promise<RewindResponse> {
     return this.request<RewindResponse>(`/v1/sessions/${sessionId}/rewind`, { method: "POST", body: JSON.stringify(request) });
+  }
+
+  /// Stops a sub-agent working in the background of this chat's turn.
+  async stopAgent(sessionId: string, toolCallId: string): Promise<{ stopped: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/agents/stop`, { method: "POST", body: JSON.stringify({ toolCallId }) });
   }
 
   async steer(sessionId: string, request: SteerTurnRequest): Promise<{ steerId: string; turnId: string }> {

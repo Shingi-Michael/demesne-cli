@@ -89,6 +89,8 @@ export interface WorkspaceHostOptions {
   /// Desktop hosts use trusted native IPC instead of command-line OS utilities.
   copy?: (text: string) => Promise<void>;
   open?: (path: string) => Promise<void>;
+  /// Brings an app the chat opened in front of Demesne (tests pass a fake).
+  bringToFront?: (app: string) => Promise<void>;
   changed: (snapshot: ReturnType<WorkspaceHost["snapshot"]>) => void;
   /// Applied once, the first time the daemon is online: `demesne --model <id>`
   /// and `demesne "<message>"`.
@@ -264,6 +266,8 @@ export class WorkspaceHost {
   verificationFingerprint: WorkspaceFingerprint | null = null;
   processesError: string | null = null;
   reviewRevision = 0;
+  /// Files a preview card showed, which Open may hand to their own app.
+  private previewed = new Set<string>();
   private reviewCache = new Map<
     string,
     import("@demesne/protocol").ReviewResponse
@@ -428,6 +432,7 @@ export class WorkspaceHost {
       files: this.files,
       planOnly: this.planOnly,
       attachments: this.attachments,
+      sources: this.current?.state.sources ?? [],
       queue: this.queue,
       steers: this.steers,
       asks: this.asks,
@@ -1154,9 +1159,10 @@ export class WorkspaceHost {
   private async settingsInfo(): Promise<SettingsInfo> {
     const config = this.settings.loaded.config, mine = new Set(this.userAllowRules());
     const user = this.userConfig(), userMcp = isRecord(user.mcp) && isRecord(user.mcp.servers) ? user.mcp.servers : {};
-    const [trusted, subagent] = await Promise.all([
+    const [trusted, subagent, agents] = await Promise.all([
       this.client.trusted().then((result) => result.trusted).catch(() => null),
       this.client.subagentModel().catch(() => null),
+      Promise.resolve().then(() => this.client.agentChoice()).catch(() => null),
     ]);
     const limits = config.drive ?? {};
     return {
@@ -1166,7 +1172,8 @@ export class WorkspaceHost {
       server: this.client.server,
       allow: config.permissions.allow.map((rule) => ({ rule, mine: mine.has(rule) })),
       trusted,
-      subagent: subagent ? { model: subagent.model, models: subagent.models } : { model: config.agent?.subagentModel ?? null, models: [] },
+      subagent: subagent ? { model: subagent.model, often: subagent.often ?? "usual", models: subagent.models } : { model: config.agent?.subagentModel ?? null, often: config.agent?.subagentOften ?? "usual", models: [] },
+      agents,
       agent: { maxModelRounds: config.agent?.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds, maxToolCalls: config.agent?.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls },
       drive: { maxActiveMinutes: limits.maxActiveMinutes ?? DEFAULT_DRIVE_LIMITS.maxActiveMinutes, maxTokens: limits.maxTokens ?? DEFAULT_DRIVE_LIMITS.maxTokens, maxTasks: limits.maxTasks ?? DEFAULT_DRIVE_LIMITS.maxTasks },
       images: config.images?.url ? { model: config.images.model ?? null } : null,
@@ -1292,6 +1299,8 @@ export class WorkspaceHost {
         ...(attached.length ? { attachmentIds: attached.map((image) => image.id) } : {}),
       });
       if (this.current?.session.id === id) this.attachments = this.attachments.filter((image) => !attached.includes(image));
+      // A file sent with the message is kept as a source (pass 205 A).
+      if (attached.some((one) => one.kind === "file")) session.state.sources = (await this.client.listSources(id).catch(() => null))?.sources ?? session.state.sources;
       if (this.current?.session.id === id) {
         session.ensureTurn(result.turn);
         this.drive?.agent.workerStarted(id, content, result.turn.id);
@@ -1553,7 +1562,12 @@ export class WorkspaceHost {
       "setup",
       "setup-action",
       "foundry-list",
+      "foundry-shelf",
       "foundry-get",
+      // A page's own saves and asks (pages that remember), from the foundry: handler.
+      "foundry-data",
+      "foundry-data-set",
+      "foundry-ask",
       "google-ai-cancel",
       // The sidebar's right-click menu acts on any chat or project.
       "delete-chat",
@@ -1593,7 +1607,7 @@ export class WorkspaceHost {
     // The Next queue: refresh, Run (a bounded Drive mission), Plan first
     // (a read-only plan turn), Not now (a day), Never (a veto in memory).
     if (method === "next-refresh") return this.refreshNext(true);
-    // Drive on by default: the one switch per project.
+    // Drive on its own: the one switch per project (off until turned on).
     if (method === "drive-auto") {
       if (!this.breakage.supported) throw new Error("Drive on its own needs a newer daemon.");
       return this.breakage.setAuto(args.on === true);
@@ -1687,7 +1701,7 @@ export class WorkspaceHost {
     // kept for callers that take over explicitly; typing no longer sends it).
     // Clicking, navigating, opening panels and reading leave it running.
     // A mission in the background keeps going while you talk in your own chat.
-    if (method === "manual" || (["submit", "plan-submit", "themefy", "foundry-create", "foundry-make"].includes(method) && (!this.driveSession || this.inDriveHome))) {
+    if (method === "manual" || (["submit", "plan-submit", "themefy", "foundry-create"].includes(method) && (!this.driveSession || this.inDriveHome))) {
       this.onManual?.();
       this.drive?.agent.intervene();
     }
@@ -1869,12 +1883,12 @@ export class WorkspaceHost {
     }
     if (method === "attach") {
       if (!this.current) throw new Error("Choose a session first.");
-      if (typeof args.data !== "string" || typeof args.mimeType !== "string" || typeof args.name !== "string") throw new Error("Invalid image");
-      if (this.attachments.length >= 6) throw new Error("A message can carry at most 6 images.");
+      if (typeof args.data !== "string" || typeof args.mimeType !== "string" || typeof args.name !== "string") throw new Error("Invalid file");
+      if (this.attachments.length >= 10) throw new Error("A message can carry at most 10 files and pictures.");
       const selected = this.current;
       const artifact = await this.client.uploadAttachment(selected.session.id, Buffer.from(args.data, "base64"), args.mimeType, args.name);
       if (this.current !== selected) return;
-      const image = { id: artifact.id, filename: artifact.filename, width: artifact.width, height: artifact.height };
+      const image = { id: artifact.id, filename: artifact.filename, width: artifact.width, height: artifact.height, ...(artifact.kind === "file" ? { kind: "file" as const, size: artifact.size } : {}) };
       this.attachments = [...this.attachments, image];
       this.publish();
       return image;
@@ -1967,6 +1981,60 @@ export class WorkspaceHost {
     if (method === "files") {
       await this.refreshFiles();
       return this.files;
+    }
+    // Stop on a background sub-agent's line (pass 190 A).
+    if (method === "stop-agent") {
+      if (!this.current) throw new Error("Choose a session first.");
+      await this.client.stopAgent(this.current.session.id, string(args.toolCallId, "agent", 200));
+      return;
+    }
+    // Sources kept with the chat (pass 204): a link, a file or folder by its
+    // path (Choose… or a drop), or a picture waiting in the composer (Keep).
+    if (method === "source-add") {
+      if (!this.current) throw new Error("Choose a session first.");
+      const selected = this.current;
+      const asked = typeof args.url === "string" ? { url: string(args.url, "link", 8000) }
+        : typeof args.path === "string" ? { path: string(args.path, "path", 4096) }
+        : { attachmentId: string(args.attachmentId, "attachment", 200) };
+      const { source, sources } = await this.client.addSource(selected.session.id, asked);
+      selected.state.sources = sources;
+      if ("attachmentId" in asked && this.current === selected) this.attachments = this.attachments.filter((image) => image.id !== asked.attachmentId);
+      this.publish();
+      return source;
+    }
+    if (method === "source-remove") {
+      if (!this.current) throw new Error("Choose a session first.");
+      const selected = this.current;
+      selected.state.sources = (await this.client.removeSource(selected.session.id, string(args.id, "source", 100))).sources;
+      this.publish();
+      return;
+    }
+    // A folder opens in Finder, a link in the browser, a file in its own app
+    // (the page shows a file it can preview in the preview card instead).
+    if (method === "source-open") {
+      const source = this.current?.state.sources?.find((one) => one.id === args.id);
+      if (!source) throw new Error("That source isn't kept here any more");
+      if (source.kind === "link") {
+        const url = new URL(source.target);
+        if (!["http:", "https:"].includes(url.protocol)) throw new Error("Unsupported link");
+      }
+      await this.open(source.target);
+      return;
+    }
+    // A file for its preview card (pass 188 A).
+    if (method === "file-preview") {
+      if (!this.current) throw new Error("Choose a session first.");
+      const preview = await this.client.preview(this.current.session.id, string(args.path, "path", 4000));
+      this.previewed.add(preview.absolute);
+      return preview;
+    }
+    // Opens a previewed file in its own app: only a file the daemon just
+    // previewed, so a page can't open anything else.
+    if (method === "open-preview") {
+      const absolute = string(args.absolute, "file", 4000);
+      if (!this.previewed.has(absolute)) throw new Error("Preview the file first");
+      await this.open(absolute);
+      return;
     }
     if (method === "file-edit-details") {
       const turnId = string(args.turnId, "turn id", 200);
@@ -2160,28 +2228,24 @@ export class WorkspaceHost {
     // Foundry: what the agent made. The list and a source are read by the
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
+    if (method === "foundry-shelf") return await this.client.foundryList();
+    // A picture a tool took this chat (look_at_page), for its step in the turn.
+    if (method === "tool-picture") {
+      const id = string(args.id, "picture", 64);
+      if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("Invalid picture");
+      const artifact = await this.client.getArtifact(String(args.sessionId), id);
+      const bytes = await this.client.artifactContent(artifact, "original");
+      return `data:${/^image\/(png|jpeg|webp|gif)$/.test(artifact.mimeType) ? artifact.mimeType : "image/png"};base64,${Buffer.from(bytes).toString("base64")}`;
+    }
     if (method === "foundry-get") return this.client.foundryGet(string(args.id, "artifact", 200), typeof args.version === "number" && Number.isSafeInteger(args.version) && args.version > 0 ? args.version : undefined);
-    if (method === "foundry-rename") return this.client.foundryRename(string(args.id, "artifact", 200), string(args.title, "title", 200));
-    if (method === "foundry-delete") return this.client.foundryDelete(string(args.id, "artifact", 200));
+    if (method === "foundry-data") return this.client.foundryData(string(args.id, "artifact", 200));
+    if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);
+    if (method === "foundry-ask") return this.client.foundryAsk(string(args.id, "artifact", 200), string(args.question, "question", 8000));
     if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you" });
     if (method === "foundry-create") {
       const text = string(args.text, "request", 4000).trim();
       if (!text) throw new Error("Describe what to make");
       return this.submit(`Foundry: ${text}`);
-    }
-    // Make something: a new chat in this window's place, asked to use Foundry.
-    if (method === "foundry-make") {
-      const text = string(args.text, "request", 4000).trim();
-      if (!text) throw new Error("Describe what to make");
-      const plain = Boolean(this.current && !this.current.session.workspace);
-      await this.newSession(undefined, { plain, reuse: true });
-      await this.submit(`Create in Foundry: ${text}`, false, "ask");
-      return this.snapshot();
-    }
-    // Revise: the composer of the open chat gets a line naming the artifact.
-    if (method === "foundry-revise") {
-      this.carryDraft(`Revise the Foundry artifact "${string(args.title, "title", 200)}" (id ${string(args.id, "artifact", 200)}): `);
-      return;
     }
     // Customize: this project's instructions, commands and workflows, read
     // and written in place; a plain chat has only yours.
@@ -2309,6 +2373,35 @@ export class WorkspaceHost {
       if (spec.restart) this.restartFor.add(key);
       return this.settingsInfo();
     }
+    if (method === "handoff" || method === "handoff-act") {
+      const id = typeof args.id === "string" && /^[a-z0-9-]{1,40}$/.test(args.id) ? args.id : null;
+      if (!id) throw new Error("Invalid hand-off");
+      if (method === "handoff") return this.client.handoff(id);
+      const action = args.action;
+      if (action !== "apply" && action !== "undo" && action !== "discard") throw new Error("Invalid value");
+      return this.client.handoffAct(id, action);
+    }
+    if (method === "subagent-often") {
+      const often = args.often;
+      if (often !== "less" && often !== "usual" && often !== "more") throw new Error("Invalid value");
+      await this.client.setSubagentOften(often);
+      this.reloadSettings();
+      return this.settingsInfo();
+    }
+    // Settings › Agents (pass 206 A): the one switch, or one agent's place.
+    if (method === "agent-choice") {
+      const mode = args.mode;
+      if (mode !== undefined && mode !== "every" && mode !== "some" && mode !== "off") throw new Error("Invalid value");
+      const projects = args.projects === undefined ? undefined : Array.isArray(args.projects) ? args.projects.map((root) => string(root, "project", 4000)) : null;
+      if (projects === null) throw new Error("Invalid value");
+      await this.client.setAgentChoice({
+        ...(typeof args.off === "boolean" ? { off: args.off } : {}),
+        ...(args.agent !== undefined ? { agent: string(args.agent, "agent", 40), mode: mode ?? "every", ...(projects ? { projects } : {}) } : {}),
+      });
+      // The sidebar's Agents list follows at once.
+      void this.refreshAgents();
+      return this.settingsInfo();
+    }
     if (method === "subagent-model") {
       const model = args.model === null ? null : string(args.model, "model", 200);
       await this.client.setSubagentModel(model);
@@ -2385,6 +2478,18 @@ export class WorkspaceHost {
         if (skipped.length) throw new Error(`Kept ${skipped.length} ${skipped.length === 1 ? "chat" : "chats"}: ${skipped[0]!.reason}`);
       }
       await this.refreshSessions();
+      return;
+    }
+    // Bring to front (pass 210 A): only an app this chat opened.
+    if (method === "bring-to-front") {
+      const app = string(args.app, "app", 100);
+      const opened = this.current?.runs().some((run) => run.entries.some((entry) => entry.type === "tool" && entry.name === "open" && entry.state === "done"
+        && typeof entry.message === "string" && (() => { try { return (JSON.parse(entry.message) as { app?: unknown }).app === app; } catch { return false; } })()));
+      if (!opened) throw new Error("This chat didn't open that app");
+      if (this.options.bringToFront) return this.options.bringToFront(app);
+      if (process.platform !== "darwin") throw new Error("Bring it to front from your taskbar");
+      const child = Bun.spawn(["open", "-a", app], { stdout: "ignore", stderr: "ignore" });
+      if ((await child.exited) !== 0) throw new Error(`Could not bring ${app} to front`);
       return;
     }
     if (method === "open-link") {

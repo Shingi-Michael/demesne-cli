@@ -25,6 +25,7 @@ import { join } from "node:path";
 /// outward action. Without a running daemon none of this is offered.
 
 export const HEARTBEAT_TOOL = "heartbeat";
+const AGENT_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "Gemini" };
 const PERFORMATIVES = ["request", "offer", "agree", "refuse", "inform", "done", "fail", "cancel", "lease", "release"] as const;
 const REQUEST_TIMEOUT_MS = 10_000;
 const AGENTS_CACHE_MS = 30_000;
@@ -182,6 +183,9 @@ export interface HeartbeatBridgeOptions {
   answersMail?: (sessionId: string) => boolean;
   /// The finished turn's answer, or null when it didn't finish.
   answerOf?: (turnId: string) => string | null;
+  /// The agent tool (claude, codex, gemini) a chat on this machine runs, for
+  /// naming who a message went to; null for an ordinary chat.
+  agentOf?: (sessionId: string) => string | null;
   /// Resolves when the chat's running turn, if any, has ended.
   waitForIdle: (sessionId: string) => Promise<void>;
   log?: (message: string) => void;
@@ -217,6 +221,16 @@ export class HeartbeatBridge {
   sessionOf(address: string): string | null {
     for (const [sessionId, attachment] of this.attachments) if (attachment.address === address) return sessionId;
     return null;
+  }
+
+  /// Who an address is, in words the chat can show: the agent behind it
+  /// (its face), its name and its project.
+  recipient(address: string): { agent: string | null; name: string; project: string } {
+    const parts = splitAddress(address);
+    const project = parts ? (/-[a-z0-9]{5}$/.test(parts.label) ? parts.label.slice(0, -6) : parts.label) : "";
+    const local = this.sessionOf(address);
+    const agent = local ? this.options.agentOf?.(local) ?? null : parts && parts.provider !== "demesne" ? parts.provider : null;
+    return { agent, name: agent ? AGENT_NAMES[agent] ?? agent : parts?.provider === "demesne" ? "a Demesne chat" : address, project };
   }
 
   attach(sessionId: string, workspaceRoot: string): Promise<string | null> {
@@ -310,15 +324,19 @@ export class HeartbeatBridge {
     }
   }
 
-  /// Sends a chat's answer back to whoever wrote: done for a request,
-  /// inform otherwise, fail when the turn didn't finish.
+  /// Answers whoever asked: done for a request, fail when the turn didn't
+  /// finish. Only a request asks for an answer, so announcements and other
+  /// mail get none and a broadcast costs no replies. A sender's latest
+  /// request is the one answered.
   async answer(sessionId: string, asked: Envelope[], text: string | null): Promise<void> {
     const address = this.address(sessionId);
     if (!address) return;
     const latest = new Map<string, Envelope>();
-    for (const message of asked) if (message.from !== address) latest.set(message.from, message);
+    for (const message of asked) {
+      if (message.from !== address && message.performative === "request") latest.set(message.from, message);
+    }
     for (const message of latest.values()) {
-      const performative: Performative = text === null ? "fail" : message.performative === "request" ? "done" : "inform";
+      const performative: Performative = text === null ? "fail" : "done";
       const words = (text ?? "This agent did not finish; its chat in Demesne says why.").slice(0, 1900);
       try {
         const { line } = compactLine({ to: message.from, performative, reply_to: message.id, text: words });
@@ -480,7 +498,8 @@ export function heartbeatTool(bridge: HeartbeatBridge): AgentTool {
           const reply = await bridge.client.request({ command: "say", line, as: address, owner: input.owner === true, read: true });
           if (reply.status !== "ok") throw new Error(typeof reply.error === "string" ? reply.error : "Heartbeat refused the message");
           const unread = Array.isArray(reply.unread) ? reply.unread as Envelope[] : [];
-          return JSON.stringify({ id: reply.id, result: reply.result, ...(reply.reason ? { reason: reply.reason } : {}), english: reply.english,
+          const to = String(input.to ?? "").trim(), who = bridge.recipient(to);
+          return JSON.stringify({ id: reply.id, to, ...who, result: reply.result, ...(reply.reason ? { reason: reply.reason } : {}), english: reply.english,
             ...(unread.length ? { unread: unread.map((message) => `[${message.authority}] ${message.compact}`) } : {}) });
         }
         case "approve":

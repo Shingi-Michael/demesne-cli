@@ -1,38 +1,15 @@
-/// Foundry: what the agent made for you — prototypes, graphics, documents —
-/// as a gallery, and one artifact at a time with its versions. HTML and SVG
+/// Foundry: one long page of mockups (pass 196 A). Every version of every
+/// mockup, newest first, grouped by day, each at real size under one quiet
+/// line; options stack one under another. You only look here: what to change
+/// goes to the chat. HTML and SVG
 /// render in a foundry:// frame that has no network, no app access and no
 /// shared origin; Markdown renders through the app's sanitizer.
-import type { FoundryArtifact, FoundryArtifactDetail, FoundryKind } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryKind, FoundryShelfVersion } from "@demesne/protocol";
 import { dayWord } from "./chats-page.ts";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
-const btn = (action: string, label: string, data: Record<string, unknown> = {}, className = "", extra = "") =>
-  `<button type="button" class="${className}" data-action="${action}" data-args="${h(JSON.stringify(data))}"${extra}>${label}</button>`;
 const icon = (paths: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${paths}</svg>`;
-const projectWord = (path: string | null) => path ? path.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || path : "Just a chat";
-
-export type FoundryTab = "all" | FoundryKind;
-export type FoundryWidth = "desktop" | "tablet" | "phone";
-export interface FoundryUi {
-  tab: FoundryTab;
-  view: "preview" | "source";
-  width: FoundryWidth;
-  /// Source being edited in place, or null.
-  edit: string | null;
-  draft: string;
-  error: string;
-  busy: boolean;
-}
-export interface FoundryView {
-  list: FoundryArtifact[] | null;
-  open: FoundryArtifactDetail | null;
-  ui: FoundryUi;
-  /// This window's project, to mark artifacts made here.
-  here: string;
-  /// Rendered, sanitized Markdown for an open document.
-  markdownHtml: (source: string) => string;
-}
 
 export const KIND_WORD: Record<FoundryKind, string> = { html: "Prototype", svg: "Graphic", markdown: "Document", deck: "Deck", doc: "Doc", dashboard: "Dashboard" };
 export const KIND_ICON: Record<FoundryKind, string> = {
@@ -46,60 +23,93 @@ export const KIND_ICON: Record<FoundryKind, string> = {
 export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", svg: "svg", markdown: "md", deck: "html", doc: "html", dashboard: "html" };
 /// The kinds Demesne draws from content (a deck, a doc, a dashboard).
 export const READY_KIND = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
-/// Which tab an artifact sits under: plain Markdown notes sit with the docs.
-const tabOf = (kind: FoundryKind): FoundryTab => kind === "markdown" ? "doc" : kind;
 export const frameURL = (id: string, version: number) => `foundry://artifact/${encodeURIComponent(id)}?v=${version}`;
-const frame = (artifact: { id: string; version: number; title: string }, className: string, extra = "") =>
-  `<iframe class="${className}" src="${h(frameURL(artifact.id, artifact.version))}" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(artifact.title)}"${extra}></iframe>`;
+/// On the long page a page shows its options stacked (parts.js reads stack=1),
+/// and loads only when it scrolls near the screen.
+/// `at` is when the version last changed: Foundry's own fixes in the same
+/// ask change it in place (pass 197 A), so the frame loads the fixed page.
+const frame = (id: string, version: number, title: string, at: string) =>
+  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1&at=${Date.parse(at) || 0}`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
 
-function gallery(view: FoundryView) {
-  const { list, ui } = view;
-  const counts: Record<FoundryTab, number> = { all: list?.length ?? 0, html: 0, svg: 0, markdown: 0, deck: 0, doc: 0, dashboard: 0 };
-  for (const item of list ?? []) counts[tabOf(item.kind)]++;
-  const tab = (id: FoundryTab, word: string) => btn("foundry-tab", `${word}<span class="cp-count"> ${counts[id] || ""}</span>`, { tab: id }, `cp-tab${ui.tab === id ? " on" : ""}`, ` aria-pressed="${ui.tab === id}"`);
-  const shown = (list ?? []).filter((item) => ui.tab === "all" || tabOf(item.kind) === ui.tab);
-  const cards = list === null ? '<p class="cp-empty">Reading Foundry…</p>' : !shown.length
-    ? `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>${list.length ? "Nothing of this kind yet" : "Nothing made yet"}</b><span>Describe something above, or ask for it in any chat. The agent saves it here, and every revision is kept.</span></div>`
-    : `<div class="fd-grid">${shown.map((item) => {
-      const thumb = item.kind === "markdown"
-        ? `<div class="fd-thumb doc">${KIND_ICON.markdown}</div>`
-        : `<div class="fd-thumb${item.kind === "svg" ? " graphic" : ""}">${frame(item, "fd-thumb-frame", ' loading="lazy" tabindex="-1" aria-hidden="true" scrolling="no"')}</div>`;
-      return `<div class="fd-card">${btn("foundry-open", `${thumb}<span class="fd-card-text"><b>${h(item.title)}</b><span>${KIND_ICON[item.kind]}${KIND_WORD[item.kind]} · ${h(dayWord(item.updatedAt))}${item.version > 1 ? ` · v${item.version}` : ""}</span></span>`, { id: item.id }, "fd-card-open")}${item.workspace && item.workspace !== view.here ? `<span class="fd-where" title="${h(item.workspace)}">${h(projectWord(item.workspace))}</span>` : ""}</div>`;
-    }).join("")}</div>`;
-  return `<div class="fd-head"><div><h1 class="cp-title">Foundry</h1><p class="cp-lede">Decks, docs, dashboards, prototypes and graphics made for you. Open one to see it live, revise it, or export it.</p></div></div>`
-    + `<form class="fd-make" id="foundry-make"><span class="fd-make-icon">${icon('<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>')}</span><input name="make" value="${h(ui.draft)}" placeholder="Make a pricing page for a coffee roaster, warm and minimal" aria-label="Describe something to make" autocomplete="off" spellcheck="false"${ui.busy ? " disabled" : ""}><kbd aria-hidden="true">↵</kbd></form>`
-    + (ui.error ? `<p class="sp-error" role="alert">${h(ui.error)}</p>` : `<p class="sp-hint">Starts a chat ${view.here ? `in ${h(projectWord(view.here))}` : "on its own"}; what it makes lands here.</p>`)
-    + `<div class="cp-tabs fd-tabs" role="toolbar" aria-label="Kinds">${tab("all", "All")}${tab("deck", "Decks")}${tab("doc", "Docs")}${tab("dashboard", "Dashboards")}${tab("html", "Prototypes")}${tab("svg", "Graphics")}</div>${cards}`;
+export interface FoundryView {
+  list: FoundryArtifact[] | null;
+  versions: FoundryShelfVersion[] | null;
+  error: string;
+  /// The chat a version came from, by its id.
+  chatTitle: (id: string) => string | null;
 }
 
-function detail(view: FoundryView, open: FoundryArtifactDetail) {
-  const { ui } = view;
-  const editing = ui.edit !== null;
-  const showSource = ui.view === "source" || editing;
-  const seg = (action: string, word: string, on: boolean, args: Record<string, unknown>) => btn(action, word, args, `fd-seg${on ? " on" : ""}`, ` aria-pressed="${on}"`);
-  const current = open.versions[0]?.version ?? open.version;
-  const versionNote = open.versions.find((item) => item.version === open.version)?.note;
-  const versions = open.versions.length > 1
-    ? `<label class="fd-versions"><span class="sr-only">Version</span><select data-foundry-version aria-label="Version">${open.versions.map((item) => `<option value="${item.version}"${item.version === open.version ? " selected" : ""}>v${item.version}${item.version === current ? " · latest" : ""}${item.note ? ` · ${h(item.note.slice(0, 40))}` : ""}</option>`).join("")}</select></label>`
-    : "";
-  const stage = showSource
-    ? `<div class="fd-source"><textarea spellcheck="false" aria-label="Source"${editing ? "" : " readonly"}>${h(editing ? ui.edit : open.source)}</textarea>${editing ? `<div class="cz-edit-bar"><span class="cz-path">Saving makes version ${current + 1}</span>${btn("foundry-edit-cancel", "Cancel", {}, "cz-cancel")}${btn("foundry-edit-save", "Save version", {}, "cz-save")}</div>` : ""}</div>`
-    : open.kind === "markdown"
-      ? `<article class="fd-doc markdown">${view.markdownHtml(open.source)}</article>`
-      : `<div class="fd-stage ${open.kind === "svg" ? "graphic" : h(ui.width)}">${frame(open, "fd-frame")}</div>`;
-  const older = open.version !== current ? `<div class="fd-older">You're looking at v${open.version}. ${btn("foundry-version", "Show latest", { version: current }, "link")} ${btn("foundry-restore", "Make this the latest", {}, "link")}</div>` : "";
-  return `<div class="fd-detail">`
-    + `<div class="fd-top">${btn("foundry-close", `${icon('<path d="m15 6-6 6 6 6"/>')}Foundry`, {}, "st-back fd-back")}<span class="sp"></span>`
-    + `${btn("foundry-revise", `${icon('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>')}Revise in chat`, { id: open.id, title: open.title }, "fd-act primary")}`
-    + `${btn("foundry-copy", "Copy", {}, "fd-act")}${btn("foundry-export", "Export", { id: open.id }, "fd-act")}${btn("foundry-delete", "Delete", { id: open.id }, "fd-act danger")}</div>`
-    + `<div class="fd-title"><h1 class="cp-title" title="Double-click to rename" data-foundry-title>${h(open.title)}</h1>`
-    + `<p class="fd-meta">${KIND_ICON[open.kind]}${KIND_WORD[open.kind]} · v${open.version}${versionNote ? ` · ${h(versionNote)}` : ""} · ${h(dayWord(open.updatedAt))} · ${h(projectWord(open.workspace))}</p></div>`
-    + `<div class="fd-bar"><div class="fd-segs" role="group" aria-label="View">${seg("foundry-view", "Preview", !showSource, { view: "preview" })}${seg("foundry-view", "Source", showSource, { view: "source" })}</div>`
-    + ((open.kind === "html" || READY_KIND.has(open.kind)) && !showSource ? `<div class="fd-segs" role="group" aria-label="Width">${seg("foundry-width", "Desktop", ui.width === "desktop", { width: "desktop" })}${seg("foundry-width", "Tablet", ui.width === "tablet", { width: "tablet" })}${seg("foundry-width", "Phone", ui.width === "phone", { width: "phone" })}</div>` : "")
-    + `<span class="sp"></span>${versions}${editing ? "" : btn("foundry-edit", "Edit source", {}, "fd-act")}${open.kind !== "markdown" && !showSource ? btn("foundry-reload", "Reload", {}, "fd-act") : ""}</div>`
-    + older + (ui.error ? `<p class="sp-error" role="alert">${h(ui.error)}</p>` : "") + stage + `</div>`;
-}
+/// One version on the long page: its address, for links from the chat.
+export const shelfKey = (id: string, version: number) => `${id}:${version}`;
+const dayKey = (date: string) => { const at = new Date(date); return `${at.getFullYear()}-${at.getMonth() + 1}-${at.getDate()}`; };
+const clock = (date: string) => new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+/// The long page: every version, newest first, under the day it was made.
+/// The day stays at the top as you scroll; the rail on the edge (pass 209 A)
+/// snaps to any mockup.
 export function foundryPage(view: FoundryView) {
-  return view.open ? detail(view, view.open) : gallery(view);
+  const { list, versions } = view;
+  const title = `<h1 class="cp-title fd-h">Foundry</h1>` + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "");
+  if (list === null || versions === null) return title + '<p class="cp-empty">Reading Foundry…</p>';
+  const byId = new Map(list.map((item) => [item.id, item]));
+  const shown = versions.filter((item) => byId.has(item.artifactId));
+  if (!shown.length) return title + `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
+  const days = shelfDays(shown);
+  // Pass 208 A: the name, from which chat (a link to it), what it is, and
+  // the version's own name; "based on" links to the mockup it came from.
+  const item = (version: FoundryShelfVersion, pick: boolean) => {
+    const artifact = byId.get(version.artifactId)!, key = shelfKey(artifact.id, version.version);
+    const chat = version.sessionId ? view.chatTitle(version.sessionId) : null;
+    const line = `<div class="fd-ln"><b>${h(artifact.title)}</b>${chat ? `<span>from ${link("select-session", { id: version.sessionId }, `“${h(chat)}”`, "Open the chat")}</span>` : ""}`
+      + `<span class="fd-ln-r">${h(KIND_WORD[artifact.kind])} · ${h(clock(version.createdAt))}</span></div>`;
+    const based = artifact.basedOn && byId.get(artifact.basedOn.id);
+    const ver = `<div class="fd-ver"><b>v${version.version}${version.note ? ` · ${h(version.note)}` : ""}</b>`
+      + (pick ? '<span class="fd-rec-pill">recommended</span>' : "")
+      + (based ? `<span>based on ${link("foundry-open", { id: based.id, version: artifact.basedOn!.version }, `${h(based.title)} v${artifact.basedOn!.version}`, "Show it")}</span>` : "") + "</div>";
+    const words = artifact.description ? `<p class="fd-desc">${h(artifact.description)}</p>` : "";
+    const body = artifact.kind === "markdown"
+      ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
+      : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt)}</div>`;
+    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${words}${ver}${body}</section>`;
+  };
+  return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
+}
+
+/// The page's days, newest first, each with its versions in page order.
+function shelfDays(shown: readonly FoundryShelfVersion[]) {
+  const days: { key: string; word: string; items: FoundryShelfVersion[] }[] = [];
+  for (const item of shown) {
+    const key = dayKey(item.createdAt);
+    const day = days.at(-1)?.key === key ? days.at(-1)! : (days.push({ key, word: dayWord(item.createdAt), items: [] }), days.at(-1)!);
+    day.items.push(item);
+  }
+  return days;
+}
+
+/// Every version in the order the long page draws it, with its day: what
+/// the rail on the page's edge is made from (pass 209 A).
+export function foundryOrder(list: readonly FoundryArtifact[] | null, versions: readonly FoundryShelfVersion[] | null) {
+  if (!list || !versions) return [];
+  const byId = new Map(list.map((item) => [item.id, item]));
+  return shelfDays(versions.filter((item) => byId.has(item.artifactId))).flatMap((day) =>
+    pickFirst(day.items).map(({ version }) => ({ id: version.artifactId, version: version.version, title: byId.get(version.artifactId)!.title, day: day.word })));
+}
+
+const link = (action: string, args: Record<string, unknown>, html: string, tip: string) =>
+  `<button type="button" class="fd-link" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="${h(tip)}">${html}</button>`;
+
+/// What one ask made sits together, the one the model would use first
+/// (pass 208 A). The pink mark shows only where an ask made several.
+export function pickFirst(items: readonly FoundryShelfVersion[]) {
+  const out: { version: FoundryShelfVersion; pick: boolean }[] = [];
+  for (let at = 0; at < items.length;) {
+    const turn = items[at]!.turnId;
+    let end = at + 1;
+    if (turn) while (end < items.length && items[end]!.turnId === turn) end++;
+    const group = items.slice(at, end), several = new Set(group.map((item) => item.artifactId)).size > 1;
+    const pick = several ? group.find((item) => item.recommended) : undefined;
+    for (const version of pick ? [pick, ...group.filter((item) => item !== pick)] : group) out.push({ version, pick: version === pick });
+    at = end;
+  }
+  return out;
 }

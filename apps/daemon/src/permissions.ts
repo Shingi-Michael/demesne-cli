@@ -1,4 +1,4 @@
-import { isRecord, type PermissionDecision } from "@demesne/protocol";
+import { isRecord, openAppKey, type PermissionDecision } from "@demesne/protocol";
 import { allowRulesCover, pathsOf, type ConfigAllowlist } from "./allowlist.ts";
 
 interface PendingPermission {
@@ -26,7 +26,7 @@ export interface SessionRule {
 const MAX_SESSION_RULES = 16;
 
 /// What "Accept edits" lets through without asking. Deletes and commands still ask.
-export const EDIT_TOOLS = new Set(["edit_file", "write_file", "move_path"]);
+export const EDIT_TOOLS = new Set(["edit_file", "write_file", "move_path", "remember"]);
 
 /// In-memory per-session approval grants ("always this session") plus the
 /// persisted user allowlist, which is consulted first. Session grants never
@@ -152,6 +152,8 @@ function sessionRulesCover(rules: SessionRule[], toolName: string, input: unknow
   }
   const toolRules = rules.filter((rule) => rule.tool === toolName);
   if (toolRules.length === 0) return false;
+  // Opening is granted per app (pass 210 A).
+  if (toolName === "open") { const key = openAppKey(input); return key !== null && toolRules.some((rule) => rule.pathPrefix === key); }
   const paths = pathsOf(input);
   if (paths.length === 0) return true;
   return paths.every((path) => toolRules.some((rule) => pathMatchesRule(path, rule)));
@@ -178,6 +180,7 @@ function deriveRules(toolName: string, argsJson: string | undefined): SessionRul
     const command = commandOf(input);
     return command ? [{ tool: toolName, pathPrefix: "", argv: command.argv, cwd: command.cwd }] : [];
   }
+  if (toolName === "open") { const key = openAppKey(input); return key ? [{ tool: toolName, pathPrefix: key }] : []; }
   const paths = pathsOf(input);
   if (paths.length === 0) return [{ tool: toolName, pathPrefix: "" }];
   return paths.map((path) => {

@@ -1,7 +1,8 @@
 /// What a Foundry page looks like once rendered, measured in the page itself:
 /// the layout faults a single look catches (sideways scroll, text cut off or
 /// spilling out of its box, text on text, text you can barely read, broken
-/// images). Runs as one expression in the page; returns plain JSON. Kept
+/// images, and a crooked layout: cards in a row of different sizes, uneven
+/// gaps, uneven margins, edges a few pixels off). Runs as one expression in the page; returns plain JSON. Kept
 /// free of Electron so a test can run it in any Chromium.
 export interface LookMeasure { width: number; height: number; issues: string[] }
 
@@ -95,7 +96,75 @@ export const LOOK_MEASURE = String.raw`(() => {
     if (ratio > 1.05 && ratio < 3) { faint++; say("Hard to read (" + ratio.toFixed(1) + ":1 contrast): " + label(el)); }
   }
 
+  // Text drawn too small to read: its size times every zoom above it (a part
+  // shrunk to fit reports its own 14px while drawing 7px). Initials in an avatar, and
+  // what's inside something named by its own aria-label (a slide's thumbnail), are pictures, not text.
+  const drawn = (el) => { let size = parseFloat(getComputedStyle(el).fontSize); for (let at = el; at && at !== document.documentElement; at = at.parentElement) { const z = parseFloat(getComputedStyle(at).zoom); if (z > 0 && z !== 1) size *= z; } return size; };
+  let tiny = 0;
+  for (const el of texts) { if (tiny >= 3) break; if (el.closest("d-avatar") || el.parentElement?.closest("[aria-label]")) continue; const size = drawn(el); if (size < 10.5) { tiny++; say("Text drawn at " + size.toFixed(1) + "px, too small to read: " + label(el)); } }
   for (const img of document.images) if (img.complete && !img.naturalWidth) say("Image did not load: " + label(img));
+
+  // A crooked layout (pass 200 A): what an eye sees as "not quite even".
+  // Only near misses are named, never a difference that is clearly meant
+  // (a 2fr/1fr grid, a tall card beside a short one by design is a big gap).
+  // The parts' own frame chrome (data-chrome) is not the design.
+  let crooked = 0;
+  const bent = (text) => { if (crooked < 4) { crooked++; say(text); } };
+  const px = (n) => Math.round(n) + "px";
+  const design = all.filter((el) => !el.closest("[data-chrome]"));
+  const card = (el) => {
+    const style = getComputedStyle(el), box = el.getBoundingClientRect();
+    return box.width >= 80 && box.height >= 40 && (boxed(el, style) || style.boxShadow !== "none");
+  };
+  // Rows: boxed siblings side by side under one parent.
+  const parents = new Set(design.map((el) => el.parentElement).filter(Boolean));
+  for (const parent of parents) {
+    const kids = [...parent.children].filter((el) => design.includes(el) && card(el)).map((el) => [el, el.getBoundingClientRect()]);
+    if (kids.length < 2) continue;
+    const rows = [];
+    for (const kid of kids.sort((a, b) => a[1].top - b[1].top || a[1].left - b[1].left)) {
+      const row = rows.find((r) => Math.abs(r[0][1].top - kid[1].top) <= 12 && r.every(([, b]) => b.right <= kid[1].left + 1 || b.left >= kid[1].right - 1));
+      if (row) row.push(kid); else rows.push([kid]);
+    }
+    for (const row of rows) {
+      if (row.length < 2) continue;
+      row.sort((a, b) => a[1].left - b[1].left);
+      const name = label(parent), boxes = row.map(([, b]) => b);
+      const tops = boxes.map((b) => b.top), heights = boxes.map((b) => b.height), widths = boxes.map((b) => b.width);
+      const spread = (list) => Math.max(...list) - Math.min(...list);
+      if (spread(tops) >= 2) bent("Cards side by side don't line up at the top (off by " + px(spread(tops)) + ") in " + name);
+      else if (spread(heights) >= 3 && spread(heights) <= 0.25 * Math.max(...heights)) bent("Cards side by side differ in height: " + heights.map(px).join(", ") + " in " + name);
+      const gaps = boxes.slice(1).map((b, i) => b.left - boxes[i].right);
+      if (gaps.length > 1 && spread(gaps) >= 3) bent("Uneven gaps in a row: " + gaps.map(px).join(", ") + " in " + name);
+      if (spread(widths) >= 4 && spread(widths) <= 0.15 * Math.max(...widths)) bent("Cards in a row are nearly but not quite the same width: " + widths.map(px).join(", ") + " in " + name);
+    }
+  }
+  // Margins: the page's wide blocks, under something full width, sit off
+  // centre (the margins most of them share, so one stray block isn't it).
+  const sides = new Map();
+  for (const el of design) {
+    const box = el.getBoundingClientRect(), up = el.parentElement?.getBoundingClientRect();
+    if (!up || up.width < W - 2 || box.width < 0.6 * W || box.width > W - 4) continue;
+    const left = Math.round(box.left), right = Math.round(W - box.right);
+    if (left < 0 || right < 0 || Math.max(left, right) > 0.25 * W) continue;
+    const key = left + ":" + right, seen = sides.get(key) || { left, right, count: 0, el };
+    seen.count++; sides.set(key, seen);
+  }
+  const usual = [...sides.values()].sort((a, b) => b.count - a.count)[0];
+  if (usual && Math.abs(usual.left - usual.right) >= 4) bent("Left and right margins differ: " + px(usual.left) + " vs " + px(usual.right) + " around " + label(usual.el));
+  // Edges: a block a few pixels off a left edge others in the same card (or
+  // on the same page, outside any card) share. A card's inset is its own.
+  const frameOf = (el) => { for (let at = el.parentElement; at && at !== document.body; at = at.parentElement) if (card(at)) return at; return document.body; };
+  const blocks = design.filter((el) => (own(el) || card(el)) && !/^inline$/.test(getComputedStyle(el).display)).slice(0, 400).map((el) => [el, Math.round(el.getBoundingClientRect().left * 2) / 2, frameOf(el)]);
+  const edges = new Map();
+  const at = (frame, left) => edges.get(frame)?.get(left) || 0;
+  for (const [, left, frame] of blocks) { if (!edges.has(frame)) edges.set(frame, new Map()); edges.get(frame).set(left, at(frame, left) + 1); }
+  for (const [el, left, frame] of blocks) {
+    const near = [...edges.get(frame).entries()].find(([edge, count]) => count >= 3 && Math.abs(edge - left) >= 1 && Math.abs(edge - left) <= 4);
+    if (!near || at(frame, left) > 1) continue;
+    if (blocks.some(([other, edge]) => edge === near[0] && (other.contains(el) || el.contains(other)))) continue;
+    bent(label(el) + " starts " + px(Math.abs(near[0] - left)) + (left < near[0] ? " left" : " right") + " of the edge " + near[1] + " other blocks share");
+  }
   return { width: W, height: document.documentElement.scrollHeight, issues };
 })()`;
 

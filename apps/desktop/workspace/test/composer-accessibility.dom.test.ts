@@ -28,6 +28,8 @@ let completionItems = [], completionIndex = 0, completionAll = false, completion
 let question = null, suggestion = null, modeChanges = 0;
 const calls = [], pendingDeletes = new Map();
 const pendingQuestion = () => question;
+let foundryNames = [];
+const ensureMockupNames = () => {};
 const recentCommands = () => [];
 const commandIcon = () => '', groupWords = x => x, sectionTitle = x => x, sectionRank = () => 0;
 const plainName = x => x.replace(/^\\//, '');

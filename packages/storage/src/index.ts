@@ -5,8 +5,10 @@ import { dirname } from "node:path";
 import {
   type FoundryArtifact,
   type FoundryArtifactDetail,
+  type FoundryShelfVersion,
   type FoundryKind,
   FOUNDRY_KINDS,
+  FOUNDRY_MAX_DATA_BYTES,
   FOUNDRY_MAX_SOURCE_BYTES,
   type ImageArtifact,
   type TurnAttachment,
@@ -184,9 +186,11 @@ interface ToolCallRow {
   error_message: string | null;
 }
 
-interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: string | null; session_id: string | null; created_at: string; updated_at: string; version: number }
+interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: string | null; session_id: string | null; created_at: string; updated_at: string; version: number;
+  description: string | null; based_on: string | null; based_on_version: number | null }
 const foundryArtifact = (row: FoundryRow): FoundryArtifact => ({ id: row.id, title: row.title, kind: row.kind, workspace: row.workspace,
-  sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at, version: row.version });
+  sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at, version: row.version, description: row.description ?? "",
+  basedOn: row.based_on && row.based_on_version ? { id: row.based_on, version: row.based_on_version } : null });
 
 export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
@@ -248,7 +252,16 @@ export class DemesneStore {
       artifact_id TEXT NOT NULL REFERENCES foundry_artifacts(id) ON DELETE CASCADE, version INTEGER NOT NULL,
       created_at TEXT NOT NULL, session_id TEXT, turn_id TEXT, note TEXT NOT NULL, source TEXT NOT NULL,
       PRIMARY KEY (artifact_id, version)
+    );
+    CREATE TABLE IF NOT EXISTS foundry_data (
+      artifact_id TEXT PRIMARY KEY REFERENCES foundry_artifacts(id) ON DELETE CASCADE, data TEXT NOT NULL, updated_at TEXT NOT NULL
     );`);
+    // Pass 208 A: a description per mockup, what it was made from, and the
+    // version one ask would use when it made several.
+    if (!this.hasColumn("foundry_artifacts", "description")) this.database.run("ALTER TABLE foundry_artifacts ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+    if (!this.hasColumn("foundry_artifacts", "based_on")) this.database.run("ALTER TABLE foundry_artifacts ADD COLUMN based_on TEXT");
+    if (!this.hasColumn("foundry_artifacts", "based_on_version")) this.database.run("ALTER TABLE foundry_artifacts ADD COLUMN based_on_version INTEGER");
+    if (!this.hasColumn("foundry_versions", "recommended")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN recommended INTEGER NOT NULL DEFAULT 0");
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
     this.userQuestions.recover();
@@ -297,31 +310,76 @@ export class DemesneStore {
   /// `baseVersion` is the version the writer last read: when the artifact has
   /// moved past it (someone else saved, or Edit source was used) the save is
   /// refused instead of silently clobbering that work, as an artifact publish is.
-  saveFoundryArtifact(input: { id?: string; title?: string; kind?: FoundryKind; workspace?: string | null; sessionId?: string | null; turnId?: string | null; note?: string; source: string; baseVersion?: number }): FoundryArtifactDetail {
+  saveFoundryArtifact(input: { id?: string; title?: string; kind?: FoundryKind; workspace?: string | null; sessionId?: string | null; turnId?: string | null; note?: string;
+    description?: string; basedOn?: { id: string; version: number } | null; recommended?: boolean; source: string; baseVersion?: number }): FoundryArtifactDetail {
     if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new InvalidStateError("Foundry source is larger than 512 KB");
     const now = new Date().toISOString();
+    const description = input.description?.trim() || null;
     const id = this.database.transaction(() => {
       if (input.id) {
         const row = this.database.query("SELECT version FROM foundry_artifacts WHERE id = ?").get(input.id) as { version: number } | null;
         if (!row) throw new NotFoundError("Foundry artifact not found");
         if (input.baseVersion !== undefined && input.baseVersion !== row.version) throw new InvalidStateError(`Foundry artifact is at version ${row.version}, not ${input.baseVersion}`);
+        // One ask, one version (pass 197 A): a save in the turn that made the
+        // latest version (the agent fixing its own page after a look or a
+        // try) changes that version instead of adding another.
+        const last = this.database.query("SELECT turn_id, recommended FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(input.id, row.version) as { turn_id: string | null; recommended: number } | null;
+        if (input.turnId && last?.turn_id === input.turnId) {
+          this.database.query("UPDATE foundry_artifacts SET updated_at = ?, title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?").run(now, input.title?.trim() || null, description, input.id);
+          this.database.query("UPDATE foundry_versions SET source = ?, created_at = ?, note = CASE WHEN note = '' THEN ? ELSE note END, recommended = ? WHERE artifact_id = ? AND version = ?")
+            .run(input.source, now, input.note?.trim() ?? "", input.recommended === undefined ? last.recommended : input.recommended ? 1 : 0, input.id, row.version);
+          if (input.recommended) this.onlyRecommended(input.id, row.version, input.turnId);
+          return input.id;
+        }
         const version = row.version + 1;
-        this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title) WHERE id = ?").run(version, now, input.title?.trim() || null, input.id);
-        this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source) VALUES (?,?,?,?,?,?,?)")
-          .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source);
+        this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?").run(version, now, input.title?.trim() || null, description, input.id);
+        this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended) VALUES (?,?,?,?,?,?,?,?)")
+          .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0);
+        if (input.recommended && input.turnId) this.onlyRecommended(input.id, version, input.turnId);
         return input.id;
       }
       if (!input.kind || !FOUNDRY_KINDS.includes(input.kind)) throw new InvalidStateError(`Foundry kind must be one of ${FOUNDRY_KINDS.join(", ")}`);
       const title = input.title?.trim();
       if (!title) throw new InvalidStateError("A Foundry artifact needs a title");
       const created = crypto.randomUUID();
-      this.database.query("INSERT INTO foundry_artifacts(id,title,kind,workspace,session_id,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,1)")
-        .run(created, title.slice(0, 200), input.kind, input.workspace ?? null, input.sessionId ?? null, now, now);
-      this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source) VALUES (?,1,?,?,?,?,?)")
-        .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source);
+      this.database.query("INSERT INTO foundry_artifacts(id,title,kind,workspace,session_id,created_at,updated_at,version,description,based_on,based_on_version) VALUES (?,?,?,?,?,?,?,1,?,?,?)")
+        .run(created, title.slice(0, 200), input.kind, input.workspace ?? null, input.sessionId ?? null, now, now, (description ?? "").slice(0, 600), input.basedOn?.id ?? null, input.basedOn?.version ?? null);
+      this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended) VALUES (?,1,?,?,?,?,?,?)")
+        .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0);
+      if (input.recommended && input.turnId) this.onlyRecommended(created, 1, input.turnId);
       return created;
     })();
     return this.getFoundryArtifact(id)!;
+  }
+
+  /// One ask recommends one mockup: marking one unmarks the others it made.
+  private onlyRecommended(id: string, version: number, turnId: string) {
+    this.database.query("UPDATE foundry_versions SET recommended = 0 WHERE turn_id = ? AND NOT (artifact_id = ? AND version = ?)").run(turnId, id, version);
+  }
+
+  /// Names and words without a new version (pass 208 A): renaming a mockup,
+  /// naming or recommending its latest version, describing it.
+  describeFoundryArtifact(id: string, input: { title?: string; description?: string; note?: string; recommended?: boolean }): FoundryArtifactDetail {
+    this.database.transaction(() => {
+      const row = this.database.query("SELECT version FROM foundry_artifacts WHERE id = ?").get(id) as { version: number } | null;
+      if (!row) throw new NotFoundError("Foundry artifact not found");
+      const title = input.title?.trim().slice(0, 200) || null, description = input.description?.trim().slice(0, 600) || null;
+      this.database.query("UPDATE foundry_artifacts SET title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?").run(title, description, id);
+      if (input.note?.trim()) this.database.query("UPDATE foundry_versions SET note = ? WHERE artifact_id = ? AND version = ?").run(input.note.trim().slice(0, 300), id, row.version);
+      if (input.recommended !== undefined) {
+        this.database.query("UPDATE foundry_versions SET recommended = ? WHERE artifact_id = ? AND version = ?").run(input.recommended ? 1 : 0, id, row.version);
+        const turn = this.database.query("SELECT turn_id FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, row.version) as { turn_id: string | null } | null;
+        if (input.recommended && turn?.turn_id) this.onlyRecommended(id, row.version, turn.turn_id);
+      }
+    })();
+    return this.getFoundryArtifact(id)!;
+  }
+
+  /// What one ask made: each mockup it saved and whether it is the pick.
+  foundryInTurn(turnId: string): { id: string; title: string; version: number; recommended: boolean }[] {
+    const rows = this.database.query("SELECT v.artifact_id AS id, a.title AS title, v.version AS version, v.recommended AS recommended FROM foundry_versions v JOIN foundry_artifacts a ON a.id = v.artifact_id WHERE v.turn_id = ? ORDER BY v.rowid")
+      .all(turnId) as { id: string; title: string; version: number; recommended: number }[];
+    return rows.map((row) => ({ ...row, recommended: row.recommended === 1 }));
   }
 
   listFoundryArtifacts(): FoundryArtifact[] {
@@ -329,16 +387,23 @@ export class DemesneStore {
     return rows.map(foundryArtifact);
   }
 
+  /// Every version of every artifact, newest first, for Foundry's long page.
+  listFoundryVersions(limit = 400): FoundryShelfVersion[] {
+    const rows = this.database.query("SELECT artifact_id, version, created_at, session_id, turn_id, note, recommended FROM foundry_versions ORDER BY created_at DESC, version DESC LIMIT ?")
+      .all(limit) as { artifact_id: string; version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; recommended: number }[];
+    return rows.map((row) => ({ artifactId: row.artifact_id, version: row.version, createdAt: row.created_at, sessionId: row.session_id, turnId: row.turn_id, note: row.note, recommended: row.recommended === 1 }));
+  }
+
   getFoundryArtifact(id: string, version?: number): FoundryArtifactDetail | null {
     const row = this.database.query("SELECT * FROM foundry_artifacts WHERE id = ?").get(id) as FoundryRow | null;
     if (!row) return null;
-    const versions = this.database.query("SELECT version, created_at, session_id, turn_id, note, length(CAST(source AS BLOB)) AS bytes FROM foundry_versions WHERE artifact_id = ? ORDER BY version DESC")
-      .all(id) as { version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; bytes: number }[];
+    const versions = this.database.query("SELECT version, created_at, session_id, turn_id, note, recommended, length(CAST(source AS BLOB)) AS bytes FROM foundry_versions WHERE artifact_id = ? ORDER BY version DESC")
+      .all(id) as { version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; recommended: number; bytes: number }[];
     const pick = version ?? row.version;
     const source = this.database.query("SELECT source FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, pick) as { source: string } | null;
     if (!source) return null;
     return { ...foundryArtifact(row), version: pick, source: source.source,
-      versions: versions.map((item) => ({ version: item.version, createdAt: item.created_at, sessionId: item.session_id, turnId: item.turn_id, note: item.note, byteLength: item.bytes })) };
+      versions: versions.map((item) => ({ version: item.version, createdAt: item.created_at, sessionId: item.session_id, turnId: item.turn_id, note: item.note, recommended: item.recommended === 1, byteLength: item.bytes })) };
   }
 
   renameFoundryArtifact(id: string, title: string): FoundryArtifact {
@@ -348,8 +413,31 @@ export class DemesneStore {
     return foundryArtifact(this.database.query("SELECT * FROM foundry_artifacts WHERE id = ?").get(id) as FoundryRow);
   }
 
+  /// What a page saved (demesne.save): one JSON object per artifact, kept
+  /// across versions, gone with the artifact.
+  getFoundryData(id: string): Record<string, unknown> {
+    if (!this.database.query("SELECT 1 FROM foundry_artifacts WHERE id = ?").get(id)) throw new NotFoundError("Foundry artifact not found");
+    const row = this.database.query("SELECT data FROM foundry_data WHERE artifact_id = ?").get(id) as { data: string } | null;
+    try { const data = row ? JSON.parse(row.data) : {}; return data && typeof data === "object" && !Array.isArray(data) ? data : {}; } catch { return {}; }
+  }
+
+  /// Keeps one named value (null forgets it); the whole page keeps up to 256 KB.
+  setFoundryData(id: string, name: string, value: unknown): Record<string, unknown> {
+    if (!name || name.length > 200) throw new InvalidStateError("A saved value needs a name of up to 200 characters");
+    return this.database.transaction(() => {
+      const data = this.getFoundryData(id);
+      if (value === null || value === undefined) delete data[name]; else data[name] = value;
+      const text = JSON.stringify(data);
+      if (Buffer.byteLength(text) > FOUNDRY_MAX_DATA_BYTES) throw new InvalidStateError("That is too much to save; a page keeps up to 256 KB");
+      this.database.query("INSERT INTO foundry_data(artifact_id,data,updated_at) VALUES (?,?,?) ON CONFLICT(artifact_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at")
+        .run(id, text, new Date().toISOString());
+      return data;
+    })();
+  }
+
   deleteFoundryArtifact(id: string): boolean {
     return this.database.transaction(() => {
+      this.database.query("DELETE FROM foundry_data WHERE artifact_id = ?").run(id);
       this.database.query("DELETE FROM foundry_versions WHERE artifact_id = ?").run(id);
       return this.database.query("DELETE FROM foundry_artifacts WHERE id = ?").run(id).changes > 0;
     })();
@@ -1610,14 +1698,19 @@ export class DemesneStore {
   /// A step line (`text`) or, once at the end, what a sub-agent found (`report`).
   /// Why Auto gave a sub-agent to the agent tool it runs on (`why`).
   /// A commit or merge step's tree (`repo`): git before and after it.
-  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string; why?: string; repo?: import("@demesne/protocol").RepoFlow }): void {
+  /// A hand-off's change card, once its agent is done (`handoff`).
+  appendToolProgress(turnId: string, toolCallId: string, update: { text?: string; report?: string; why?: string; repo?: import("@demesne/protocol").RepoFlow; handoff?: import("@demesne/protocol").HandoffCard; research?: import("@demesne/protocol").ResearchState; asked?: string; crew?: "working" | "reported" | "stopped" }): void {
     const turn = this.getTurnOrThrow(turnId);
     if (turn.status !== "running") return;
     const event = this.insertEvent("tool.call_progress", turn.sessionId, turnId, { toolCallId,
       ...(update.text !== undefined ? { text: update.text.slice(0, 500) } : {}),
       ...(update.report ? { report: update.report.slice(0, 4000) } : {}),
       ...(update.why ? { why: update.why.slice(0, 300) } : {}),
-      ...(update.repo ? { repo: update.repo } : {}) }, new Date().toISOString());
+      ...(update.repo ? { repo: update.repo } : {}),
+      ...(update.handoff ? { handoff: update.handoff } : {}),
+      ...(update.research ? { research: update.research } : {}),
+      ...(update.asked ? { asked: update.asked.slice(0, 1000) } : {}),
+      ...(update.crew ? { crew: update.crew } : {}) }, new Date().toISOString());
     this.eventSink?.(event);
   }
 
@@ -1916,6 +2009,17 @@ export class DemesneStore {
     this.requireSession(sessionId);
     return (this.database.query("SELECT * FROM events WHERE session_id = ? AND (? IS NULL OR turn_id = ?) AND type IN ('tool.call_completed','turn.reverted','session.rewound','session.rewind_redone') ORDER BY id LIMIT 10001")
       .all(sessionId,turnId??null,turnId??null) as EventRow[]).map(mapEvent);
+  }
+
+  /// Source previews are authorized by completed tool records, never by a
+  /// filename invented in model prose or supplied in a download URL.
+  completedFileReads(sessionId: string, turnId: string) {
+    const turn = this.getTurn(turnId);
+    if (!turn || turn.sessionId !== sessionId) throw new NotFoundError("Turn not found in session");
+    return this.database.query(`SELECT id, name, arguments_json AS argumentsJson, result_text AS resultText
+      FROM tool_calls WHERE turn_id = ? AND status = 'completed'
+      AND name IN ('read_file', 'read_files', 'personal_files') ORDER BY rowid LIMIT 256`)
+      .all(turnId) as { id: string; name: string; argumentsJson: string; resultText: string | null }[];
   }
 
   eventsAfter(sessionId: string, afterEventId: number, limit = 100): EventEnvelope[] {
@@ -2598,9 +2702,14 @@ function mapEvent(row: EventRow): EventEnvelope {
 }
 
 function toolResultMetadata(name: string, resultText: string): Record<string, unknown> {
+  if (name === "look_at_page") return pageLookMetadata(resultText);
+  if (name === "capture_window") return windowCaptureMetadata(resultText);
+  if (name === "open" || name === "show") return shownMetadata(resultText);
   let result: unknown;
   try {
-    result = JSON.parse(resultText);
+    // A result that came with pictures (Foundry's look and try) has a line
+    // per picture after its JSON: "Image artifact <id>: <file> (w×h)".
+    result = JSON.parse(resultText.replace(/(?:\nImage artifact [^\n]*)+$/, ""));
   } catch {
     return {};
   }
@@ -2609,7 +2718,11 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
   if ((name === "foundry_save" || name === "foundry_edit") && typeof value.id === "string" && /^[\w-]{1,200}$/.test(value.id)
     && typeof value.title === "string" && FOUNDRY_KINDS.includes(value.kind as FoundryKind)
     && typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version > 0) {
-    return { message: JSON.stringify({ id: value.id, title: value.title.slice(0, 200), kind: value.kind, version: value.version }) };
+    // The chat's chip shows the description, the version's name and the pick (pass 208 A).
+    return { message: JSON.stringify({ id: value.id, title: value.title.slice(0, 200), kind: value.kind, version: value.version,
+      ...(typeof value.description === "string" && value.description ? { description: value.description.slice(0, 600) } : {}),
+      ...(typeof value.note === "string" && value.note ? { note: value.note.slice(0, 300) } : {}),
+      ...(value.recommended === true ? { recommended: true } : {}) }) };
   }
   if (name === "edit_file" || name === "write_file") {
     return {
@@ -2632,6 +2745,18 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
       ...(typeof value.bytes === "number" ? { bytes: value.bytes } : {}),
     };
   }
+  // A Heartbeat message: who it went to (their face and name) and its id, so
+  // the chat can tie the answer back to it.
+  if (name === "heartbeat" && typeof value.to === "string" && typeof value.id === "string" && typeof value.name === "string") {
+    return { message: JSON.stringify({ id: value.id.slice(0, 80), to: value.to.slice(0, 200), agent: typeof value.agent === "string" ? value.agent.slice(0, 40) : null,
+      name: value.name.slice(0, 80), project: typeof value.project === "string" ? value.project.slice(0, 120) : "" }) };
+  }
+  // Wait and watch: what it waited for and how it ended, for the step row.
+  if (name === "wait_for" && ["matched", "exited", "timeout"].includes(String(value.status))) {
+    return { message: JSON.stringify({ command: typeof value.command === "string" ? value.command.slice(0, 200) : "", status: value.status, afterMs: typeof value.afterMs === "number" ? value.afterMs : 0,
+      line: typeof value.line === "string" ? value.line.slice(0, 300) : null, exitCode: typeof value.exitCode === "number" ? value.exitCode : null,
+      tail: typeof value.tail === "string" ? value.tail.slice(-1_200) : "" }) };
+  }
   if (name === "run_command") {
     const limit = 16_000;
     return {
@@ -2650,4 +2775,45 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
 /// How steered words read to the model: the person's, mid-task, to act on now.
 export function steerContent(texts: string[]): string {
   return `The user sent this while you were working. Take it into account from your next step on:\n\n${texts.join("\n\n")}`;
+}
+
+/// A window the model captured: its app, title and picture, for the chat's
+/// screenshot card. "Captured window <id>: <app> — <title>" leads the result.
+export function windowCaptureMetadata(resultText: string): Record<string, unknown> {
+  const head = /^Captured window [^:\n]*: ([^\n]*)/.exec(resultText);
+  const picture = /\nImage artifact ([0-9a-f-]{36}): \S+ \((\d+)×(\d+)\)/.exec(resultText);
+  if (!head || !picture) return {};
+  const [app = "", ...title] = head[1]!.split(" — ");
+  return { message: JSON.stringify({ app: app.slice(0, 120), title: title.join(" — ").slice(0, 200), picture: { id: picture[1], width: Number(picture[2]), height: Number(picture[3]) } }) };
+}
+
+/// What open and show put on the right (pass 210 A): its name, the kind, the
+/// link, path or app, and the picture when there is one.
+export function shownMetadata(resultText: string): Record<string, unknown> {
+  const [head = "", ...rest] = resultText.split("\nImage artifact ");
+  let value: Record<string, unknown>;
+  try { const parsed = JSON.parse(head) as unknown; if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}; value = parsed as Record<string, unknown>; } catch { return {}; }
+  const text = (key: string, max: number) => typeof value[key] === "string" && value[key] ? { [key]: (value[key] as string).slice(0, max) } : {};
+  const picture = rest.length ? /^([0-9a-f-]{36}): \S+ \((\d+)×(\d+)\)/.exec(rest[0]!) : null;
+  const shown = value.opened === true ? "window" : typeof value.shown === "string" && ["file", "page", "app"].includes(value.shown) ? value.shown : null;
+  if (!shown) return {};
+  return { message: JSON.stringify({ shown, ...text("name", 200), ...text("app", 120), ...text("title", 200), ...text("target", 2000), ...text("path", 2000), ...text("url", 2000), ...text("kind", 20),
+    ...(value.live === true ? { live: true } : {}), ...(picture ? { picture: { id: picture[1], width: Number(picture[2]), height: Number(picture[3]) } } : {}) }) };
+}
+
+/// See the app: where it looked, how each step went and its pictures (the
+/// session artifacts the engine listed after the report), for the step row.
+export function pageLookMetadata(resultText: string): Record<string, unknown> {
+  const [head = "", ...rest] = resultText.split("\nImage artifact ");
+  let value: Record<string, unknown>;
+  try { const parsed = JSON.parse(head) as unknown; if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}; value = parsed as Record<string, unknown>; } catch { return {}; }
+  const labels = Array.isArray(value.pictures) ? value.pictures.filter((item): item is string => typeof item === "string") : [];
+  const pictures = rest.map((line, index) => {
+    const match = /^([0-9a-f-]{36}): \S+ \((\d+)×(\d+)\)/.exec(line);
+    return match ? { id: match[1], width: Number(match[2]), height: Number(match[3]), label: (labels[index] ?? "").slice(0, 120) } : null;
+  }).filter((item) => item !== null).slice(0, 3);
+  const steps = Array.isArray(value.steps) ? value.steps.filter((item): item is string => typeof item === "string").slice(0, 12).map((line) => line.slice(0, 240)) : [];
+  const errors = Array.isArray(value.console_errors) ? value.console_errors.filter((item): item is string => typeof item === "string") : [];
+  return { message: JSON.stringify({ url: typeof value.url === "string" ? value.url.slice(0, 500) : "", title: typeof value.title === "string" ? value.title.slice(0, 200) : "",
+    width: typeof value.width === "string" ? value.width : "", steps, errors: errors.slice(0, 3).map((line) => line.slice(0, 200)), errorCount: errors.length, pictures }) };
 }

@@ -4519,12 +4519,12 @@ function composerFrame(width: number) {
       : state.activeTurnId
       ? "Steer it while it works…"
       : suggestion ? `${suggestion}   Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
-    : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…";
+    : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…");
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
     answeringQuestion ||
-    Boolean(answered));
+    Boolean(answered);
   // Like the terminal: no stop hint while running (Esc Esc still stops; only
   // the armed confirmation shows). In a session, an empty composer shows
   // / and @, and a draft shows ↵ send instead. The start screen keeps / and

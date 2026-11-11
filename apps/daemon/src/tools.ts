@@ -1,4 +1,5 @@
-import { documentText, readable } from "./documents.ts";
+import { documentText, MAX_PDF_BYTES, readable } from "./documents.ts";
+import { PdfPageError, renderPdfPage } from "./pdf-pages.ts";
 import type { CommandReporter } from "./command-monitor.ts";
 import { createHash } from "node:crypto";
 import {
@@ -16,7 +17,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { open } from "node:fs/promises";
-import { isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, dirname, extname, relative, resolve, sep } from "node:path";
 import type { ProviderToolDefinition } from "@demesne/providers";
 import { isRecord, MAX_QUESTION_SUGGESTIONS, MAX_USER_QUESTIONS, parseUserQuestions, parseAnswerQuestionsRequest, type UserAnswer, type UserQuestion, type QuestionMode } from "@demesne/protocol";
 import { applyEdits, EditApplyError, type EditHunk } from "./edit-engine.ts";
@@ -162,14 +163,22 @@ function builtInTools(): AgentTool[] {
 
 export function viewImageTool(): AgentTool {
   return {
-    definition: { name: "view_image", description: "Import a screenshot or image file from the workspace into Preview. Use after a browser or command saves a screenshot to a file. Vision-enabled providers also receive the image for inspection on the next step.",
-      inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } },
+    definition: { name: "view_image", description: "Import a screenshot or image file from the workspace into Preview. Use after a browser or command saves a screenshot to a file. Vision-enabled providers also receive the image for inspection on the next step. For a PDF, pass page (from 1) to see that page as a picture: a scan with no text, a chart, a diagram, a form's layout.",
+      inputSchema: { type: "object", properties: { path: { type: "string" }, page: { type: "integer", minimum: 1, description: "A PDF's page, from 1." } }, required: ["path"], additionalProperties: false } },
     permission: () => null,
     execute: async () => { throw new Error("view_image requires artifact-aware execution"); },
     executeWithArtifacts: async (input, context) => {
-      if (!isRecord(input) || typeof input.path !== "string" || !input.path.trim() || Object.keys(input).some((key) => key !== "path")) throw new Error("view_image requires a workspace image path");
+      if (!isRecord(input) || typeof input.path !== "string" || !input.path.trim() || Object.keys(input).some((key) => key !== "path" && key !== "page")) throw new Error("view_image requires a workspace image path");
       context.signal.throwIfAborted();
       const path = resolveWorkspacePath(context.workspaceRoot, input.path, true, true);
+      if (extname(path).toLowerCase() === ".pdf") {
+        const page = typeof input.page === "number" && Number.isInteger(input.page) && input.page >= 1 ? input.page : 1;
+        if (statSync(path).size > MAX_PDF_BYTES) throw toolError("TOO_LARGE", `${input.path} is over 30 MB`, "split the PDF, or read its text with read_file");
+        let drawn: Awaited<ReturnType<typeof renderPdfPage>>;
+        try { drawn = await renderPdfPage(path, page); }
+        catch (error) { throw toolError("PDF_PAGE", error instanceof PdfPageError ? error.message : "the page couldn't be drawn", "read its text with read_file, or try another page"); }
+        return { text: `Page ${page}${drawn.pages ? ` of ${drawn.pages}` : ""} of ${input.path}`, images: [{ data: drawn.png, mimeType: "image/png", filename: `${path.split(sep).at(-1)!.replace(/\.pdf$/i, "")}-page-${page}.png` }] };
+      }
       const file = await open(path, "r");
       try {
         const stat = await file.stat();
@@ -465,7 +474,7 @@ async function readSingleFile(
   const kind = readable(absolute);
   if (kind === "pdf" || kind === "office") {
     try { text = await documentText(absolute, stat.size); }
-    catch (error) { throw toolError("UNREADABLE", `${path} is ${error instanceof Error ? error.message : "unreadable"}`, "use run_command for other ways to inspect it"); }
+    catch (error) { const message = error instanceof Error ? error.message : "unreadable"; throw toolError("UNREADABLE", `${path} is ${message}`, /scanned PDF/.test(message) ? "look at its pages as pictures with view_image (path, page)" : "use run_command for other ways to inspect it"); }
   } else {
     if (stat.size > 8 * 1024 * 1024) throw toolError("TOO_LARGE", `${path} exceeds the 8 MiB read limit`, "read a narrower file or use search_files");
     const bytes = readFileSync(absolute);

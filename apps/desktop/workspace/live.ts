@@ -187,6 +187,11 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
   if (tool.name === "web_fetch") return (tool.detail ?? "").split("/")[0] ?? "";
   if (tool.name === "read_source") return sourceName(tool);
+  if (tool.name.startsWith("github_")) {
+    const pr = tool.input.pr, number = typeof pr === "number" ? `#${pr}` : typeof pr === "string" ? pr.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+).*$/, "#$1").replace(/^(\d+)$/, "#$1") : "";
+    if (tool.name === "github_check_log") return typeof tool.input.check === "string" && tool.input.check ? tool.input.check : `failed checks${number ? ` on ${number}` : ""}`;
+    return number || "this branch's PR";
+  }
   const path = String(tool.input.path ?? tool.detail ?? "");
   return isAgentStep(tool) ? "" : path.split("/").at(-1) ?? path;
 }
@@ -306,6 +311,9 @@ const verb = (tool: ToolEntry) =>
     foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
     use_skill: "Using skill",
+    github_pr: "Looked at",
+    github_check_log: "Read the log of",
+    github_reply: tool.input.comment ? "Replied on" : "Commented on",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
@@ -2048,7 +2056,7 @@ const stepIcon = (tool: ToolEntry) => {
     : isAgentStep(tool) ? "agent"
     : tool.name === "ask_user" ? "ask"
     : tool.name === "heartbeat" ? "mail"
-    : ["read_file", "read_files", "read_source", "web_fetch", "view_image", "git_diff", "git_status", "git_history"].includes(tool.name) ? "read"
+    : ["read_file", "read_files", "read_source", "web_fetch", "view_image", "git_diff", "git_status", "git_history", "github_pr", "github_check_log"].includes(tool.name) ? "read"
     : "other";
   return stepIconFor(kind);
 };

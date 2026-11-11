@@ -9,7 +9,7 @@ import type { ToolEntry } from "@demesne/workbench/entries.ts";
 type Step = Pick<ToolEntry, "name" | "state" | "input" | "waiting" | "drafting" | "repo" | "detail" | "changes" | "created" | "durationMs">;
 
 /// Tools that look: they read, search, list, or ask git.
-export const LOOK_TOOLS = new Set(["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history", "search_files", "list_files", "session_tools", "recall_turn", "foundry_read", "web_search", "web_fetch"]);
+export const LOOK_TOOLS = new Set(["read_file", "read_files", "view_image", "git_diff", "git_status", "git_history", "search_files", "list_files", "session_tools", "recall_turn", "foundry_read", "web_search", "web_fetch", "github_pr", "github_check_log"]);
 /// Tools that change files.
 export const CHANGE_TOOLS = new Set(["edit_file", "write_file", "move_path", "delete_path"]);
 

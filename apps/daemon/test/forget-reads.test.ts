@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import type { ModelMessage } from "@demesne/protocol";
-import { CUT_AFTER_CHARS, cutPoint, forgetOldReads, forgetOldReadsInHistory, KEEP_UNDER } from "../src/forget-reads.ts";
+import { CACHE_COLD_MS, COLD_CUT_CHARS, CUT_AFTER_CHARS, cutPoint, forgetOldReads, forgetThrough, KEEP_UNDER, nextForgetThrough } from "../src/forget-reads.ts";
+
+/// The old rule's size, kept only to place chats from before stored cuts.
+const OLD_CUT = 240_000;
 
 const big = (path: string, lines = 200) => JSON.stringify({ path, content: `${"export const line = 1;\n".repeat(lines)}` });
 const readTurn = (chars: number): ModelMessage[] => [
@@ -42,25 +45,42 @@ test("an earlier turn keeps a note of its long reads, and everything else whole"
   expect(forgetOldReads(messages)).toEqual(out);
 });
 
-test("the last two turns stay whole; older ones are cut in one step once their reads pile up", () => {
-  const step = Math.floor(CUT_AFTER_CHARS / 2.5);
+test("chats from before stored cuts start where the old rule had cut", () => {
+  const step = Math.floor(OLD_CUT / 2.5);
   // Two turns back is never cut, however large.
-  expect(cutPoint([readTurn(CUT_AFTER_CHARS * 3), chat()])).toBe(0);
-  // Older reads under the limit stay whole.
+  expect(cutPoint([readTurn(OLD_CUT * 3), chat()])).toBe(0);
   expect(cutPoint([readTurn(step), readTurn(step), chat(), chat()])).toBe(0);
-  // Past it, every turn but the last two is cut at once...
   const turns = [readTurn(step), readTurn(step), readTurn(step), chat(), chat()];
   expect(cutPoint(turns)).toBe(3);
-  // ...and the cut holds while new turns arrive, until reads pile up again.
-  expect(cutPoint([...turns, chat()])).toBe(3);
   expect(cutPoint([...turns, chat(), chat()])).toBe(3);
-  const cut = forgetOldReadsInHistory(turns);
-  expect((cut[0]![2] as { content: string }).content).toContain("[From an earlier turn:");
-  expect(cut[3]).toBe(turns[3]!);
   // A history that grows one turn at a time agrees with itself at every length.
   const grown = Array.from({ length: 12 }, (_, i) => i % 3 === 2 ? chat() : readTurn(step));
   let last = 0;
   for (let length = 1; length <= grown.length; length++) { const at = cutPoint(grown.slice(0, length)); expect(at).toBeGreaterThanOrEqual(last); last = at; }
+});
+
+test("old reads are cut only when the cache has gone cold, and the cut holds", () => {
+  const numbered = (messages: ModelMessage[][]) => messages.map((turn, index) => ({ firstMessageId: (index + 1) * 10, messages: turn }));
+  const turns = numbered([readTurn(COLD_CUT_CHARS * 2), readTurn(COLD_CUT_CHARS * 2), chat(), chat()]);
+  // A warm cache keeps the cut where it was: every round sends the same history.
+  expect(nextForgetThrough(turns, 0, 60_000)).toBe(0);
+  // Cold, everything but the last two turns becomes notes.
+  expect(nextForgetThrough(turns, 0, CACHE_COLD_MS)).toBe(20);
+  // A new chat with nothing cached cuts freely too.
+  expect(nextForgetThrough(turns, 0, null)).toBe(20);
+  // Too little to be worth it stays whole, even cold.
+  expect(nextForgetThrough(numbered([readTurn(COLD_CUT_CHARS / 2), chat(), chat()]), 0, CACHE_COLD_MS)).toBe(0);
+  // Once cut, more turns don't move it while warm...
+  const more = numbered([readTurn(COLD_CUT_CHARS * 2), readTurn(COLD_CUT_CHARS * 2), chat(), readTurn(COLD_CUT_CHARS * 2), chat(), chat()]);
+  expect(nextForgetThrough(more, 20, 1_000)).toBe(20);
+  // ...unless the pile gets huge, when the cut pays for its rebuild.
+  expect(nextForgetThrough(numbered([readTurn(CUT_AFTER_CHARS + 1), chat(), chat()]), 0, 1_000)).toBe(10);
+  // A chat from before starts where the old rule had cut.
+  const step = Math.floor(OLD_CUT / 2.5);
+  expect(nextForgetThrough(numbered([readTurn(step), readTurn(step), readTurn(step), chat(), chat()]), null, 1_000)).toBe(30);
+  const cut = forgetThrough(turns, 20);
+  expect((cut[0]!.messages[2] as { content: string }).content).toContain("[From an earlier turn:");
+  expect(cut[2]).toBe(turns[2]!);
 });
 
 test("the next turn's request carries the note; the turn that read it saw it whole", async () => {
@@ -75,10 +95,12 @@ test("the next turn's request carries the note; the turn that read it saw it who
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), "demesne-forget-")));
   const store = new DemesneStore(":memory:");
   const { session } = store.createSession("Reads", workspace);
-  const text = big("src/greeting.ts", Math.ceil((CUT_AFTER_CHARS + 5_000) / 23));
+  const text = big("src/greeting.ts", Math.ceil((COLD_CUT_CHARS + 5_000) / 23));
   const tools = new ToolRegistry([{ definition: { name: "read_file", description: "read", inputSchema: { type: "object" } }, permission: () => null, async execute() { return text; } }]);
   const schedulers = new InferenceSchedulers(new InferenceScheduler(1), "test");
-  const engine = new AgentEngine(store, tools, new PermissionBroker(), schedulers);
+  // Each turn starts after the cache has gone cold.
+  let clock = Date.now();
+  const engine = new AgentEngine(store, tools, new PermissionBroker(), schedulers, undefined, undefined, { now: () => new Date(clock += CACHE_COLD_MS) });
   const seen: string[][] = [];
   const inference = { providerId: "test", modelId: "test", profile: null, thinkingEnabled: undefined, preservesPromptCache: false,
     async *stream(messages: { role: string; content?: string | null }[]) {

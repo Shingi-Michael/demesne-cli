@@ -5,8 +5,8 @@
 /// what each large read-style result was (the paths, the start of the text)
 /// and the model reads again when it needs the current text, which is also
 /// fresher than the copy it had. Edits, answers, questions and short results
-/// stay whole. Only turns before the cut point (cutPoint) are touched: the
-/// last two finished turns and the turn in progress keep everything.
+/// stay whole. Only turns up to the stored cut (nextForgetThrough) are
+/// touched: the last two finished turns and the turn in progress keep everything.
 import { isRecord, type ModelMessage } from "@demesne/protocol";
 
 /// Tools whose output can be fetched again, and so need not be carried.
@@ -62,13 +62,17 @@ export function forgetOldReads<T extends ModelMessage>(messages: T[]): T[] {
 /// from the cached copy instead of reading again (measured on the Codex plan,
 /// trimming the last turns too cost more rounds and more uncached tokens).
 export const KEEP_RECENT_TURNS = 2;
-/// Older turns are cut to notes in one step once their long read-style
-/// output passes this many characters (~60k tokens), then left alone until
-/// it piles up again. Cutting rarely, all at once, keeps the cached prefix
-/// valid in between, where trimming a turn every time would not. A cut
-/// costs one uncached rebuild and pays back on every later round, so it
-/// waits for a lot to come off (at 120k a short chat lost a little, measured).
-export const CUT_AFTER_CHARS = 240_000;
+/// Old turns are cut to notes only when it costs nothing: when the
+/// provider's prompt cache has gone cold (the chat sat idle this long), the
+/// next request is rebuilt from scratch anyway, so rewriting old turns then
+/// is free. Cutting while the cache is warm throws it away: after cuts at a
+/// fixed size (240k) long turns sent 2.4× more uncached tokens (measured on
+/// Mike's Mac, 2026-11-05).
+export const CACHE_COLD_MS = 15 * 60_000;
+/// A cold cut is worth making once this much long output can come off.
+export const COLD_CUT_CHARS = 8_000;
+/// Even with a warm cache, past this much the cut pays for its rebuild.
+export const CUT_AFTER_CHARS = 480_000;
 
 const longOutput = (messages: ModelMessage[]) => {
   const names = new Map<string, string>();
@@ -80,23 +84,38 @@ const longOutput = (messages: ModelMessage[]) => {
   return total;
 };
 
-/// How many of the earliest turns are cut to notes: worked out from the
-/// history alone, as if it grew one turn at a time, so every round and
-/// every later turn agrees on it until the next cut.
-export function cutPoint(turns: ModelMessage[][]): number {
+/// How many of the earliest turns the old rule (a cut each 240k, worked out
+/// from the history alone) had cut: where a chat from before stored cuts
+/// starts, so its request doesn't suddenly grow back.
+export function cutPoint(turns: ModelMessage[][], every = 240_000): number {
   const sizes = turns.map(longOutput);
   let cut = 0, pending = 0, counted = 0;
   for (let length = 1; length <= turns.length; length++) {
     const end = length - KEEP_RECENT_TURNS;
     while (counted < end) pending += sizes[counted++]!;
-    if (end > cut && pending > CUT_AFTER_CHARS) { cut = end; pending = 0; }
+    if (end > cut && pending > every) { cut = end; pending = 0; }
   }
   return cut;
 }
 
-/// The history's turns, the ones before the cut point with their long reads
-/// as notes.
-export function forgetOldReadsInHistory<T extends ModelMessage>(turns: T[][]): T[][] {
-  const cut = cutPoint(turns);
-  return turns.map((messages, index) => index < cut ? forgetOldReads(messages) : messages);
+interface Turn<T extends ModelMessage> { firstMessageId: number; messages: T[] }
+
+/// Where the cut stands for this turn: kept from before unless the cache is
+/// cold (or the pile is huge), then moved up to all but the last turns.
+/// Decided once at the start of a turn, so every round of it sends the same
+/// history and keeps the cache. `through` null = a chat from before stored
+/// cuts; `idleMs` null = no request yet (nothing cached).
+export function nextForgetThrough<T extends ModelMessage>(turns: Turn<T>[], through: number | null, idleMs: number | null): number {
+  let at = through ?? (() => { const cut = cutPoint(turns.map((turn) => turn.messages)); return cut ? turns[cut - 1]!.firstMessageId : 0; })();
+  const end = turns.length - KEEP_RECENT_TURNS;
+  if (end <= 0 || turns[end - 1]!.firstMessageId <= at) return at;
+  const pending = turns.slice(0, end).filter((turn) => turn.firstMessageId > at).reduce((total, turn) => total + longOutput(turn.messages), 0);
+  const cold = idleMs === null || idleMs >= CACHE_COLD_MS;
+  if ((cold && pending >= COLD_CUT_CHARS) || pending > CUT_AFTER_CHARS) at = turns[end - 1]!.firstMessageId;
+  return at;
+}
+
+/// The history's turns, those up to the cut with their long reads as notes.
+export function forgetThrough<T extends ModelMessage, U extends Turn<T>>(turns: U[], through: number): U[] {
+  return turns.map((turn) => turn.firstMessageId <= through ? { ...turn, messages: forgetOldReads(turn.messages) } : turn);
 }

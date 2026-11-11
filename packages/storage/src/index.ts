@@ -582,6 +582,24 @@ export class DemesneStore {
     })();
   }
 
+  /// Old reads are notes up to this message id; null until first decided.
+  getForgetThrough(id: string): number | null {
+    const row = this.database.query("SELECT forget_through FROM sessions WHERE id = ?").get(id) as { forget_through: number | null } | null;
+    return row?.forget_through ?? null;
+  }
+
+  setForgetThrough(id: string, messageId: number): void {
+    this.database.query("UPDATE sessions SET forget_through = ? WHERE id = ?").run(messageId, id);
+  }
+
+  /// When the chat's last model request finished: past a few minutes the
+  /// provider's prompt cache is gone, so rewriting old turns costs nothing.
+  lastProviderCallAt(sessionId: string): string | null {
+    const row = this.database.query(`SELECT MAX(provider_calls.completed_at) AS at FROM provider_calls JOIN turns ON turns.id = provider_calls.turn_id
+      WHERE turns.session_id = ? AND provider_calls.completed_at IS NOT NULL`).get(sessionId) as { at: string | null } | null;
+    return row?.at ?? null;
+  }
+
   /// A lightweight policy read for every approval and model request. A
   /// deleted or missing session never receives automatic authorization.
   isSessionAutoApprove(id: string): boolean {
@@ -2330,6 +2348,8 @@ export class DemesneStore {
     if (!this.hasColumn("sessions", "auto_approve")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0 CHECK (auto_approve IN (0, 1))");
     }
+    // Old reads are cut to notes up to this message (forget-reads.ts); null = never decided yet.
+    if (!this.hasColumn("sessions", "forget_through")) this.database.run("ALTER TABLE sessions ADD COLUMN forget_through INTEGER");
     if (!this.hasColumn("sessions", "accept_edits")) {
       this.database.run("ALTER TABLE sessions ADD COLUMN accept_edits INTEGER NOT NULL DEFAULT 0 CHECK (accept_edits IN (0, 1))");
     }

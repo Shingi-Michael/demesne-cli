@@ -26,7 +26,7 @@ import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-
 import { forgetFoundrySources, FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { WEB_TOOL_NAMES } from "./web.ts";
 import { UPDATE_PLAN } from "./plan.ts";
-import { forgetOldReadsInHistory } from "./forget-reads.ts";
+import { forgetThrough, nextForgetThrough } from "./forget-reads.ts";
 import { ASSISTANT_TOOL_NAMES, assistantBasePrompt, assistantStamp } from "./assistant.ts";
 import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
@@ -336,6 +336,13 @@ export class AgentEngine {
     if (![maxModelRounds, maxToolCalls].every((value) => Number.isSafeInteger(value) && value > 0)) throw new Error("Agent turn limits must be positive integers");
     let budgetReason: string | undefined;
 
+    // Old reads become notes only when the cache is cold (forget-reads.ts),
+    // decided once here so every round of this turn sends the same history.
+    const lastCall = this.store.lastProviderCallAt(session.id);
+    const idleMs = lastCall ? (this.options.now?.() ?? new Date()).getTime() - Date.parse(lastCall) : null;
+    const storedForget = themefy ? 0 : this.store.getForgetThrough(session.id);
+    const forgetUpTo = themefy ? 0 : nextForgetThrough(history, storedForget, idleMs);
+    if (!themefy && forgetUpTo !== storedForget) this.store.setForgetThrough(session.id, forgetUpTo);
     let round = 0;
     // Reserve one tool-free status request after an allowance is exhausted.
     while (round <= maxModelRounds) {
@@ -349,7 +356,7 @@ export class AgentEngine {
       const requestDefinitions = finalizing ? [] : sent;
       // A page made in an earlier turn is stored, and a file read then can be
       // read again: neither needs to ride along in full.
-      const historyMessages = forgetOldReadsInHistory(history.map((entry) => forgetFoundrySources(entry.messages))).flat();
+      const historyMessages = forgetThrough(history.map((entry) => ({ ...entry, messages: forgetFoundrySources(entry.messages) })), forgetUpTo).flatMap((entry) => entry.messages);
       const systemPrompt = themefy ? THEMEFY_PROMPT : assistant ? assistantSystemPrompt({ home: session.workspace?.root, definitions, planOnly: turn.planOnly })
         : agentSystemPrompt({ workspaceRoot: session.workspace?.root, definitions, content: turn.content,
         planOnly: turn.planOnly, orchestrate: orchestrating, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),

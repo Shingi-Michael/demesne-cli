@@ -267,7 +267,7 @@ function readFileTool(): AgentTool {
   return {
     definition: {
       name: "read_file",
-      description: "Read numbered UTF-8 lines. Files up to 600 lines come back whole; longer ones return at least 200 lines from offset (default limit 400, max 500). PDFs, spreadsheets (.xlsx), Word files (.docx) and decks (.pptx) come back as their text. Read once; do not page in small slices.",
+      description: "Read numbered UTF-8 lines. Files up to 600 lines come back whole; longer ones return at least 200 lines from offset (default limit 400, max 500). PDFs, spreadsheets (.xlsx, .ods), Word and text documents (.docx, .doc, .odt, .rtf) and decks (.pptx, .odp) come back as their text. Read once; do not page in small slices.",
       inputSchema: {
         type: "object",
         properties: {

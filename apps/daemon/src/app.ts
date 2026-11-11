@@ -12,6 +12,7 @@ import { webFetchTool, webSearchTool } from "./web.ts";
 import { fileText, linkTitle, MAX_COPY_BYTES, SourceError, SourceStore } from "./sources.ts";
 import { rememberTool } from "./remember.ts";
 import { updatePlanTool } from "./plan.ts";
+import { githubTools } from "./github.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
@@ -188,6 +189,8 @@ export function createDaemonApp(options: {
   phone?: Phone;
   /// false leaves out web_search and web_fetch.
   web?: boolean;
+  /// false leaves out the GitHub tools (github.ts).
+  github?: boolean;
   /// The model the assistant's chat always runs on. The picker switches the
   /// daemon's model for every other chat; your personal files never follow
   /// it to another provider.
@@ -374,6 +377,8 @@ export function createDaemonApp(options: {
   tools.register(rememberTool());
   // The plan checklist the chat shows as a ribbon on a turn of several steps.
   tools.register(updatePlanTool());
+  // GitHub through your gh login: a PR with its checks and open review comments, a check's log, a reply.
+  if (options.github !== false) for (const tool of githubTools()) tools.register(tool);
   tools.register(foundrySaveTool(store, look, looks));
   tools.register(foundryReadTool(store));
   tools.register(foundryEditTool(store, look, looks));

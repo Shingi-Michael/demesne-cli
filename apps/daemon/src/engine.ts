@@ -1537,6 +1537,8 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
   "update_plan",
   // A preview on the right; it changes nothing.
   "show",
+  // GitHub, read only: a pull request and a check's log.
+  "github_pr", "github_check_log",
   // Read-only. A literal: subagent.ts imports this module, so its constant
   // may not be initialised yet while this set is built.
   "subagent", "agents",
@@ -1546,6 +1548,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
 export const ORCHESTRATE_TOOL_NAMES = new Set([
   "list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history",
   "session_tools", "ask_user", "subagent", "agents", "start_threads", "message_thread", "web_search", "web_fetch", "remember", "update_plan",
+  "github_pr", "github_check_log",
 ]);
 /// Tools that only mean something in a project, left out of a chat with none.
 const PROJECT_ONLY_TOOLS = new Set(["remember", "start_threads", "message_thread"]);

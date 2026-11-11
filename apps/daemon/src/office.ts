@@ -229,3 +229,82 @@ export function officeText(kind: "xlsx" | "docx" | "pptx", bytes: Uint8Array): s
   if (kind === "docx") return docxBlocks(bytes).map((block) => `${block.level ? `${"#".repeat(block.level)} ` : block.bullet ? "- " : ""}${block.text}`).join("\n");
   return pptxSlides(bytes).slides.map((slide, index) => `## Slide ${index + 1}: ${slide.title}${slide.lines.length ? `\n${slide.lines.join("\n")}` : ""}`).join("\n\n");
 }
+
+/// An OpenDocument file (.odt, .ods, .odp from LibreOffice, Google Docs
+/// downloads) as plain text: headings marked, table cells tab-separated,
+/// one line per paragraph.
+export function odfText(bytes: Uint8Array): string {
+  const xml = text(readZip(bytes), "content.xml");
+  if (!xml) throw new Error("not an OpenDocument file");
+  // Footnotes hold paragraphs of their own; they go before the paragraphs are read.
+  const body = (/<office:body>([\s\S]*)<\/office:body>/.exec(xml)?.[1] ?? xml).replace(/<text:note\b[\s\S]*?<\/text:note>/g, "");
+  const lines: string[] = [];
+  const inline = (part: string) => unescapeXml(part
+    .replace(/<text:s(?:\s+text:c="(\d+)")?\s*\/>/g, (_, count) => " ".repeat(Number(count ?? 1)))
+    .replace(/<text:tab\s*\/>/g, "\t").replace(/<text:line-break\s*\/>/g, "\n")
+    .replace(/<[^>]+>/g, ""));
+  for (const [, row, heading, level, paragraph] of body.matchAll(/<table:table-row\b[^>]*>([\s\S]*?)<\/table:table-row>|<text:h\b([^>]*)>([\s\S]*?)<\/text:h>|<text:p\b[^>]*?(?:\/>|>([\s\S]*?)<\/text:p>)/g)) {
+    if (lines.length >= MAX_BLOCKS) break;
+    if (row !== undefined) {
+      const cells = [...row.matchAll(/<table:table-cell\b([^>]*?)(?:\/>|>([\s\S]*?)<\/table:table-cell>)/g)].map(([, attrs, cell]) => {
+        const repeat = Math.min(20, Number(/table:number-columns-repeated="(\d+)"/.exec(attrs ?? "")?.[1] ?? 1));
+        const words = [...(cell ?? "").matchAll(/<text:p\b[^>]*?(?:\/>|>([\s\S]*?)<\/text:p>)/g)].map(([, p]) => inline(p ?? "")).join(" ");
+        return Array<string>(repeat).fill(words);
+      }).flat();
+      while (cells.length && !cells.at(-1)) cells.pop();
+      if (cells.length) lines.push(cells.join("\t"));
+      continue;
+    }
+    if (heading !== undefined) {
+      const depth = Math.min(3, Math.max(1, Number(/text:outline-level="(\d+)"/.exec(heading)?.[1] ?? 1)));
+      lines.push(`${"#".repeat(depth)} ${inline(level ?? "").trim()}`);
+      continue;
+    }
+    lines.push(inline(paragraph ?? ""));
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/// Groups an RTF reader skips whole: fonts, colours, styles, pictures and
+/// anything marked optional with \\*.
+const RTF_SKIP = new Set(["fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "header", "footer", "headerl", "headerr", "footerl", "footerr", "listtable", "listoverridetable", "themedata", "colorschememapping", "latentstyles", "datastore", "xmlnstbl", "rsidtbl", "generator"]);
+
+/// A Rich Text file (.rtf, TextEdit's default) as plain text.
+export function rtfText(source: string): string {
+  if (!source.startsWith("{\\rtf")) throw new Error("not an RTF file");
+  let out = "", skip = 0, depth = 0, unicodeSkip = 1, pendingSkip = 0;
+  const skipAt: number[] = [];
+  for (let at = 0; at < source.length; at++) {
+    const char = source[at]!;
+    if (char === "{") { depth++; continue; }
+    if (char === "}") { if (skipAt.at(-1) === depth) { skipAt.pop(); skip--; } depth--; continue; }
+    if (char === "\\") {
+      const next = source[at + 1] ?? "";
+      if (next === "\\" || next === "{" || next === "}") { if (!skip) out += next; at++; continue; }
+      if (next === "'") { const code = parseInt(source.slice(at + 2, at + 4), 16); if (pendingSkip) pendingSkip--; else if (!skip && !Number.isNaN(code)) out += new TextDecoder("windows-1252").decode(new Uint8Array([code])); at += 3; continue; }
+      if (next === "*") { if (!skip || skipAt.at(-1) !== depth) { skip++; skipAt.push(depth); } at++; continue; }
+      if (next === "~") { if (!skip) out += "\u00a0"; at++; continue; }
+      if (next === "\n" || next === "\r") { if (!skip) out += "\n"; at++; continue; }
+      const word = /^([a-z]+)(-?\d+)? ?/.exec(source.slice(at + 1));
+      if (!word) { at++; continue; }
+      at += word[0].length;
+      const [, name, value] = word;
+      if (RTF_SKIP.has(name!) && source[at - word[0].length - 1] === "{") { skip++; skipAt.push(depth); continue; }
+      if (skip) continue;
+      if (name === "par" || name === "line" || name === "row") out += "\n";
+      else if (name === "tab" || name === "cell") out += "\t";
+      else if (name === "uc") unicodeSkip = Number(value ?? 1);
+      else if (name === "u") { const code = Number(value); out += String.fromCharCode(code < 0 ? code + 65536 : code); pendingSkip = unicodeSkip; }
+      else if (name === "emdash") out += "—"; else if (name === "endash") out += "–";
+      else if (name === "lquote") out += "‘"; else if (name === "rquote") out += "’";
+      else if (name === "ldblquote") out += "“"; else if (name === "rdblquote") out += "”";
+      else if (name === "bullet") out += "•";
+      continue;
+    }
+    if (char === "\n" || char === "\r") continue;
+    if (skip) continue;
+    if (pendingSkip) { pendingSkip--; continue; }
+    out += char;
+  }
+  return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}

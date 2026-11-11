@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalWorkspace, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
+import { canonicalWorkspace, fitDiff, fitRead, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
 import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE, defaultSystemPrompt, FOUNDRY_GUIDANCE, FOUNDRY_UNATTENDED_GUIDANCE, planModeDefinitions, planModeGuidance, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 import { applyEdits, EditApplyError } from "../src/edit-engine.ts";
 
@@ -146,7 +146,31 @@ describe("built-in tools", () => {
     expect(result.stdoutBytes).toBe(65544);
     expect(result.stdout).toStartWith("HEAD");
     expect(result.stdout).toEndWith("TAIL");
-    expect(result.stdout).toContain("49160 bytes omitted");
+    expect(result.stdout).toContain("59400 bytes omitted");
+    expect(result.note).toContain("grep, head or tail");
+  });
+
+  test("a long read stops at a whole line and says where to go on", () => {
+    const content = Array.from({ length: 50 }, (_, index) => `${index + 1}: ${"x".repeat(98)}`).join("\n");
+    const record = fitRead({ path: "a.ts", totalLines: 50, range: { from: 1, to: 50 }, content, truncated: false }, 1_000, "this read reached its size limit");
+    expect(record).toMatchObject({ range: { from: 1, to: 9 }, truncated: true, nextOffset: 10, remainingLines: 41 });
+    expect(String(record.content).split("\n").at(-1)).toStartWith("9: ");
+    expect(String(record.note)).toContain("line 10");
+    expect(fitRead({ content: "1: short" }, 1_000, "")).toEqual({ content: "1: short" });
+  });
+
+  test("a long diff shows whole files and names the ones left out", () => {
+    const file = (name: string, size: number) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n+${"y".repeat(size)}\n`;
+    const fitted = fitDiff(file("a.ts", 400) + file("b.ts", 400) + file("c.ts", 400), false, 1_000);
+    expect(fitted.text).toContain("a/a.ts");
+    expect(fitted.text).toContain("a/b.ts");
+    expect(fitted.text).not.toContain("a/c.ts");
+    expect(fitted).toMatchObject({ truncated: true, leftOut: ["c.ts"] });
+    // One file bigger than the budget shows its start.
+    const big = fitDiff(file("big.ts", 5_000), false, 1_000);
+    expect(big.text).toStartWith("diff --git a/big.ts");
+    expect(big.leftOut).toEqual([]);
+    expect(fitDiff("small", true)).toEqual({ text: "small", truncated: true, leftOut: [] });
   });
 
   test("edit engine falls back from exact to line to whitespace matching", () => {

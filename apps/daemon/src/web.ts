@@ -11,7 +11,8 @@ import { toolError, type AgentTool } from "./tools.ts";
 export const WEB_TOOL_NAMES = new Set(["web_search", "web_fetch"]);
 
 const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Demesne";
-const PAGE_DEFAULT_CHARS = 20_000;
+/// Most answers sit in a page's first screens; nextOffset reads on.
+const PAGE_DEFAULT_CHARS = 10_000;
 const PAGE_MAX_CHARS = 60_000;
 const BODY_MAX_BYTES = 4 * 1024 * 1024;
 const TIMEOUT_MS = 20_000;

@@ -213,6 +213,8 @@ export function createDaemonApp(options: {
   foundryTry?: FoundryTry;
   /// Opens the app being built for look_at_page (tests pass a fake; the daemon uses the desktop app).
   pageLook?: PageLook;
+  /// The engine's clock (evals step it to make the prompt cache go cold).
+  now?: () => Date;
   /// The open and show tools (pass 210 A); on unless false.
   openShow?: boolean;
   /// Name chats from their first answer (the daemon on; tests off).
@@ -488,6 +490,7 @@ export function createDaemonApp(options: {
       providerVision: options.providerVision,
       deferTools: options.deferTools,
       nameChats: options.nameChats,
+      ...(options.now ? { now: options.now } : {}),
       questions,
       themes,
       commands,

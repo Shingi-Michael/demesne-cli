@@ -337,12 +337,7 @@ function readFilesTool(): AgentTool {
           const record = result as Record<string, unknown>;
           const again = givenBefore(context, "read", record, false);
           if (again) { results.push(again); continue; }
-          const content = typeof record.content === "string" ? record.content : "";
-          if (Buffer.byteLength(content) > remaining) {
-            record.content = content.slice(0, Math.max(0, remaining)).replace(/\n[^\n]*$/, "");
-            record.truncated = true;
-            record.note = "content truncated by batch budget: read the rest with offset, or fewer files at once";
-          }
+          fitRead(record, Math.max(0, remaining), "this batch reached its size limit");
           remaining -= Buffer.byteLength(record.content as string);
           givenBefore(context, "read", record);
           results.push(record);
@@ -357,10 +352,37 @@ function readFilesTool(): AgentTool {
   };
 }
 
-/// One read_files call returns at most this much text. It was 256 KB; every
-/// later round of the turn resends what a read returned, so a big batch is
-/// paid for again and again (reads were over half of all tool output).
-const READ_BATCH_LIMIT_BYTES = 64 * 1024;
+/// One read_files call returns at most this much text, and one read_file
+/// call too. It was 256 KB, then 64; every later round of the turn resends
+/// what a read returned, so a big read is paid for again and again (reads
+/// were over half of all tool output, median 26k characters).
+const READ_BATCH_LIMIT_BYTES = 32 * 1024;
+const READ_FILE_LIMIT_BYTES = 32 * 1024;
+/// A command gives this much of each stream, its start and end kept.
+const COMMAND_OUTPUT_BYTES = 6 * 1024;
+/// A line longer than this (minified code, data) is clipped: one such line
+/// could fill a read on its own.
+const READ_LINE_CHARS = 2_000;
+
+/// A read cut to fit: whole lines only, and where to go on from.
+export function fitRead(record: Record<string, unknown>, bytes: number, why: string): Record<string, unknown> {
+  const content = typeof record.content === "string" ? record.content : "";
+  if (Buffer.byteLength(content) <= bytes) return record;
+  let cut = Buffer.from(content).subarray(0, bytes).toString("utf8").replace(/\uFFFD$/, "");
+  cut = cut.includes("\n") ? cut.slice(0, cut.lastIndexOf("\n")) : "";
+  const last = /(?:^|\n)(\d+): [^\n]*$/.exec(cut);
+  const range = isRecord(record.range) ? record.range : {};
+  const from = typeof range.from === "number" ? range.from : 1;
+  const to = last ? Number(last[1]) : from - 1;
+  const total = typeof record.totalLines === "number" ? record.totalLines : to;
+  record.content = cut;
+  record.range = { from, to };
+  record.truncated = true;
+  record.remainingLines = Math.max(0, total - to);
+  record.nextOffset = to + 1;
+  record.note = `${why}: read on from line ${to + 1} with offset, or search_files for what you need`;
+  return record;
+}
 
 /// What this turn has already been given, by turn: a read (path and lines)
 /// or a diff, with a hash of its text. Asking again for the same unchanged
@@ -463,16 +485,22 @@ async function readSingleFile(
   else limit = Math.max(limit, MIN_READ_WINDOW);
   const endLine = Math.min(offset - 1 + limit, totalLines);
   const selected = lines.slice(offset - 1, endLine);
-  const content = selected.map((line, index) => `${offset + index}: ${line.slice(0, 16_384)}`).join("\n");
-  return {
+  let clipped = 0;
+  const content = selected.map((line, index) => {
+    if (line.length <= READ_LINE_CHARS) return `${offset + index}: ${line}`;
+    clipped++;
+    return `${offset + index}: ${line.slice(0, READ_LINE_CHARS)} … [${line.length.toLocaleString("en-US")} characters, clipped]`;
+  }).join("\n");
+  return fitRead({
     path,
     totalLines,
     range: { from: offset, to: endLine },
-    content: content.slice(0, 256 * 1024),
+    content,
     truncated: offset - 1 + limit < totalLines,
     remainingLines: Math.max(0, totalLines - endLine),
     ...(endLine < totalLines ? { nextOffset: endLine + 1 } : {}),
-  };
+    ...(clipped ? { clippedLines: clipped, note: "Very long lines are clipped; search_files finds text inside them." } : {}),
+  }, READ_FILE_LIMIT_BYTES, "this read reached its size limit");
 }
 
 function searchFilesTool(): AgentTool {
@@ -959,6 +987,30 @@ async function runGit(workspaceRoot: string, args: string[], signal: AbortSignal
 }
 
 const GIT_OUTPUT_LIMIT_BYTES = 64 * 1024;
+/// What a diff gives the model: whole files up to this much, then the names
+/// of the rest, so it asks for the one it needs instead of carrying them all.
+const DIFF_SHOWN_BYTES = 24 * 1024;
+
+export function fitDiff(text: string, cutByGit = false, limit = DIFF_SHOWN_BYTES): { text: string; truncated: boolean; leftOut: string[] } {
+  if (Buffer.byteLength(text) <= limit) return { text, truncated: cutByGit, leftOut: [] };
+  // Split before each file's header; the part before the first is a log or stat.
+  const parts = text.split(/(?=^diff --git )/m);
+  let shown = "", used = 0;
+  const leftOut: string[] = [];
+  for (const part of parts) {
+    const size = Buffer.byteLength(part);
+    if (!leftOut.length && used + size <= limit) { shown += part; used += size; continue; }
+    const name = /^diff --git a\/(.+?) b\//.exec(part)?.[1];
+    if (name) leftOut.push(name);
+    else if (!shown) { shown = Buffer.from(part).subarray(0, limit).toString("utf8").replace(/\n[^\n]*$/, ""); used = limit; }
+  }
+  // One file bigger than the whole budget: show its start.
+  if (!shown.trim() && parts.length) {
+    shown = Buffer.from(parts[0]!).subarray(0, limit).toString("utf8").replace(/\n[^\n]*$/, "");
+    leftOut.shift();
+  }
+  return { text: shown, truncated: true, leftOut: leftOut.slice(0, 200) };
+}
 
 function gitStatusTool(): AgentTool {
   return {
@@ -1012,8 +1064,8 @@ function gitDiffTool(): AgentTool {
       const path = optionalString(value.path, "path");
       if (path) args.push("--", path);
       const diff = await runGit(context.workspaceRoot, args, context.signal);
-      const truncated = Buffer.byteLength(diff.stdout) >= GIT_OUTPUT_LIMIT_BYTES;
-      const result = { empty: diff.stdout.length === 0, truncated, diff: diff.stdout };
+      const fitted = fitDiff(diff.stdout, Buffer.byteLength(diff.stdout) >= GIT_OUTPUT_LIMIT_BYTES);
+      const result = { empty: diff.stdout.length === 0, truncated: fitted.truncated, diff: fitted.text, ...(fitted.leftOut.length ? { filesLeftOut: fitted.leftOut, note: "Diff too long to show whole: pass path for one of filesLeftOut." } : {}) };
       return JSON.stringify(givenBefore(context, "diff", { ...result, path: path ?? "", staged: value.staged === true, range: { from: contextLines, to: contextLines } }) ?? result);
     },
   };
@@ -1077,7 +1129,8 @@ function gitHistoryTool(): AgentTool {
       } else throw toolError("BAD_ACTION", `unknown action ${JSON.stringify(action)}`, "use log, show, blame or diff");
       const result = await runGit(context.workspaceRoot, args, context.signal);
       if (result.code !== 0) throw toolError("GIT_FAILED", (result.stderr.trim().split("\n")[0] || `git ${action} failed`).slice(0, 300), "check the revision and path");
-      return JSON.stringify({ truncated: Buffer.byteLength(result.stdout) >= GIT_OUTPUT_LIMIT_BYTES, output: result.stdout });
+      const fitted = fitDiff(result.stdout, Buffer.byteLength(result.stdout) >= GIT_OUTPUT_LIMIT_BYTES);
+      return JSON.stringify({ truncated: fitted.truncated, output: fitted.text, ...(fitted.leftOut.length ? { filesLeftOut: fitted.leftOut, note: "Too long to show whole: pass path for one of filesLeftOut." } : {}) });
     },
   };
 }
@@ -1291,8 +1344,8 @@ function runCommandTool(): AgentTool {
       }, timeoutMs);
       try {
         const [stdout, stderr, exitCode] = await Promise.all([
-          readCommandOutput(child.stdout, 16 * 1024,text=>observer?.output("stdout",text)),
-          readCommandOutput(child.stderr, 16 * 1024,text=>observer?.output("stderr",text)),
+          readCommandOutput(child.stdout, COMMAND_OUTPUT_BYTES,text=>observer?.output("stdout",text)),
+          readCommandOutput(child.stderr, COMMAND_OUTPUT_BYTES,text=>observer?.output("stderr",text)),
           child.exited,
         ]);
         observer?.finished(exitCode,timedOut,context.signal.aborted?"Turn cancelled":undefined);
@@ -1304,6 +1357,7 @@ function runCommandTool(): AgentTool {
           timedOut,
           ...(stdout.truncated ? { stdoutTruncated: true, stdoutBytes: stdout.totalBytes } : {}),
           ...(stderr.truncated ? { stderrTruncated: true, stderrBytes: stderr.totalBytes } : {}),
+          ...(stdout.truncated || stderr.truncated ? { note: "Long output keeps its start and end. For the middle, run it again through grep, head or tail, or with quieter flags." } : {}),
         });
       } catch(error){observer?.finished(null,timedOut,String(error));throw error;} finally {
         clearTimeout(timer);

@@ -10,7 +10,7 @@ function hostFor(f: Awaited<ReturnType<typeof fixture>>) {
     workspace: f.workspace,
     settings: f.settings,
     client: f.client,
-    changed: () => {},
+    changed: () => {}, startOnAsk: true,
   });
 }
 test("live edits wait for approval and replay matches the finished UI", async () => {
@@ -311,7 +311,7 @@ test("clicking around the desktop never pauses Drive; writing or sending does", 
 test("the displayed context follows the active daemon model, not the primary provider's config", async () => {
   const f = await fixture({ providerId: "cloud", modelId: "cloud-model", contextCapacity: 272000,
     async listModels() { return []; }, async *stream() { yield { type: "text_delta", delta: "Ready" }; yield { type: "finish", reason: "stop" }; } });
-  const h = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  const h = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, startOnAsk: true });
   try { await h.connect(); expect(h.snapshot().model.contextWindow).toBe(272000); }
   finally { h.dispose(); await f.close(); }
 });

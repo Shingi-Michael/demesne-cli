@@ -1475,12 +1475,20 @@ export function canonicalWorkspace(path: string): string {
   return root;
 }
 
+/// Chats with no project work in your home folder (engine plainRoot). The
+/// home folder is still too broad for a project, and these folders inside
+/// it stay out of reach: Demesne's own data and your keys.
+let homeForChats: { home: string; guarded: string[] } | null = null;
+export function openHomeForChats(home: string | null, guarded: string[] = []): void {
+  homeForChats = home ? { home: resolve(home), guarded: guarded.map((path) => resolve(path)) } : null;
+}
+
 function assertWorkspaceRoot(root: string): void {
   const linkStat = lstatSync(root);
   if (linkStat.isSymbolicLink()) throw new Error("workspace root changed");
   const stat = statSync(root);
   if (!stat.isDirectory()) throw new Error("workspace path must be a directory");
-  if (root === sep || root === homedir()) throw new Error("workspace root is too broad");
+  if (root === sep || (root === homedir() && root !== homeForChats?.home)) throw new Error("workspace root is too broad");
 }
 
 export function resolveWorkspacePath(root: string, input: string, allowMissingFinal: boolean, allowMissingParents = false): string {
@@ -1491,6 +1499,8 @@ export function resolveWorkspacePath(root: string, input: string, allowMissingFi
   const absolute = resolve(root, input);
   const relation = relative(root, absolute);
   if (relation.startsWith(`..${sep}`) || relation === ".." || isAbsolute(relation)) throw new Error("path escapes workspace");
+  if (root === homeForChats?.home && homeForChats.guarded.some((guarded) => absolute === guarded || absolute.startsWith(guarded + sep)))
+    throw new Error("that folder is off limits to chats");
   let current = root;
   for (const [index, component] of components.entries()) {
     if (component === ".") continue;
@@ -1531,6 +1541,7 @@ function walkFiles(
     if (!stat.isDirectory()) continue;
     const relativeDirectory = relative(root, current);
     if (!shouldEnterDirectory(relativeDirectory)) continue;
+    if (root === homeForChats?.home && homeForChats.guarded.includes(current)) continue;
     if (relativeDirectory === ".git" || relativeDirectory.startsWith(`.git${sep}`)) continue;
     const entries = readdirSync(current).sort().reverse();
     for (const entry of entries) stack.push(join(current, entry));

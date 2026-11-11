@@ -88,6 +88,7 @@ test("real command facts distinguish failed, passing and outdated checks", async
     settings: f.settings,
     client: f.client,
     changed() {},
+    startOnAsk: true,
   });
   try {
     writeFileSync(

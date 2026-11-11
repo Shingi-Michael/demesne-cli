@@ -4,6 +4,9 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- Every new chat starts on **Auto**: edits and commands run without asking. The mode word under the composer still switches a chat to Ask, Accept edits or Plan.
+- **Just a chat** can make changes: a chat with no project works in your home folder, reading and editing files and running commands there (paths like `Desktop/notes.md`). Demesne's own data folder and config stay out of its file tools, and key folders (`.ssh`, `.aws`, `.gnupg`) stay hidden as before. Threads and remembered rules still need a project.
+
 - A working thread can be stopped: its composer's send turns into Stop while the thread works, as in any chat, and turns back to send once you type (words steer it instead).
 - Drive lives at the foot of the sidebar, above you and Settings: its state, what it's on, Tell Drive and its ideas unfold there, and nothing sits above the composer any more. Branches to review stay on the sidebar's Review line.
 - No thinking in the window: the "Thought for … · Show trace" rows are gone from chats and threads, like frontier apps. While a turn runs, its working line still says what it is about.

@@ -83,6 +83,8 @@ export interface WorkspaceHostOptions {
   /// Opens on Home: an empty chat, with no project ("plain") or in this
   /// one, using again one left empty, rather than the last chat.
   home?: "plain" | "project";
+  /// New chats start on Ask rather than Auto (tests that walk approvals).
+  startOnAsk?: boolean;
   /// No project is open yet: every chat here is Just a chat, and the folder
   /// the host stands in is never shown as a project.
   projectless?: boolean;
@@ -672,7 +674,7 @@ export class WorkspaceHost {
     }
     await this.connect();
   }
-  /// A plain chat has no project: no files, commands or Drive. With
+  /// A plain chat has no project or Drive; it works in your home folder. With
   /// `reuse`, an empty chat already there is opened rather than piling up.
   async newSession(title?: string, options: { plain?: boolean; reuse?: boolean; waitForModel?: boolean } = {}) {
     if (this.options.projectless) options = { ...options, plain: true };
@@ -692,6 +694,8 @@ export class WorkspaceHost {
         ...(options.plain ? {} : { workspacePath: this.workspace }),
         title: title ?? `Session ${new Date().toLocaleTimeString()}`,
         ...(this.trustWorkspace && !options.plain ? { trustWorkspace: true } : {}),
+        // Every new chat starts on Auto; the mode word switches it back.
+        ...(this.options.startOnAsk ? {} : { autoApprove: true }),
       });
     } catch (error) {
       // Every caller (startup, New session, the desktop's project switch)

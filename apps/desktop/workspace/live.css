@@ -2060,7 +2060,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin-left: 34px;
+  margin-left: 32px;
   position: relative;
 }
 .steps::before {
@@ -2080,7 +2080,7 @@ button:disabled {
   width: 100%;
   min-height: 24px;
   margin: 0;
-  padding: 0 8px 0 0;
+  padding: 0 4px 0 0;
   border: 0;
   border-radius: 8px;
   font-size: 12.5px;
@@ -2281,7 +2281,7 @@ button:disabled {
   flex-wrap: wrap;
   align-items: center;
   gap: 16px;
-  margin-left: 34px;
+  margin-left: 32px;
   font-size: 12.5px;
   line-height: 20px;
   color: var(--muted);

@@ -107,7 +107,7 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 .sidebar-view-count { color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 /* A project's line ends in its state: branches to review in green, the
    amber ring when a chat needs you, a spinner, or when it last moved. */
-.sidebar-project-state { flex: none; display: inline-flex; align-items: center; padding-right: 8px; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sidebar-project-state { flex: none; display: inline-flex; align-items: center; padding-right: 10px; color: var(--t4); font-size: 11px; font-variant-numeric: tabular-nums; }
 .sidebar-project-state .sidebar-session-mark { margin: 0; }
 .sidebar-project-branch { gap: 4px; max-width: 96px; font-size: 11.5px; }
 .sidebar-project-branch > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -213,6 +213,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 #desktop-toggle-sidebar { color: var(--t3); display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; }
 #desktop-toggle-sidebar:hover { background: var(--surface2); color: var(--t1); }
 #desktop-toolbar header { flex: none; min-width: 0; margin: 0 0 0 auto; gap: 8px; }
+/* With no chat open the header is empty; it leaves the bar so the last control keeps the bar's own inset. */
+#desktop-toolbar > header:empty { display: none; }
 #desktop-toolbar .header-more { margin-left: auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--t3); font-size: 18px; line-height: 1; }
 #desktop-toolbar .header-more:hover, #desktop-toolbar .header-more.active { background: var(--surface2); color: var(--t1); }
 #desktop-shell > .live-app { grid-column: 2; grid-row: 2; min-width: 0; width: 100%; height: 100%; }
@@ -380,9 +382,9 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    on the right, each row a title, a sentence and its own control. */
 /* The text keeps room to read; a control that doesn't fit beside it goes under it. */
 .desktop .settings-toggle { position: relative; width: 36px; height: 20px; border-radius: 8px; background: var(--surface3); border: 1px solid var(--line2); }
-.desktop .settings-toggle i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--t2); transition: left 120ms ease; }
+.desktop .settings-toggle i { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--t2); transition: left 120ms ease; }
 .desktop .settings-toggle.on { background: var(--acc); border-color: var(--acc); }
-.desktop .settings-toggle.on i { left: 18px; background: #fff; }
+.desktop .settings-toggle.on i { left: 19px; background: #fff; }
 .desktop .settings-segments { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface2); }
 .desktop .settings-segments button { padding: 5px 12px; border-radius: 8px; font-size: 12.5px; color: var(--t3); }
 .desktop .settings-segments button:hover { color: var(--t1); }
@@ -440,7 +442,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* Thinking is one soft groove that fills from the left (pass 77); the
    fill's edge is the handle. Faint notches show the levels while you point
    at it, and the fill covers the ones it has passed. */
-.desktop .mp-thinking { position: relative; flex: none; display: flex; align-items: center; height: 30px; margin: 4px 3px 2px; padding: 0 12px; border-radius: 15px; background: var(--tone); overflow: hidden; font-size: 12.5px; color: var(--t3); cursor: ew-resize; touch-action: none; user-select: none; }
+.desktop .mp-thinking { position: relative; flex: none; display: flex; align-items: center; height: 30px; margin: 4px 0 2px; padding: 0 12px; border-radius: 15px; background: var(--tone); overflow: hidden; font-size: 12.5px; color: var(--t3); cursor: ew-resize; touch-action: none; user-select: none; }
 .desktop .mp-thinking.none { cursor: default; }
 .desktop .mp-thinking:not(.none):hover, .desktop .mp-thinking.drag { background: var(--tone2); }
 .desktop .mp-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 15px; background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 10%, transparent), color-mix(in srgb, var(--acc) 30%, transparent)); box-shadow: inset -1px 0 0 color-mix(in srgb, var(--acc) 45%, transparent); pointer-events: none; }
@@ -536,7 +538,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop :is(#composer, #tp-composer).stopping .send { color: var(--t2); }
 .desktop :is(#composer, #tp-composer).stopping .send .send-arrow { display: none; }
 .desktop :is(#composer, #tp-composer).stopping .send .send-stop { display: block; width: 14px; height: 14px; fill: currentColor; stroke: none; }
-.desktop :is(#composer, #tp-composer) .composer-bar { position: static; display: flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 0 6px; }
+.desktop :is(#composer, #tp-composer) .composer-bar { position: static; display: flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 0 10px; }
 .desktop :is(#composer, #tp-composer) .composer-bar .sp { flex: 1; }
 .desktop :is(#composer, #tp-composer) .composer-bar .cb, .desktop :is(#composer, #tp-composer) .composer-bar .cb-box { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; color: var(--t3); }
 .desktop :is(#composer, #tp-composer) .composer-bar .cb:hover { background: var(--surface2); color: var(--t1); }
@@ -1222,8 +1224,8 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 /* All chats: the whole list in place of the conversation, with Archived. */
 .live-app.paging #stage > :not(#page) { display: none !important; }
 .live-app.paging #input-area { display: none; }
-.desktop #page { max-width: 680px; margin: 0 auto; padding: 28px 0 32px; color: var(--t2); }
-.cp-title { margin: 0 0 6px; color: var(--t1); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.desktop #page { max-width: 720px; margin: 0 auto; padding: 44px 0 32px; color: var(--t2); }
+.cp-title { margin: 0 0 6px; color: var(--t1); font-size: 28px; font-weight: 600; line-height: 34px; letter-spacing: -0.01em; }
 .cp-tabs { display: flex; gap: 18px; margin-bottom: 14px; }
 .cp-tab { height: 26px; padding: 0; color: var(--t3); font-size: 13px; box-shadow: inset 0 -1.5px 0 transparent; transition: color 140ms var(--ease), box-shadow 140ms var(--ease); }
 .cp-tab:hover { color: var(--t1); }
@@ -1240,8 +1242,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .cp-empty { padding: 16px 10px; color: var(--t3); font-size: 13px; }
 /* Scheduled: routines and Drive's quiet-time runs, the week's runs, and a
    new routine written as one sentence. */
-.desktop #page[data-kind="scheduled"] { max-width: 720px; }
-.cp-lede { margin: 0 0 18px; color: var(--t3); font-size: 13px; }
+.cp-lede { margin: 0 0 18px; color: var(--t3); font-size: 13.5px; line-height: 20px; }
 .cp-head { display: flex; justify-content: space-between; margin: 18px 0 4px; padding: 0 10px; color: var(--t3); font-size: 12px; font-weight: 500; }
 .cp-head span + span { color: var(--t4); font-weight: 400; font-variant-numeric: tabular-nums; }
 .sp-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 10px; border-radius: var(--r); box-shadow: inset 0 -1px 0 var(--hair); }
@@ -1269,7 +1270,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .sp-hint, .sp-error { margin: 8px 14px 0; color: var(--t4); font-size: 12px; }
 .sp-error { color: var(--warn); }
 /* Customize: each file a row with Edit and Run; Edit unfolds the file in place. */
-.desktop #page[data-kind="customize"] { max-width: 720px; }
 .cz-row { min-height: 46px; }
 .cz-row.on { background: var(--surface2); }
 .cz-name { flex: none; width: 150px; overflow: hidden; color: var(--t1); font-size: 13.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -1317,7 +1317,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .st-nav.on { background: var(--surface2); color: var(--t1); }
 .st-nav.on .ico { color: var(--t1); }
 .st-nav-n { margin-left: auto; color: var(--t4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.desktop #page[data-kind="settings"] { max-width: 660px; padding-top: 30px; }
 .st-head { display: flex; justify-content: space-between; align-items: baseline; margin: 24px 16px 8px; color: var(--t2); font-size: 12.5px; font-weight: 500; }
 .st-head span + span { color: var(--t4); font-weight: 400; font-variant-numeric: tabular-nums; }
 .st-goto { padding: 0; color: var(--t2); font-size: 12.5px; font-weight: 500; }
@@ -1377,7 +1376,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .st-note.foot { margin: 18px 16px 0; color: var(--t4); font-size: 12px; }
 
 /* Settings, pass 116 A: Overview first, then sections with pictures. */
-.desktop #page[data-kind="settings"] { max-width: 720px; }
 .ov-say { margin: 2px 0 20px; color: var(--t2); font-size: 15px; line-height: 25px; }
 .ov-link { padding: 0; color: var(--t1); font: inherit; text-decoration: underline; text-decoration-color: var(--hair2); text-underline-offset: 4px; }
 .ov-link:hover { text-decoration-color: var(--acc); }
@@ -1461,7 +1459,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .pm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .pm-more { height: 26px; padding: 0 8px; border-radius: 7px; color: var(--t3); font-size: 12px; }
 .pm-more:hover { background: var(--tone2); color: var(--t1); }
-.pm-folder { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 36px; padding: 0 6px 0 12px; box-shadow: inset 0 -1px 0 var(--hair); }
+.pm-folder { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 36px; padding: 0 4px 0 16px; box-shadow: inset 0 -1px 0 var(--hair); }
 .pm-folder code { overflow: hidden; color: var(--t1); font: 11.5px "JetBrains Mono", ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .pm-more-row { color: var(--t3); font-size: 12px; }
 .pm-more-row:hover { color: var(--t1); }
@@ -2177,7 +2175,7 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 #bar-drive:has(> #drive-pill:not([hidden])) { display: flex; }
 #bar-drive:has(> #drive-pill:not([hidden])) + header { margin-left: 0 !important; }
 #desktop-toolbar.thread-split #bar-drive { margin-left: 0; }
-#drive-pill { display: flex; align-items: center; gap: 7px; height: 28px; max-width: 220px; padding: 0 11px 0 8px; border: 0; border-radius: 99px; background: none; box-shadow: inset 0 0 0 1px var(--hair, var(--tone2)); color: var(--t2); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; }
+#drive-pill { display: flex; align-items: center; gap: 7px; height: 28px; max-width: 220px; padding: 0 12px 0 8px; border: 0; border-radius: 99px; background: none; box-shadow: inset 0 0 0 1px var(--hair, var(--tone2)); color: var(--t2); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; }
 #drive-pill[hidden] { display: none; }
 #drive-pill:hover, #drive-pill[aria-expanded="true"] { background: var(--surface2); color: var(--t1); }
 #drive-pill .dp-word { font-weight: 500; color: var(--t1); }
@@ -2185,7 +2183,7 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 #drive-pill .dp-word.bad { color: var(--bad); }
 #drive-pill .dp-about { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t3); }
 #drive-pill .bf-ring { width: 16px; height: 16px; }
-#drive-pill .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin: 0 4px; }
+#drive-pill .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin: 0 0 0 4px; }
 #drive-sheet { position: absolute; top: calc(100% + 8px); right: 0; z-index: 95; display: flex; flex-direction: column; gap: 2px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 10px 8px; border-radius: 12px; background: var(--surface2); box-shadow: 0 0 0 1px var(--line2, var(--hair)), 0 18px 40px -12px rgb(0 0 0 / .55); -webkit-app-region: no-drag; }
 #drive-sheet[hidden] { display: none; }
 html.mac-chrome #desktop-toolbar #drive-sheet * { -webkit-app-region: no-drag; }
@@ -2252,7 +2250,6 @@ html.mac-chrome #desktop-toolbar #drive-sheet * { -webkit-app-region: no-drag; }
    room beside it as cards; a narrow window puts the cards above the feed. */
 /* Today sits in the same 720px column as Scheduled and Customize; its
    cards ride above the feed, as they do in a narrow window. */
-.desktop #page[data-kind="today"] { max-width: 720px; }
 .td-solo { max-width: 600px; }
 .td-wrap { container-type: inline-size; }
 .td-layout { display: grid; grid-template-columns: minmax(0, 600px) 236px; gap: 32px; align-items: start; }
@@ -2599,9 +2596,7 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 #desktop-sidebar .st-nav-n { font-size: 11.5px; }
 #desktop-sidebar .st-nav-group { margin: 14px 0 4px; padding-left: 9px; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; }
 
-/* The overview's "Worth a look" heading starts on the cards' edge, and a
-   card's line keeps its last words together instead of leaving one alone. */
-.ov-tiles + .st-head { margin-inline: 0; }
+/* A card's line keeps its last words together instead of leaving one alone. */
 .ov-tile small { text-wrap: pretty; }
 
 /* Pages (Today, Scheduled, Customize, Foundry) have no chat underneath,
@@ -2618,7 +2613,7 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
    pale sidebar beside Today's filled tile. */
 html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 0 1px rgb(0 0 0 / .14); }
 /* A row's last action ends on the same edge as the section's count above. */
-#page[data-kind="customize"] .cp-list .sp-row > :last-child:is(button, .cz-state) { margin-right: -9px; }
+.cp-list .sp-row > :last-child:is(button, .cz-state) { margin-right: -9px; }
 /* Drive's ideas: two lines, the title and what proves it; questions after a small label. */
 .desktop :is(#briefing, #drive-reply, #hero) .bf-row.bf-idea { height: auto; min-height: 34px; padding-top: 5px; padding-bottom: 5px; align-items: flex-start; }
 .desktop :is(#briefing, #drive-reply, #hero) .bf-idea .bf-dot { margin-top: 6px; }
@@ -2799,16 +2794,14 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 
 /* Settings, pass 207 (like Codex): the list in named categories, a big
    title, plain group names, roomy rows with a sentence under each name. */
-.desktop #page[data-kind="settings"] { padding-top: 44px; }
-#page[data-kind="settings"] .cp-title { margin-bottom: 6px; font-size: 28px; line-height: 34px; }
-#page[data-kind="settings"] .cp-lede { margin-bottom: 8px; font-size: 13.5px; line-height: 20px; }
-#page[data-kind="settings"] .st-head { margin: 30px 2px 10px; color: var(--t1); font-size: 14px; }
+#page[data-kind="settings"] .cp-lede { margin-bottom: 8px; }
+#page[data-kind="settings"] .st-head { margin: 30px 0 10px; color: var(--t1); font-size: 14px; }
 #page[data-kind="settings"] .st-head span + span { font-size: 12px; }
 #page[data-kind="settings"] .st-group { border-radius: 14px; background: color-mix(in srgb, var(--t1) 3%, transparent); }
 #page[data-kind="settings"] .st-row { min-height: 60px; padding: 11px 16px; }
 #page[data-kind="settings"] .st-tx b { font-size: 13.5px; line-height: 19px; }
 #page[data-kind="settings"] .st-tx small { margin-top: 1px; font-size: 12.5px; line-height: 18px; }
-#page[data-kind="settings"] .st-hint { margin: 8px 4px 0; }
+#page[data-kind="settings"] .st-hint { margin: 8px 0 0; }
 #desktop-sidebar .st-nav-group { margin: 16px 0 4px; padding-left: 10px; color: var(--t3); font-size: 12.5px; letter-spacing: 0; text-transform: none; }
 
 /* Notifications: a banner as the system shows one, over a soft desktop. */
@@ -2833,3 +2826,5 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .dm-words { flex: 1; min-width: 0; line-height: 19px; }
 .dm-words b { display: block; color: var(--t1); font-size: 15px; font-weight: 600; }
 .dm-words small { display: block; color: var(--t3); font-size: 12.5px; }
+/* Customize's closing note starts on its rows' text, as Scheduled's starts on its field's. */
+#page[data-kind="customize"] .sp-hint { margin-inline: 10px; }

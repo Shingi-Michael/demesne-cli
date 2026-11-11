@@ -2406,6 +2406,11 @@ export class WorkspaceHost {
       void this.refreshAgents();
       return this.settingsInfo();
     }
+    // Settings › Agents › Models: the model (and Codex thinking level) an agent works on.
+    if (method === "agent-model") {
+      await this.client.setAgentModel(string(args.agent, "agent", 40), args.model ? string(args.model, "model", 80) : null, args.effort ? string(args.effort, "thinking level", 10) : null);
+      return this.settingsInfo();
+    }
     if (method === "subagent-model") {
       const model = args.model === null ? null : string(args.model, "model", 200);
       await this.client.setSubagentModel(model);

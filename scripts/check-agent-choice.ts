@@ -55,6 +55,14 @@ try {
   expect(await page.locator('#page [aria-label="Projects for Codex"] button.on', { hasText: `✓ ${name}` }).count() === 1, "ticking this project brings Codex back here");
   await page.screenshot({ path: join(output, "some-projects.png") });
 
+  // Each agent's model changes here: Codex's thinking level, picked and read back.
+  await page.locator('#page button.st-word[data-args*="agent-model:codex"]').click();
+  await page.locator('#page [aria-label="Codex thinking"]').waitFor({ timeout: 5_000 });
+  await page.screenshot({ path: join(output, "models-open.png") });
+  await page.locator('#page [aria-label="Codex thinking"] button', { hasText: "High" }).click();
+  await page.locator('#page button.st-word[data-args*="agent-model:codex"]', { hasText: "· High" }).waitFor({ timeout: 5_000 });
+  expect(true, "Codex's thinking level is picked in Settings and reads back");
+
   // The one switch: every agent off, and the Agents list goes.
   await page.locator('#page button[role="switch"][aria-label="Agents"]').click();
   await page.locator("#page", { hasText: "Off: no agent chats, side work, hand-offs or Today posts" }).waitFor({ timeout: 5_000 });

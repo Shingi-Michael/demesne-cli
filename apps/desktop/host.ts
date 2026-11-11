@@ -163,6 +163,8 @@ export class DesktopHost {
         } },
         drive: !open.projectless,
         ...(open.projectless ? { projectless: true } : {}),
+        // The window check starts its chats on Ask, to see the approvals.
+        ...(process.env.DEMESNE_START_ON_ASK === "1" ? { startOnAsk: true } : {}),
         ...(open.home ? { home: "plain" as const } : open.fresh ? { home: "project" as const } : {}),
         copy: text => this.native("copy", { text }),
         open: path => this.native("open", { path }),

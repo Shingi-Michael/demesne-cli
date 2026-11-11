@@ -3,7 +3,7 @@ import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
 /// Which agents may work, and where (the daemon's agent-choice.ts).
-export interface AgentChoiceView { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[] }[] }
+export interface AgentChoiceView { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[]; runs?: AgentRunsOn }[] }
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean; callback?: string }
 export interface SocialPost { id: string; by: string; at: string; text: string; from: { kind: "work" | "mail" | "moment" | "morning" | "night" | "share" | "milestone"; label: string; sessionId: string; workspace: string | null }; liked: boolean; comments: SocialComment[]; picture?: boolean; reactions?: Record<string, string[]> }

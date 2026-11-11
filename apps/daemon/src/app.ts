@@ -1434,7 +1434,8 @@ export function createDaemonApp(options: {
           }
         }
         const record = agentChoice.read();
-        return json({ off: record.off, agents: agentCli.agents().map((agent) => ({ id: agent.id, name: agent.name, mode: record.agents[agent.id]?.mode ?? "every", projects: record.agents[agent.id]?.projects ?? [] })) });
+        // runs: the model each one works on, so Settings can change it.
+        return json({ off: record.off, agents: await Promise.all(agentCli.agents().map(async (agent) => ({ id: agent.id, name: agent.name, mode: record.agents[agent.id]?.mode ?? "every", projects: record.agents[agent.id]?.projects ?? [], runs: agentCli.runsOn(agent.id, await codexPlan(agent.id)) }))) });
       }
 
       // Other agents Heartbeat sees, for the sidebar's project lines.

@@ -36,7 +36,7 @@ export interface SettingsInfo {
   trusted: string[] | null;
   subagent: { model: string | null; often?: string; models: { id: string; provider: string }[] };
   /// Which agents may work, and where; null when the daemon can't say.
-  agents?: { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[] }[] } | null;
+  agents?: { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[]; runs?: AgentRuns }[] } | null;
   agent: { maxModelRounds: number; maxToolCalls: number };
   drive: { maxActiveMinutes: number; maxTokens: number; maxTasks: number };
   /// Null when no image service is set up.
@@ -217,6 +217,8 @@ export const GLASS_DEFAULT = 15;
 /// starts more solid so words stay readable over a sharp wallpaper.
 export const GLASS_SHARP_DEFAULT = 70;
 
+/// The model an agent tool works on: your pick, else the tool's own default.
+export interface AgentRuns { model: string | null; effort: string | null; label: string; options: { id: string; label: string; note: string }[]; efforts: string[] | null }
 export interface SettingsRow { title: string; line?: string; control?: string; keywords?: string; fold?: string; tone?: "" | "bad" }
 /// A hidden group is only for search: its page draws the same things its own way.
 interface Group { name: string; right?: string; rows: SettingsRow[]; hint?: string; hidden?: boolean }
@@ -285,9 +287,24 @@ function agentsPage(view: SettingsView): Page {
         : `<p class="st-hint">Open a project once and it shows here to tick.</p>`) : "",
     };
   });
+  // The model each agent works on, picked here (it was only on an agent's Today profile).
+  const models: SettingsRow[] = choice.agents.filter((agent) => agent.mode !== "off" && agent.runs).map((agent) => {
+    const runs = agent.runs!, fold = `agent-model:${agent.id}`, open = view.fold === fold;
+    const current = runs.options.find((option) => option.id === (runs.model ?? "")) ?? runs.options[0];
+    const pick = (model: string, effort: string | null) => ({ agent: agent.id, model, effort: effort ?? "" });
+    return {
+      title: agent.name,
+      line: runs.model ? `Your pick${current?.note && current.note !== "your pick" ? `, ${current.note}` : ""}` : current?.note ?? "Tool default",
+      control: word(fold, runs.label, open),
+      keywords: `agents agent model ${agent.name.toLowerCase()} runs on thinking`,
+      fold: open ? choices(`${agent.name} model`, runs.options.map((option): [string, boolean, string, Record<string, unknown>] => [option.id ? option.label : `Tool default${current && !runs.model && option.note ? ` · ${option.note.split(",")[0]}` : ""}`, (runs.model ?? "") === option.id, "agent-model", pick(option.id, runs.effort)]))
+        + (runs.efforts ? choices(`${agent.name} thinking`, [["Tool default", !runs.effort, "agent-model", pick(runs.model ?? "", null)], ...runs.efforts.map((effort): [string, boolean, string, Record<string, unknown>] => [effort[0]!.toUpperCase() + effort.slice(1), runs.effort === effort, "agent-model", pick(runs.model ?? "", effort)])], "Thinking") : "") : "",
+    };
+  });
   return { id: "agents", title: "Agents", sub, groups: [
     { name: "All agents", rows: [{ title: "Agents", line: on ? `On: ${listWords(found)} ${found.length === 1 ? "was" : "were"} found on this computer` : "Off: no agent chats, side work, hand-offs or Today posts", control: toggle(on, "agent-choice", { off: on }, "Agents"), keywords: "agents off on turn off disable" }] },
     { name: "Each agent", rows, hint: "Where one is off, side work and hand-offs run on the chat’s own model and it leaves the Agents list. Its old chats stay readable." },
+    ...(on && models.length ? [{ name: "Models", rows: models, hint: "Each agent's chats, side work and hand-offs run on this. Tool default is what the tool itself is set to." }] : []),
   ] };
 }
 

@@ -296,3 +296,24 @@ test("Settings › Agents: one switch, then each agent everywhere, some projects
   expect(settingsPage(view({ section: "agents", info: { ...info, agents: { off: false, agents: [] } } }))).toContain("No agent tools found");
 });
 const h = (text: string) => text.replace(/"/g, "&quot;");
+
+test("Settings › Agents › Models: each agent's model, and Codex's thinking, change here", () => {
+  const claude = { model: null, effort: null, label: "Sonnet", options: [{ id: "", label: "Tool default", note: "Sonnet, from your Claude Code settings" }, { id: "opus", label: "Opus", note: "" }], efforts: null };
+  const codex = { model: "gpt-5.5", effort: "high", label: "gpt-5.5 · High", options: [{ id: "", label: "Tool default", note: "Codex picks" }, { id: "gpt-5.5", label: "gpt-5.5", note: "on your Codex plan" }], efforts: ["low", "medium", "high"] };
+  const agents = { off: false, agents: [
+    { id: "claude", name: "Claude Code", mode: "every" as const, projects: [], runs: claude },
+    { id: "codex", name: "Codex", mode: "every" as const, projects: [], runs: codex },
+    { id: "gemini", name: "Gemini", mode: "off" as const, projects: [], runs: { ...claude, label: "Gemini" } },
+  ] };
+  const shut = settingsPage(view({ section: "agents", info: { ...info, agents } }));
+  expect(shut).toContain("Models");
+  expect(shut).toContain("Sonnet, from your Claude Code settings");
+  expect(shut).toContain("Your pick, on your Codex plan");
+  expect(shut).toContain(h('{"fold":"agent-model:codex"}'));
+  // An agent that is off has no model to pick.
+  expect(shut).not.toContain(h('{"fold":"agent-model:gemini"}'));
+  const open = settingsPage(view({ section: "agents", fold: "agent-model:codex", info: { ...info, agents } }));
+  expect(open).toContain(h('{"agent":"codex","model":"","effort":"high"}'));
+  expect(open).toMatch(/st-choice on" aria-pressed="true" data-action="agent-model" data-args="[^"]*gpt-5.5[^"]*high/);
+  expect(open).toContain(h('{"agent":"codex","model":"gpt-5.5","effort":""}'));
+});

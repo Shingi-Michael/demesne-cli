@@ -26,7 +26,14 @@ test("Settings › Agents: off in a project leaves it out of that project's list
   const ids = async (root: string) => ((await (await call(`/v1/agents?workspace=${encodeURIComponent(root)}`)).json()) as { agents: { id: string }[] }).agents.map((agent) => agent.id);
   try {
     for (const root of [one, two]) await call("/v1/sessions", { title: "x", workspacePath: root, trustWorkspace: true });
-    expect(await (await call("/v1/agent-choice")).json()).toEqual({ off: false, agents: [{ id: "claude", name: "Claude Code", mode: "every", projects: [] }, { id: "codex", name: "Codex", mode: "every", projects: [] }] });
+    const listed = await (await call("/v1/agent-choice")).json() as { off: boolean; agents: { id: string; runs: { model: string | null; options: { id: string }[] } }[] };
+    expect(listed).toMatchObject({ off: false, agents: [{ id: "claude", name: "Claude Code", mode: "every", projects: [] }, { id: "codex", name: "Codex", mode: "every", projects: [] }] });
+    // Each agent says what it runs on, so Settings can change it there.
+    expect(listed.agents[0]!.runs.model).toBeNull();
+    expect(listed.agents[0]!.runs.options[0]!.id).toBe("");
+    await call("/v1/socials/agents/claude/model", { model: "opus" });
+    const picked = await (await call("/v1/agent-choice")).json() as typeof listed;
+    expect(picked.agents[0]!.runs.model).toBe("opus");;
     await call("/v1/agent-choice", { agent: "codex", mode: "some", projects: [one] });
     expect(await ids(one)).toEqual(["claude", "codex"]);
     expect(await ids(two)).toEqual(["claude"]);

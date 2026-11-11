@@ -666,6 +666,8 @@ export interface CreateSessionRequest {
   workspacePath?: string;
   /// Records the workspace as trusted before creating the session.
   trustWorkspace?: boolean;
+  /// Starts the chat on Auto: edits and commands run without asking.
+  autoApprove?: boolean;
 }
 
 export interface CreateSessionResponse {
@@ -794,10 +796,14 @@ export function parseCreateSessionRequest(value: unknown): CreateSessionRequest 
   if (value.trustWorkspace !== undefined && typeof value.trustWorkspace !== "boolean") {
     throw new ProtocolValidationError("trustWorkspace must be a boolean");
   }
+  if (value.autoApprove !== undefined && typeof value.autoApprove !== "boolean") {
+    throw new ProtocolValidationError("autoApprove must be a boolean");
+  }
   return {
     ...(title ? { title } : {}),
     ...(workspacePath ? { workspacePath } : {}),
     ...(value.trustWorkspace === true ? { trustWorkspace: true } : {}),
+    ...(value.autoApprove === true ? { autoApprove: true } : {}),
   };
 }
 

@@ -72,7 +72,7 @@ import { QuestionBroker } from "./questions.ts";
 import { ThemeStore } from "./themes.ts";
 import { ConfigAllowlist } from "./allowlist.ts";
 import { WorkspaceTrust } from "./workspace-trust.ts";
-import { canonicalWorkspace, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
+import { canonicalWorkspace, openHomeForChats, listWorkspaceFiles, readWorkspaceText, resolveWorkspacePath, ToolRegistry, viewImageTool } from "./tools.ts";
 import { detectGitBranch, detectGitSync } from "./git-branch.ts";
 import { formatSessionMarkdown } from "./session-export.ts";
 import { SessionReplay } from "./session-replay.ts";
@@ -219,6 +219,9 @@ export function createDaemonApp(options: {
   openShow?: boolean;
   /// Name chats from their first answer (the daemon on; tests off).
   nameChats?: boolean;
+  /// Where chats with no project work, changing files and running commands:
+  /// your home folder in the daemon; unset in tests, so they only talk.
+  plainChatsHome?: string;
   /// Agent socials: the agents post about the day (the daemon on; tests off).
   socials?: boolean;
   agent?: AgentConfig;
@@ -476,6 +479,9 @@ export function createDaemonApp(options: {
   }
   const keepEdits = new KeepEdits(join(dirname(options.databasePath), "keep"));
   const sources = new SourceStore(join(dirname(options.databasePath), "sources"));
+  // Demesne's own data and config stay out of a home-folder chat's file tools.
+  const plainRoot = options.plainChatsHome;
+  if (plainRoot) openHomeForChats(plainRoot, [realpathSync(dirname(options.databasePath)), join(plainRoot, ".demesne"), ...(options.allowlistPath ? [options.allowlistPath] : [])]);
   const engine = new AgentEngine(
     store,
     tools,
@@ -490,6 +496,7 @@ export function createDaemonApp(options: {
       providerVision: options.providerVision,
       deferTools: options.deferTools,
       nameChats: options.nameChats,
+      ...(plainRoot ? { plainRoot } : {}),
       ...(options.now ? { now: options.now } : {}),
       questions,
       themes,
@@ -1609,7 +1616,7 @@ export function createDaemonApp(options: {
           }
         }
         const { session, event } = store.createSession(body.title, workspaceRoot);
-        const response: CreateSessionResponse = { session, eventId: event.eventId };
+        const response: CreateSessionResponse = { session: body.autoApprove ? store.setSessionAutoApprove(session.id, true).session : session, eventId: event.eventId };
         return json(response, 201);
       }
 

@@ -11,7 +11,7 @@ const settings = (f: Awaited<ReturnType<typeof fixture>>) => ({
   workspace: f.workspace,
   settings: f.settings,
   client: f.client,
-  changed: () => {},
+  changed: () => {}, startOnAsk: true,
 });
 test("live commands expose output before exit, persist results, detect external edits and rerun exact checks", async () => {
   let round = 0;

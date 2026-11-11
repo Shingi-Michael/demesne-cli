@@ -22,7 +22,7 @@ test("a chat that asks for approval in the background is marked waiting until it
       }
     },
   });
-  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, startOnAsk: true });
   try {
     await host.connect();
     const asking = host.current!.session.id;

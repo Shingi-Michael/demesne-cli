@@ -7,7 +7,7 @@ import { WorkspaceSession } from "../session-model.ts";
 import { fixture, eventually } from "./fixture.ts";
 
 const hostFor = (f: Awaited<ReturnType<typeof fixture>>) => new WorkspaceHost({
-  workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {},
+  workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {}, startOnAsk: true,
 });
 
 test("session auto-approve releases the current approval and follows selection, SSE and reconnect", async () => {
@@ -118,4 +118,20 @@ test("the session projection accepts only current permission changes in event or
   expect(session.session.autoApprove).toBe(true);
   session.apply(event(4, "selected", false));
   expect(session.session.autoApprove).toBe(false);
+});
+
+test("new chats start on Auto, in a project and out of one", async () => {
+  const f = await fixture({ providerId: "test", modelId: "test", async listModels() { return []; }, async *stream() { yield { type: "finish", reason: "stop" }; } });
+  const host = new WorkspaceHost({ workspace: f.workspace, settings: f.settings, client: f.client, changed: () => {} });
+  try {
+    await host.connect();
+    await host.newSession();
+    expect(host.snapshot().session?.autoApprove).toBe(true);
+    await host.newSession(undefined, { plain: true });
+    expect(host.current!.session.workspace).toBeFalsy();
+    expect(host.snapshot().session?.autoApprove).toBe(true);
+  } finally {
+    host.dispose();
+    await f.close();
+  }
 });

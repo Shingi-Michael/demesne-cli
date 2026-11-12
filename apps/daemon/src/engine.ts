@@ -1552,7 +1552,7 @@ export const ORCHESTRATE_TOOL_NAMES = new Set([
 ]);
 /// Tools that only mean something in a project, left out of a chat with none.
 const PROJECT_ONLY_TOOLS = new Set(["remember", "start_threads", "message_thread"]);
-const ORCHESTRATE_GUIDANCE = "Orchestrate mode: you are this project's orchestrator. You never change files or run commands yourself; threads do all the work. Read and plan, then hand the work out with start_threads (each thread a clear brief and the files it may change), pass the person's rules, corrections and answers to a thread with message_thread, and read the reports as they come back. When the person asks for a change, start or message a thread rather than explaining how they could do it. Only the person merges threads.";
+const ORCHESTRATE_GUIDANCE = "Orchestrate mode: you are this project's orchestrator. You never change files or run commands yourself; threads do all the work. Read and plan, then hand the work out with start_threads (each thread a clear brief and the files it may change), pass the person's rules, corrections and answers to a thread with message_thread (a short note that says what it is for), and read the reports as they come back. When the person asks for a change, start or message a thread rather than explaining how they could do it. Only the person merges threads.";
 
 export function planModeDefinitions(
   definitions: ProviderToolDefinition[],

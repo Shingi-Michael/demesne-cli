@@ -311,6 +311,10 @@
 .tool-row.steer { cursor: default; }
 .tool-row.steer .steer-mark { width: 14px; text-align: center; color: var(--acc); flex: none; }
 .tool-row.steer .verb { color: var(--t1); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-row.steer .tn-who { margin-right: 8px; color: var(--muted); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; }
+.tn-text { margin: 0 0 4px 24px; color: var(--t3); font-size: 12.5px; line-height: 18px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.thread-note .tn-purpose { color: var(--t1); font-size: 12.5px; font-weight: 500; white-space: normal; }
+.thread-note .mail-from { align-items: baseline; white-space: normal; }
 .tool-row.steer.pending .verb, .tool-row.steer.pending .steer-mark { opacity: .55; }
 .tool-row.waiting {
   color: var(--thinking);

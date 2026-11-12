@@ -1156,6 +1156,7 @@ export * from "./next-prompt.ts";
 export * from "./heartbeat-mail.ts";
 export * from "./drive-report.ts";
 export * from "./thread-report.ts";
+export * from "./thread-note.ts";
 export * from "./foundry-try.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";

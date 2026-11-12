@@ -182,6 +182,8 @@ try {
   assert.deepEqual(order, [`${artifact.id}:2`, `${artifact.id}:1`], "every version, newest first");
   assert.equal(await item(artifact.id, 2).locator(".fd-ver b").textContent(), "v2 · Blue");
   assert.equal(await item(artifact.id, 2).locator(".fd-why dd").first().textContent(), "Same page, cooler.", "each version says its own why");
+  // Pass 219 A: each version quotes the ask that made it.
+  assert.equal(await item(artifact.id, 2).locator(".fd-ask q").textContent(), "Make it blue", "the ask is quoted");
   await item(artifact.id, 2).screenshot({ path: join(output, "foundry-why.png") });
   await served(2, 1);
   console.log("PASS: a follow-up edits the artifact in place (foundry_edit); both versions sit on the long page, newest first.");

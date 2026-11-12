@@ -87,3 +87,32 @@ test("each version says why it looks the way it does, quietly under the descript
   expect(html.indexOf("fd-desc")).toBeLessThan(html.indexOf("fd-why"));
   expect(html.indexOf("fd-why")).toBeLessThan(html.indexOf("fd-ver"));
 });
+
+test("a version quotes the ask that made it, and says which merged pull request built it (pass 219 A)", () => {
+  const prOpened = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10).toISOString();
+  const later = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11).toISOString();
+  const long = `Make the middle plan the obvious choice, ${"and keep it calm ".repeat(12)}please`;
+  const html = foundryPage({
+    list: [artifact("a1", "Roastery pricing"), artifact("p2", "Roastery pricing, phone"), artifact("o3", "Opening hours")],
+    versions: [
+      { artifactId: "p2", version: 1, createdAt: later, sessionId: "s1", note: "", ask: "Now show me the pricing on a phone" },
+      { artifactId: "a1", version: 2, createdAt: today, sessionId: "s1", note: "", ask: long },
+      { artifactId: "a1", version: 1, createdAt: earlier, sessionId: "s1", note: "" },
+      { artifactId: "o3", version: 1, createdAt: today, sessionId: "s2", note: "", ask: "Hours <card>" },
+    ],
+    error: "",
+    chatTitle: () => null,
+    builtIn: (id) => id === "s1" ? { number: 622, createdAt: prOpened } : null,
+  });
+  expect(html).toContain('<p class="fd-ask">You asked <q title="Now show me the pricing on a phone">Now show me the pricing on a phone</q></p>');
+  // A long ask is cut on the page and whole on hover; it is escaped.
+  expect(html).toContain(`title="${long}"`);
+  expect(html).toMatch(/<q title="[^"]+">Make the middle plan[^<]{100,160}…<\/q>/);
+  expect(html).toContain("Hours &lt;card&gt;");
+  // Built: only the newest version of each mockup the chat made before it opened the pull request.
+  expect(html.match(/class="fd-built"/g)?.length).toBe(1);
+  expect(html).toMatch(/data-fd="a1:2"[\s\S]*?built in <button[^>]*data-action="pr-github"[^>]*data-args="\{&quot;id&quot;:&quot;s1&quot;\}"[^>]*>#622<\/button>/);
+  expect(html.slice(html.indexOf('data-fd="p2:1"'), html.indexOf('data-fd="a1:2"'))).not.toContain("fd-built");
+  // Older versions saved before asks were kept show no line.
+  expect(html.match(/class="fd-ask"/g)?.length).toBe(3);
+});

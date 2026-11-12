@@ -58,3 +58,13 @@ After a page is saved, Foundry renders it off screen at 1280 and 390 pixels wide
 These are the same numbers the quality eval scores (`scripts/foundry-quality.ts`); until now only the eval saw them. They judge pages the model designs (`html`); the ready kinds are drawn by Demesne.
 
 When the look finds a fault or a number off target, the fix has to say what it is fixing first. `foundry_edit` takes a `critique`: the rules the page breaks, by number, and what will change. A fix without one is turned back, and a whole new source through `foundry_save` is pointed to `foundry_edit`. A number can stay off target on purpose, with the reason in the critique. The critique is the model's own working: it is not kept and never shown to you. One fix per ask, as before.
+
+## A mockup you can trace
+
+Each version keeps the trail back to why it exists and forward to what came of it:
+
+- **The ask that made it.** The message you sent is kept with the version and quoted under the name ("You asked …"), cut to a line, in full on hover. It is a copy, so it stays after the chat is deleted.
+- **Based on.** When the model read another mockup in the same ask before making a new one, the new one is based on it, even if the model didn't say so. Naming `based_on` still wins.
+- **Built in #N.** When the chat that made a mockup opened a pull request that has merged, the newest version of each mockup it made before opening that pull request says "built in #N", a link to the pull request on GitHub.
+- **A name that says what it is.** `foundry_save` and `foundry_edit` turn back names like "Mockup", "Option B", "New design" or "v2", and names over six words. Options keep their letter in the version's note.
+- **Search.** `foundry_read` with `query` lists the mockups whose name, description, version names, whys or asks hold every word, not only the newest fifty.

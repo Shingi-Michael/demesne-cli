@@ -191,12 +191,12 @@ test("artifact identity reaches live events and old replay without rewriting the
     const { turn } = store.createTurn(session.id, "Make a mockup");
     store.startTurn(turn.id);
     const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
-    const input = { title: "Mockup", kind: "html", description: "A test page.", why: W, source: "<button>Interact</button>" };
+    const input = { title: "Garden plan", kind: "html", description: "A test page.", why: W, source: "<button>Interact</button>" };
     const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
     const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
     const event = store.settleToolCall(toolCallId, "completed", result);
     const artifact = JSON.parse(result);
-    const expected = { id: artifact.id, title: "Mockup", kind: "html", version: 1, description: "A test page." };
+    const expected = { id: artifact.id, title: "Garden plan", kind: "html", version: 1, description: "A test page." };
     expect(JSON.parse(event.payload.message as string)).toEqual(expected);
     expect(event.payload.message).not.toContain(input.source);
     const legacy = { ...event.payload }; delete legacy.message;
@@ -215,13 +215,13 @@ test("a save that came back with the look's pictures still names its artifact (t
     const { turn } = store.createTurn(session.id, "Make a mockup");
     store.startTurn(turn.id);
     const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
-    const input = { title: "Mockup", kind: "html", description: "A test page.", why: W, source: "<button>Interact</button>" };
+    const input = { title: "Garden plan", kind: "html", description: "A test page.", why: W, source: "<button>Interact</button>" };
     const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
     const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
     // The engine adds a line per picture after the tool's JSON.
     const withPictures = `${JSON.stringify({ ...JSON.parse(result), look: { issues: [] } })}\nImage artifact f20e2bf4: foundry-look-1280.png (960×600)\nImage artifact 5bf0f588: foundry-look-390.png (390×844)`;
     const event = store.settleToolCall(toolCallId, "completed", withPictures);
-    expect(JSON.parse(event.payload.message as string)).toEqual({ id: JSON.parse(result).id, title: "Mockup", kind: "html", version: 1, description: "A test page." });
+    expect(JSON.parse(event.payload.message as string)).toEqual({ id: JSON.parse(result).id, title: "Garden plan", kind: "html", version: 1, description: "A test page." });
   } finally { store.close(); }
 });
 
@@ -498,5 +498,37 @@ test("every new page version says why it looks that way, and keeps it (pass 218 
     const shelf = store.listFoundryVersions().filter((item) => item.artifactId === saved.id);
     expect(shelf.map((item) => item.why?.look)).toEqual(["The price.", "The dark middle plan."]);
     expect(store.getFoundryArtifact(saved.id)!.version).toBe(2);
+  } finally { store.close(); }
+});
+
+test("a mockup you can trace: its ask, a name that says what it is, what it was based on, and search (pass 219 A)", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store), edit = foundryEditTool(store), read = foundryReadTool(store);
+    // One chat per ask here, so each turn is the only one in its chat.
+    const ask = (content: string) => { const { session } = store.createSession("Pricing page"); const { turn } = store.createTurn(session.id, content); return { ...context, sessionId: session.id, turnId: turn.id }; };
+    // The name says what it is: generic names and long ones are turned back.
+    const first = ask("Make the middle plan   the obvious choice,\nand drop the table");
+    for (const title of ["Mockup", "Option B", "New design", "v2", "page 3"]) await expect(save.execute({ title, kind: "html", description: "x", why: W, source: "<p>a</p>" }, first)).rejects.toThrow("doesn't say what it is");
+    await expect(save.execute({ title: "A pricing page for the roastery with three plans", kind: "html", description: "x", why: W, source: "<p>a</p>" }, first)).rejects.toThrow("is 9 words");
+    const plans = JSON.parse(await save.execute({ title: "Roastery pricing", kind: "html", description: "Three plans.", why: W, source: "<p>plans</p>" }, first));
+    await expect(edit.execute({ id: plans.id, title: "Mockup" }, first)).rejects.toThrow("doesn't say what it is");
+    // The ask that made it is kept with the version, on one line.
+    expect(store.getFoundryArtifact(plans.id)!.versions[0]!.ask).toBe("Make the middle plan the obvious choice, and drop the table");
+    expect(store.listFoundryVersions()[0]!.ask).toBe("Make the middle plan the obvious choice, and drop the table");
+    // Read in an ask, then made: based on what was read, without being told.
+    const second = ask("Now show me the pricing on a phone");
+    await read.execute({ id: plans.id }, second);
+    const phone = JSON.parse(await save.execute({ title: "Roastery pricing, phone", kind: "html", description: "Stacked.", why: W, source: "<p>phone</p>" }, second));
+    expect(store.getFoundryArtifact(phone.id)!.basedOn).toEqual({ id: plans.id, version: 1 });
+    // An ask that read nothing makes something based on nothing.
+    const other = JSON.parse(await save.execute({ title: "Opening hours", kind: "html", description: "Hours.", why: W, source: "<p>hours</p>" }, ask("Opening hours card")));
+    expect(store.getFoundryArtifact(other.id)!.basedOn).toBeNull();
+    // Search finds by every word, in names, descriptions and the asks that made them.
+    const titles = async (query: string) => JSON.parse(await read.execute({ query }, context)).map((item: { title: string }) => item.title).sort();
+    expect(await titles("roastery")).toEqual(["Roastery pricing", "Roastery pricing, phone"]);
+    expect(await titles("obvious middle")).toEqual(["Roastery pricing"]);
+    expect(await titles("hours")).toEqual(["Opening hours"]);
+    expect(await titles("nothing like this")).toEqual([]);
   } finally { store.close(); }
 });

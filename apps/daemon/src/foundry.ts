@@ -156,6 +156,43 @@ function basedOnOf(store: DemesneStore, value: unknown) {
   return { id: found.id, version };
 }
 
+/// Pass 219 A: one naming rule, checked on save. A name says what the
+/// thing is, so it can be found again weeks later.
+const GENERIC_NAME = /^(?:(?:a |the |new |my |untitled |simple |test )?(?:mock-?ups?|mocks?|pages?|designs?|drafts?|prototypes?|ideas?|screens?|layouts?|concepts?|untitled|test|options?|versions?|artifacts?|things?)(?: [a-z0-9]{1,2}| \d+)?|options? [a-z0-9]+|v\d+|[a-z0-9]{1,2})$/i;
+function checkName(title: unknown) {
+  if (typeof title !== "string" || !title.trim()) return;
+  const name = title.trim().replace(/[.!?]+$/, "");
+  const words = name.split(/\s+/).length;
+  if (GENERIC_NAME.test(name)) throw new Error(`[invalid_input] "${name}" doesn't say what it is. Hint: name it by what it shows, in two to four words, like "Roastery pricing" or "Invoice dashboard"; put an option's letter in note`);
+  if (words > 6) throw new Error(`[invalid_input] "${name}" is ${words} words. Hint: name it in two to four words; the rest goes in description`);
+}
+
+/// The mockups each ask read (turn → the last one), so one made right after
+/// says what it was based on even when the model doesn't (pass 219 A).
+const readInTurn = new Map<string, { id: string; version: number }>();
+function remember(turnId: string | undefined, id: string, version: number) {
+  if (!turnId) return;
+  readInTurn.delete(turnId);
+  readInTurn.set(turnId, { id, version });
+  if (readInTurn.size > 200) readInTurn.delete(readInTurn.keys().next().value!);
+}
+
+/// Every word of the query, in a mockup's name, description, version names,
+/// whys or the asks that made it.
+export function searchFoundry(store: DemesneStore, query: string) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const text = new Map<string, string[]>();
+  for (const version of store.listFoundryVersions(2000)) {
+    const parts = text.get(version.artifactId) ?? [];
+    parts.push(version.note, version.ask ?? "", version.why ? `${version.why.direction} ${version.why.look} ${version.why.dropped}` : "");
+    text.set(version.artifactId, parts);
+  }
+  return store.listFoundryArtifacts().filter((item) => {
+    const haystack = [item.title, item.description, ...(text.get(item.id) ?? [])].join(" ").toLowerCase();
+    return words.every((word) => haystack.includes(word));
+  });
+}
+
 const savedResult = (saved: FoundryArtifactDetail) => {
   const current = saved.versions.find((item) => item.version === saved.version);
   return { id: saved.id, title: saved.title, kind: saved.kind, version: saved.version, description: saved.description,
@@ -169,7 +206,7 @@ const clean = (value: unknown, max: number) => typeof value === "string" ? value
 /// answer in the chat says the same.
 const WHY_SCHEMA = {
   type: "object",
-  description: "Why it looks this way; required on each new html or svg version.",
+  description: "Why it looks so; required on new html/svg versions.",
   properties: {
     direction: { type: "string", maxLength: 300, description: "Who it is for, the mood." },
     look_at: { type: "string", maxLength: 300, description: "What leads." },
@@ -250,8 +287,11 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       if (!id && (!kind || !FOUNDRY_KINDS.includes(kind))) throw new Error(`[invalid_input] kind must be one of ${FOUNDRY_KINDS.join(", ")} when creating. Hint: deck, doc or dashboard for slides, a report or numbers; html for anything else`);
       if (!id && (typeof input.title !== "string" || !input.title.trim())) throw new Error("[invalid_input] A new artifact needs a title. Hint: name it in a few words");
       if (!id && (typeof input.description !== "string" || !input.description.trim())) throw new Error("[invalid_input] A new artifact needs a description. Hint: one or two sentences on what it is and what to look at");
+      checkName(input.title);
       checkOptions(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
-      const basedOn = id ? null : basedOnOf(store, input.based_on);
+      // Made right after reading another mockup in this ask: based on it, unless said otherwise.
+      const read = !id && input.based_on === undefined && context.turnId ? readInTurn.get(context.turnId) : undefined;
+      const basedOn = id ? null : read && store.getFoundryArtifact(read.id) ? read : basedOnOf(store, input.based_on);
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       if (!id) checkPick(store, context.turnId, recommended);
       const why = whyOf(input.why);
@@ -319,7 +359,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           description: { type: "string", maxLength: 600, description: "What it is and what to look at." },
           recommended: { type: "boolean", description: "True on the one you would use." },
           why: WHY_SCHEMA,
-          critique: { type: "string", maxLength: 1200, description: "Fixing after a look that found problems: rules broken, by number, and what you change." },
+          critique: { type: "string", maxLength: 1200, description: "After a look found problems: rules broken, by number, and the fix." },
         },
         required: ["id"],
         additionalProperties: false,
@@ -328,6 +368,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
     permission: () => null,
     async execute(input, context) {
       if (!isRecord(input) || typeof input.id !== "string" || !input.id) throw new Error("[invalid_input] foundry_edit needs the artifact id. Hint: foundry_read lists them");
+      checkName(input.title);
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       // Names and words only: no new version, no look.
       if (input.edits === undefined || (Array.isArray(input.edits) && input.edits.length === 0)) {
@@ -373,22 +414,24 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_read",
-      description: "List Foundry artifacts (no id), the parts catalogue (id \"kit:parts\"), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save.",
+      description: "List Foundry artifacts (no id; query searches), the parts catalogue (id \"kit:parts\"), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "string" }, version: { type: "integer", minimum: 1 } },
+        properties: { id: { type: "string" }, version: { type: "integer", minimum: 1 }, query: { type: "string" } },
         additionalProperties: false,
       },
     },
     permission: () => null,
-    async execute(input) {
+    async execute(input, context) {
       const args = isRecord(input) ? input : {};
       if (args.id === "kit:parts") return PARTS_GUIDE;
       if (typeof args.id !== "string" || !args.id) {
-        return JSON.stringify(store.listFoundryArtifacts().slice(0, 50).map(({ id, title, kind, version, updatedAt, workspace, description }) => ({ id, title, kind, version, updatedAt, workspace, ...(description ? { description } : {}) })));
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        return JSON.stringify((query ? searchFoundry(store, query) : store.listFoundryArtifacts()).slice(0, 50).map(({ id, title, kind, version, updatedAt, workspace, description }) => ({ id, title, kind, version, updatedAt, workspace, ...(description ? { description } : {}) })));
       }
       const found = store.getFoundryArtifact(args.id, typeof args.version === "number" ? args.version : undefined);
       if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
+      remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
@@ -399,8 +442,6 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
 /// The kinds that render as a page, so the look can see them.
 const LOOKED_KINDS = new Set(["html", "deck", "doc", "dashboard"]);
 
-/// After a page is saved: render it, and hand the model the faults
-/// found and a picture at each width. Twice per artifact per turn at most.
 /// Pages whose last look found something: their next save in the same ask
 /// carries a critique first (step 3), keyed by turn and artifact.
 const critiqueOwed = new Set<string>();
@@ -413,6 +454,8 @@ function checkCritique(id: string | undefined, turnId: string | undefined, criti
   throw new Error(`[invalid_input] Critique before you fix: ${through ? "fix it with foundry_edit and pass" : "pass"} critique, the Design guide rules the page breaks (by number) and the numbers off target, with what you will change. Hint: a few lines; it is not shown to the person`);
 }
 
+/// After a page is saved: render it, and hand the model the faults
+/// found and a picture at each width. Twice per artifact per turn at most.
 async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<string, number>, text: string, context: { turnId?: string; signal: AbortSignal }): Promise<string | StructuredToolResult> {
   let saved: Record<string, unknown>;
   try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return text; }

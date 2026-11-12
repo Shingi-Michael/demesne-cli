@@ -63,7 +63,15 @@ try {
   const page = await browser.firstWindow();
   await page.setViewportSize({ width: 1180, height: 760 });
   const rows = page.locator(".sidebar-housed-row:not(.sidebar-today)");
-  await rows.first().waitFor({ timeout: 20_000 });
+  // Pass 217 C: one row of stacked round faces, opened with a click.
+  const group = page.locator(".sidebar-agents-group");
+  await group.waitFor({ timeout: 20_000 });
+  expect((await group.innerText()).includes("2 agents") && await page.locator(".sidebar-agents-stack .agent-face").count() === 2, "the agents fold into one row of two faces");
+  expect(await page.locator(".sidebar-agents-stack .agent-face").first().evaluate((node) => getComputedStyle(node).borderRadius === "50%" && getComputedStyle(node).overflow === "hidden"), "the faces are cut round");
+  expect(await rows.first().isHidden(), "the rows wait behind the group");
+  await page.screenshot({ path: join(output, "agents-folded.png") });
+  await group.click();
+  await rows.first().waitFor();
   expect(await rows.count() === 2, "two installed agents listed");
   expect(await page.locator("#sidebar-housed .sidebar-housed-row:not(.sidebar-today)").count() === 2 && await page.locator(".sidebar-project .sidebar-housed-row").count() === 0, "agents sit on their own line at the bottom, not under a project");
   expect((await rows.first().innerText()).includes("Claude Code") && (await rows.first().getAttribute("aria-label"))?.includes("ready"), "Claude Code is ready");

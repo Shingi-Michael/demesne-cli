@@ -699,6 +699,11 @@ function assistantWhy() {
 /// What Scheduled and Foundry say on their rows (pass 213): when the next
 /// routine runs, and how many mockups arrived since you last looked.
 let places: { next: string | null; foundryNew: number } = { next: null, foundryNew: 0 };
+/// Agent faces are drawn on a 100×100 tile with the head in the middle;
+/// the sidebar crops in to the head and shoulders so they read when small.
+const roundFace = (svg: string) => svg.replace('viewBox="0 0 100 100"', 'viewBox="15 13 70 70"');
+/// Whether the agents row at the bottom is open (pass 217 C), kept per window.
+let agentsOpen = (() => { try { return localStorage.getItem("demesne-agents-open") === "1"; } catch { return false; } })();
 const FOUNDRY_SEEN = "demesne-foundry-seen";
 function foundrySeenAt() {
   try { const at = Number(localStorage.getItem(FOUNDRY_SEEN)); if (at) return at; localStorage.setItem(FOUNDRY_SEEN, String(Date.now())); } catch { /* storage off */ }
@@ -851,14 +856,28 @@ function renderSidebar() {
   // the same spot; their feed, Today, is on the label's line.
   const todayLink = btn("today-page", `<span>Today${todayCount ? ` · <b>${todayCount} new</b>` : ""}</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}${socialsView?.reel && reelSeen() !== socialsView.reel.id ? `<i class="today-reel" title="This week's reel is ready"></i>` : ""}`, {}, `sidebar-today${pageOpen === "today" ? " on" : ""}`)
     .replace("<button ", `<button title="Today, your agents' feed" `);
-  const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><div class="sidebar-label sidebar-housed-label"><span>Agents</span>${todayLink}</div><div class="sidebar-agents-line">${housed.map((agent) => {
+  // Pass 217 C: the agents fold into one row of stacked faces with a short
+  // line on what they are doing; clicking it opens a row per agent.
+  const agentInfo = housed.map((agent) => {
     const helps = helping.has(agent.id);
     const tone = agent.state === "working" || helps ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = helps && agent.state !== "working" ? "helping" : tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
-    return btn("agent-open", `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}${tone ? ` ${tone}` : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts, Date.now(), socialsView?.moods))}</span><span class="housed-name">${h(agent.name)}</span>`,
+    const face = `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${roundFace(agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts, Date.now(), socialsView?.moods)))}</span>`;
+    return { agent, tone, word, face: `<span class="sidebar-face${tone ? ` ${tone}` : ""}">${face}${tone ? `<i class="sidebar-face-dot" aria-hidden="true"></i>` : ""}</span>` };
+  });
+  const agentSummary = () => {
+    const busy = agentInfo.filter((one) => one.tone);
+    if (!busy.length) return `${agentInfo.length === 1 ? "ready" : "all ready"}`;
+    return busy.map((one) => `<span class="${one.tone}">${h(one.agent.name.split(/\s+/)[0] ?? one.agent.name)} ${one.tone === "acc" ? "replied" : one.word}</span>`).join(" · ");
+  };
+  const housedLines = () => {
+    const head = btn("agents-toggle", `<span class="sidebar-agents-stack">${agentInfo.map((one) => one.face).join("")}</span><span class="sidebar-agents-words"><b>${agentInfo.length === 1 ? h(agentInfo[0]!.agent.name) : `${agentInfo.length} agents`}</b><small>${agentSummary()}</small></span><svg class="sidebar-agents-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`, {}, "sidebar-agents-group")
+      .replace("<button ", `<button aria-expanded="${agentsOpen}" title="${agentsOpen ? "Fold your agents" : "Show your agents"}" `);
+    const rows = agentInfo.map(({ agent, word, tone, face }) => btn("agent-open", `${face}<span class="housed-name">${h(agent.name)}</span><small class="${tone}">${word}</small>`,
       { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
-      .replace("<button ", `<button aria-label="${h(`${agent.name}, ${word}`)}" title="${h(`${socialsView?.moods?.[agent.id] ? moodTitle(agent.name, socialsView.moods[agent.id]) : agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`} · ${word}`)}" `);
-  }).join("")}</div></div>`;
+      .replace("<button ", `<button aria-label="${h(`${agent.name}, ${word}`)}" title="${h(`${socialsView?.moods?.[agent.id] ? moodTitle(agent.name, socialsView.moods[agent.id]) : agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`} · ${word}`)}" `)).join("");
+    return `<div class="sidebar-housed${agentsOpen ? " open" : ""}" role="group" aria-label="Agents"><div class="sidebar-label sidebar-housed-label"><span>Agents</span>${todayLink}</div>${head}<div class="sidebar-agents-rows"${agentsOpen ? "" : " hidden"}>${rows}</div></div>`;
+  };
   // An orchestrator's threads hang under its row (pass 211 A), each with its
   // ring; one opens on the right, beside its orchestrator.
   const threadLines = (id: string) => {
@@ -6388,6 +6407,13 @@ async function dispatch(
     deletedSessions.delete(String(args.id));
     archivedChats = archivedChats?.filter((chat) => chat.id !== args.id) ?? null;
     renderPage();
+    return;
+  }
+  if (action === "agents-toggle") {
+    agentsOpen = !agentsOpen;
+    try { localStorage.setItem("demesne-agents-open", agentsOpen ? "1" : "0"); } catch { /* storage off */ }
+    sidebarSignature = "";
+    renderSidebar();
     return;
   }
   if (action === "project-toggle" || action === "group-toggle" || action === "project-more") {

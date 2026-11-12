@@ -278,6 +278,8 @@ export class DemesneStore {
     if (!this.hasColumn("foundry_versions", "recommended")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN recommended INTEGER NOT NULL DEFAULT 0");
     // Pass 218 A: why each version looks the way it does, as JSON.
     if (!this.hasColumn("foundry_versions", "why")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN why TEXT NOT NULL DEFAULT ''");
+    // Pass 219 A: the ask that made each version, kept with it so it outlives the chat.
+    if (!this.hasColumn("foundry_versions", "ask")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN ask TEXT NOT NULL DEFAULT ''");
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
     this.userQuestions.recover();
@@ -331,6 +333,7 @@ export class DemesneStore {
     if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new InvalidStateError("Foundry source is larger than 512 KB");
     const now = new Date().toISOString();
     const why = whyText(input.why);
+    const ask = this.askOf(input.turnId);
     const description = input.description?.trim() || null;
     const id = this.database.transaction(() => {
       if (input.id) {
@@ -350,8 +353,8 @@ export class DemesneStore {
         }
         const version = row.version + 1;
         this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?").run(version, now, input.title?.trim() || null, description, input.id);
-        this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why) VALUES (?,?,?,?,?,?,?,?,?)")
-          .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why);
+        this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask) VALUES (?,?,?,?,?,?,?,?,?,?)")
+          .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask);
         if (input.recommended && input.turnId) this.onlyRecommended(input.id, version, input.turnId);
         return input.id;
       }
@@ -361,12 +364,20 @@ export class DemesneStore {
       const created = crypto.randomUUID();
       this.database.query("INSERT INTO foundry_artifacts(id,title,kind,workspace,session_id,created_at,updated_at,version,description,based_on,based_on_version) VALUES (?,?,?,?,?,?,?,1,?,?,?)")
         .run(created, title.slice(0, 200), input.kind, input.workspace ?? null, input.sessionId ?? null, now, now, (description ?? "").slice(0, 600), input.basedOn?.id ?? null, input.basedOn?.version ?? null);
-      this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why) VALUES (?,1,?,?,?,?,?,?,?)")
-        .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why);
+      this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask) VALUES (?,1,?,?,?,?,?,?,?,?)")
+        .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask);
       if (input.recommended && input.turnId) this.onlyRecommended(created, 1, input.turnId);
       return created;
     })();
     return this.getFoundryArtifact(id)!;
+  }
+
+  /// The person's message for a turn, on one line and cut, for the version it made.
+  private askOf(turnId: string | null | undefined): string {
+    if (!turnId) return "";
+    const row = this.database.query("SELECT content FROM turns WHERE id = ?").get(turnId) as { content: string } | null;
+    const text = row?.content.replace(/\s+/g, " ").trim() ?? "";
+    return text.length > 600 ? `${text.slice(0, 599).trimEnd()}…` : text;
   }
 
   /// One ask recommends one mockup: marking one unmarks the others it made.
@@ -408,21 +419,21 @@ export class DemesneStore {
 
   /// Every version of every artifact, newest first, for Foundry's long page.
   listFoundryVersions(limit = 400): FoundryShelfVersion[] {
-    const rows = this.database.query("SELECT artifact_id, version, created_at, session_id, turn_id, note, recommended, why FROM foundry_versions ORDER BY created_at DESC, version DESC LIMIT ?")
-      .all(limit) as { artifact_id: string; version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; recommended: number; why: string }[];
-    return rows.map((row) => ({ artifactId: row.artifact_id, version: row.version, createdAt: row.created_at, sessionId: row.session_id, turnId: row.turn_id, note: row.note, recommended: row.recommended === 1, why: parseWhy(row.why) }));
+    const rows = this.database.query("SELECT artifact_id, version, created_at, session_id, turn_id, note, recommended, why, ask FROM foundry_versions ORDER BY created_at DESC, version DESC LIMIT ?")
+      .all(limit) as { artifact_id: string; version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; recommended: number; why: string; ask: string }[];
+    return rows.map((row) => ({ artifactId: row.artifact_id, version: row.version, createdAt: row.created_at, sessionId: row.session_id, turnId: row.turn_id, note: row.note, recommended: row.recommended === 1, why: parseWhy(row.why), ...(row.ask ? { ask: row.ask } : {}) }));
   }
 
   getFoundryArtifact(id: string, version?: number): FoundryArtifactDetail | null {
     const row = this.database.query("SELECT * FROM foundry_artifacts WHERE id = ?").get(id) as FoundryRow | null;
     if (!row) return null;
-    const versions = this.database.query("SELECT version, created_at, session_id, turn_id, note, recommended, why, length(CAST(source AS BLOB)) AS bytes FROM foundry_versions WHERE artifact_id = ? ORDER BY version DESC")
-      .all(id) as { version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; recommended: number; why: string; bytes: number }[];
+    const versions = this.database.query("SELECT version, created_at, session_id, turn_id, note, recommended, why, ask, length(CAST(source AS BLOB)) AS bytes FROM foundry_versions WHERE artifact_id = ? ORDER BY version DESC")
+      .all(id) as { version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; recommended: number; why: string; ask: string; bytes: number }[];
     const pick = version ?? row.version;
     const source = this.database.query("SELECT source FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, pick) as { source: string } | null;
     if (!source) return null;
     return { ...foundryArtifact(row), version: pick, source: source.source,
-      versions: versions.map((item) => ({ version: item.version, createdAt: item.created_at, sessionId: item.session_id, turnId: item.turn_id, note: item.note, recommended: item.recommended === 1, why: parseWhy(item.why), byteLength: item.bytes })) };
+      versions: versions.map((item) => ({ version: item.version, createdAt: item.created_at, sessionId: item.session_id, turnId: item.turn_id, note: item.note, recommended: item.recommended === 1, why: parseWhy(item.why), ...(item.ask ? { ask: item.ask } : {}), byteLength: item.bytes })) };
   }
 
   renameFoundryArtifact(id: string, title: string): FoundryArtifact {

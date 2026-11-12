@@ -1278,6 +1278,8 @@ export interface FoundryVersion {
   recommended: boolean;
   /// Why it looks this way; null on versions saved before pass 218 or by the person.
   why: FoundryWhy | null;
+  /// The person's message that made it (pass 219 A), cut to 600 characters; "" when none.
+  ask?: string;
   byteLength: number;
 }
 
@@ -1314,6 +1316,7 @@ export interface FoundryShelfVersion {
   note: string;
   recommended?: boolean;
   why?: FoundryWhy | null;
+  ask?: string;
 }
 
 export interface FoundryListResponse {

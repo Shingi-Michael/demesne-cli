@@ -645,7 +645,7 @@ async function refreshPullRequests(fresh?: string) {
     // An unfolded row shows its news, so it counts as looked at.
     if (prOpenFor === id) markPrSeen(id, pr.activityAt);
   }
-  if (changed) { renderSidebar(); renderNotifications(); }
+  if (changed) { renderSidebar(); renderNotifications(); if (pageOpen === "foundry") renderPage(); }
 }
 setInterval(() => { if (prKey) void refreshPullRequests(); }, 60_000);
 /// Each project's face (the sidebar facelift): its own icon, trimmed to what
@@ -4318,7 +4318,8 @@ function renderPage() {
   } else if (pageOpen === "foundry") {
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
-    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null });
+    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
+      builtIn: (id) => { const pr = pullRequests.get(id); return pr?.state === "merged" ? { number: pr.number, createdAt: pr.createdAt } : null; } });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");

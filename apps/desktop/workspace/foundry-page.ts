@@ -37,7 +37,29 @@ export interface FoundryView {
   error: string;
   /// The chat a version came from, by its id.
   chatTitle: (id: string) => string | null;
+  /// The merged pull request a chat opened, if any (pass 219 A): the mockups
+  /// it made before opening it are what it built.
+  builtIn?: (sessionId: string) => { number: number; createdAt: string } | null;
 }
+
+/// Pass 219 A: which versions a chat's merged pull request built, as
+/// shelf keys: of each mockup the chat made, its newest version from before
+/// the pull request was opened.
+export function builtVersions(versions: readonly FoundryShelfVersion[], builtIn: FoundryView["builtIn"]): Map<string, number> {
+  const built = new Map<string, number>(), seen = new Set<string>();
+  if (!builtIn) return built;
+  for (const version of versions) {
+    if (!version.sessionId) continue;
+    const pr = builtIn(version.sessionId);
+    const mine = `${version.sessionId}:${version.artifactId}`;
+    if (!pr || seen.has(mine) || Date.parse(version.createdAt) > Date.parse(pr.createdAt)) continue;
+    seen.add(mine);
+    built.set(shelfKey(version.artifactId, version.version), pr.number);
+  }
+  return built;
+}
+
+const ASK_SHOWN = 160;
 
 /// One version on the long page: its address, for links from the chat.
 export const shelfKey = (id: string, version: number) => `${id}:${version}`;
@@ -55,6 +77,7 @@ export function foundryPage(view: FoundryView) {
   const shown = versions.filter((item) => byId.has(item.artifactId));
   if (!shown.length) return title + `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
   const days = shelfDays(shown);
+  const built = builtVersions(shown, view.builtIn);
   // Pass 208 A: the name, from which chat (a link to it), what it is, and
   // the version's own name; "based on" links to the mockup it came from.
   const item = (version: FoundryShelfVersion, pick: boolean) => {
@@ -65,7 +88,10 @@ export function foundryPage(view: FoundryView) {
     const based = artifact.basedOn && byId.get(artifact.basedOn.id);
     const ver = `<div class="fd-ver"><b>v${version.version}${version.note ? ` · ${h(version.note)}` : ""}</b>`
       + (pick ? '<span class="fd-rec-pill">recommended</span>' : "")
-      + (based ? `<span>based on ${link("foundry-open", { id: based.id, version: artifact.basedOn!.version }, `${h(based.title)} v${artifact.basedOn!.version}`, "Show it")}</span>` : "") + "</div>";
+      + (based ? `<span>based on ${link("foundry-open", { id: based.id, version: artifact.basedOn!.version }, `${h(based.title)} v${artifact.basedOn!.version}`, "Show it")}</span>` : "")
+      + (built.has(key) ? `<span class="fd-built"><i aria-hidden="true"></i>built in ${link("pr-github", { id: version.sessionId }, `#${built.get(key)}`, "Open the pull request on GitHub")}</span>` : "") + "</div>";
+    // Pass 219 A: the ask that made it, one quiet quoted line.
+    const asked = version.ask ? `<p class="fd-ask">You asked <q title="${h(version.ask)}">${h(version.ask.length > ASK_SHOWN ? `${version.ask.slice(0, ASK_SHOWN - 1).trimEnd()}…` : version.ask)}</q></p>` : "";
     const words = artifact.description ? `<p class="fd-desc">${h(artifact.description)}</p>` : "";
     // Pass 218 A: why this version looks the way it does, three quiet lines.
     const why = version.why;
@@ -74,7 +100,7 @@ export function foundryPage(view: FoundryView) {
     const body = artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
       : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt)}</div>`;
-    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${words}${because}${ver}${body}</section>`;
+    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${asked}${words}${because}${ver}${body}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
 }

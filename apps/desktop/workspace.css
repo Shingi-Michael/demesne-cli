@@ -1827,6 +1827,11 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-why { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 8px 0 0; max-width: 68ch; font-size: 12.5px; line-height: 19px; color: var(--t2); }
 .fd-why dt { color: var(--t3); }
 .fd-why dd { margin: 0; }
+/* Pass 219 A: the ask that made a version, and the pull request that built it. */
+.fd-ask { margin: -2px 0 2px; max-width: 68ch; overflow: hidden; color: var(--t3); font-size: 12.5px; line-height: 19px; }
+.fd-ask q { color: var(--t2); quotes: "\201C" "\201D"; }
+.fd-built { display: inline-flex; align-items: baseline; gap: 5px; }
+.fd-built i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); align-self: center; }
 .fd-ver { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 6px 0 10px; color: var(--t3); font-size: 12.5px; }
 .fd-ver b { color: var(--t1); font-weight: 500; }
 .fd-rec-pill, .fd-chip-rec { padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 16%, transparent); color: var(--blossom, #e48aa6); font-size: 11.5px; font-weight: 500; line-height: 18px; }

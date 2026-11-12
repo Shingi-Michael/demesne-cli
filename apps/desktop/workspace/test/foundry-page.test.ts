@@ -69,3 +69,21 @@ test("what one ask made sits together, the one it would use first and marked (pa
   expect(html.match(/fd-rec-pill/g)?.length).toBe(1);
   expect(html).toMatch(/class="fd-item fd-rec" data-fd="bold:1"/);
 });
+
+test("each version says why it looks the way it does, quietly under the description (pass 218 A)", () => {
+  const html = foundryPage({
+    list: [{ ...artifact("a1", "Roastery pricing"), description: "Three plans." }],
+    versions: [
+      { artifactId: "a1", version: 2, createdAt: today, sessionId: null, note: "Middle leads", why: { direction: "Warm paper & a serif.", look: "The dark middle plan.", dropped: "" } },
+      { artifactId: "a1", version: 1, createdAt: today, sessionId: null, note: "" },
+    ],
+    error: "",
+    chatTitle: () => null,
+  });
+  // Direction and what to look at; a line with nothing dropped is left out, and so is a version saved before.
+  expect(html.match(/class="fd-why"/g)?.length).toBe(1);
+  expect(html).toContain("<dt>Direction</dt><dd>Warm paper &amp; a serif.</dd><dt>Look at</dt><dd>The dark middle plan.</dd></dl>");
+  expect(html).not.toContain("<dt>Dropped</dt>");
+  expect(html.indexOf("fd-desc")).toBeLessThan(html.indexOf("fd-why"));
+  expect(html.indexOf("fd-why")).toBeLessThan(html.indexOf("fd-ver"));
+});

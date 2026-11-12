@@ -13,7 +13,7 @@ for (const home of ["plain", "project"] as const) {
           yield { type: "finish", reason: "stop" }; return;
         }
         yield { type: "tool_call_delta", index: 0, idDelta: "make-chat-mockup", nameDelta: "foundry_save",
-          argumentsDelta: JSON.stringify({ title: "Chat mockup", kind: "html", description: "A button to try.", source: "<button>Try me</button>" }) };
+          argumentsDelta: JSON.stringify({ title: "Chat mockup", kind: "html", description: "A button to try.", why: { direction: "Plain, for a test.", look_at: "The button." }, source: "<button>Try me</button>" }) };
         yield { type: "finish", reason: "tool_calls" };
       },
     });

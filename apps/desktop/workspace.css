@@ -1823,6 +1823,10 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-link:hover { color: var(--t1); box-shadow: inset 0 -1px 0 var(--electric, #4c8dff); }
 .fd-link:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; border-radius: 3px; }
 .fd-desc { margin: 4px 0 0; max-width: 68ch; color: var(--t2); font-size: 13px; line-height: 19px; }
+/* Pass 218 A: why it looks this way, under the description: a quiet label and a line each. */
+.fd-why { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 8px 0 0; max-width: 68ch; font-size: 12.5px; line-height: 19px; color: var(--t2); }
+.fd-why dt { color: var(--t3); }
+.fd-why dd { margin: 0; }
 .fd-ver { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 6px 0 10px; color: var(--t3); font-size: 12.5px; }
 .fd-ver b { color: var(--t1); font-weight: 500; }
 .fd-rec-pill, .fd-chip-rec { padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 16%, transparent); color: var(--blossom, #e48aa6); font-size: 11.5px; font-weight: 500; line-height: 18px; }

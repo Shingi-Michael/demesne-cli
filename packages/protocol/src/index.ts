@@ -1256,6 +1256,16 @@ export const FOUNDRY_MAX_SOURCE_BYTES = 512 * 1024;
 /// What one page may keep with demesne.save, all names together.
 export const FOUNDRY_MAX_DATA_BYTES = 256 * 1024;
 
+/// Why a version looks the way it does (pass 218 A), written when it is
+/// saved: the direction, what to look at first, and what was tried and
+/// dropped. Shown as three quiet lines under the description.
+export interface FoundryWhy {
+  direction: string;
+  look: string;
+  /// Empty when nothing was dropped.
+  dropped: string;
+}
+
 export interface FoundryVersion {
   version: number;
   createdAt: string;
@@ -1266,6 +1276,8 @@ export interface FoundryVersion {
   note: string;
   /// The one the model would use, among what one ask made.
   recommended: boolean;
+  /// Why it looks this way; null on versions saved before pass 218 or by the person.
+  why: FoundryWhy | null;
   byteLength: number;
 }
 
@@ -1301,6 +1313,7 @@ export interface FoundryShelfVersion {
   turnId?: string | null;
   note: string;
   recommended?: boolean;
+  why?: FoundryWhy | null;
 }
 
 export interface FoundryListResponse {

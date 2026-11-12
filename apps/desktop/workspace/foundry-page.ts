@@ -67,10 +67,14 @@ export function foundryPage(view: FoundryView) {
       + (pick ? '<span class="fd-rec-pill">recommended</span>' : "")
       + (based ? `<span>based on ${link("foundry-open", { id: based.id, version: artifact.basedOn!.version }, `${h(based.title)} v${artifact.basedOn!.version}`, "Show it")}</span>` : "") + "</div>";
     const words = artifact.description ? `<p class="fd-desc">${h(artifact.description)}</p>` : "";
+    // Pass 218 A: why this version looks the way it does, three quiet lines.
+    const why = version.why;
+    const reasons = why ? ([["Direction", why.direction], ["Look at", why.look], ["Dropped", why.dropped]] as const).filter(([, text]) => text) : [];
+    const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
     const body = artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
       : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt)}</div>`;
-    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${words}${ver}${body}</section>`;
+    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${words}${because}${ver}${body}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
 }

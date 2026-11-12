@@ -7,6 +7,9 @@ import { foundryTryTool, TRIES_PER_TURN } from "../src/foundry.ts";
 import { FOUNDRY_LOOK_PREFIX, lookReport, type FoundryTry } from "../src/foundry-look.ts";
 import { PLAN_MODE_TOOL_NAMES } from "../src/engine.ts";
 
+/// Why a test page looks the way it does (pass 218 A).
+const W = { direction: "Plain, for a test.", look_at: "The heading." };
+
 const PNG = Buffer.from("png").toString("base64");
 
 function setup(tryer: FoundryTry) {

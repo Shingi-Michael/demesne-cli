@@ -751,7 +751,7 @@ export function settingsPage(view: SettingsView) {
   }
   const all = pages(view), page = all.find((item) => item.id === settingsHome(view.section)) ?? all[0]!;
   const note = page.note ? `<p class="st-note${page.id === "permissions" ? " foot" : ""}">${h(page.note)}${page.note.startsWith("Changed here") ? ` ${link("restart-daemon", "Restart now")}` : ""}</p>` : "";
-  return `<div class="st-page" style="--page:${PAGE_TONES[page.id]}"><i class="st-light" aria-hidden="true"></i><h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${summary(view, page.id)}${error}${note}${page.html ?? ""}${page.groups.filter((group) => !group.hidden).map((group) => groupHtml(group, [])).join("")}</div>`;
+  return `<div class="st-page" style="--page:${PAGE_TONES[page.id]}"><h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${summary(view, page.id)}${error}${note}${page.html ?? ""}${page.groups.filter((group) => !group.hidden).map((group) => groupHtml(group, [])).join("")}</div>`;
 }
 
 /// The sidebar while Settings is open: Back to chats, the search, the list.

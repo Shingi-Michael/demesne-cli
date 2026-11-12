@@ -7,6 +7,7 @@ import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
 import { FOUNDRY_LOOK_PREFIX } from "./foundry-look.ts";
 import { PAGE_LOOK_PREFIX } from "./page-look.ts";
+import { BROWSER_PICTURE_PREFIX } from "./browser.ts";
 import { WINDOW_CAPTURE_FILE } from "./window-capture.ts";
 import { OPEN, SHOW, SHOWN_FILE } from "./open-show.ts";
 import { ProviderError, type ProviderMessage, type ProviderToolCall, type ProviderToolDefinition } from "@demesne/providers";
@@ -1461,7 +1462,7 @@ export function delegateGuidance({ often, onAgents }: { often: SubagentOften; on
 }
 
 /// Tool pictures a model that sees always gets, even without provider.vision.
-export const seenToolPicture = (filename: string) => filename.startsWith(FOUNDRY_LOOK_PREFIX) || filename.startsWith(PAGE_LOOK_PREFIX) || filename === WINDOW_CAPTURE_FILE || filename === SHOWN_FILE;
+export const seenToolPicture = (filename: string) => filename.startsWith(FOUNDRY_LOOK_PREFIX) || filename.startsWith(PAGE_LOOK_PREFIX) || filename.startsWith(BROWSER_PICTURE_PREFIX) || filename === WINDOW_CAPTURE_FILE || filename === SHOWN_FILE;
 export function agentSystemPrompt(options: { workspaceRoot?: string; plain?: boolean; definitions: ProviderToolDefinition[]; content?: string;
   planOnly?: boolean; orchestrate?: boolean; autoApprove?: boolean; acceptEdits?: boolean; providerVision?: boolean;
   /// The model takes pictures, though tool pictures weren't turned on for it.

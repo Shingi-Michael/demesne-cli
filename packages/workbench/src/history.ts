@@ -16,6 +16,16 @@ export function toolTarget(name: string, input: Record<string, unknown>): string
   if (name === "heartbeat") return [input.to, input.node_id].find((part): part is string => typeof part === "string" && part.length > 0) ?? (typeof input.action === "string" ? input.action : undefined);
   // session_tools: "run find_definition", "define ts_search".
   if (name === "session_tools") return [input.action, input.name].filter((part) => typeof part === "string" && part).join(" ") || undefined;
+  // browser: the page it opened, the control it used (by name; a bare number says nothing), what it typed or waited for.
+  if (name === "browser") {
+    const text = (value: unknown, max = 60) => typeof value === "string" && value.trim() ? (value.length > max ? `${value.slice(0, max - 1)}…` : value) : undefined;
+    const named = typeof input.ref === "string" && !/^\d+$/.test(input.ref) ? `“${text(input.ref, 40)}”` : undefined;
+    if (input.action === "open") return text(input.url, 80)?.replace(/^https?:\/\//, "");
+    if (input.action === "type") return [text(input.text, 40) ? `“${text(input.text, 40)}”` : undefined, named ? `into ${named}` : undefined].filter(Boolean).join(" ") || undefined;
+    if (input.action === "key") return text(input.key);
+    if (input.action === "wait") return text(input.for, 40) ? `for “${text(input.for, 40)}”` : undefined;
+    return named;
+  }
   // message_thread: who was told, and what for.
   if (name === "message_thread") return [input.thread, input.purpose].filter((part): part is string => typeof part === "string" && part.length > 0).join(" · ") || undefined;
   if (name === "move_path" && typeof input.from === "string" && typeof input.to === "string") return `${input.from} → ${input.to}`;

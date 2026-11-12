@@ -81,7 +81,8 @@ export function lookAtPageTool(look: PageLook, looks = new Map<string, number>()
         + "Optional steps use it the way a person would, with real clicks and typing, and say after each what visibly changed: "
         + "{click: name}, {type: text, into?: name}, {key: Enter|Tab|Escape|Backspace|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight}, {scroll: px}, {hover: name}, {wait: ms}. "
         + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). "
-        + "Use it after changing a web UI, to check it looks and works right before you answer.",
+        + "Use it after changing a web UI, to check it looks and works right before you answer. "
+        + "This is one look that starts fresh each time; to stay in a page across calls (sign in, go several pages deep, act on what you find), use browser.",
       inputSchema: {
         type: "object",
         properties: {

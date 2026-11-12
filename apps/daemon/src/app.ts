@@ -18,6 +18,7 @@ import { githubTools } from "./github.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
+import { browserTool, electronBrowser, type BrowserDriver } from "./browser.ts";
 import { openTool, showTool } from "./open-show.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
@@ -218,6 +219,8 @@ export function createDaemonApp(options: {
   foundryTry?: FoundryTry;
   /// Opens the app being built for look_at_page (tests pass a fake; the daemon uses the desktop app).
   pageLook?: PageLook;
+  /// The model's own browser (tests pass a fake; the daemon uses the desktop app). False turns it off.
+  browser?: BrowserDriver | false;
   /// The engine's clock (evals step it to make the prompt cache go cold).
   now?: () => Date;
   /// The open and show tools (pass 210 A); on unless false.
@@ -398,6 +401,9 @@ export function createDaemonApp(options: {
   // Seeing the app being built: the same hidden window, opened on a local address.
   const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
   if (pageLook) tools.register(lookAtPageTool(pageLook));
+  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith) : null;
+  const browser = options.browser === false ? null : options.browser ?? ownBrowser;
+  if (browser) tools.register(browserTool(browser));
   // Open it behind Demesne, and show it on the right (pass 210 A).
   if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index
@@ -1653,6 +1659,8 @@ export function createDaemonApp(options: {
           if (!session) { response.skipped.push({ id, reason: "not found" }); continue; }
           if (session.turns.some((turn) => turn.status === "queued" || turn.status === "running")) { response.skipped.push({ id, reason: "a turn is running" }); continue; }
           heartbeat?.detach(id);
+          // Its tab in the model's browser goes with it.
+          if (browser) void browser(id, { action: "close" }, AbortSignal.timeout(5000)).catch(() => {});
           store.deleteSession(id);
           rmSync(join(dirname(options.databasePath), "session-tools", `${id}.json`), { force: true });
           response.deleted.push(id);
@@ -2312,6 +2320,7 @@ export function createDaemonApp(options: {
 
   async function closeApplication(): Promise<void> {
       closing = true;
+      ownBrowser?.close();
       for (const timer of awayTimers.values()) clearTimeout(timer);
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       clearInterval(driveAutoTimer);

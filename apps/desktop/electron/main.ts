@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
+import { BROWSER_HOST_FLAG, runBrowserHost } from "./browser-host.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
@@ -16,8 +17,11 @@ import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
-const lookJob = lookJobPath(process.argv);
-if (lookJob) runFoundryLook(lookJob);
+/// `--browser-host`: the model's own hidden browser, kept up by the daemon (browser-host.ts).
+const browserHost = process.argv.includes(BROWSER_HOST_FLAG);
+const lookJob = lookJobPath(process.argv) ?? (browserHost ? BROWSER_HOST_FLAG : null);
+if (browserHost) runBrowserHost();
+else if (lookJob) runFoundryLook(lookJob);
 // Match the installed Windows shortcut identity so native toasts can appear.
 if (process.platform === "win32") app.setAppUserModelId("com.demesne.desktop");
 const userData = app.commandLine.getSwitchValue("user-data-dir");

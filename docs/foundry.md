@@ -41,3 +41,20 @@ Each version of a page the model designs (`html` or `svg`) carries a short **why
 On the Foundry page the why sits under the description as three quiet lines, one per version, so the history reads as a line of decisions. The model's answer in the chat says the same thing in plain words, so you never have to open Foundry to learn it.
 
 `foundry_save` and `foundry_edit` take it as `why: {direction, look_at, dropped}`. A save that makes a new page version without it is turned back with a hint. The model fixing its own page in the same ask (after a look or a try) keeps the why it already gave. A later ask is a new version, so it says what changed and why. `foundry_edit` with only `id` and `why` sets the why of the latest version without making a new one. Versions saved before this, and the ready kinds, have none. It is stored per version in the `why` column of `foundry_versions`.
+
+## A critic before you see it
+
+After a page is saved, Foundry renders it off screen at 1280 and 390 pixels wide and the model gets the pictures back ([foundry-look.ts](../apps/daemon/src/foundry-look.ts)). Besides layout faults, the look now carries the page's **design numbers** against targets, each tied to the design guide rule it checks:
+
+| Number | Target | Rule |
+| --- | --- | --- |
+| Text sizes | 3 to 6 | 3, type from the scale |
+| Lead | biggest text 2.8× the body or more | 2, one focal point |
+| Rhythm | 90% of spacing from six steps | 4, space from the scale |
+| Aligned | 85% of text blocks share a left edge | 6, an even layout |
+| Colours | 3 to 8 | 5, a small palette |
+| Surface | a third of the first screen is more than blank paper | 8, depth where it earns it |
+
+These are the same numbers the quality eval scores (`scripts/foundry-quality.ts`); until now only the eval saw them. They judge pages the model designs (`html`); the ready kinds are drawn by Demesne.
+
+When the look finds a fault or a number off target, the fix has to say what it is fixing first. `foundry_edit` takes a `critique`: the rules the page breaks, by number, and what will change. A fix without one is turned back, and a whole new source through `foundry_save` is pointed to `foundry_edit`. A number can stay off target on purpose, with the reason in the critique. The critique is the model's own working: it is not kept and never shown to you. One fix per ask, as before.

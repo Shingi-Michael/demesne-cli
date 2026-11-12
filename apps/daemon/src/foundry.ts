@@ -169,7 +169,7 @@ const clean = (value: unknown, max: number) => typeof value === "string" ? value
 /// answer in the chat says the same.
 const WHY_SCHEMA = {
   type: "object",
-  description: "Why it looks this way, a sentence each; required on each new html or svg version (revising: what changed and why).",
+  description: "Why it looks this way; required on each new html or svg version.",
   properties: {
     direction: { type: "string", maxLength: 300, description: "Who it is for, the mood." },
     look_at: { type: "string", maxLength: 300, description: "What leads." },
@@ -256,6 +256,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       if (!id) checkPick(store, context.turnId, recommended);
       const why = whyOf(input.why);
       checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
+      checkCritique(id, context.turnId, undefined, "foundry_edit");
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
@@ -318,6 +319,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           description: { type: "string", maxLength: 600, description: "What it is and what to look at." },
           recommended: { type: "boolean", description: "True on the one you would use." },
           why: WHY_SCHEMA,
+          critique: { type: "string", maxLength: 1200, description: "Fixing after a look that found problems: rules broken, by number, and what you change." },
         },
         required: ["id"],
         additionalProperties: false,
@@ -350,6 +352,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       checkOptions(current.kind, source);
       const why = whyOf(input.why);
       checkWhy(store, current.kind, input.id, context.turnId, why);
+      checkCritique(input.id, context.turnId, input.critique);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
@@ -398,6 +401,18 @@ const LOOKED_KINDS = new Set(["html", "deck", "doc", "dashboard"]);
 
 /// After a page is saved: render it, and hand the model the faults
 /// found and a picture at each width. Twice per artifact per turn at most.
+/// Pages whose last look found something: their next save in the same ask
+/// carries a critique first (step 3), keyed by turn and artifact.
+const critiqueOwed = new Set<string>();
+
+/// A fix after a look that found problems says what it is fixing, by rule,
+/// before it is saved. The critique is the model's own: it is not kept or shown.
+function checkCritique(id: string | undefined, turnId: string | undefined, critique: unknown, through = "") {
+  if (!id || !turnId || !critiqueOwed.has(`${turnId}:${id}`)) return;
+  if (typeof critique === "string" && critique.trim().length >= 20) { critiqueOwed.delete(`${turnId}:${id}`); return; }
+  throw new Error(`[invalid_input] Critique before you fix: ${through ? "fix it with foundry_edit and pass" : "pass"} critique, the Design guide rules the page breaks (by number) and the numbers off target, with what you will change. Hint: a few lines; it is not shown to the person`);
+}
+
 async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<string, number>, text: string, context: { turnId?: string; signal: AbortSignal }): Promise<string | StructuredToolResult> {
   let saved: Record<string, unknown>;
   try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return text; }
@@ -410,7 +425,9 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
-  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN);
+  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN, artifact.kind === "html");
+  if (report.found) critiqueOwed.add(key); else critiqueOwed.delete(key);
+  if (critiqueOwed.size > 200) critiqueOwed.delete(critiqueOwed.values().next().value!);
   return { text: JSON.stringify({ ...saved, look: report.look }), images: report.images };
 }
 

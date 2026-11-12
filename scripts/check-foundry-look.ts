@@ -3,7 +3,7 @@
 // (Linux needs a display: xvfb-run -a bun scripts/check-foundry-look.ts).
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
-import { electronLook } from "../apps/daemon/src/foundry-look.ts";
+import { designReport, electronLook, lookReport } from "../apps/daemon/src/foundry-look.ts";
 
 const root = resolve(import.meta.dir, "..");
 const electron = process.env.DEMESNE_ELECTRON ?? join(root, "node_modules/electron/dist", process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron");
@@ -39,6 +39,11 @@ const design = desktop!.design!;
 assert(design, "design numbers come with the look");
 for (const key of ["sizes", "body", "lead", "rhythm", "aligned", "colours", "surface"]) assert(typeof design[key] === "number", `design.${key}`);
 assert(design.sizes >= 2 && design.lead > 1 && design.colours >= 2, JSON.stringify(design));
+// Step 3: the model sees them against targets, by the design guide's rule.
+const numbers = designReport(design);
+assert.equal(numbers.off.length + numbers.ok.length, 6, "every number has a target");
+assert(lookReport(look, false).look.next, "the look says what to do next");
+console.log("design numbers off target:", numbers.off);
 // The parts draw a real frame: a Demesne mock and a phone render with no faults, and paint the screen.
 const parts = `<html data-theme="dark"><link rel="stylesheet" href="foundry://kit/base.css"><main class="container" style="max-width:1180px"><h1>Calmer settings</h1>
 <d-demesne page="Customize" tabs="Settings"><h2>General</h2><div><d-row title="Keep this computer awake" note="While a chat or Drive runs"><d-toggle on></d-toggle></d-row>

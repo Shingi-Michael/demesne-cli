@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { OpenTabs } from "../tabs.ts";
 
 const memory = () => {
@@ -39,4 +39,33 @@ test("tabs move, step around, drop chats that are gone, and survive a restart", 
   expect(new OpenTabs(store).ids).toEqual(["c", "b"]);
   store.setItem("demesne.tabs", "not json");
   expect(new OpenTabs(store).ids).toEqual([]);
+});
+
+describe("pinned tabs", () => {
+  const store2 = () => { const data = new Map<string, string>(); return { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) }; };
+  test("a pinned tab moves first, stays put on close, and is saved", () => {
+    const store = store2(), tabs = new OpenTabs(store);
+    tabs.open("a"); tabs.open("b"); tabs.open("c");
+    expect(tabs.pin("c", true)).toBe(true);
+    expect(tabs.ids).toEqual(["c", "a", "b"]);
+    expect(tabs.close("c")).toBeUndefined();
+    expect(tabs.ids).toEqual(["c", "a", "b"]);
+    tabs.open("d", "c");
+    expect(tabs.ids).toEqual(["c", "d", "a", "b"]);
+    const again = new OpenTabs(store);
+    expect(again.pinned).toEqual(["c"]);
+    expect(again.ids).toEqual(["c", "d", "a", "b"]);
+  });
+  test("tabs keep to their side of the pins when dragged, and unpinning lets a tab close", () => {
+    const tabs = new OpenTabs(store2());
+    for (const id of ["a", "b", "c"]) tabs.open(id);
+    tabs.pin("b", true);
+    tabs.move("c", 0);
+    expect(tabs.ids).toEqual(["b", "c", "a"]);
+    tabs.move("b", 2);
+    expect(tabs.ids).toEqual(["b", "c", "a"]);
+    tabs.pin("b", false);
+    expect(tabs.ids).toEqual(["b", "c", "a"]);
+    expect(tabs.close("b")).toBe("c");
+  });
 });

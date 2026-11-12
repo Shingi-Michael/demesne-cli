@@ -3000,3 +3000,86 @@ html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.d
 #page[data-kind="settings"] .ov-tile { background: linear-gradient(160deg, color-mix(in srgb, var(--page) 9%, transparent), rgb(var(--ink-fg) / .02) 60%);
   box-shadow: inset 0 0 0 1px var(--hair), inset 0 1px 0 rgb(var(--ink-fg) / .06); }
 #page[data-kind="settings"] .ov-tile:hover { background: linear-gradient(160deg, color-mix(in srgb, var(--page) 15%, transparent), rgb(var(--ink-fg) / .03) 60%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page) 35%, transparent); }
+
+/* Top bar, improved (Figma "Top bar, improved"): the same greys on one grid.
+   One centre line (the open tab's middle, 28px down), every control 28px tall,
+   other tabs 32px, the open tab 40px joining the chat; one 6px gap; the bar
+   starts on the chat panel's left edge and ends on its right edge. */
+#desktop-toolbar { padding: 0 10px; gap: 6px; }
+#desktop-toggle-sidebar, #desktop-toolbar .header-more { width: 28px; height: 28px; border-radius: 8px; }
+#desktop-toolbar header { gap: 6px; }
+#workspace-more { transform: translateY(4px); }
+#workspace-tabs { gap: 6px; }
+#workspace-tabs.fade-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent); }
+#workspace-tabs.fade-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 56px); mask-image: linear-gradient(to right, transparent, #000 56px); }
+#workspace-tabs.fade-left.fade-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent); }
+
+/* Tabs share the width (up to 196px), then the strip scrolls. */
+/* Every tab has the same 1px side border (clear unless open), so all share one width. */
+.bar-tab { flex: 1 1 0; min-width: 132px; max-width: 196px; height: 32px; margin-bottom: 4px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px; }
+.bar-tab.on { height: 40px; margin-bottom: 0; border-color: var(--panel-edge, var(--hair)); border-radius: 10px 10px 0 0; }
+@media (max-width: 720px) { .bar-tab { flex-basis: 0; min-width: 120px; } }
+/* Inside a tab: 12 | mark 16 | 8 | words | 8 | close 16 | 12, the same on every tab. */
+.bar-tab > button[role="tab"], .bar-tab-label { gap: 8px; padding: 0 0 0 12px; font-size: 13px; }
+.bar-tab-label { padding-right: 12px; }
+.bar-tab.here .bar-tab-label { padding-left: 12px; }
+.bar-tab .sidebar-session-mark { flex: none; display: grid; place-items: center; width: 16px; height: 16px; margin: 0; border: 0; border-radius: 0; background: none; box-shadow: none; animation: none; visibility: visible; -webkit-mask: none; mask: none; }
+.bar-tab .sidebar-session-mark:not(.warn, .acc, .working, .bad) { display: grid; }
+.bar-tab .sidebar-session-mark::before, .bar-tab .sidebar-session-mark::after { content: none; }
+.bar-tab-words { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; text-align: left; }
+.bar-tab-name { line-height: 16px; }
+.bar-tab-sub { display: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; line-height: 13px; color: var(--t4); }
+.bar-tab:not(.on):hover .bar-tab-sub { display: block; }
+.bar-tab.on .bar-tab-name { font-weight: 500; }
+.bar-tab-close { width: 16px; height: 16px; margin: 0 12px 0 8px; border-radius: 4px; font-size: 14px; }
+.bar-tab-rename { margin-left: 36px; }
+
+/* State by shape and brightness, never by colour. */
+.bar-tab:is(.t-warn, .t-acc):not(.on) { color: var(--t1); }
+.bar-tab:is(.t-warn, .t-acc):not(.on) .bar-tab-name { font-weight: 500; }
+.bar-tab .sidebar-session-mark.warn::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--t1); }
+.bar-tab .sidebar-session-mark.bad::before { content: "×"; position: static; width: auto; height: auto; background: none; transform: none; color: var(--t2); font-size: 14px; line-height: 1; }
+.bar-tab .sidebar-session-mark.working::before { content: ""; box-sizing: border-box; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--t1) 16%, transparent); border-top-color: color-mix(in srgb, var(--t1) 75%, transparent); }
+.bar-tab.t-working::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 1.5px; border-radius: 1px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--t1) 55%, transparent), transparent); background-size: 200% 100%; }
+@media (prefers-reduced-motion: no-preference) {
+  .bar-tab .sidebar-session-mark.working::before { animation: bar-turn 1.2s linear infinite; }
+  .bar-tab.t-working::after { animation: bar-sweep 1.8s linear infinite; }
+}
+@keyframes bar-turn { to { transform: rotate(360deg); } }
+@keyframes bar-sweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* A pinned tab: a small square with its project's letter, first in the row. */
+.bar-tab.pinned { flex: none; width: 32px; min-width: 32px; max-width: 32px; }
+.bar-tab.pinned.on { width: 40px; min-width: 40px; max-width: 40px; }
+.bar-tab.pinned > button[role="tab"] { justify-content: center; padding: 0; gap: 0; }
+.bar-tab.pinned .sidebar-session-mark { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; }
+.bar-tab.pinned .sidebar-session-mark:not(.warn) { display: none; }
+.bar-tab.pinned.t-working::after { left: 6px; right: 6px; }
+/* Pins have their own row, which never scrolls; a hairline with a 6px gap on each side ends it. */
+#workspace-pins { flex: none; display: flex; align-items: flex-end; gap: 6px; height: 100%; }
+#workspace-pins:empty { display: none; }
+#workspace-pins::after { content: ""; flex: none; align-self: center; width: 1px; height: 16px; margin: 8px 0 0; background: var(--hair2, var(--hair)); }
+html.mac-chrome #desktop-toolbar #workspace-pins .bar-tab { -webkit-app-region: no-drag; }
+.bar-pin-face { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: color-mix(in srgb, var(--t1) 12%, transparent); color: var(--t1); font: 600 9.5px/1 Inter, system-ui, sans-serif; text-transform: lowercase; }
+#workspace-tabs { overflow-y: visible; }
+
+/* "N more": the same height and place as the other controls. */
+.bar-more { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--tone); color: var(--t2); font: 12.5px Inter, system-ui, sans-serif; cursor: pointer; }
+.bar-more[hidden] { display: none; }
+.bar-more:hover { background: var(--tone2); color: var(--t1); }
+.bar-more i { width: 6px; height: 6px; border-radius: 50%; background: var(--t1); }
+
+/* Drive: a quiet grey chip with a meter of the mission's steps. */
+#drive-pill { gap: 8px; height: 28px; padding: 0 12px; border-radius: 8px; background: var(--tone); box-shadow: none; }
+#drive-pill:hover, #drive-pill[aria-expanded="true"] { background: var(--tone2); }
+#drive-pill .dp-word { color: var(--t2); }
+#drive-pill:hover .dp-word, #drive-pill[aria-expanded="true"] .dp-word { color: var(--t1); }
+.desktop #drive-pill .bf-ring { width: 16px; height: 16px; }
+.desktop #drive-pill .bf-ring:not(.amber, .done) .tr { stroke: color-mix(in srgb, var(--t1) 16%, transparent); }
+.desktop #drive-pill .bf-ring:not(.amber, .done) .fl { stroke: color-mix(in srgb, var(--t1) 70%, transparent); }
+#drive-pill .bf-dot.idea { background: var(--t2); }
+.dp-meter { display: inline-flex; align-items: center; gap: 2px; }
+.dp-meter i { width: 8px; height: 3px; border-radius: 1.5px; background: color-mix(in srgb, var(--t1) 15%, transparent); }
+.dp-meter i.on { background: color-mix(in srgb, var(--t1) 70%, transparent); }
+/* A tab's menu opens over the top bar. */
+#row-menu { z-index: 90; }

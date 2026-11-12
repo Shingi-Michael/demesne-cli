@@ -1107,7 +1107,7 @@ document.getElementById("sidebar-projects")?.addEventListener("keydown", (event)
 // menu at the pointer. Deleting asks once, in place: the row turns into
 // "Delete forever?" and a second click confirms. Removing a project deletes
 // its chats in Demesne; its folder and files on disk are never touched.
-type RowMenu = { kind: "chat"; id: string } | { kind: "project"; path: string };
+type RowMenu = { kind: "chat"; id: string } | { kind: "tab"; id: string } | { kind: "project"; path: string };
 let rowMenu: RowMenu | null = null, rowMenuSure = false, rowMenuAt = { x: 0, y: 0 };
 function closeRowMenu() {
   rowMenu = null; rowMenuSure = false;
@@ -1120,7 +1120,10 @@ function renderRowMenu() {
   if (!menu) { menu = document.createElement("div"); menu.id = "row-menu"; menu.setAttribute("role", "menu"); document.body.append(menu); }
   const item = (label: string, what: string, extra = "", cls = "") => btn("row-menu", `<span>${label}</span>${extra ? `<small>${extra}</small>` : ""}`, { what }, `row-menu-item${cls ? ` ${cls}` : ""}`).replace("<button ", '<button role="menuitem" ');
   const line = '<hr class="row-menu-line">';
-  if (rowMenu.kind === "chat") {
+  if (rowMenu.kind === "tab") {
+    const pinned = tabs.isPinned(rowMenu.id);
+    menu.innerHTML = item(pinned ? "Unpin tab" : "Pin tab", "tab-pin", pinned ? "" : "keeps it at the left") + (pinned ? "" : item("Close tab", "tab-close"));
+  } else if (rowMenu.kind === "chat") {
     const chat = state.sessions.find((one) => one.id === (rowMenu as { id: string }).id);
     const working = chat?.status === "running" || chat?.status === "queued";
     menu.innerHTML = item("Open", "open") + item("Rename", "rename") + item(chat?.pinned ? "Unpin" : "Pin", "pin") + line
@@ -1141,6 +1144,18 @@ function renderRowMenu() {
 }
 document.addEventListener("contextmenu", (event) => {
   const target = event.target as HTMLElement;
+  // Right-click a tab: pin or unpin it, or close it.
+  const barTab = target.closest<HTMLElement>(":is(#workspace-tabs, #workspace-pins) .bar-tab[data-tab]");
+  if (barTab) {
+    event.preventDefault();
+    closeRowMenu();
+    rowMenu = { kind: "tab", id: barTab.dataset.tab! };
+    rowMenuAt = { x: event.clientX, y: event.clientY };
+    barTab.classList.add("row-menu-on");
+    renderRowMenu();
+    document.querySelector<HTMLButtonElement>("#row-menu button")?.focus({ preventScroll: true });
+    return;
+  }
   const chatRow = target.closest<HTMLElement>("#sidebar-projects .sidebar-item");
   const chatButton = chatRow?.querySelector<HTMLElement>('[data-action="select-session"], [data-action="project-session"]');
   const projectRow = target.closest<HTMLElement>("#sidebar-projects .sidebar-project-header");
@@ -1163,6 +1178,11 @@ async function rowMenuAction(what: string): Promise<unknown> {
   if (!menu || !state) return;
   if ((what === "delete" || what === "remove") && !rowMenuSure) { rowMenuSure = true; renderRowMenu(); document.querySelector<HTMLButtonElement>("#row-menu .sure")?.focus({ preventScroll: true }); return; }
   closeRowMenu();
+  if (menu.kind === "tab") {
+    if (what === "tab-pin") { tabs.pin(menu.id, !tabs.isPinned(menu.id)); tabsSignature = ""; renderTabs(); return; }
+    if (what === "tab-close") return closeTab(menu.id);
+    return;
+  }
   if (menu.kind === "chat") {
     const id = menu.id, chat = state.sessions.find((one) => one.id === id);
     if (what === "open") return goChat(id);
@@ -1232,7 +1252,7 @@ async function showGlance(row: HTMLElement) {
   document.body.append(card);
   const box = row.getBoundingClientRect(), side = document.getElementById("desktop-sidebar")?.getBoundingClientRect();
   // A tab's glance hangs under it; a row's sits beside the sidebar.
-  if (row.closest("#workspace-tabs")) {
+  if (row.closest("#workspace-tabs, #workspace-pins")) {
     card.style.left = `${Math.round(Math.max(8, Math.min(box.left, innerWidth - card.offsetWidth - 8)))}px`;
     card.style.top = `${Math.round(box.bottom + 8)}px`;
   } else {
@@ -1279,6 +1299,17 @@ tabStrip?.addEventListener("pointerover", (event) =>
   glanceOver((event.target as Element).closest<HTMLElement>(".bar-tab:not(.on)")?.querySelector<HTMLElement>("[data-updated]") ?? null));
 tabStrip?.addEventListener("pointerleave", () => { hideGlance(); glanceQuiet = ""; });
 tabStrip?.addEventListener("pointerdown", glanceDown);
+// Pinned tabs glance and take arrow keys like the others.
+const tabPins = document.getElementById("workspace-pins");
+tabPins?.addEventListener("keydown", (event) => { if (handleTabStripKey(event, tabPins)) event.stopPropagation(); });
+tabPins?.addEventListener("pointerover", (event) =>
+  glanceOver((event.target as Element).closest<HTMLElement>(".bar-tab:not(.on)")?.querySelector<HTMLElement>("[data-updated]") ?? null));
+tabPins?.addEventListener("pointerleave", () => { hideGlance(); glanceQuiet = ""; });
+tabPins?.addEventListener("pointerdown", glanceDown);
+// The "N more" chip follows the strip as it scrolls and as the window resizes.
+tabStrip?.addEventListener("scroll", () => updateTabsMore(), { passive: true });
+if (tabStrip && typeof ResizeObserver !== "undefined") new ResizeObserver(() => updateTabsMore()).observe(tabStrip);
+document.getElementById("workspace-more")?.addEventListener("click", () => showMoreTabs());
 // A middle click closes a tab.
 tabStrip?.addEventListener("auxclick", (event) => {
   const id = (event.target as Element).closest<HTMLElement>(".bar-tab[data-tab]")?.dataset.tab;
@@ -2037,7 +2068,7 @@ function renderTabs() {
   const tones = shown.map((id) => chatTone(byId.get(id)!));
   // The open chat's own time moves with every streamed word; its tab has no
   // glance to key by it, so it doesn't redraw the strip.
-  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
+  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, tabs.pinned, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
   if (signature === tabsSignature) return;
   renderRailChats(shown.map((id, index) => ({ item: byId.get(id)!, tone: tones[index]!, on: chatOpen && id === current!.id })));
   tabsSignature = signature;
@@ -2045,26 +2076,66 @@ function renderTabs() {
     const item = byId.get(id)!, on = chatOpen && id === current!.id, title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
     const [action, args] = chatTarget(id);
     const tip = on && rimNow ? `${title} · ${rimNow.words}` : about ? `${title}, ${about}` : title;
-    return `<div class="bar-tab${on ? " on" : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}"><span class="sidebar-session-mark ${tone}" aria-hidden="true"></span><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span></button>${btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `)}</div>`;
+    const project = item.workspace ? item.workspace.split(/[\\/]/).filter(Boolean).pop() ?? "Just a chat" : "Just a chat";
+    const pinned = tabs.isPinned(id);
+    // Pointing at a tab adds its project and state on a second line.
+    const sub = [project, STATE_SAYS[tone]].filter(Boolean).join(" · ");
+    const words = pinned
+      ? `<span class="bar-pin-face" aria-hidden="true">${h((project === "Just a chat" ? title : project).trim().charAt(0).toLowerCase() || "·")}</span>`
+      : `<span class="bar-tab-words"><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span><span class="bar-tab-sub" aria-hidden="true">${h(sub)}</span></span>`;
+    // The close slot is always kept, so a name never moves when × shows.
+    const close = pinned ? "" : btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `);
+    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}"><span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>${words}</button>${close}</div>`;
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
   const newTab = document.getElementById("workspace-new-tab");
-  updateTabStrip(strip, `${shown.map((id, index) => tab(id, tones[index]!)).join("")}${page}`, newTab);
-  const selected = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+  // Pinned tabs live in their own row before the strip, so they stay put while it scrolls.
+  const pins = document.getElementById("workspace-pins");
+  const pinnedIds = shown.filter((id) => tabs.isPinned(id));
+  if (pins) updateTabStrip(pins, pinnedIds.map((id) => tab(id, tones[shown.indexOf(id)]!)).join(""), newTab);
+  updateTabStrip(strip, `${shown.filter((id) => !pins || !tabs.isPinned(id)).map((id) => tab(id, tones[shown.indexOf(id)]!)).join("")}${page}`, newTab);
+  const selected = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? pins?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? null;
   const panel = document.getElementById("workspace");
   if (selected) panel?.setAttribute("aria-labelledby", selected.id);
   else panel?.removeAttribute("aria-labelledby");
   if (newTab) newTab.title = `New chat (${shortcut("Ctrl+T")})`;
   const callSlot = document.getElementById("workspace-call");
   if (callSlot) callSlot.innerHTML = callButton;
+  updateTabsMore();
   // Scrolled into view only when it changes: scrolling asks the browser to lay out the page.
   const focus = strip.contains(document.activeElement) ? document.activeElement as HTMLElement : selected;
   if (focus && focus.id !== tabsInView) { tabsInView = focus.id; focus.scrollIntoView({ block: "nearest", inline: "nearest" }); }
 }
 let tabsInView = "";
+/// Past the bar's width the tabs scroll under a soft fade, and a chip says how
+/// many are out of sight. Its dot says one of them asks you; a click scrolls
+/// to that one (or the next one along). No menu.
+function updateTabsMore() {
+  const strip = document.getElementById("workspace-tabs"), more = document.getElementById("workspace-more");
+  if (!strip || !more) return;
+  const box = strip.getBoundingClientRect();
+  const hidden = [...strip.querySelectorAll<HTMLElement>(".bar-tab")].filter((tab) => { const r = tab.getBoundingClientRect(); return r.right > box.right + 1 || r.left < box.left - 1; });
+  strip.classList.toggle("fade-right", strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1);
+  strip.classList.toggle("fade-left", strip.scrollLeft > 1);
+  const asks = hidden.some((tab) => tab.classList.contains("t-warn"));
+  const html = hidden.length ? `<span>${hidden.length} more</span>${asks ? '<i aria-hidden="true"></i>' : ""}` : "";
+  if (more.innerHTML !== html) more.innerHTML = html;
+  more.hidden = !hidden.length;
+  more.title = hidden.length ? `${hidden.length} more ${hidden.length === 1 ? "tab" : "tabs"}${asks ? ", one asks you" : ""}` : "";
+}
+function showMoreTabs() {
+  const strip = document.getElementById("workspace-tabs");
+  if (!strip) return;
+  const box = strip.getBoundingClientRect();
+  const hidden = [...strip.querySelectorAll<HTMLElement>(".bar-tab")].filter((tab) => { const r = tab.getBoundingClientRect(); return r.right > box.right + 1 || r.left < box.left - 1; });
+  const target = hidden.find((tab) => tab.classList.contains("t-warn")) ?? hidden.find((tab) => tab.getBoundingClientRect().left >= box.left) ?? hidden[0];
+  target?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+}
 /// Closes a tab; the one you were on hands over to its neighbour, or Home.
 function closeTab(id: string): Promise<unknown> | void {
+  // A pinned tab stays: unpin it first (right-click the tab).
+  if (id && tabs.isPinned(id)) return;
   if (!id) { if (pageOpen) return openPage(""); if (tabOn && tabs.has(tabOn)) return goChat(tabOn); return; }
   const open = state?.session?.id === id && !pageOpen;
   const next = tabs.close(id);
@@ -5110,7 +5181,10 @@ function renderBriefing() {
     const about = [missionTitle(pinned), driveProgress(pinned)].filter(Boolean).join(" · ");
     const word = working ? shine("Drive is working") : label(pinned);
     const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
-    pill = `${driveRing(pinned)}${stopped ? pillWord("Drive stopped", "amber") : pillWord(pinned.status === "paused" ? "Drive paused" : "Drive", "", tasks.length > 1 ? `${Math.min(done, tasks.length)} of ${tasks.length}` : working ? "working" : "")}`;
+    // The steps as a small meter (the improved top bar), up to eight marks.
+    const marks = Math.min(tasks.length, 8), lit = tasks.length ? Math.round((Math.min(done, tasks.length) / tasks.length) * marks) : 0;
+    const meter = tasks.length > 1 ? `<span class="dp-meter" role="img" aria-label="${Math.min(done, tasks.length)} of ${tasks.length} steps">${Array.from({ length: marks }, (_, i) => `<i${i < lit ? ' class="on"' : ""}></i>`).join("")}</span>` : "";
+    pill = `${driveRing(pinned)}${stopped ? pillWord("Drive stopped", "amber") : `${pillWord(pinned.status === "paused" ? "Drive paused" : "Drive", "", meter ? "" : working ? "working" : "")}${meter}`}`;
     parts.push(`${driveRing(pinned)}<span class="bf-word${stopped ? " amber" : ""}"${stopped ? ` title="${h(stoppedReason(pinned))}"` : ""}>${word}</span><span class="bf-about" title="${h(missionTitle(pinned))}">${h(about)}</span>`);
     const watch = pinned.homeSessionId !== state.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "bf-pill") : "";
     const acts = stopped

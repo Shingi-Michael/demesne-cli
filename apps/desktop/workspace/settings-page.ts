@@ -78,6 +78,13 @@ export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = 
     ["data", "Data and daemon", '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'],
   ]],
 ];
+/// Each page's own colour (the Settings facelift): its light at the top of
+/// the page, its summary card, its row in the list and its switches.
+export const PAGE_TONES: Record<SettingsSection, string> = {
+  overview: "#f2b6c8", general: "#9fb4c8", notifications: "#ef8b8b", appearance: "#b79cf0", keys: "#9fb4c8",
+  models: "#7eaef0", providers: "#71c994", agents: "#f2b6c8", permissions: "#e7b96a", drive: "#5fb0c8",
+  connectors: "#a488ee", heartbeat: "#a488ee", usage: "#71c994", archived: "#7eaef0", data: "#9fb4c8",
+};
 export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { heartbeat: "connectors" };
 /// The page a section is drawn on.
 export const settingsHome = (id: SettingsSection): SettingsSection => SETTINGS_HOME[id] ?? id;
@@ -238,7 +245,14 @@ const choices = (label: string, items: [string, boolean, string, Record<string, 
 /// Beside it, its default, and Reset once you changed it.
 const number = (key: string, value: number, unit: string, label: string, fallback?: number) =>
   (fallback === undefined ? "" : `<span class="st-default">${value === fallback ? "default" : `default ${h(fallback.toLocaleString("en-US"))}${btn("settings-config", "Reset", { key, value: null }, "st-reset")}`}</span>`) +
-  `<label class="st-num">${unit ? `<span>${h(unit)}</span>` : ""}<input type="text" inputmode="numeric" data-key="${h(key)}" data-value="${value}" value="${h(value.toLocaleString("en-US"))}" aria-label="${h(label)}" autocomplete="off" spellcheck="false"></label>`;
+  `<span class="st-stepper">${stepButton(key, value, -1, label)}<label class="st-num"><input type="text" inputmode="numeric" data-key="${h(key)}" data-value="${value}" value="${h(value.toLocaleString("en-US"))}" aria-label="${h(label)}" autocomplete="off" spellcheck="false">${unit ? `<span>${h(unit)}</span>` : ""}</label>${stepButton(key, value, 1, label)}</span>`;
+/// How far − and + move a number: a step that suits its size.
+export const stepOf = (value: number) => value >= 1_000_000 ? 100_000 : value >= 10_000 ? 1_000 : value >= 1_000 ? 100 : value >= 100 ? 10 : 1;
+function stepButton(key: string, value: number, way: 1 | -1, label: string) {
+  const max = SETTINGS_KEYS[key]?.max ?? Infinity, next = Math.min(max, Math.max(1, value + way * stepOf(way < 0 && value > 1 ? value - 1 : value)));
+  const off = next === value;
+  return `<button type="button" class="st-step" data-action="settings-config" data-args="${h(JSON.stringify({ key, value: next }))}" aria-label="${h(`${label}: ${way < 0 ? "less" : "more"}`)}" tabindex="-1"${off ? " disabled" : ""}>${way < 0 ? "−" : "+"}</button>`;
+}
 /// A fact with nothing to change, on the right in place of a control.
 const value = (text: string) => `<code class="st-val" title="${h(text)}">${h(text)}</code>`;
 /// The daemon's own limits when config.toml says nothing (DEFAULT_AGENT_LIMITS).
@@ -395,16 +409,20 @@ function pages(view: SettingsView): Page[] {
     ] : [{ title: "Reading…" }], hint: "The daemon reads these when it starts." },
   ] });
   out.push(agentsPage(view));
-  out.push({ id: "providers", title: "Providers", sub: "Where models come from: accounts, API keys and model servers on this computer.", groups: [
-    { name: "Sign-ins and keys", rows: [
-      ...view.providers.items.map((item) => {
-        if (item.kind === "google") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
+  const providerRow = (item: SettingsView["providers"]["items"][number]): SettingsRow => {
+    if (item.kind === "google") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
           control: link("google-ai-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("google-ai-disconnect", "Remove saved key", { key: item.key }, " quiet") : ""),
           fold: view.fold === `google:${item.key}` ? `<div data-google-provider="${h(item.key)}"></div>` : "", keywords: "google gemini ai studio api key test connect" };
         const signing = view.providers.signingIn === item.key;
         const action = signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "";
-        return { title: item.label, line: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`, control: action ? link(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }) : "", keywords: "sign in account api key local provider" };
-      }),
+        return { title: item.label, line: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`, control: action ? link(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }, item.status === "signed-in" || signing ? "" : " key") : "", keywords: "sign in account api key local provider" };
+  };
+  // Accounts sorts itself: what works first, then what you could add.
+  const signedIn = view.providers.items.filter((item) => item.status === "signed-in"), notYet = view.providers.items.filter((item) => item.status !== "signed-in");
+  out.push({ id: "providers", title: "Providers", sub: "Where models come from: accounts, API keys and model servers on this computer.", groups: [
+    ...(signedIn.length ? [{ name: "Signed in", rows: signedIn.map(providerRow) }] : []),
+    ...(notYet.length ? [{ name: "Not set up", rows: notYet.map(providerRow) }] : []),
+    { name: "Keys and servers", rows: [
       { title: "Google API keys", line: "Create or revoke a key in Google AI Studio. Removing a saved key here does not revoke it at Google.", control: link("open-link", "AI Studio ↗", { url: "https://aistudio.google.com/apikey" }), keywords: "google gemini key billing quota" },
       { title: "Provider setup", line: view.providers.message ?? "Add a local model server, an API key, or an account", control: link("setup", "Open"), keywords: "add provider configure setup" },
     ] },
@@ -470,8 +488,6 @@ function sorted(out: Page[], view: SettingsView): Page[] {
       { name: "Theme", hidden: true, rows: theme },
     ];
   }
-  const notify = page("notifications");
-  if (notify && view.desktop) notify.html = notifyBanner();
   if (data) {
     data.html = daemonCard(view);
     // The card says it now; its rows stay for search.
@@ -480,15 +496,72 @@ function sorted(out: Page[], view: SettingsView): Page[] {
   return out;
 }
 
-/// Notifications: what a banner looks like, so the switches below read as
-/// "when do I get one of these".
-const notifyBanner = () => `<div class="nt-scene" aria-hidden="true"><div class="nt-banner"><span class="nt-mark">d.</span><span class="nt-words"><b>Demesne</b><small>Fix the login redirect is waiting on you</small></span><span class="nt-when">now</span></div></div>`;
 
 /// Data and daemon: whether the daemon runs, at the top, with its restart.
 function daemonCard(view: SettingsView): string {
   const info = view.info, waiting = info?.restart.includes("app.update") ? "A newer daemon came with this app. It restarts by itself once nothing is working" : info?.restart.length ? "Settings you changed wait for a restart" : "";
   const where = info ? info.server.replace(/^https?:\/\//, "").replace(/\/$/, "") : "";
   return `<div class="dm-card${view.online ? "" : " off"}"><span class="dm-pulse" aria-hidden="true"><i></i></span><span class="dm-words"><b>${view.online ? "The daemon is running" : "The daemon isn’t answering"}</b><small>${h(waiting || (view.online ? `It runs your chats, and keeps going when you close the window${where ? ` · ${where}` : ""}` : "Chats and Drive wait until it’s back"))}</small></span>${link("restart-daemon", "Restart")}</div>`;
+}
+
+/// The card at the top of a page (the Settings facelift): the page's state
+/// in one line, drawn in the page's colour, with a small picture of it.
+/// Overview has its tiles and Data its daemon card, so they have none.
+function summary(view: SettingsView, id: SettingsSection): string {
+  const info = view.info;
+  const card = (title: string, line: string, art = "") => `<div class="st-hero"><div class="st-hero-tx"><b>${h(title)}</b><small>${h(line)}</small></div>${art ? `<div class="st-hero-art">${art}</div>` : ""}</div>`;
+  const chip = (text: string, tone = "") => `<span class="st-chip${tone ? ` ${tone}` : ""}"><i></i>${h(text)}</span>`;
+  const bars = (on: number, of: number) => `<span class="st-bars" aria-hidden="true">${Array.from({ length: Math.max(1, Math.min(of, 6)) }, (_, i) => `<i${i < on ? ' class="on"' : ""}></i>`).join("")}</span>`;
+  switch (id) {
+    case "general": return card(view.general.openOn === "home" ? "Opens on Home" : "Opens on your last chat",
+      view.desktop ? view.general.awake ? "Keeps this computer awake while something runs" : "Lets this computer sleep as usual" : "Where the window lands when you open Demesne",
+      view.general.updates ? chip(view.general.updates.on ? "Updates itself" : "Updates off", view.general.updates.on ? "ok" : "") : "");
+    case "notifications": {
+      if (!view.desktop) return card("Banners come from the desktop app", "Open Demesne on your computer to get them");
+      const on = NOTIFY_KINDS.filter(([kind]) => view.notify[kind]);
+      return card(`${on.length} of ${NOTIFY_KINDS.length} on`, on.length ? `You hear when ${listWords(on.map(([, title]) => title.replace(/^(A |An )/, "").toLowerCase().replace(/ on today$/, "")))}` : "You won't get a banner", `<div class="nt-banner" aria-hidden="true"><span class="nt-mark">d.</span><span class="nt-words"><b>Demesne</b><small>Fix the export button is waiting on you</small></span></div>`);
+    }
+    case "appearance": {
+      const theme = view.appearance.themes.find((item) => item.name === view.appearance.theme);
+      const ink = INKS.find(([name]) => name === view.appearance.ink)?.[1] ?? "Neutral";
+      const glass = view.glass ? `glass ${view.appearance.glass}%` : "solid window";
+      const swatch = theme?.colors ? `<span class="st-swatch" aria-hidden="true">${[theme.colors.bg, theme.colors.surface, theme.colors.accent, theme.colors.text].map((color) => `<i style="background:${h(color)}"></i>`).join("")}</span>` : "";
+      return card(theme?.label ?? view.appearance.theme, `${ink} ink · ${glass}${view.appearance.zoom ? ` · text ${Math.round(view.appearance.zoom * 100)}%` : ""}`, swatch);
+    }
+    case "keys": return card(view.mac ? "⌘K finds any chat" : "Ctrl+K finds any chat", "Every shortcut below works without leaving the keyboard", `<span class="st-keys">${kbd(view.mac ? "⌘N" : "Ctrl+N")}${kbd(view.mac ? "⌘K" : "Ctrl+K")}${kbd(view.mac ? "⌥M" : "Alt+M")}</span>`);
+    case "models": return card(view.model.words || "No model yet", view.model.provider ? `From ${view.model.provider}${view.model.reasoning ? ` · ${view.model.reasoning} thinking` : ""}${view.model.chatgpt ? " · signed in" : ""}` : "Pick the model that answers your chats", btn("overlay", "Change", { name: "models" }, "st-link key"));
+    case "providers": {
+      const signed = view.providers.items.filter((item) => item.status === "signed-in");
+      return card(signed.length ? `${signed.length} connected` : "Nothing connected yet", signed.length ? `Answers can come from ${listWords(signed.map((item) => item.label.split(" · ")[0]!))}` : "Sign in or add a key below to start", signed.slice(0, 3).map((item) => chip(item.label.split(" · ")[0]!, "ok")).join(""));
+    }
+    case "agents": {
+      const choice = info?.agents, on = choice && !choice.off ? choice.agents.filter((agent) => agent.mode !== "off") : [];
+      return card(!choice ? "Agents" : choice.off ? "Agents are off" : on.length ? `${on.length} ${on.length === 1 ? "agent" : "agents"} at work` : "No agents at work", !choice ? "Reading…" : choice.agents.length ? choice.off ? "No agent chats, side work, hand-offs or Today posts" : `${listWords(on.map((agent) => agent.name))}${on.length ? " can be opened as chats and take side work" : ""}` : "Install Claude Code, Codex or Gemini and they show here");
+    }
+    case "permissions": {
+      const mode = view.permissions.mode, index = MODES.findIndex(([name]) => name === mode);
+      return card(mode ? `This chat: ${MODES[index]![1]}` : "Each chat chooses", `It ${modeWords(mode)}${info?.allow.length ? ` · ${info.allow.length} ${info.allow.length === 1 ? "rule" : "rules"} it no longer asks about` : ""}`, bars(index + 1, MODES.length));
+    }
+    case "drive": {
+      const auto = view.drive.auto;
+      if (!view.drive.project || !auto) return card("Drive works in a project", "Open a project to set Drive for it");
+      return card(auto.on ? "Starts on its own" : "Waits for you", auto.on ? `After ${auto.quietMinutes} quiet minutes, at most ${auto.perDay} a day` : `It starts only when you say so${info ? `, up to ${info.drive.maxActiveMinutes} min each` : ""}`, `<span class="st-hero-meter">${bars(auto.usedToday, auto.perDay)}<small>${auto.usedToday} of ${auto.perDay} ${auto.perDay === 1 ? "run" : "runs"} today</small></span>`);
+    }
+    case "connectors": case "heartbeat": {
+      const ready = view.connectors.servers.filter((server) => server.state === "ready"), tools = ready.reduce((sum, server) => sum + server.tools, 0), failed = view.connectors.servers.some((server) => server.state === "failed");
+      const servers = info?.mcp.length ?? view.connectors.servers.length;
+      return card(servers ? `${servers} ${servers === 1 ? "server" : "servers"}${tools ? ` · ${tools} tools` : ""}` : "No servers yet", `${failed ? "One didn't start. " : ""}Heartbeat is ${view.connectors.heartbeat ? "on" : info?.heartbeat ? "on, not answering" : "off"}${view.agents.length ? ` · ${view.agents.length} ${view.agents.length === 1 ? "agent" : "agents"} nearby` : ""}`, failed ? chip("Look below", "bad") : ready.length ? chip("Ready", "ok") : "");
+    }
+    case "usage": {
+      const scores = (view.usage ?? []).filter((score) => score.turns > 0), turns = scores.reduce((sum, score) => sum + score.turns, 0), daily = dailyTotal(scores), top = Math.max(1, ...daily);
+      // The empty list below already says "Nothing yet"; a card saying it too adds nothing.
+      if (view.usage !== null && !turns) return "";
+      return card(view.usage === null ? "Counting…" : turns ? `${turns} ${turns === 1 ? "turn" : "turns"} in 30 days` : "Nothing yet", turns ? `On ${listWords(scores.slice(0, 3).map((score) => view.modelWords({ id: score.model })))}` : "Turns show here once a model has answered",
+        turns ? `<span class="ov-spark st-hero-spark" aria-hidden="true">${daily.map((n) => `<i style="height:${n ? Math.max(8, Math.round((n / top) * 100)) : 4}%"${n ? "" : ' class="none"'}></i>`).join("")}</span>` : "");
+    }
+    case "archived": return card(`${view.chats.all} ${view.chats.all === 1 ? "chat" : "chats"}`, view.archived ? `${view.archived.length} put away${view.chats.here !== view.chats.all ? ` · ${view.chats.here} in this project` : ""}` : "On this computer", btn("page-open", "All chats", { page: "active" }, "st-link"));
+    default: return "";
+  }
 }
 
 /// Pass 154 B: the small pages join a bigger one, in the list's order.
@@ -541,7 +614,7 @@ function overview(view: SettingsView): string {
   const sentence = `<p class="ov-say">Answers come from ${linkTo("models", view.model.words || "your model")}${source}, it ${linkTo("permissions", modeWords(mode))}, and ${linkTo("drive", drive)}.</p>`;
 
   const tile = (id: SettingsSection, label: string, right: string, body: string, extra = "") =>
-    `<div class="ov-tile${extra}" ${ov(id)}><div class="ov-top"><button type="button" class="ov-label" ${ov(id)}>${h(label)}</button>${right ? `<span>${right}</span>` : ""}</div>${body}</div>`;
+    `<div class="ov-tile${extra}" style="--page:${PAGE_TONES[id]}" ${ov(id)}><div class="ov-top"><button type="button" class="ov-label" ${ov(id)}>${h(label)}</button>${right ? `<span>${right}</span>` : ""}</div>${body}</div>`;
   const subagent = info?.subagent.model && info.subagent.model !== "auto" && info.subagent.model !== "same" ? info.subagent.models.find((model) => model.id === info.subagent.model)?.provider.replace(/ on this machine$/, "") ?? view.modelWords({ id: info.subagent.model }) : "";
   const model = tile("models", "Model", view.model.reasoning ? `${h(view.model.reasoning)} thinking` : "",
     `<b class="ov-big">${h(view.model.words || "No model yet")}</b><small>${view.model.provider ? `<i class="ov-dot${view.online ? "" : " off"}"></i>${h(view.model.provider)}${view.model.chatgpt ? ", signed in" : ""}` : "Pick one in Models"}${subagent ? `<br>Subagents on ${h(subagent)}` : ""}</small>` +
@@ -678,7 +751,7 @@ export function settingsPage(view: SettingsView) {
   }
   const all = pages(view), page = all.find((item) => item.id === settingsHome(view.section)) ?? all[0]!;
   const note = page.note ? `<p class="st-note${page.id === "permissions" ? " foot" : ""}">${h(page.note)}${page.note.startsWith("Changed here") ? ` ${link("restart-daemon", "Restart now")}` : ""}</p>` : "";
-  return `<h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${error}${note}${page.html ?? ""}${page.groups.filter((group) => !group.hidden).map((group) => groupHtml(group, [])).join("")}`;
+  return `<div class="st-page" style="--page:${PAGE_TONES[page.id]}"><i class="st-light" aria-hidden="true"></i><h1 class="cp-title">${h(page.title)}</h1>${page.sub ? `<p class="cp-lede">${h(page.sub)}</p>` : ""}${summary(view, page.id)}${error}${note}${page.html ?? ""}${page.groups.filter((group) => !group.hidden).map((group) => groupHtml(group, [])).join("")}</div>`;
 }
 
 /// The sidebar while Settings is open: Back to chats, the search, the list.
@@ -691,6 +764,6 @@ export function settingsNav(view: Pick<SettingsView, "section" | "query" | "arch
     `<label class="sidebar-search st-search">${icon('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>')}<input id="settings-search" type="search" placeholder="Search settings" aria-label="Search settings" value="${h(view.query)}" autocomplete="off" spellcheck="false"></label>` +
     SETTINGS_GROUPS.map(([name, items]) => `${name ? `<div class="st-nav-group">${h(name)}</div>` : ""}${items.map(([id, label, path]) => {
       const on = !searching && id === settingsHome(view.section);
-      return `<button type="button" class="st-nav${on ? " on" : ""}" data-action="settings-section" data-args="${h(JSON.stringify({ id }))}"${on ? ' aria-current="page"' : ""}>${icon(path)}<span>${h(label)}</span>${counts[id] ? `<span class="st-nav-n">${h(counts[id])}</span>` : ""}</button>`;
+      return `<button type="button" class="st-nav${on ? " on" : ""}" style="--page:${PAGE_TONES[id]}" data-action="settings-section" data-args="${h(JSON.stringify({ id }))}"${on ? ' aria-current="page"' : ""}>${icon(path)}<span>${h(label)}</span>${counts[id] ? `<span class="st-nav-n">${h(counts[id])}</span>` : ""}</button>`;
     }).join("")}`).join("");
 }

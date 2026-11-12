@@ -48,6 +48,8 @@ let overlapRound = 0;
 // Threads (pass 126): the chat splits a job into two threads, one held
 // until the window has shown it working beside the chat.
 const threadsPrompt = "Desktop smoke: split this into threads";
+const threadNotePrompt = "Desktop smoke: tell the greeting thread to be warmer";
+let threadNoteRound = 0;
 // The greeting thread waits in a command (not in a model call, which would
 // hold the one inference slot the orchestrator needs to answer) until the
 // check releases it.
@@ -111,8 +113,10 @@ const f = await fixture({
       yield { type: "finish", reason: "stop" };
       return;
     }
-    if (typeof user === "string" && user.startsWith("You're one of the threads")) {
-      const second = user.includes("Write the greeting");
+    // A thread's chat opens on its brief; a note from the orchestrator may come after it.
+    const opened = messages.find(message => message.role === "user")?.content;
+    if (typeof opened === "string" && opened.startsWith("You're one of the threads")) {
+      const second = opened.includes("Write the greeting");
       const toolResults = messages.filter(message => message.role === "tool").length;
       if (second && toolResults === 0) {
         yield { type: "reasoning_delta", delta: "The greeting belongs in its own file, threads-b.md." };
@@ -124,6 +128,16 @@ const f = await fixture({
       if (toolResults >= (second ? 2 : 1)) { yield { type: "text_delta", delta: second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
       yield { type: "tool_call_delta", index: 0, idDelta: `thread-${second ? "b" : "a"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify(second ? { path: "threads-b.md", content: "# Hello\n" } : { path: "threads-a.md", content: "# Notes\n" }) };
       yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
+    if (user === threadNotePrompt) {
+      if (threadNoteRound++ === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "note", nameDelta: "message_thread", argumentsDelta: JSON.stringify({ thread: "Write the greeting", purpose: "The person wants a warmer hello", text: "Keep the Hello heading, and add one friendly line under it." }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "Told the greeting thread." };
+        yield { type: "finish", reason: "stop" };
+      }
       return;
     }
     if (user === threadsPrompt) {
@@ -1848,7 +1862,17 @@ try {
   await capture("17-threads-working");
   await page.locator("#tp-context").click();
   await until(() => page.locator("#tp-context-card").isHidden(), "and closes it");
+  // The orchestrator's note to a thread is short and says what it is for:
+  // the thread's chat shows it as the orchestrator's, never as "you".
+  const orchestratorBox = page.locator('textarea[aria-label="Message"]');
+  await orchestratorBox.fill(threadNotePrompt); await orchestratorBox.press("Enter");
+  await textIncludes("Told the greeting thread.");
   releaseThread();
+  const note = page.locator("#thread-pane .tool-row.steer.note");
+  await until(() => note.isVisible(), "the thread's chat shows the orchestrator's note", 30_000);
+  assert.match(await note.innerText(), /Orchestrator\s*The person wants a warmer hello/i);
+  assert.equal(await page.locator("#thread-pane .tn-text").innerText(), "Keep the Hello heading, and add one friendly line under it.");
+  await capture("17-threads-note");
   const merge = page.locator("#threads-foot .th-merge button");
   await until(() => merge.isVisible(), "both back: the Merge bar", 30_000);
   assert.equal(await merge.innerText(), "Merge both");

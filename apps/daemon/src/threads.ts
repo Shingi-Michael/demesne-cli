@@ -1,4 +1,4 @@
-import type { DriveFix, DriveThread } from "@demesne/protocol";
+import { formatThreadNote, THREAD_NOTE_MAX_CHARS, THREAD_NOTE_PURPOSE_MAX_CHARS, type DriveFix, type DriveThread } from "@demesne/protocol";
 import type { ProviderToolDefinition } from "@demesne/providers";
 import { MAX_THREADS } from "./drive-fixes.ts";
 import type { AgentTool } from "./tools.ts";
@@ -117,7 +117,8 @@ export function startThreadsTool(host: ThreadsHost): AgentTool {
 export const MESSAGE_THREAD_TOOL = "message_thread";
 
 /// The orchestrator passing words to one of its threads: they steer it while
-/// it works, or start its next turn once it's back.
+/// it works, or start its next turn once it's back. Each note is short and
+/// says what it is for; the thread reads the project itself for the rest.
 export interface MessageThreadHost {
   message(from: string, thread: string, text: string): { title: string; how: "steered" | "sent" };
 }
@@ -126,25 +127,29 @@ export function messageThreadTool(host: MessageThreadHost): AgentTool {
   return {
     definition: {
       name: MESSAGE_THREAD_TOOL,
-      description: "Pass words to one of the threads this chat started: a correction, a rule, an answer, or more to do. While the thread works it reads them after its current step; once it's back they start its next turn, and what it changes then is merged with it. Name the thread by its title (or its id from a thread report). Use it when the person asks you to tell a thread something; don't do a thread's work yourself.",
+      description: `Pass a short note to one of the threads this chat started: a correction, a rule, an answer, or more to do. While the thread works it reads the note after its current step; once it's back the note starts its next turn, and what it changes then is merged with it. Name the thread by its title (or its id from a thread report). Keep the note to a few sentences, under ${THREAD_NOTE_MAX_CHARS} characters: say what to change and why, and name files instead of quoting them, since the thread can read the project itself. Use it when the person asks you to tell a thread something; don't do a thread's work yourself.`,
       inputSchema: {
         type: "object",
         properties: {
           thread: { type: "string", description: "The thread's title, or its id" },
-          text: { type: "string", description: "What to tell it, in the person's words where you can" },
+          purpose: { type: "string", description: `Why you are sending this, in a few words the person will see as the note's heading, e.g. "The person wants 3, not 2" or "The quote test still fails". Under ${THREAD_NOTE_PURPOSE_MAX_CHARS} characters.` },
+          text: { type: "string", description: `What to tell it, in the person's words where you can. A few sentences, under ${THREAD_NOTE_MAX_CHARS} characters.` },
         },
-        required: ["thread", "text"],
+        required: ["thread", "purpose", "text"],
         additionalProperties: false,
       },
     },
     permission: () => null,
     async execute(input, context) {
-      const value = (input ?? {}) as { thread?: unknown; text?: unknown };
+      const value = (input ?? {}) as { thread?: unknown; purpose?: unknown; text?: unknown };
       const thread = typeof value.thread === "string" ? value.thread.trim() : "";
       const text = typeof value.text === "string" ? value.text.trim() : "";
+      const purpose = typeof value.purpose === "string" ? value.purpose.replace(/\s+/g, " ").trim() : "";
       if (!thread || !text) throw new Error("message_thread needs a thread and the text");
+      if (!purpose) throw new Error("message_thread needs a purpose: a few words on why you are sending this, shown as the note's heading");
+      if (text.length > THREAD_NOTE_MAX_CHARS) throw new Error(`That note is ${text.length} characters. Keep it under ${THREAD_NOTE_MAX_CHARS}: say what to change and why, and name files instead of quoting them. The thread can read the project itself.`);
       if (!context.sessionId) throw new Error("Threads are messaged from their orchestrator chat");
-      const { title, how } = host.message(context.sessionId, thread, text.slice(0, 8000));
+      const { title, how } = host.message(context.sessionId, thread, formatThreadNote({ purpose, text }));
       return how === "steered" ? `Told "${title}"; it reads this after its current step.` : `Sent to "${title}"; it's working on it now and reports back when done.`;
     },
   };

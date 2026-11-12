@@ -6,7 +6,7 @@ A chat in a project can split a job into **threads**: up to six chats that work 
 
 Threads only exist inside a project. A plain chat on Home, the assistant's chat, and a thread itself can't start threads.
 
-You can talk to a thread directly in the right half, or ask the orchestrator to tell it something (`message_thread`): words reach a working thread after its current step, or start its next turn once it's back.
+You can talk to a thread directly in the right half, or ask the orchestrator to tell it something (`message_thread`): words reach a working thread after its current step, or start its next turn once it's back. What the orchestrator sends is a short note: it must say what it is for (`purpose`, a few words) and stay under 1,200 characters, so it names files instead of quoting them. In the thread's chat the note reads "Orchestrator · the purpose" with its few lines under it, never as something you typed, and a thread sent back shows that purpose on its row.
 
 A thread answers only to its orchestrator and to you: it isn't on Heartbeat (no address, no mail, no `heartbeat` tool).
 

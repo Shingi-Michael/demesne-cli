@@ -43,10 +43,10 @@ test("an orchestrator chat splits work into threads that run side by side, repor
         yield { type: "text_delta" as const, delta: "Plan and run threads." }; yield { type: "finish" as const, reason: "stop" }; return;
       }
       if (last.role === "user" && said === "tell bump a to use 3") {
-        yield { type: "tool_call_delta" as const, index: 0, idDelta: "m", nameDelta: "message_thread", argumentsDelta: JSON.stringify({ thread: "bump a", text: "Use 3, not 2." }) };
+        yield { type: "tool_call_delta" as const, index: 0, idDelta: "m", nameDelta: "message_thread", argumentsDelta: JSON.stringify({ thread: "bump a", purpose: "The person wants 3", text: "Use 3, not 2." }) };
         yield { type: "finish" as const, reason: "tool_calls" }; return;
       }
-      if (last.role === "user" && said === "Use 3, not 2.") {
+      if (last.role === "user" && said === "From the orchestrator · The person wants 3\n\nUse 3, not 2.") {
         told.push(said);
         yield { type: "tool_call_delta" as const, index: 0, idDelta: "w3", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "src/a.ts", content: "export const a = 3;\n" }) };
         yield { type: "finish" as const, reason: "tool_calls" }; return;
@@ -91,7 +91,7 @@ test("an orchestrator chat splits work into threads that run side by side, repor
     expect(ask).toBeTruthy();
     const thread = join(threads[0]!.path, "src", "a.ts");
     for (let i = 0; i < 400 && !(existsSync(thread) && readFileSync(thread, "utf8") === "export const a = 3;\n"); i++) await Bun.sleep(25);
-    expect(told).toEqual(["Use 3, not 2."]);
+    expect(told).toEqual(["From the orchestrator · The person wants 3\n\nUse 3, not 2."]);
     for (let i = 0; i < 400 && (await call(`/v1/sessions/${threads[0]!.sessionId}`)).body.session.turns.some((turn: { status: string }) => turn.status === "running" || turn.status === "queued"); i++) await Bun.sleep(25);
     // Orchestrate mode: the chat reads and runs threads, never edits or runs commands.
     expect((await call(`/v1/sessions/${session.id}`, { method: "PATCH", body: JSON.stringify({ orchestrate: true }) })).body.session.orchestrate).toBe(true);

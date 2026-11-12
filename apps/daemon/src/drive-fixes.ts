@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { formatDriveReport, formatThreadReport, splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type DriveThread, type Turn } from "@demesne/protocol";
+import { formatDriveReport, formatThreadReport, parseThreadNote, splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type DriveThread, type Turn } from "@demesne/protocol";
 
 /// Drive's unattended work, each piece in its own git worktree on its own
 /// branch: fixes for breakages, Next proposals you press Run on, and /drive
@@ -341,7 +341,7 @@ export class DriveFixes {
     const fix = this.get(id);
     if (!fix?.thread || !fix.sessionId || fix.status !== "ready") throw new Error("That thread isn't back.");
     const review = fix.review ?? { sentBack: 0 };
-    fix.review = by === "orchestrator" ? { sentBack: review.sentBack + 1, note: text.split("\n")[0]!.slice(0, 200) } : { sentBack: review.sentBack };
+    fix.review = by === "orchestrator" ? { sentBack: review.sentBack + 1, note: (parseThreadNote(text)?.purpose ?? text.split("\n")[0]!).slice(0, 200) } : { sentBack: review.sentBack };
     const next = this.host.startTurn(fix.sessionId, text);
     Object.assign(fix, { turnId: next.turnId, status: "running", finishedAt: null });
     this.save();

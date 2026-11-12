@@ -30,10 +30,12 @@ export const DESIGN_RULES: readonly string[] = [
   "Depth and detail where they earn it: layered surfaces, soft shadows only on things that float, hover/selected/empty states, small SVG icons. Write as much CSS of your own as the design needs, on the kit's variables.",
   "Real content, never lorem ipsum: believable names, numbers and dates.",
   "A mockup is the working thing at real size, not a poster of it: no headline or notes above it, it fills the page, and every control does something (tabs and links go somewhere, inputs take typing, buttons change what shows).",
-  "It reads and works about 620px wide, and at phone width with no horizontal scroll.",
+  "It reads and works about 620px wide, and at phone width with no horizontal scroll. Text has 4.5:1 contrast on what is behind it (3:1 from 24px up), and on a phone anything to tap is at least 44px each way.",
   "Options: two or three genuinely different directions (never more than three), each named, in one <d-compare> with recommended set on the one you would pick; say in the chat which and why.",
   "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce.",
   "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.",
+  "Every state it can be in is designed, not only the happy one: a control has hover, pressed, focused and disabled; a list or a screen has empty, loading and error. Show the ones the ask touches, and make them reachable by using the page.",
+  "Words are part of the design. A button starts with a verb and says what happens (\"Save changes\", never \"Submit\" or \"OK\"). An error says what happened, why, and how to fix it. An empty state says what goes here and how to start. A confirmation names the thing (\"Delete 3 files?\", never \"Are you sure?\") and its buttons say the two outcomes. One word for one thing throughout.",
 ];
 
 /// How Demesne itself looks, for a mockup of Demesne (docs/interface-design.md).

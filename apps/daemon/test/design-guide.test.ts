@@ -18,7 +18,13 @@ afterEach(() => { for (const path of made.splice(0)) rmSync(path, { recursive: t
 test("Demesne's rules are numbered, and say what the old paragraph said", () => {
   const block = designGuideBlock([]);
   expect(block).toContain("1. Direction first");
-  expect(block).toContain(`${DESIGN_RULES.length}. Avoid stock AI looks`);
+  expect(block).toContain("14. Avoid stock AI looks");
+  // From the design plugin's checklists: readable text and tap sizes, every state, and plain words.
+  expect(block).toContain("4.5:1 contrast");
+  expect(block).toContain("at least 44px each way");
+  expect(block).toContain("15. Every state it can be in is designed");
+  expect(block).toContain(`${DESIGN_RULES.length}. Words are part of the design`);
+  expect(block).toContain("\"Delete 3 files?\", never \"Are you sure?\"");
   for (const words of ["the kit is the floor", "var(--text-xs|sm|md|lg|xl|display)", "var(--space-1…8)", "cards side by side the same height", "phone width", "never more than three", "prefers-reduced-motion: reduce", "never lorem ipsum"])
     expect(block).toContain(words);
   // Demesne's own look, for a mockup of Demesne.

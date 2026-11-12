@@ -125,6 +125,8 @@ test("the model sees its page's design numbers against targets, by the guide's r
   expect((report.look.design as { off_target: string[] }).off_target).toHaveLength(3);
   expect(String(report.look.next)).toContain("Critique before you fix");
   expect(String(report.look.next)).toContain("never repeat it to the person");
+  // The critique runs in a fixed order, marks severity and keeps what works.
+  for (const words of ["1 first impression", "2 usability", "3 hierarchy", "4 consistency", "5 accessibility", "critical, moderate or minor", "one thing that works and must stay"]) expect(String(report.look.next)).toContain(words);
   // On target, nothing is owed; the last look owes nothing either.
   const fine = { sizes: 4, body: 14, lead: 3.4, rhythm: 0.95, aligned: 0.9, colours: 5, surface: 0.5 };
   expect(lookReport({ pages: [{ width: 1280, height: 900, issues: [], png: PNG, design: fine }], errors: [] }, false).found).toBe(false);

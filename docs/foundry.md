@@ -8,7 +8,7 @@ Foundry is where the model shows you something: a mockup, a prototype, a chart, 
 
 Every page the model designs follows a design guide. It has three layers, and a later one wins over an earlier one:
 
-1. **Demesne's rules.** Fourteen numbered rules ([design-guide.ts](../apps/daemon/src/design-guide.ts)): a direction first, one focal point, type and space from the kit's scales, a small palette, an even layout, rows with hairlines, real content, a mockup that works at real size, two or three options with a pick, quiet motion, no stock AI looks. Plus how Demesne itself looks, for a mockup of Demesne.
+1. **Demesne's rules.** Sixteen numbered rules ([design-guide.ts](../apps/daemon/src/design-guide.ts)): a direction first, one focal point, type and space from the kit's scales, a small palette, an even layout, rows with hairlines, real content, a mockup that works at real size, two or three options with a pick, quiet motion, no stock AI looks, every state designed, and plain words (a button starts with a verb, an error says what happened, why and how to fix it). Plus how Demesne itself looks, for a mockup of Demesne.
 2. **Your guide for every chat**: `~/.demesne/design.md`.
 3. **The project's guide**: `.demesne/design.md` in the project (a `DESIGN.md` at its root is read when that file is missing).
 
@@ -58,6 +58,12 @@ After a page is saved, Foundry renders it off screen at 1280 and 390 pixels wide
 These are the same numbers the quality eval scores (`scripts/foundry-quality.ts`); until now only the eval saw them. They judge pages the model designs (`html`); the ready kinds are drawn by Demesne.
 
 When the look finds a fault or a number off target, the fix has to say what it is fixing first. `foundry_edit` takes a `critique`: the rules the page breaks, by number, and what will change. A fix without one is turned back, and a whole new source through `foundry_save` is pointed to `foundry_edit`. A number can stay off target on purpose, with the reason in the critique. The critique is the model's own working: it is not kept and never shown to you. One fix per ask, as before.
+
+The critique runs in a fixed order, so nothing is skipped: first impression (what the eye lands on in two seconds), usability, hierarchy, consistency with the guide and the numbers, then accessibility. Each problem is marked critical, moderate or minor, the fix goes to the first two, and one thing that works is named so the fix doesn't undo it.
+
+The look also holds pages to the accessibility standard (WCAG 2.1 AA): text needs 4.5:1 contrast against what is behind it, or 3:1 from 24px up (18.66px when bold), and at phone width anything to tap must be at least 44 by 44 pixels. A link inside a sentence, a tick box with its label, a switched-off control and a desktop app drawn inside a frame are exempt. The kit's own muted text, status colours and phone-width buttons were adjusted to meet the same numbers.
+
+The order of the critique, the states rule and the wording rules come from the checklists in Anthropic's design plugin for Claude ([knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins)).
 
 ## A mockup you can trace
 

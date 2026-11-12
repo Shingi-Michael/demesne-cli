@@ -93,7 +93,26 @@ export const LOOK_MEASURE = String.raw`(() => {
     const mix = fg.slice(0, 3).map((v, k) => v * fg[3] + bg[k] * (1 - fg[3]));
     const [hi, lo] = [lum(mix), lum(bg)].sort((x, y) => y - x);
     const ratio = (hi + 0.05) / (lo + 0.05);
-    if (ratio > 1.05 && ratio < 3) { faint++; say("Hard to read (" + ratio.toFixed(1) + ":1 contrast): " + label(el)); }
+    // WCAG 2.1 AA (1.4.3): 4.5:1 for text, 3:1 for large text (24px, or 18.66px bold). A switched-off control is exempt.
+    const style = getComputedStyle(el), size = parseFloat(style.fontSize), large = size >= 24 || (size >= 18.66 && Number(style.fontWeight) >= 700);
+    const need = large ? 3 : 4.5;
+    if (el.closest(":disabled, [aria-disabled=true]")) continue;
+    if (ratio > 1.05 && ratio < need - 0.05) { faint++; say("Hard to read (" + ratio.toFixed(1) + ":1 contrast, needs " + need + ":1): " + label(el)); }
+  }
+
+  // On a phone, things to tap are at least 44px each way (WCAG 2.5.5). A link
+  // inside a sentence, a tick box with its label and a framed desktop app are exempt.
+  if (W < 800) {
+    let small = 0;
+    for (const el of all) {
+      if (small >= 3) break;
+      if (!el.matches("button, a[href], select, input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]), [role=button], [role=tab]")) continue;
+      // A desktop app drawn in a frame keeps its desktop-size controls: it is a picture of that app, not a phone screen.
+      if (el.closest("[data-chrome], d-demesne, d-window, d-browser") || el.matches(":disabled, [aria-disabled=true]")) continue;
+      if (el.tagName === "A" && getComputedStyle(el).display === "inline") continue;
+      const box = el.getBoundingClientRect();
+      if (box.height < 43.5 || box.width < 43.5) { small++; say("Too small to tap (" + Math.round(box.width) + "×" + Math.round(box.height) + "px, needs 44×44): " + label(el)); }
+    }
   }
 
   // Text drawn too small to read: its size times every zoom above it (a part

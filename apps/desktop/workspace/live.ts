@@ -6,6 +6,7 @@ import { modelCardHTML } from "./model-card.ts";
 import { commandIcon, groupWords, plainName, sectionRank, sectionTitle } from "./command-menu.ts";
 import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
+import { projectTone } from "./project-tone.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
 import { ChatDOM, ComposerHeight, isWindowsDesktopChat, threadConversationKey } from "./windows-chat-redraw.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
@@ -530,6 +531,8 @@ function markSeen(id: string, updatedAt: string) {
 }
 /// What a row's dot means, in words: for its tooltip and screen readers.
 const STATE_WORDS: Record<string, string> = { warn: "needs you", working: "working", bad: "failed", acc: "new reply" };
+/// What a chat's row says where its time was, when it has something to say.
+const STATE_SAYS: Record<string, string> = { warn: "asks you", working: "working", bad: "failed", acc: "finished" };
 type Chat = Snapshot["sessions"][number];
 /// What a chat's dot says, in the sidebar and on its tab: amber when it
 /// needs you, a breathing dot while it works, a cross when it failed, blue
@@ -645,10 +648,71 @@ async function refreshPullRequests(fresh?: string) {
   if (changed) { renderSidebar(); renderNotifications(); }
 }
 setInterval(() => { if (prKey) void refreshPullRequests(); }, 60_000);
+/// Each project's face (the sidebar facelift): its own icon, trimmed to what
+/// is drawn and shown as a small rounded tile, or a letter on its colour.
+/// The colour is also the light the open project casts on the sidebar; for an
+/// icon it is the icon's own brightest colour.
+type ProjectFace = { src: string | null; tone: string };
+const projectFaces = new Map<string, ProjectFace>();
+let facesAsked = new Set<string>();
+async function loadProjectFaces(paths: string[]) {
+  const missing = paths.filter((path) => !facesAsked.has(path));
+  if (!missing.length) return;
+  for (const path of missing) facesAsked.add(path);
+  let found: Record<string, string | null>;
+  try { found = await api<Record<string, string | null>>("project-faces", { paths: missing }); } catch { facesAsked = new Set([...facesAsked].filter((path) => !missing.includes(path))); return; }
+  await Promise.all(missing.map(async (path) => {
+    const fallback = projectTone(projectLabel(path));
+    const src = found[path];
+    projectFaces.set(path, src ? await trimFace(src, fallback) : { src: null, tone: fallback });
+  }));
+  sidebarSignature = "";
+  renderSidebar();
+}
+/// Crops an icon to its drawn part (a Mac icon keeps a wide clear margin) and
+/// finds its liveliest colour. Falls back to the letter when it won't load.
+function trimFace(src: string, fallback: string): Promise<ProjectFace> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onerror = () => resolve({ src: null, tone: fallback });
+    image.onload = () => {
+      try {
+        const size = 96, canvas = document.createElement("canvas");
+        canvas.width = canvas.height = size;
+        const context = canvas.getContext("2d", { willReadFrequently: true })!;
+        context.drawImage(image, 0, 0, size, size);
+        const { data } = context.getImageData(0, 0, size, size);
+        let top = size, left = size, bottom = -1, right = -1, red = 0, green = 0, blue = 0, weight = 0;
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+          const at = (y * size + x) * 4, alpha = data[at + 3]!;
+          if (alpha < 24) continue;
+          top = Math.min(top, y); bottom = Math.max(bottom, y); left = Math.min(left, x); right = Math.max(right, x);
+          const r = data[at]!, g = data[at + 1]!, b = data[at + 2]!;
+          const max = Math.max(r, g, b), min = Math.min(r, g, b), saturation = max ? (max - min) / max : 0;
+          if (saturation < 0.25 || max < 90) continue;
+          const pull = saturation * max * alpha;
+          red += r * pull; green += g * pull; blue += b * pull; weight += pull;
+        }
+        if (bottom < 0) { resolve({ src: null, tone: fallback }); return; }
+        const side = Math.max(bottom - top, right - left) + 1, out = document.createElement("canvas");
+        out.width = out.height = 48;
+        out.getContext("2d")!.drawImage(canvas, left, top, side, side, 0, 0, 48, 48);
+        const hex = (value: number) => Math.round(value / weight).toString(16).padStart(2, "0");
+        resolve({ src: out.toDataURL("image/png"), tone: weight ? `#${hex(red)}${hex(green)}${hex(blue)}` : fallback });
+      } catch { resolve({ src: null, tone: fallback }); }
+    };
+    image.src = src;
+  });
+}
+/// The face itself, wearing a ring for what is happening inside the project:
+/// a turning blue arc while a chat there works, amber while one asks you.
+function projectFaceHTML(path: string, ring: "" | "working" | "warn") {
+  const face = projectFaces.get(path) ?? { src: null, tone: projectTone(projectLabel(path)) };
+  const letter = (projectLabel(path).replace(/^[^a-z0-9]+/i, "")[0] ?? "·").toLowerCase();
+  const inner = face.src ? `<img src="${h(face.src)}" alt="" draggable="false">` : `<b>${h(letter)}</b>`;
+  return `<span class="project-face${face.src ? " has-icon" : ""}${ring ? ` ring-${ring}` : ""}" style="--face:${h(face.tone)}" aria-hidden="true">${inner}</span>`;
+}
 const ICON_PIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>';
-/// A project's folder is its fold: shut while folded, open while its chats show.
-const ICON_FOLDER_SHUT = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2.2h8.4a1 1 0 0 1 1 1v9.8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></svg>';
-const ICON_FOLDER_OPEN = '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.5V6.5a1 1 0 0 1 1-1h4.6l2 2.2h7.4a1 1 0 0 1 1 1V10"/><path d="M3.5 18.5 6 11.2a1 1 0 0 1 .95-.7H21a.8.8 0 0 1 .76 1.05L19.5 18.5z"/></svg>';
 const ICON_GROUP_ICONS: Record<string, string> = {
   pinned: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>',
   back: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
@@ -674,7 +738,6 @@ function renderAssistantRow() {
   const row = document.getElementById("sidebar-assistant"), rail = document.getElementById("rail-assistant");
   const assistant = state?.assistant ?? null;
   // Pass 213: the Assistant has no row of its own; it comes up in Search,
-  // and in Needs you when it waits on you or did something while you were away.
   const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
   if (row) row.hidden = !assistant || !query || !"assistant".includes(query);
   if (rail) rail.hidden = true;
@@ -695,15 +758,6 @@ function renderAssistantRow() {
   row.setAttribute("aria-label", row.title);
   const badge = rail?.querySelector<HTMLElement>(".rail-badge");
   if (badge) { badge.hidden = !tone; badge.classList.toggle("blue", tone !== "warn"); }
-}
-/// Why the assistant waits in Needs you: it asks you something, or it did
-/// something (a routine, a reply) while you were elsewhere. "" when neither.
-function assistantWhy() {
-  const assistant = state?.assistant;
-  if (!assistant || (inAssistant() && !pageOpen)) return "";
-  if (assistant.waiting) return "asks you";
-  const id = assistant.sessionId;
-  return id && assistant.status === "completed" && assistant.updatedAt && id in seenChats && seenChats[id] !== assistant.updatedAt ? "finished" : "";
 }
 /// What Scheduled and Foundry say on their rows (pass 213): when the next
 /// routine runs, and how many mockups arrived since you last looked.
@@ -768,6 +822,7 @@ function renderSidebar() {
   if (prs !== prKey) { prKey = prs; void refreshPullRequests(); }
   const projectWorkspace = list.dataset.workspace || state.workspace;
   const projectPaths = projectOrder.paths();
+  void loadProjectFaces(projectPaths);
   // Worktree chats stay with their parent project, alongside its review
   // actions. A chat with no folder is under Just a chat (null).
   const projectFor = (item: typeof sessions[number]) => !item.workspace ? null : branches.has(item.id) || item.id === state!.session?.id ? projectWorkspace : item.workspace;
@@ -817,15 +872,19 @@ function renderSidebar() {
   // time (or its project, when the list is by date or state). Pointing at it
   // shows Pin and Archive there instead. The tooltip and the accessible name
   // say in words what the mark shows.
-  const row = (item: typeof sessions[number], right: string, nested: boolean, reason = "") => {
+  const row = (item: typeof sessions[number], right: string, nested: boolean) => {
     const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !pageOpen;
     const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
     const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
     const pr = pullRequests.get(id);
-    const side = reason || (tone || pr || (id === current?.id && !inSession()) ? "" : right);
-    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age${reason ? " sidebar-reason" : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
+    // A chat that needs you says so where its time was, in its state's
+    // colour: asks you, working, finished, failed, back now.
+    const back = backOf(item) === "back" && !selected;
+    const say = back ? "back now" : selected && tone !== "working" && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
+    const side = say || (pr || (id === current?.id && !inSession()) ? "" : right);
+    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age${say ? ` sidebar-say-state ${back ? "warn" : tone}` : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
       .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
     // archives with Delete on the row, so they stay out of the tab order.
@@ -834,7 +893,6 @@ function renderSidebar() {
     // Bring it back later: the bell unfolds a few times under the row.
     const bell = btn("back-open", ICON_BELL, { id }, `sidebar-bell${backOpenFor === id ? " on" : ""}`).replace("<button ", `<button title="Bring it back later" aria-label="${h(`Bring ${title} back later`)}" aria-expanded="${backOpenFor === id}" tabindex="-1" `);
     const backLine = backOpenFor === id ? `<div class="sidebar-back-line" role="group" aria-label="Bring it back"><span class="sidebar-back-label">Bring it back</span>${backChoices(new Date(), pr?.state === "open" ? pr.number : undefined).map((choice) => btn("bring-back", h(choice.label), { id, at: choice.at }, "sidebar-back-opt")).join("")}</div>` : "";
-    const back = backOf(item) === "back";
     // Its pull request sits where the time would: #N, a blue dot for news
     // since you looked, purple once merged. The number unfolds the news.
     const fresh = pr ? prNew(id, pr) : false;
@@ -852,8 +910,7 @@ function renderSidebar() {
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
     if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    // Under Needs you a row says why it is there instead of its PR chip.
-    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !reason ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${reason ? "" : chip}</span></div>${backLine}${reason ? "" : prLine}`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   // The agents: a letter tile, the name, and how it is (a dot
@@ -872,7 +929,7 @@ function renderSidebar() {
     const tone = agent.state === "working" || helps ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = helps && agent.state !== "working" ? "helping" : tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
     const face = `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${roundFace(agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts, Date.now(), socialsView?.moods)))}</span>`;
-    return { agent, tone, word, face: `<span class="sidebar-face${tone ? ` ${tone}` : ""}">${face}${tone ? `<i class="sidebar-face-dot" aria-hidden="true"></i>` : ""}</span>` };
+    return { agent, tone, word, face: `<span class="sidebar-face${tone ? ` ${tone}` : ""}">${face}</span>` };
   });
   const agentSummary = () => {
     const busy = agentInfo.filter((one) => one.tone);
@@ -893,9 +950,9 @@ function renderSidebar() {
     const mine = state!.threads.list.filter((fix) => fix.from === id && fix.status !== "discarded");
     return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-open", `${threadRing(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id }, `sidebar-thread${state!.threads.open === fix.id && !state!.threads.closed ? " on" : ""}`)).join("")}</div>` : "";
   };
-  const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false, reason?: (item: typeof sessions[number]) => string) => {
+  const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
-    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item), reason?.(item) ?? "") + (reason ? "" : threadLines(item.id)));
+    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)) + threadLines(item.id));
     if (items.length > limit) rows.push(btn("project-more", `Show ${items.length - limit} more`, { key }, "sidebar-more"));
     else if (!query && expandedProjectChats.has(key) && items.length > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { key }, "sidebar-more"));
     return rows;
@@ -928,39 +985,14 @@ function renderSidebar() {
     housedList.hidden = !show;
     housedList.innerHTML = show ? housedLines() : "";
   }
-  // Needs you (pass 213): every chat waiting on you, from any project, with
-  // why: it asks you something, it finished while you were away, its PR has
-  // news, or it came back when you asked. A chat you bring back leaves its
-  // project's list until you open it; the others stay there too.
-  const backChats = listed.filter((item) => backOf(item) === "back" && item.id !== current?.id && matches(item));
-  const needWhy = (item: typeof sessions[number]): string => {
-    if (item.id === current?.id && !pageOpen) return "";
-    if (backChats.includes(item)) return "back now";
-    const tone = tones.get(item.id) ?? "", pr = pullRequests.get(item.id);
-    if (tone === "warn") return "asks you";
-    if (pr && pr.state === "open" && prNew(item.id, pr)) return `#${pr.number} news`;
-    if (tone === "bad") return "failed";
-    if (tone === "acc") return "finished";
-    return "";
-  };
-  const needChats = listed.filter((item) => matches(item) && needWhy(item));
-  const assistantNeed = !query ? assistantWhy() : "";
-  const needList = document.getElementById("sidebar-need");
-  if (needList) {
-    const count = needChats.length + (assistantNeed ? 1 : 0);
-    needList.hidden = !count;
-    const lead = assistantNeed ? btn("assistant-open", `${dot(assistantNeed === "asks you" ? "warn" : "acc")}<span class="sidebar-session-name">Assistant</span><span class="sidebar-session-age sidebar-reason">${assistantNeed}</span>`, {}, "sidebar-session") : "";
-    needList.innerHTML = count ? `<section class="sidebar-group-block sidebar-need" data-group="need"><p class="sidebar-label"><span>Needs you</span><b>${count}</b></p><div class="sidebar-group-chats">${lead ? `<div class="sidebar-item">${lead}</div>` : ""}${groupRows("need", needChats, () => "", () => false, needWhy).join("")}</div></section>` : "";
-  }
-  const isBack = (item: typeof sessions[number]) => backChats.includes(item);
   // Pinned chats lead the list, whichever project they are in.
-  const pinnedChats = sorted(listed.filter((item) => item.pinned && !isBack(item) && matches(item)));
+  const pinnedChats = sorted(listed.filter((item) => item.pinned && matches(item)));
   const pinnedList = document.getElementById("sidebar-pinned");
   if (pinnedList) {
     pinnedList.hidden = !pinnedChats.length;
     pinnedList.innerHTML = pinnedChats.length ? group("pinned", "Pinned", groupRows("pinned", pinnedChats, (item) => shortAge(item.updatedAt)), 0) : "";
   }
-  const rest = listed.filter((item) => !item.pinned && !isBack(item));
+  const rest = listed.filter((item) => !item.pinned);
   const groups: string[] = [];
   let plainGroup = "";
   if (sidebarView.group === "project") {
@@ -978,14 +1010,15 @@ function renderSidebar() {
       if (active && !query) rows.push(reviewLine());
       // The whole line is the fold, its folder shut or open with it; + starts
       // a chat in the project.
-      const label = btn("project-toggle", `${expanded ? ICON_FOLDER_OPEN : ICON_FOLDER_SHUT}<span>${h(name)}</span>`, { path }, "sidebar-project-name")
+      // The face's ring says what its chats' marks say: one asks you, or one works.
+      const asks = projectSessions.filter(item => tones.get(item.id) === "warn").length;
+      const asking = asks > 0, busy = projectSessions.some(item => tones.get(item.id) === "working");
+      const label = btn("project-toggle", `${projectFaceHTML(path, asking ? "warn" : busy ? "working" : "")}<span>${h(name)}</span>`, { path }, "sidebar-project-name")
         .replace("<button ", `<button draggable="true" aria-expanded="${expanded}" aria-controls="project-chats-${index}" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="${h(path)} · Drag to reorder (Alt+↑/↓)"${active ? ' aria-current="location"' : ""}${query ? " aria-disabled=\"true\"" : ""} `);
       const start = btn("project-new", ICON_PLUS_SMALL, { path }, "sidebar-project-new").replace("<button ", `<button title="${h(`New chat in ${name}`)}" aria-label="${h(`New chat in ${name}`)}" `);
       // Each project's line says its state on the right, so a closed project
       // still shows what it needs: branches to review, a chat waiting on you,
       // work in progress, or how many chats it holds.
-      const asking = projectSessions.some(item => item.id === current?.id ? Boolean(waiting) : item.waiting);
-      const busy = projectSessions.some(item => item.id === current?.id ? Boolean(state!.activeTurnId) : item.status === "running" || item.status === "queued");
       const link = active && state.connection !== "online" ? state.connection === "connecting" ? "connecting…" : "offline" : "";
       // Other agents at work here (Heartbeat): their marks lead the state, and
       // clicking them unfolds who they are, with Message.
@@ -995,14 +1028,13 @@ function renderSidebar() {
         .replace("<button ", `<button title="${h(here.map(agent => `${agent.name} ${agentPlace(agent)}`).join(" · "))}" aria-label="${h(`${here.length} ${here.length === 1 ? "agent" : "agents"} working in ${name}`)}" aria-expanded="${showing}" `) : "";
       const status = link ? `<span class="sidebar-project-state">${link}</span>`
         : active && review.length ? btn("review-open", `${ICON_BRANCH}${review.length}`, { show: true }, "sidebar-project-review").replace("<button ", `<button title="${review.length} ${review.length === 1 ? "branch" : "branches"} to review" `)
-        : asking ? `<span class="sidebar-project-state" title="A chat needs you">${dot("warn")}</span>`
-        // An open project's rows already show the work; a folded one says so.
-        : busy && !expanded ? `<span class="sidebar-project-state" title="Working">${dot("working")}</span>`
+        // The face's ring shows the work; a folded project also says when one asks you.
+        : asking && !expanded ? `<span class="sidebar-project-state sidebar-say-state warn">${asks > 1 ? `${asks} ask` : "asks"} you</span>`
         // An open project names its branch; a folded one, how many chats it holds.
         : expanded && active && state.session?.workspace?.gitBranch ? `<span class="sidebar-project-state sidebar-project-branch" title="On ${h(state.session.workspace.gitBranch)}">${ICON_BRANCH}<span>${h(state.session.workspace.gitBranch)}</span></span>`
         : here.length || expanded ? "" : `<span class="sidebar-group-count">${found.length || ""}</span>`;
       const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
-      groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}"><div class="sidebar-project-header">${label}${marks}${status}${start}${viewButton(key)}</div>${viewLine(key)}${agentRows}<div class="sidebar-project-chats${key === unfoldingGroup && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
+      groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}" style="--face:${h(projectFaces.get(path)?.tone ?? projectTone(name))}"><div class="sidebar-project-header">${label}${marks}${status}${start}${viewButton(key)}</div>${viewLine(key)}${agentRows}<div class="sidebar-project-chats${key === unfoldingGroup && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
     }
     // Chats with no project follow, under Just a chat.
     const plainChats = sorted(rest.filter((item) => !item.workspace && matches(item)));

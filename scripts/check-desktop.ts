@@ -431,7 +431,7 @@ async function open(workspace = false, welcome = false, extraEnv: Record<string,
 /// After a launch: Home as Just a chat, then the chat from its project's line.
 async function reopenChat(id: string) {
   await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "launch lands on Home as Just a chat");
-  const row = page.locator(`.sidebar-session:not(#sidebar-need *)[data-args*='${id}']`);
+  const row = page.locator(`.sidebar-session[data-args*='${id}']`);
   if (!(await row.isVisible())) await click("project-toggle", { path: f.workspace });
   await row.click();
 }
@@ -723,16 +723,16 @@ try {
   await capture("02-plain-chat");
   await page.keyboard.press("Escape");
   await until(() => page.locator("#plain-line .where-opt").count().then(count => count === 0), "Esc folds the projects");
-  await page.locator(`.sidebar-session:not(#sidebar-need *)[data-args*='${sessionId}']`).click();
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
-  await page.locator(`.sidebar-session:not(#sidebar-need *)[data-args*='${sessionId}'] .sidebar-session-name`).dblclick();
+  await page.locator(`.sidebar-session[data-args*='${sessionId}'] .sidebar-session-name`).dblclick();
   const renameLook = await page.locator(".sidebar-rename input").evaluate(node => { const style = getComputedStyle(node); return style.borderTopWidth + style.boxShadow + style.backgroundColor; });
   assert.equal(renameLook, "0pxnonergba(0, 0, 0, 0)", "the name is edited on the row, with no box or ring");
   await capture("02-rename");
   await page.locator(".sidebar-rename input").fill("Desktop smoke, renamed");
   await page.locator(".sidebar-rename input").press("Enter");
   await until(async () => (await f.client.getSessionState(sessionId)).session.title === "Desktop smoke, renamed", "double-click renames the chat in place");
-  await until(() => page.locator(`.sidebar-session:not(#sidebar-need *)[data-args*='${sessionId}']`).innerText().then(text => text.includes("renamed")), "the row shows its new title");
+  await until(() => page.locator(`.sidebar-session[data-args*='${sessionId}']`).innerText().then(text => text.includes("renamed")), "the row shows its new title");
   // Ctrl+Tab steps to the other chat and Ctrl+Shift+Tab steps back.
   const current = () => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args");
   await page.locator("textarea").focus();
@@ -761,7 +761,7 @@ try {
   await until(async () => (await current())?.includes(sessionId), "Ctrl+1 goes back to the first tab");
   await textIncludes(completed);
   // Bring it back later: the bell beside Pin and Archive unfolds a few times;
-  // the chat leaves the list until then, and comes back under Needs you.
+  // the chat leaves the list until then, and comes back in its project saying "back now".
   const asideRow = page.locator(`#sidebar-projects .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
   const asideId = JSON.parse(await asideRow.locator(".sidebar-session").getAttribute("data-args") ?? "{}").id as string;
   await asideRow.hover();
@@ -769,26 +769,27 @@ try {
   await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).waitFor();
   await capture("02-bring-back");
   await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).click();
-  await until(() => page.locator(`.sidebar-session:not(#sidebar-need *)[data-args*='${asideId}']`).count().then(count => count === 0), "the chat leaves the list until then");
+  await until(() => page.locator(`.sidebar-session[data-args*='${asideId}']`).count().then(count => count === 0), "the chat leaves the list until then");
   assert.ok(Date.parse((await f.client.getSessionState(asideId)).session.backAt ?? "") > Date.now() + 3_500_000, "for an hour");
   await page.evaluate((id) => (window as unknown as { demesne: { request: (method: string, args: unknown) => Promise<unknown> } }).demesne.request("bring-back", { id: id.aside, sessionId: id.current, at: new Date(Date.now() - 1000).toISOString() }), { aside: asideId, current: sessionId });
-  await until(() => page.locator(`#sidebar-need .sidebar-session[data-args*='${asideId}']`).count().then(count => count === 1), "once due it leads the list under Needs you");
+  const backRow = page.locator(`#sidebar-projects .sidebar-session[data-args*='${asideId}']`);
+  await until(() => backRow.innerText().then(text => text.includes("back now")).catch(() => false), "once due it is back in its project, saying so");
   await capture("02-back-now");
-  await page.locator(`#sidebar-need .sidebar-session[data-args*='${asideId}']`).click();
+  await backRow.click();
   await until(async () => !(await f.client.getSessionState(asideId)).session.backAt, "opening it ends its coming back");
-  await until(() => page.locator("#sidebar-need").isHidden(), "and Needs you empties");
-  await page.locator(`.sidebar-session:not(#sidebar-need *)[data-args*='${sessionId}']`).click();
+  await until(() => backRow.innerText().then(text => !text.includes("back now")), "and it stops saying so");
+  await page.locator(`.sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
   // Its pull request on the row: #287 where the time was, a blue dot for the
   // review since; the number unfolds it, Hand it to the chat puts it in the
   // composer, and merged turns it purple with Archive.
   ghPullRequest("OPEN");
   await f.client.updateSession(asideId, { prUrl: "https://github.com/demesne/fieldnote/pull/287" });
-  await page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-session:not(#sidebar-need *)[data-args*='${asideId}']`).click();
+  await page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-session[data-args*='${asideId}']`).click();
   await textIncludes(asideDone);
-  await page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-session:not(#sidebar-need *)[data-args*='${sessionId}']`).click();
+  await page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
-  const prRow = page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-item:has(.sidebar-session:not(#sidebar-need *)[data-args*='${asideId}'])`).first();
+  const prRow = page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-item:has(.sidebar-session[data-args*='${asideId}'])`).first();
   await prRow.locator(".sidebar-pr.new", { hasText: "#287" }).waitFor();
   await page.mouse.move(600, 400);
   await capture("02-pr-row");
@@ -801,7 +802,7 @@ try {
   await until(async () => (await current())?.includes(asideId), "Hand it to the chat opens the chat");
   await until(() => page.locator("textarea").inputValue().then(value => value.startsWith("Pull request #287") && value.includes("The peek opens too soon.")), "the news waits in the composer");
   await page.locator("textarea").fill("");
-  await page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-session:not(#sidebar-need *)[data-args*='${sessionId}']`).click();
+  await page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-session[data-args*='${sessionId}']`).click();
   await textIncludes(completed);
   ghPullRequest("MERGED");
   await prRow.locator(".sidebar-pr").click();
@@ -858,19 +859,19 @@ try {
   await capture("02-all-chats");
   await page.locator(`#page .cp-restore[data-args*='${archivedId}']`).click();
   await until(async () => (await f.client.listSessions()).length === kept, "Restore brings the chat back to the daemon's list");
-  await until(() => page.locator(`#sidebar-projects .sidebar-session:not(#sidebar-need *)[data-args*='${archivedId}']`).isVisible(), "the restored chat is back in the sidebar");
+  await until(() => page.locator(`#sidebar-projects .sidebar-session[data-args*='${archivedId}']`).isVisible(), "the restored chat is back in the sidebar");
   await page.locator("body").focus();
   await page.keyboard.press("Escape");
   await until(() => page.locator("#page").isHidden(), "Esc leaves All chats");
   await page.locator(".sidebar-project.active .sidebar-view-button").click();
   // A pinned chat leads the list, above its project.
-  const pinRow = page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-item:has(.sidebar-session:not(#sidebar-need *)[data-args*='${archivedId}'])`);
+  const pinRow = page.locator(`:is(#sidebar-sessions, #sidebar-chats) .sidebar-item:has(.sidebar-session[data-args*='${archivedId}'])`);
   await pinRow.hover();
   await pinRow.locator(".sidebar-pin").click();
-  await until(() => page.locator(`#sidebar-pinned .sidebar-session:not(#sidebar-need *)[data-args*='${archivedId}']`).isVisible(), "Pin moves the chat to Pinned");
+  await until(() => page.locator(`#sidebar-pinned .sidebar-session[data-args*='${archivedId}']`).isVisible(), "Pin moves the chat to Pinned");
   assert(await f.client.getSessionState(archivedId).then(state => Boolean(state.session.pinnedAt)), "the daemon keeps the pin");
   await capture("02-pinned");
-  const pinnedRow = page.locator(`#sidebar-pinned .sidebar-item:has(.sidebar-session:not(#sidebar-need *)[data-args*='${archivedId}'])`);
+  const pinnedRow = page.locator(`#sidebar-pinned .sidebar-item:has(.sidebar-session[data-args*='${archivedId}'])`);
   await pinnedRow.hover();
   await pinnedRow.locator(".sidebar-pin").click();
   await until(() => page.locator("#sidebar-pinned").isHidden(), "Unpin puts it back with its project");
@@ -1411,7 +1412,7 @@ try {
   await page.waitForTimeout(300);
   await type("A chat in the second project");
   await until(() => page.locator(".sidebar-project.active .sidebar-session").count().then(count => count === 1), "new chat is nested under its project");
-  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-session:not(#sidebar-need *)[data-args*="${sessionId}"]`).click();
+  await page.locator(`.sidebar-project[data-project="${f.workspace}"] .sidebar-session[data-args*="${sessionId}"]`).click();
   await until(() => page.locator("#sidebar-sessions").getAttribute("data-workspace").then(path => path === f.workspace), "chat selection switches to its project");
   await until(() => page.locator(".sidebar-session[aria-current='page']").getAttribute("data-args").then(args => Boolean(args?.includes(sessionId))), "cross-project selection opens the exact chat");
   const secondary = page.locator(`.sidebar-project[data-project="${secondProject}"]`);
@@ -1442,7 +1443,7 @@ try {
   await secondary.locator(".sidebar-project-header").hover();
   await secondary.locator(".sidebar-project-new").click();
   await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === secondProject), "opening the reordered project");
-  await primary.locator(`.sidebar-session:not(#sidebar-need *)[data-args*="${sessionId}"]`).click();
+  await primary.locator(`.sidebar-session[data-args*="${sessionId}"]`).click();
   await until(() => page.locator(".sidebar-project.active").getAttribute("data-project").then(path => path === f.workspace), "switching back to the second project in manual order");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "switching projects preserves manual ordering");
   await page.locator("textarea").focus();

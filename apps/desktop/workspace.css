@@ -2842,8 +2842,6 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .sidebar-label-button:hover { background: var(--surface2); color: var(--t1); }
 .sidebar-label-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 #desktop-sidebar #sidebar-open-project.sidebar-label-button { width: 22px; height: 22px; padding: 0; gap: 0; }
-.sidebar-need .sidebar-group-chats { margin-left: 0; box-shadow: none; }
-.sidebar-reason { color: var(--t2) !important; }
 #sidebar-housed { flex: none; margin: 4px 0 6px; }
 .sidebar-housed-label { margin-top: 4px; }
 .sidebar-today { height: 22px; padding: 0 6px; border-radius: var(--r-sm); color: var(--t3); font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
@@ -2855,8 +2853,6 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 /* Agents, pass 217 C: one row of stacked round faces that opens into a row each. */
 .sidebar-face { position: relative; flex: none; display: inline-grid; }
 #desktop-sidebar .sidebar-face .agent-face { width: 24px; height: 24px; overflow: hidden; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .1); }
-.sidebar-face-dot { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 2px var(--side, var(--surface)); }
-.sidebar-face.acc .sidebar-face-dot { background: var(--blossom, #f2b6c8); }
 .sidebar-agents-group { display: flex; align-items: center; gap: 10px; width: 100%; height: 42px; padding: 0 10px 0 8px; border-radius: 10px; color: var(--t2); text-align: left; }
 .sidebar-agents-group:hover { background: var(--surface2); }
 .sidebar-agents-stack { display: flex; flex: none; }
@@ -2875,3 +2871,52 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .sidebar-agents-rows .sidebar-housed-row small.working { color: var(--acc); }
 .sidebar-agents-rows .sidebar-housed-row small.acc { color: var(--blossom, #f2b6c8); }
 .sidebar-agents-rows .sidebar-housed-row small:not(.working):not(.acc) { color: var(--t4); }
+
+/* Sidebar facelift (Figma "Today, improved" + project light + rings):
+   every project has a face, the open project casts its colour on the glass,
+   and faces wear a ring for what is happening: a turning blue arc while
+   something works, amber while it asks you, pink when it replied.
+   Icons centre 19.5px in and labels start 41px in, chats included. */
+@property --spin { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes face-spin { to { --spin: 360deg; } }
+.project-face { position: relative; overflow: visible !important; display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(160deg, color-mix(in srgb, var(--face) 88%, #fff), color-mix(in srgb, var(--face) 62%, #000)); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .14); color: #fff; }
+.project-face b { font-size: 12px; font-weight: 700; line-height: 1; text-transform: lowercase; text-shadow: 0 1px 1px rgb(0 0 0 / .18); }
+.project-face.has-icon { background: none; box-shadow: none; }
+.project-face img { width: 20px; height: 20px; border-radius: 6px; object-fit: cover; }
+.project-face::after { content: ""; position: absolute; inset: -3.5px; border-radius: 9px; padding: 1.5px; pointer-events: none; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.project-face.ring-warn::after { background: var(--warn); }
+.project-face.ring-working::after { background: conic-gradient(from var(--spin), transparent 0 30%, color-mix(in srgb, var(--acc) 30%, transparent) 55%, var(--acc)); }
+:is(.sidebar-project-name, .sidebar-group-toggle)[aria-expanded="false"] > .project-face:not(.ring-warn, .ring-working) { opacity: .78; }
+#desktop-sidebar .sidebar-project-name { gap: 11px; }
+/* Where you are: the open project's light on the glass, and its open chat tinted the same. */
+#desktop-sidebar .sidebar-project { isolation: isolate; }
+#desktop-sidebar #sidebar-projects { overflow-x: hidden; }
+#desktop-sidebar .sidebar-project.active:not(.drop-before)::before { content: ""; position: absolute; z-index: -1; inset: -24px 0 -48px -12px; pointer-events: none; background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--face) 24%, transparent), color-mix(in srgb, var(--face) 9%, transparent) 55%, transparent 100%); }
+html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.drop-before)::before { background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--face) 20%, transparent), transparent 100%); }
+#desktop-sidebar .sidebar-project.active .sidebar-session.selected { background: color-mix(in srgb, var(--face) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--face) 20%, transparent); }
+/* Chats start on the project's name, their state in the face's column; no guide line. */
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) { margin-left: 0; box-shadow: none; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session { gap: 13.5px; padding-left: 11.5px; border-radius: var(--r); }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) :is(.sidebar-more, .sidebar-empty) { padding-left: 41px; border-radius: var(--r); }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-rename { padding-left: 11.5px; gap: 13.5px; border-radius: var(--r); }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .kid .sidebar-session { padding-left: 25px; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { background: color-mix(in srgb, var(--t1) 10%, transparent); box-shadow: none; }
+/* A state says itself where the time was, in its colour. */
+.sidebar-say-state.warn { color: var(--warn) !important; }
+.sidebar-say-state.working { color: var(--acc) !important; }
+.sidebar-say-state.acc { color: var(--blossom, #f2b6c8) !important; }
+.sidebar-say-state.bad { color: var(--bad) !important; }
+.sidebar-project-state.sidebar-say-state { font-size: 11.5px; }
+/* A working chat's mark is the same turning arc. */
+.sidebar-session-mark.working { width: 9px; height: 9px; margin: 0 3.5px; box-shadow: none; animation: none; background: conic-gradient(from var(--spin), transparent 0 30%, color-mix(in srgb, var(--acc) 30%, transparent) 55%, var(--acc)); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); }
+/* The agents wear the same rings, side by side. */
+.sidebar-agents-stack { gap: 6px; padding: 0 2px; }
+.sidebar-agents-stack .sidebar-face + .sidebar-face { margin-left: 0; }
+#desktop-sidebar .sidebar-agents-stack .agent-face { box-shadow: inset 0 0 0 1px rgb(255 255 255 / .1); }
+.sidebar-face { overflow: visible !important; }
+.sidebar-face::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; padding: 1.5px; pointer-events: none; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.sidebar-face.working::after { background: conic-gradient(from var(--spin), transparent 0 30%, color-mix(in srgb, var(--acc) 30%, transparent) 55%, var(--acc)); }
+.sidebar-face.acc::after { background: var(--blossom, #f2b6c8); }
+@media (prefers-reduced-motion: no-preference) {
+  :is(.project-face.ring-working, .sidebar-face.working)::after, .sidebar-session-mark.working { animation: face-spin 1.6s linear infinite; }
+}

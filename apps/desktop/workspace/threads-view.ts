@@ -1,9 +1,9 @@
 import type { DriveFix } from "@demesne/protocol";
 import type { ThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 
-/// The orchestrator's side of threads (pass 126): the thread list in its
-/// chat, with a ring per thread that fills as it works and turns amber when
-/// it needs you; the line above its composer that says how they're doing;
+/// The orchestrator's side of threads (pass 126): the threads in its chat,
+/// one line each (pass 216 A), with a ring that fills as the thread works
+/// and turns amber when it needs you; the line above its composer that says how they're doing;
 /// and Merge all, the one button, once they're back. The list is the only
 /// switcher: the row you pick lights up and fills the right half.
 
@@ -31,15 +31,6 @@ export function threadState(fix: DriveFix): ThreadState {
   return fix.waiting ? "you" : "work";
 }
 
-/// Where a thread is on its way (pass 211 A), as four short marks:
-/// working, back, checked, merged. The third is pink while it is sent back.
-export function threadStage(fix: DriveFix): string {
-  const state = threadState(fix);
-  const done = state === "merged" ? 4 : state === "ready" ? (fix.review?.checked ? 3 : 2) : state === "waits" ? 0 : fix.review?.sentBack ? 2 : 1;
-  const back = (state === "work" || state === "you") && Boolean(fix.review?.sentBack);
-  return `<span class="th-stage" aria-hidden="true">${[0, 1, 2, 3].map((index) => `<i class="${index < done ? "d" : ""}${index === 2 && back ? " c" : ""}"></i>`).join("")}</span>`;
-}
-
 /// How full a thread's ring is: steps so far against a typical job, never
 /// full until it is back.
 export function threadProgress(fix: DriveFix): number {
@@ -58,40 +49,67 @@ export function ring(fix: DriveFix): string {
 }
 
 const counts = (diff: DriveFix["diff"]) => diff ? `<span class="add">+${diff.additions}</span> <span class="del">−${diff.deletions}</span>` : "";
-const checksWord = (fix: DriveFix) => !fix.checks?.length ? "" : fix.checks.every((check) => check.passed) ? "checks passed" : "a check failed";
+const SHELLS = new Set(["sh", "bash", "zsh", "fish", "cmd", "cmd.exe", "powershell", "pwsh", "env"]);
+const leaf = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+
+/// What a working thread is doing, in plain words (pass 216 A). The daemon
+/// sends the step as "tool detail"; the row says "Editing csv.ts" or
+/// "Running bun test", never the tool's name or a whole shell line.
+export function threadDoing(last: string | null | undefined): string {
+  const [tool = "", ...rest] = (last ?? "").trim().split(/\s+/);
+  if (!tool) return "Working";
+  if (/^(run|exec)/.test(tool)) {
+    const program = leaf(rest[0] ?? "");
+    if (!program || SHELLS.has(program)) return "Running a command";
+    const more = rest.slice(1, 3).filter((word) => /^[\w@.:/-]+$/.test(word) && !word.startsWith("-")).map(leaf);
+    const words = [program, ...more].join(" ");
+    return `Running ${words.length > 28 ? program : words}`;
+  }
+  const verb = /^read/.test(tool) ? "Reading" : /^(edit|apply|patch)/.test(tool) ? "Editing" : /^write/.test(tool) ? "Writing" : /(search|grep|find)/.test(tool) ? "Searching"
+    : /^list/.test(tool) ? "Listing" : /^(web|fetch)/.test(tool) ? "Reading the web" : "";
+  if (!verb) return "Working";
+  const target = verb === "Searching" || verb === "Reading the web" ? "" : leaf(rest.join(" "));
+  return target && target.length <= 40 ? `${verb} ${target}` : verb === "Reading the web" || verb === "Searching" ? verb : `${verb} a file`;
+}
 
 /// One plain line on what a thread is doing or how it ended. `list` names
 /// the thread a waiting one waits for.
 export function threadLine(fix: DriveFix, list: DriveFix[] = []): string {
   const state = threadState(fix);
-  if (state === "you") return `<span class="amber">Waits for you</span>`;
-  if (state === "waits") return esc(`Waits for “${list.find((item) => item.id === fix.thread?.after)?.title ?? "the thread it's built on"}”`);
-  if (state === "work") return fix.review?.sentBack && fix.review.note ? `<span class="sent">Sent back</span>: ${esc(fix.review.note)}`
-    : esc(fix.activity?.last ? `${fix.activity.last}…` : fix.status === "starting" ? "Starting…" : "Working…");
-  if (state === "merged") return "Merged onto your branch";
-  if (state === "failed") return `<span class="danger">${esc(fix.error ?? "It stopped.")}</span>`;
-  return [fix.review?.checked ? "Checked" : "Ready", counts(fix.diff), checksWord(fix), !fix.review?.checked && fix.review?.note ? esc(fix.review.note) : ""].filter(Boolean).join(" · ");
+  if (state === "you") return `<span class="amber">Needs you</span>`;
+  if (state === "waits") return esc(`After ${list.find((item) => item.id === fix.thread?.after)?.title ?? "the thread it's built on"}`);
+  if (state === "work") return fix.review?.sentBack ? `<span class="sent">Sent back</span>${fix.review.note ? ` · ${esc(fix.review.note)}` : ""}`
+    : fix.status === "starting" && !fix.activity?.last ? "Starting" : esc(threadDoing(fix.activity?.last));
+  if (state === "merged") return "Merged";
+  if (state === "failed") return `<span class="danger">Stopped</span>${fix.error ? ` · ${esc(fix.error)}` : ""}`;
+  const failed = fix.checks?.some((check) => !check.passed) ? "a check failed" : "";
+  return ["Ready", counts(fix.diff), failed, !fix.review?.checked && fix.review?.note && fix.review.note !== failed ? esc(fix.review.note) : ""].filter(Boolean).join(" · ");
 }
 
-function meta(fix: DriveFix): string {
+/// What a row's hover says: everything the line leaves out.
+function threadTip(fix: DriveFix): string {
   const state = threadState(fix);
-  if (state === "you") return `<span class="th-pill you">Needs you</span>`;
-  if (state === "work" && fix.startedAt) return `<span>${Math.max(1, Math.round((Date.now() - Date.parse(fix.startedAt)) / 60_000))}m</span>${threadStage(fix)}`;
-  return state === "failed" ? "" : threadStage(fix);
+  const checks = !fix.checks?.length ? "" : fix.checks.every((check) => check.passed) ? "checks passed" : "a check failed";
+  return [fix.title, fix.thread?.files.length ? `Only touches ${fix.thread.files.join(", ")}` : "", state === "ready" ? [fix.review?.checked ? "checked by the orchestrator" : "", checks].filter(Boolean).join(" · ") : "",
+    state === "failed" ? fix.error ?? "" : ""].filter(Boolean).join("\n");
 }
 
-/// The chat's thread list. Each row opens its thread; the × on a row
-/// deletes it (pass 131 A): a merged thread goes at once, one with work on
-/// its branch asks once more, the × turning into "Delete".
+/// The threads a chat started, each as one line where it started them (pass
+/// 216 A): its ring, its name, what it is doing in plain words, and at the
+/// end how long it has worked or, once it is ready, Merge. A row opens its
+/// thread; the × on a row deletes it (pass 131 A): a merged thread goes at
+/// once, one with work on its branch asks once more, the × turning into
+/// "Delete".
 export function threadListHTML(view: ThreadsView, armed: string | null = null): string {
   if (!view.list.length) return "";
-  return `<div class="th-label">Threads</div><div class="th-list">${view.list.map((fix) => {
+  return `<div class="th-list" role="group" aria-label="Threads">${view.list.map((fix) => {
     const on = !view.closed && view.open === fix.id, merged = fix.status === "applied", sure = merged || armed === fix.id;
     const del = `<button type="button" class="th-del${armed === fix.id ? " armed" : ""}" data-action="${sure ? "thread-delete" : "thread-delete-arm"}" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Delete ${esc(fix.title)}" title="${merged ? "Delete this thread (its merge stays)" : "Delete this thread and its branch"}"${view.busy ? " disabled" : ""}>${armed === fix.id ? "Delete" : X}</button>`;
     // A ready thread merges on its own (pass 211 A): nothing waits for the rest.
-    const ready = threadState(fix) === "ready";
+    const state = threadState(fix), ready = state === "ready";
     const merge = ready ? button("thread-merge", view.busy === fix.id ? "Merging…" : "Merge", { id: fix.id }, "th-merge-one", Boolean(view.busy)) : "";
-    return `<div class="th-item${ready ? " ready" : ""}"><button type="button" class="th-row${on ? " on" : ""}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-pressed="${on}" title="${esc(fix.thread?.files.length ? `Claims ${fix.thread.files.join(", ")}` : fix.title)}">${ring(fix)}<span class="th-name">${esc(fix.title)}</span><span class="th-meta">${meta(fix)}</span><span class="th-line">${threadLine(fix, view.list)}</span></button>${merge}${del}</div>`;
+    const time = state === "work" && fix.startedAt ? `<span class="th-end">${Math.max(1, Math.round((Date.now() - Date.parse(fix.startedAt)) / 60_000))}m</span>` : "";
+    return `<div class="th-item ${state}"><button type="button" class="th-row${on ? " on" : ""}" data-action="thread-open" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-pressed="${on}" title="${esc(threadTip(fix))}">${ring(fix)}<span class="th-name">${esc(fix.title)}</span><span class="th-line">${threadLine(fix, view.list)}</span>${time}</button>${merge}${del}</div>`;
   }).join("")}</div>`;
 }
 

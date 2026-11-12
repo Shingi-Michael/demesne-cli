@@ -153,7 +153,7 @@ export function webFetchTool(options: WebOptions = {}): AgentTool {
   };
 }
 
-async function assertPublic(url: URL, resolve: (host: string) => Promise<string[]>): Promise<void> {
+export async function assertPublic(url: URL, resolve: (host: string) => Promise<string[]>): Promise<void> {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw toolError("BAD_URL", `${url.protocol} addresses can't be read`, "pass an http or https address");
   if (url.username || url.password) throw toolError("BAD_URL", "addresses with a login can't be read", "pass the address without the user and password");
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();

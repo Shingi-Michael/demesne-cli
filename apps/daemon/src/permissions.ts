@@ -1,4 +1,4 @@
-import { isRecord, openAppKey, type PermissionDecision } from "@demesne/protocol";
+import { browserSiteKey, isRecord, openAppKey, siteCovers, type PermissionDecision } from "@demesne/protocol";
 import { allowRulesCover, pathsOf, type ConfigAllowlist } from "./allowlist.ts";
 
 interface PendingPermission {
@@ -154,6 +154,8 @@ function sessionRulesCover(rules: SessionRule[], toolName: string, input: unknow
   if (toolRules.length === 0) return false;
   // Opening is granted per app (pass 210 A).
   if (toolName === "open") { const key = openAppKey(input); return key !== null && toolRules.some((rule) => rule.pathPrefix === key); }
+  // Its browser is granted per site.
+  if (toolName === "browser") { const site = browserSiteKey(input); return toolRules.some((rule) => siteCovers(rule.pathPrefix, site)); }
   const paths = pathsOf(input);
   if (paths.length === 0) return true;
   return paths.every((path) => toolRules.some((rule) => pathMatchesRule(path, rule)));
@@ -181,6 +183,7 @@ function deriveRules(toolName: string, argsJson: string | undefined): SessionRul
     return command ? [{ tool: toolName, pathPrefix: "", argv: command.argv, cwd: command.cwd }] : [];
   }
   if (toolName === "open") { const key = openAppKey(input); return key ? [{ tool: toolName, pathPrefix: key }] : []; }
+  if (toolName === "browser") { const site = browserSiteKey(input); return site ? [{ tool: toolName, pathPrefix: site }] : []; }
   const paths = pathsOf(input);
   if (paths.length === 0) return [{ tool: toolName, pathPrefix: "" }];
   return paths.map((path) => {

@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { isRecord, openAppKey } from "@demesne/protocol";
+import { browserSiteKey, isRecord, openAppKey, siteCovers } from "@demesne/protocol";
 import { parseConfigFile } from "@demesne/config";
 
 /// Persistent approval allowlists.
@@ -57,6 +57,8 @@ export function allowRuleMatches(rule: AllowRule, toolName: string, input: unkno
   if (rule.tool !== toolName) return false;
   // `open:figma` allows opening Figma, and nothing else (pass 210 A).
   if (toolName === "open" && rule.pathPrefix !== undefined) return rule.pathPrefix.toLowerCase() === openAppKey(input);
+  // `browser:github.com` lets its browser onto that site, and nothing else.
+  if (toolName === "browser" && rule.pathPrefix !== undefined) return siteCovers(rule.pathPrefix, browserSiteKey(input));
   if (rule.argv) {
     if (!isRecord(input) || !Array.isArray(input.argv)) return false;
     const argv = input.argv;

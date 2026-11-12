@@ -6,7 +6,10 @@
 /// stdout (apps/daemon/src/browser.ts). A page is read as an outline with a
 /// number on every control (browser-runtime.ts); the model clicks and types by
 /// number, with real input events, and is told what visibly changed.
-/// Only this computer for now: localhost addresses and files.
+/// This computer's own pages always open. A site on the internet opens only
+/// once the daemon names it (the person approved it), and the tab then stays
+/// on its approved sites; a public page can't reach this computer or its
+/// network, download, or ask for the camera.
 import { app, BrowserWindow, session as sessions } from "electron";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +33,24 @@ export function localAddress(url: string): boolean {
   } catch { return false; }
 }
 
-interface Tab { win: BrowserWindow; width: "desktop" | "phone"; errors: string[]; failed: string[]; blocked: string[]; used: number; queue: Promise<unknown> }
+/// A host on this computer or its own network, which a public page must not reach.
+export function privateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || /\.(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
+  const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host.replace(/^::ffff:/, ""));
+  if (v4) {
+    const a = Number(v4[1]), b = Number(v4[2]);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+  }
+  return host.includes(":") && (host === "::" || host === "::1" || /^(fc|fd|fe[89ab]|ff)/.test(host));
+}
+
+/// The site of a public address ("github.com"), as the daemon names it; null for a local one.
+function siteOf(url: string): string | null {
+  try { const parsed = new URL(url); return /^https?:$/.test(parsed.protocol) && !localAddress(url) ? parsed.hostname.toLowerCase().replace(/^www\./, "") : null; } catch { return null; }
+}
+
+interface Tab { win: BrowserWindow; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; used: number; queue: Promise<unknown> }
 type Command = Record<string, unknown> & { id?: unknown; chat?: unknown; action?: unknown };
 type Found = { found: boolean; gone?: boolean; hidden?: boolean; names?: string[]; x: number; y: number; many: number; what: string; covered: string | null; disabled: boolean };
 
@@ -52,23 +72,41 @@ export function runBrowserHost() {
     const win = new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
       // Its own cookies and storage per chat, kept in memory for as long as the host lives.
       webPreferences: { session: sessions.fromPartition(`browser-${chat}`), offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
-    const tab: Tab = { win, width, errors: [], failed: [], blocked: [], used: Date.now(), queue: Promise.resolve() };
+    const tab: Tab = { win, width, sites: new Set(), local: true, errors: [], failed: [], blocked: [], used: Date.now(), queue: Promise.resolve() };
     const contents = win.webContents;
-    const refuse = (event: { preventDefault(): void }, url: string) => { if (!localAddress(url)) { event.preventDefault(); if (tab.blocked.length < 4) tab.blocked.push(url.slice(0, 200)); } };
+    // Where this tab may go by itself: around this computer while it is here, and around the sites the person approved.
+    const allowed = (url: string) => {
+      if (localAddress(url)) return tab.local;
+      const site = siteOf(url);
+      return site !== null && [...tab.sites].some((approved) => site === approved || site.endsWith(`.${approved}`));
+    };
+    const blocked = (url: string) => { if (tab.blocked.length < 4) tab.blocked.push(localAddress(url) ? `${url.slice(0, 200)} was not opened: a public page can't send you into this computer` : `${url.slice(0, 200)} was not opened: it is another site, so open it yourself to go there`); };
+    const refuse = (event: { preventDefault(): void }, url: string) => { if (!allowed(url)) { event.preventDefault(); blocked(url); } };
+    contents.on("did-navigate", (_event, url) => { tab.local = localAddress(url); });
+    // Sites see an ordinary browser, not the app's name.
+    contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|demesne[\w-]*)\/\S+/gi, ""));
+    // A public page can't reach this computer or its network, download, or ask for the camera and the like.
+    contents.session.webRequest.onBeforeRequest((details, callback) => {
+      let host = ""; try { host = new URL(details.url).hostname; } catch {}
+      callback({ cancel: !tab.local && details.resourceType !== "mainFrame" && /^(https?|wss?):/.test(details.url) && privateHost(host) });
+    });
+    contents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    contents.session.removeAllListeners("will-download");
+    contents.session.on("will-download", (event, item) => { event.preventDefault(); if (tab.blocked.length < 4) tab.blocked.push(`${item.getFilename().slice(0, 80)} was not downloaded: the browser saves no files`); });
     contents.on("will-navigate", (event, url) => refuse(event, url));
     contents.on("will-redirect", (event, url) => refuse(event, url));
     // A link that wants a new window opens in this tab instead: there is one tab per chat.
     contents.setWindowOpenHandler(({ url }) => {
-      if (localAddress(url)) setImmediate(() => { void contents.loadURL(url).catch(() => {}); });
-      else if (tab.blocked.length < 4) tab.blocked.push(url.slice(0, 200));
+      if (allowed(url)) setImmediate(() => { void contents.loadURL(url).catch(() => {}); });
+      else blocked(url);
       return { action: "deny" };
     });
-    contents.on("console-message", (event) => { if (event.level === "error" && tab.errors.length < 8) tab.errors.push(event.message.slice(0, 200)); });
+    contents.on("console-message", (event) => { if (tab.local && event.level === "error" && tab.errors.length < 8) tab.errors.push(event.message.slice(0, 200)); });
     contents.session.webRequest.onCompleted((details) => {
-      if (details.statusCode >= 400 && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.statusCode}`);
+      if (tab.local && details.statusCode >= 400 && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.statusCode}`);
     });
     contents.session.webRequest.onErrorOccurred((details) => {
-      if (details.error !== "net::ERR_ABORTED" && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.error.replace(/^net::/, "")}`);
+      if (tab.local && details.error !== "net::ERR_ABORTED" && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.error.replace(/^net::/, "")}`);
     });
     tabs.set(chat, tab);
     return tab;
@@ -85,7 +123,7 @@ export function runBrowserHost() {
       await loaded();
       const dialogs = await js<string[]>("window.__demesneBrowser ? window.__demesneBrowser.dialogs() : []").catch(() => [] as string[]);
       return {
-        url: contents.getURL(), title: contents.getTitle(), ...more,
+        url: contents.getURL(), title: contents.getTitle(), ...(tab.local ? {} : { public: true }), ...more,
         ...(withOutline ? { outline: await js<string[]>(`window.__demesneBrowser.outline(${OUTLINE_MAX_LINES})`).catch(() => [] as string[]) } : {}),
         ...(dialogs.length ? { dialogs } : {}),
         ...(tab.errors.length ? { errors: tab.errors.splice(0) } : {}), ...(tab.failed.length ? { failed: tab.failed.splice(0) } : {}), ...(tab.blocked.length ? { blocked: tab.blocked.splice(0) } : {}),
@@ -93,10 +131,17 @@ export function runBrowserHost() {
     };
     if (action === "open") {
       const url = String(command.url ?? "");
-      if (!localAddress(url)) return { error: "The browser opens only this computer's own apps: a localhost address or a file." };
+      // The daemon names a site only after the person approved it.
+      const site = siteOf(url);
+      if (site !== null && command.site !== site) return { error: "That site was not approved for the browser." };
+      if (site !== null) tab.sites.add(site);
+      tab.local = site === null;
       tab.errors.length = tab.failed.length = tab.blocked.length = 0;
       try { await win.loadURL(url); } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        tab.local = localAddress(contents.getURL() || "about:blank");
+        // A redirect that left the approved sites: say where it wanted to go.
+        if (tab.blocked.length) return { error: `${url} sends you on elsewhere. ${tab.blocked.splice(0).join("; ")}` };
         if (!/ERR_ABORTED/.test(message)) return { error: `Could not open ${url}: ${message.replace(/^.*?(ERR_[A-Z_]+).*$/s, "$1")}` };
       }
       await Promise.race([js("document.fonts.ready.then(() => true)").catch(() => true), settle(3000)]);

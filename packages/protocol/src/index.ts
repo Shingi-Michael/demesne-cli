@@ -1178,6 +1178,7 @@ export function derivePersistedRule(toolName: string | undefined, rawArguments: 
     return `run_command:${argv.join(" ")}`;
   }
   if (toolName === "open") { const key = openAppKey(input); return key ? `open:${key}` : null; }
+  if (toolName === "browser") { const site = browserSiteKey(input); return site ? `browser:${site}` : null; }
   const target = pathFrom(input, toolName === "move_path" ? "from" : "path");
   if (!target) return null;
   const normalized = target.split("\\").join("/").replace(/^\.\//, "").replace(/\/+$/, "");
@@ -1185,6 +1186,31 @@ export function derivePersistedRule(toolName: string | undefined, rawArguments: 
   const segments = normalized.split("/").filter(Boolean);
   segments.pop();
   return `${toolName}:${segments.join("/") || normalized}`;
+}
+
+/// The site a `browser` call leaves this computer for, which is what the
+/// person approves: "github.com" for https://www.github.com/login. Null for
+/// this computer's own pages (localhost, a project file) and for every action
+/// but open, which need no approval.
+export function browserSiteKey(input: unknown): string | null {
+  const args = parseRuleArguments(input);
+  if (args.action !== "open" || typeof args.url !== "string") return null;
+  return siteOf(args.url.trim());
+}
+
+/// The site of a public http(s) address, without a leading www; null for a local one.
+export function siteOf(address: string): string | null {
+  if (!/^https?:\/\//i.test(address)) return null;
+  let host: string;
+  try { host = new URL(address).hostname.toLowerCase(); } catch { return null; }
+  if (!host || host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "[::1]" || host.endsWith(".localhost")) return null;
+  return host.replace(/^www\./, "");
+}
+
+/// An approved site covers itself and the sites under it (docs.github.com under github.com).
+export function siteCovers(approved: string, site: string | null): boolean {
+  const rule = approved.trim().toLowerCase().replace(/^www\./, "");
+  return site !== null && rule !== "" && (site === rule || site.endsWith(`.${rule}`));
 }
 
 /// What an `open` is approved by (pass 210 A): the app it opens, so

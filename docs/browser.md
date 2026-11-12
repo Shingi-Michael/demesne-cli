@@ -1,6 +1,6 @@
 # The model's own browser
 
-Demesne has a browser that belongs to the model. You never see it and never drive it: it is a hidden window the model uses to check that the web app it is working on really works, the way a person would, by clicking through it.
+Demesne has a browser that belongs to the model. You never see it and never drive it: it is a hidden window the model uses to check that the web app it is working on really works, the way a person would, by clicking through it, and to use a site on the internet when reading it is not enough.
 
 It is the `browser` tool. It is different from `look_at_page`, which takes one fresh look and forgets:
 
@@ -22,7 +22,19 @@ Actions: `open`, `read`, `text`, `click`, `type` (with `clear` and `enter`), `ke
 
 ## Where it can go
 
-Only this computer for now: `localhost` addresses (any port) and `.html` files in the project. A link or redirect to anywhere else is not followed, and the model is told it was blocked. Because of that it never asks for permission, like reading a file.
+**This computer, without asking.** `localhost` addresses (any port) and `.html` files in the project, like reading a file.
+
+**The internet, once you say yes.** Opening a site (a full `https://` address) asks first: "Browse github.com". The answer covers the site and the sites under it (`docs.github.com`), once, for this chat, or always (saved as `browser:github.com` in your config; a bare `browser` entry allows every site). A chat on Auto does not ask.
+
+After that the tab stays on the sites you approved:
+
+- A link or a redirect to another site is not followed. The model is told where it led, and has to open that address itself, which asks you.
+- A public page can't reach back into this computer or your network: its requests to `localhost`, `192.168.…` and the like are cancelled, and a link from it to a local address is not followed. Addresses that resolve into the local network are refused.
+- Nothing is downloaded, and a page's requests for the camera, location or notifications are refused.
+- Nothing is signed in. The browser has its own empty profile, never yours.
+- What a public page says is marked as information, not instructions, and a site's own console noise is not reported.
+
+To only read an article, `web_fetch` is cheaper. The browser is for pages that need clicking, typing, or scripts to show anything.
 
 ## In the chat
 
@@ -35,4 +47,4 @@ Each call is an ordinary step: "Opened localhost:5173/login", "Typed “Ada” i
 - `apps/daemon/src/browser.ts`: the `browser` tool, and `electronBrowser`, which starts the host on first use and starts it again if it dies.
 - `scripts/check-browser.ts`: drives a small local app through the real hidden browser (`xvfb-run -a bun scripts/check-browser.ts` on Linux, after `bun scripts/prepare-desktop.ts`).
 
-Not built yet: the open web (with a rule for what needs your yes), response bodies, and a profile that survives a restart with a way for you to sign in once.
+Not built yet: response bodies, and a profile that survives a restart with a way for you to sign in once.

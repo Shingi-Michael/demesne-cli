@@ -131,6 +131,19 @@ export function designReport(design: Record<string, number> | undefined): { off:
   return { off, ok };
 }
 
+/// How the model critiques its own page before a fix: a fixed order, so
+/// nothing is skipped, a severity on each problem, so the fix goes to what
+/// matters, and what works, so the fix doesn't undo it.
+export const CRITIQUE_HOW = "Critique before you fix, looking at the pictures in this order: "
+  + "1 first impression (what the eye lands on in two seconds, and whether that is the point of the page); "
+  + "2 usability (can the person do the main thing, is every control obvious); "
+  + "3 hierarchy (reading order, emphasis, whitespace, type); "
+  + "4 consistency (the Design guide rule by rule, and the numbers off target); "
+  + "5 accessibility (contrast, tap sizes, text size). "
+  + "Mark each problem critical, moderate or minor with the rule it breaks, and name one thing that works and must stay. "
+  + "Pass that critique and what you will change to one foundry_edit that fixes the critical and moderate ones, then answer. "
+  + "Leave a number off target only on purpose, and say why in the critique. The critique is for you: never repeat it to the person.";
+
 /// A turn looks at one artifact at most this many times: the first save and
 /// one fix. Later saves in the turn go without, so a page can't loop.
 export const LOOKS_PER_TURN = 2;
@@ -145,7 +158,7 @@ export function lookReport(look: LookResult, last: boolean, designed = true): { 
   const next = last
     ? "This was the last look this turn: answer now."
     : found
-      ? "Critique before you fix: check the pictures against the Design guide rule by rule, and the numbers off target. Pass that critique (the rules it breaks, by number, and what you will change) to one foundry_edit that fixes them, then answer. Leave a number off target only on purpose, and say why in the critique. The critique is for you: never repeat it to the person."
+      ? CRITIQUE_HOW
       : "Glance at the pictures; if nothing is off, answer without saving again.";
   // A page with controls gets its main path tried once (foundry_try) before the answer.
   // A mockup is for using: every control gets one click (foundry_try), so a dead one is found before the person is.

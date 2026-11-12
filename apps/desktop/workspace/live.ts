@@ -12,6 +12,7 @@ import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
+import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { ring as threadRing, threadBriefHTML, threadMergeHTML, threadListHTML, threadReportHTML, threadsFootHTML, threadTabsHTML } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
@@ -312,6 +313,8 @@ const verb = (tool: ToolEntry) =>
     recall_turn: "Recalled",
     read_source: "Read",
     subagent: "Agent",
+    start_threads: "Started threads",
+    message_thread: "Told",
     foundry_save: "Made",
     foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
@@ -871,7 +874,7 @@ function renderSidebar() {
     return busy.map((one) => `<span class="${one.tone}">${h(one.agent.name.split(/\s+/)[0] ?? one.agent.name)} ${one.tone === "acc" ? "replied" : one.word}</span>`).join(" · ");
   };
   const housedLines = () => {
-    const head = btn("agents-toggle", `<span class="sidebar-agents-stack">${agentInfo.map((one) => one.face).join("")}</span><span class="sidebar-agents-words"><b>${agentInfo.length === 1 ? h(agentInfo[0]!.agent.name) : `${agentInfo.length} agents`}</b><small>${agentSummary()}</small></span><svg class="sidebar-agents-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`, {}, "sidebar-agents-group")
+    const head = btn("housed-agents-toggle", `<span class="sidebar-agents-stack">${agentInfo.map((one) => one.face).join("")}</span><span class="sidebar-agents-words"><b>${agentInfo.length === 1 ? h(agentInfo[0]!.agent.name) : `${agentInfo.length} agents`}</b><small>${agentSummary()}</small></span><svg class="sidebar-agents-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`, {}, "sidebar-agents-group")
       .replace("<button ", `<button aria-expanded="${agentsOpen}" title="${agentsOpen ? "Fold your agents" : "Show your agents"}" `);
     const rows = agentInfo.map(({ agent, word, tone, face }) => btn("agent-open", `${face}<span class="housed-name">${h(agent.name)}</span><small class="${tone}">${word}</small>`,
       { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
@@ -2857,7 +2860,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     ? `<div class="request-att">${run.attachments.map((image) => image.kind === "file" ? fileChipHTML(image, { small: true }) : attachmentPreviews.has(image.id)
       ? `<img src="${attachmentPreviews.get(image.id)}" alt="${h(image.filename)}" title="${h(image.filename)}">`
       : `<span class="att-name" title="${h(`${image.width}×${image.height}`)}">${h(image.filename)}</span>`).join("")}</div>` : "";
-  const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? threadReport(run) ?? threadAsked(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${requestText(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+  const request = answerAsked(run) ?? mailRequest(run) ?? driveReport(run) ?? threadReport(run) ?? threadNoted(run) ?? threadAsked(run) ?? driveAsked(run) ?? routineAsked(run) ?? `${attached}<div class="request"><span class="text">${requestText(run.content)}</span><span class="request-meta">${asks}<time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
   const review = reviewOpen.has(run.id) && !live ? reviewHTML(run.id) : "";
   const day = assistantDay(run, index);
   return `${day ? `<div class="day-line"><span>${h(day)}</span></div>` : ""}${request}<div class="response ${live ? "running" : run.status === "failed" ? "failed" : ""}">${body}${trail}${footer}${review}</div>${queued}`;
@@ -2942,6 +2945,13 @@ function threadReport(run: WorkspaceRun): string | null {
   return report ? threadReportHTML(report, clock(run.createdAt).slice(0, 5)) : null;
 }
 /// A thread's own chat opens on its brief, not on the long prompt it was given.
+/// A turn an orchestrator's note started in its thread: the purpose is the
+/// heading, the note sits under it.
+function threadNoted(run: WorkspaceRun): string | null {
+  const note = parseThreadNote(run.content);
+  if (!note) return null;
+  return `<div class="request mail thread-note"><span class="mail-from"><span class="mail-kind">Orchestrator</span><span class="tn-purpose">${h(note.purpose)}</span></span><span class="text">${requestText(note.text)}</span><span class="request-meta"><time>${clock(run.createdAt).slice(0, 5)}</time></span></div>`;
+}
 function threadAsked(run: WorkspaceRun): string | null {
   if (!run.content.startsWith("You're one of the threads an orchestrator chat split")) return null;
   const branch = /on branch (\S+),/.exec(run.content)?.[1];
@@ -2977,6 +2987,10 @@ function driveReport(run: WorkspaceRun): string | null {
 /// Words you sent mid-turn: one line on the guide where the model read them,
 /// faint with "on its way" until it does.
 function steerLine(text: string, pending = false): string {
+  // An orchestrator's note to its thread: who it is from and what for, then
+  // the note itself, a few lines at most.
+  const note = parseThreadNote(text);
+  if (note) return `<div class="tool-row steer note"><span class="steer-mark">↳</span><span class="verb" title="${h(note.text)}"><span class="tn-who">Orchestrator</span>${h(note.purpose)}</span></div>${note.text ? `<div class="tn-text" title="${h(note.text)}">${h(note.text)}</div>` : ""}`;
   return `<div class="tool-row steer${pending ? " pending" : ""}"><span class="steer-mark">↳</span><span class="verb" title="${h(text)}">you: ${h(text)}</span>${pending ? '<small class="meta">on its way</small>' : ""}</div>`;
 }
 
@@ -6409,7 +6423,8 @@ async function dispatch(
     renderPage();
     return;
   }
-  if (action === "agents-toggle") {
+  // Its own name: "agents-toggle" is a project line's marks unfolding who works there.
+  if (action === "housed-agents-toggle") {
     agentsOpen = !agentsOpen;
     try { localStorage.setItem("demesne-agents-open", agentsOpen ? "1" : "0"); } catch { /* storage off */ }
     sidebarSignature = "";

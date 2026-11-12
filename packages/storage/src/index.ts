@@ -2735,6 +2735,10 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
   }
   if (typeof result !== "object" || result === null || Array.isArray(result)) return {};
   const value = result as Record<string, unknown>;
+  // A routine the chat made or changed: its card shows when and what.
+  if (name === "routine" && typeof value.routine === "string" && ["added", "paused", "resumed", "removed"].includes(value.routine) && typeof value.id === "string" && value.id.length <= 100) {
+    return { message: JSON.stringify({ routine: value.routine, id: value.id, when: String(value.when ?? "").slice(0, 100), prompt: String(value.prompt ?? "").slice(0, 600), on: value.on !== false }) };
+  }
   if ((name === "foundry_save" || name === "foundry_edit") && typeof value.id === "string" && /^[\w-]{1,200}$/.test(value.id)
     && typeof value.title === "string" && FOUNDRY_KINDS.includes(value.kind as FoundryKind)
     && typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version > 0) {

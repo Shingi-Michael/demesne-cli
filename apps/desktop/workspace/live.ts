@@ -45,6 +45,7 @@ import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
 import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
+import { chatRoutines, routinesCardHTML, routineTarget, ROUTINE_TOOL, ROUTINE_VERBS, ROUTINES_CARD } from "./routine-card.ts";
 import { chatShown, latestShown, shownCardHTML, SHOWN_CARD, type Shown } from "./shown-card.ts";
 import { fileChipHTML, isPicture, MAX_FILE_BYTES, refusal, sizeWord } from "./file-chips.ts";
 import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, usedSources, type SourcesView } from "./sources-card.ts";
@@ -180,6 +181,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
   if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
+  if (tool.name === ROUTINE_TOOL) return routineTarget(tool);
   if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
   if (tool.name === "look_at_page") return pageName(tool.input.url);
   if (tool.name === "open") return [tool.input.target, tool.input.app].filter((one): one is string => typeof one === "string" && Boolean(one)).map((one) => /^[a-z][a-z0-9+.-]*:\/\//i.test(one) ? pageName(one) : one.split(/[\\/]/).at(-1) ?? one).join(" in ");
@@ -292,6 +294,7 @@ const verb = (tool: ToolEntry) =>
     web_search: "Searched the web",
     web_fetch: "Read",
     remember: "Remembered",
+    routine: ROUTINE_VERBS[String(tool.input.action)] ?? "Routines",
     update_plan: "Planned",
     wait_for: "Waited for",
     look_at_page: "Opened",
@@ -1415,17 +1418,19 @@ function renderCards() {
   const allShown = chatShown(seenRuns);
   arrivedShown(s.session?.id ?? "", seenRuns, allShown);
   const shownNow = latestShown(allShown, shownClosed);
+  // Routines this chat made, as it last left them.
+  const madeRoutines = chatRoutines(seenRuns);
   const pile = chatPile(seenRuns, new Set([...pileHidden(s.session?.id ?? ""), ...(shownNow?.picture ? [shownNow.picture.id] : [])]));
   const filePreview = chatPreview();
   // What you keep with the chat (pass 204), and which the last answer used.
   const sources = s.sources ?? [], dragging = sourceView.dragging && Boolean(s.session);
   const sourcesUsed = usedSources(sources, seenRuns.length ? tools(seenRuns.at(-1)!) : []);
-  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview && !shownNow) return hide();
+  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview && !shownNow && !madeRoutines.length) return hide();
   app.classList.add("cards-on");
   app.classList.toggle("cards-wide", Boolean(filePreview?.wide) || Boolean(shownNow && shownBig));
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide]]);
+  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide], madeRoutines]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1459,6 +1464,8 @@ function renderCards() {
   if (servers.length)
     out.push(card("connectors", h(servers.map((server) => server.name).join(", ")), servers.some((server) => server.state === "failed") ? '<span class="card-dot failed"></span>' : "",
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
+  const routinesCard = routinesCardHTML(madeRoutines, cardsOpen.has(ROUTINES_CARD));
+  if (routinesCard) out.push(routinesCard);
   // Every screenshot the chat has seen, in one pile.
   if (pile.length) out.push(`<section class="card pile" data-card="pile">${pileHTML(pile, pileSrc, pileLanding(s.session?.id ?? "", pile.at(-1)?.id))}</section>`);
   // Screenshots still to send come last, in the order they were taken.

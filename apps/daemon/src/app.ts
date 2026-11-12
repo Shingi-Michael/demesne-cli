@@ -11,6 +11,7 @@ import { useSkillTool } from "./skills.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
 import { fileText, linkTitle, MAX_COPY_BYTES, SourceError, SourceStore } from "./sources.ts";
 import { rememberTool } from "./remember.ts";
+import { routineTool } from "./routine-tool.ts";
 import { updatePlanTool } from "./plan.ts";
 import { githubTools } from "./github.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
@@ -375,6 +376,12 @@ export function createDaemonApp(options: {
   if (options.web !== false) { tools.register(webSearchTool()); tools.register(webFetchTool()); }
   // "Always …": a standing rule, saved to the project's DEMESNE.md.
   tools.register(rememberTool());
+  // "Every morning, check my PRs": a routine made from the chat, in its project.
+  let routinesRef: Routines | undefined;
+  tools.register(routineTool(() => routinesRef, (context) => {
+    const root = context.sessionId ? store.getSession(context.sessionId)?.workspace?.root : undefined;
+    try { return root && workspaceTrust.isTrusted(canonicalWorkspace(root)) ? canonicalWorkspace(root) : null; } catch { return null; }
+  }));
   // The plan checklist the chat shows as a ribbon on a turn of several steps.
   tools.register(updatePlanTool());
   // GitHub through your gh login: a PR with its checks and open review comments, a check's log, a reply.
@@ -652,6 +659,7 @@ export function createDaemonApp(options: {
       return sessionId;
     },
   });
+  routinesRef = routines;
   const routinesTimer = setInterval(() => { try { routines.tick(); } catch { /* the next minute tries again */ } }, 60_000);
   // The feed's good morning and good night posts, checked once a minute.
   // And from Friday 5 pm, the week's reel.

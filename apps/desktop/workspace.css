@@ -2849,11 +2849,29 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .sidebar-today { height: 22px; padding: 0 6px; border-radius: var(--r-sm); color: var(--t3); font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 .sidebar-today:hover { background: var(--surface2); color: var(--t1); }
 .sidebar-today b { color: var(--acc); font-weight: 500; }
-.sidebar-agents-line { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px; }
-#desktop-sidebar .sidebar-agents-line .sidebar-housed-row { width: auto; height: 28px; gap: 6px; padding: 0 9px 0 4px; border-radius: 14px; background: color-mix(in srgb, var(--t1) 4%, transparent); font-size: 12.5px; }
-#desktop-sidebar .sidebar-agents-line .sidebar-housed-row:hover { background: var(--surface2); box-shadow: none; }
-.sidebar-agents-line .agent-face { position: relative; overflow: visible; width: 19px; height: 19px; flex: none; }
-.sidebar-agents-line .agent-face.working::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 1.5px var(--side, var(--surface)); }
-.sidebar-agents-line .agent-face.acc::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--blossom, #f2b6c8); box-shadow: 0 0 0 1.5px var(--side, var(--surface)); }
 .sidebar-assistant { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border-radius: var(--r); color: var(--t2); font-size: 13.5px; text-align: left; }
 .sidebar-assistant:hover { background: var(--surface2); color: var(--t1); }
+
+/* Agents, pass 217 C: one row of stacked round faces that opens into a row each. */
+.sidebar-face { position: relative; flex: none; display: inline-grid; }
+#desktop-sidebar .sidebar-face .agent-face { width: 24px; height: 24px; overflow: hidden; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .1); }
+.sidebar-face-dot { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 2px var(--side, var(--surface)); }
+.sidebar-face.acc .sidebar-face-dot { background: var(--blossom, #f2b6c8); }
+.sidebar-agents-group { display: flex; align-items: center; gap: 10px; width: 100%; height: 42px; padding: 0 10px 0 8px; border-radius: 10px; color: var(--t2); text-align: left; }
+.sidebar-agents-group:hover { background: var(--surface2); }
+.sidebar-agents-stack { display: flex; flex: none; }
+.sidebar-agents-stack .sidebar-face + .sidebar-face { margin-left: -7px; }
+#desktop-sidebar .sidebar-agents-stack .agent-face { width: 26px; height: 26px; box-shadow: 0 0 0 2px var(--side, var(--surface)); }
+.sidebar-housed.open .sidebar-agents-stack { display: none; }
+.sidebar-agents-words { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 16px; }
+.sidebar-agents-words b { color: var(--t1); font-size: 13.5px; font-weight: 500; }
+.sidebar-agents-words small { overflow: hidden; color: var(--t3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-agents-words .working { color: var(--acc); }
+.sidebar-agents-words .acc { color: var(--blossom, #f2b6c8); }
+.sidebar-agents-chev { flex: none; width: 14px; height: 14px; fill: none; stroke: var(--t4); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 150ms var(--ease); }
+.sidebar-housed.open .sidebar-agents-chev { transform: rotate(90deg); }
+.sidebar-agents-rows { padding-bottom: 4px; }
+#desktop-sidebar .sidebar-agents-rows .sidebar-housed-row { height: 32px; gap: 10px; padding: 0 10px 0 8px; font-size: 13.5px; }
+.sidebar-agents-rows .sidebar-housed-row small.working { color: var(--acc); }
+.sidebar-agents-rows .sidebar-housed-row small.acc { color: var(--blossom, #f2b6c8); }
+.sidebar-agents-rows .sidebar-housed-row small:not(.working):not(.acc) { color: var(--t4); }

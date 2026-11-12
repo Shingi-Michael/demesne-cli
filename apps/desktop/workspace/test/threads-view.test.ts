@@ -18,6 +18,9 @@ test("a thread's state, ring and line follow its job", () => {
   expect(threadLine(fix("a", { status: "ready", diff: { files: 1, additions: 4, deletions: 2, paths: ["a.ts"] }, checks: [{ command: "bun test", passed: true }] }))).toBe('Ready · <span class="add">+4</span> <span class="del">−2</span>');
   expect(threadLine(fix("a", { status: "ready", checks: [{ command: "bun test", passed: false }] }))).toBe("Ready · a check failed");
   expect(threadLine(fix("a", { status: "applied" }))).toBe("Merged");
+  expect(threadLine(fix("a", { status: "applied", mergedElsewhere: "github" }))).toBe("Merged on GitHub");
+  expect(threadListHTML(view([fix("a", { status: "applied", mergedElsewhere: "branch" })]))).toContain("Merged outside Demesne");
+  expect(threadListHTML(view([fix("a", { status: "applied", mergedElsewhere: "branch" })]))).not.toContain("thread-merge");
   expect(threadLine(fix("a", { status: "failed", error: "It ran out of steps." }))).toBe('<span class="danger">Stopped</span> · It ran out of steps.');
   expect(threadLine(fix("a", { status: "starting" }))).toBe("Starting");
 });

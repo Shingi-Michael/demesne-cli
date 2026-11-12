@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
-import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool } from "./tools.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
@@ -159,10 +159,48 @@ function basedOnOf(store: DemesneStore, value: unknown) {
 const savedResult = (saved: FoundryArtifactDetail) => {
   const current = saved.versions.find((item) => item.version === saved.version);
   return { id: saved.id, title: saved.title, kind: saved.kind, version: saved.version, description: saved.description,
-    note: current?.note ?? "", ...(current?.recommended ? { recommended: true } : {}) };
+    note: current?.note ?? "", ...(current?.recommended ? { recommended: true } : {}), ...(current?.why ? { why: current.why } : {}) };
 };
 
 const clean = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : undefined;
+
+/// Pass 218 A: every designed version says why it looks the way it does.
+/// The person sees it as three quiet lines on the Foundry page, and the
+/// answer in the chat says the same.
+const WHY_SCHEMA = {
+  type: "object",
+  description: "Why it looks this way, a sentence each; required on each new html or svg version (revising: what changed and why).",
+  properties: {
+    direction: { type: "string", maxLength: 300, description: "Who it is for, the mood." },
+    look_at: { type: "string", maxLength: 300, description: "What leads." },
+    dropped: { type: "string", maxLength: 300, description: "What you left out, and why." },
+  },
+  required: ["direction", "look_at"],
+  additionalProperties: false,
+} as const;
+
+const WHY_ANSWER = "In your answer, say the same why in plain words: the direction, what to look at first, and what you dropped.";
+
+function whyOf(value: unknown): FoundryWhy | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("[invalid_input] why is an object: {direction, look_at, dropped}");
+  const text = (key: string) => typeof value[key] === "string" ? (value[key] as string).trim().slice(0, 300) : "";
+  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped") };
+  return why.direction || why.look || why.dropped ? why : undefined;
+}
+
+/// A save that makes a new html or svg version needs its why; fixing the
+/// version this same ask made (after a look or a try) keeps the one it has.
+function checkWhy(store: DemesneStore, kind: FoundryKind | undefined, id: string | undefined, turnId: string | undefined, why: FoundryWhy | undefined) {
+  if (kind !== "html" && kind !== "svg") return;
+  if (why?.direction && why.look) return;
+  if (id && turnId) {
+    const found = store.getFoundryArtifact(id);
+    const latest = found?.versions.find((item) => item.version === found.version);
+    if (latest?.turnId === turnId && latest.why) return;
+  }
+  throw new Error("[invalid_input] Say why it looks this way: why {direction, look_at, dropped}. Hint: a sentence each; direction is who it is for and the mood, look_at is what leads, dropped is what you left out");
+}
 
 function baseVersionOf(input: Record<string, unknown>) {
   if (input.base_version === undefined) return undefined;
@@ -197,6 +235,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           description: { type: "string", maxLength: 600, description: "Required when creating: one or two sentences, what it is and what to look at." },
           based_on: { type: "string", description: "Made from another mockup: its id." },
           recommended: { type: "boolean", description: "True on the one you would use when an ask makes several." },
+          why: WHY_SCHEMA,
         },
         required: ["source"],
         additionalProperties: false,
@@ -215,17 +254,19 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const basedOn = id ? null : basedOnOf(store, input.based_on);
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       if (!id) checkPick(store, context.turnId, recommended);
+      const why = whyOf(input.why);
+      checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
       try {
         saved = store.saveFoundryArtifact({ id, kind, title: clean(input.title, 200), source: input.source, note: clean(input.note, 300) ?? "", baseVersion,
-          description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}),
+          description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}), why,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -253,7 +294,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       name: "foundry_edit",
       description: "Change part of a Foundry artifact without resending it: exact find-and-replace edits on the version you read, saved as a new version. "
         + "Each find must match exactly once (all: true replaces every occurrence). Refused if the artifact moved past base_version. "
-        + "With no edits it only changes title, note, description or recommended, with no new version.",
+        + "With no edits it only changes title, note, description, recommended or why, with no new version.",
       inputSchema: {
         type: "object",
         properties: {
@@ -276,6 +317,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           note: { type: "string", maxLength: 300, description: "This version's name, a few words." },
           description: { type: "string", maxLength: 600, description: "What it is and what to look at." },
           recommended: { type: "boolean", description: "True on the one you would use." },
+          why: WHY_SCHEMA,
         },
         required: ["id"],
         additionalProperties: false,
@@ -287,11 +329,11 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       // Names and words only: no new version, no look.
       if (input.edits === undefined || (Array.isArray(input.edits) && input.edits.length === 0)) {
-        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended };
-        if (!words.title?.trim() && !words.description?.trim() && !words.note?.trim() && recommended === undefined) throw new Error("[invalid_input] foundry_edit needs edits, or a title, note, description or recommended to change. Hint: pass edits to change the page");
+        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended, why: whyOf(input.why) };
+        if (!words.title?.trim() && !words.description?.trim() && !words.note?.trim() && recommended === undefined && !words.why) throw new Error("[invalid_input] foundry_edit needs edits, or a title, note, description, recommended or why to change. Hint: pass edits to change the page");
         if (!store.getFoundryArtifact(input.id)) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
         const saved = store.describeFoundryArtifact(input.id, words);
-        return JSON.stringify({ ...savedResult(saved), message: `Updated its ${[words.title && "name", words.note && "version name", words.description && "description", recommended !== undefined && (recommended ? "pick" : "unpick")].filter(Boolean).join(", ")}; the page itself is unchanged.` });
+        return JSON.stringify({ ...savedResult(saved), message: `Updated its ${[words.title && "name", words.note && "version name", words.description && "description", recommended !== undefined && (recommended ? "pick" : "unpick"), words.why && "why"].filter(Boolean).join(", ")}; the page itself is unchanged.` });
       }
       const baseVersion = baseVersionOf(input);
       if (baseVersion === undefined) throw new Error("[invalid_input] foundry_edit needs base_version. Hint: pass the version you read");
@@ -306,16 +348,18 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const source = applyFoundryEdits(current.source, edits);
       if (Buffer.byteLength(source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
       checkOptions(current.kind, source);
+      const why = whyOf(input.why);
+      checkWhy(store, current.kind, input.id, context.turnId, why);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
       try {
         saved = store.saveFoundryArtifact({ id: input.id, title: clean(input.title, 200), source, note: clean(input.note, 300) ?? "", baseVersion,
-          description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}),
+          description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}), why,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);

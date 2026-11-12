@@ -7,6 +7,9 @@ import type { StructuredToolResult } from "../src/artifacts.ts";
 import { foundryEditTool, foundrySaveTool } from "../src/foundry.ts";
 import { LOOKS_PER_TURN, lookCommand, lookReport, type FoundryLook, type LookResult } from "../src/foundry-look.ts";
 
+/// Why a test page looks the way it does (pass 218 A).
+const W = { direction: "Plain, for a test.", look_at: "The heading." };
+
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64").toString("base64");
 const result = (issues: string[] = []): LookResult => ({ pages: [{ width: 1280, height: 900, issues, png: PNG }, { width: 390, height: 2000, issues: [], png: PNG }], errors: [] });
 const context = (turnId: string) => ({ workspaceRoot: "/tmp", signal: new AbortController().signal, turnId });
@@ -42,24 +45,24 @@ test("a saved HTML page comes back with its look, twice per turn at most; SVG go
   try {
     const looks = new Map<string, number>();
     const save = foundrySaveTool(store, look, looks), edit = foundryEditTool(store, look, looks);
-    const first = await save.executeWithArtifacts!({ kind: "html", title: "Garden plan", description: "A test page.", source: "<main>plan</main>" }, context("t1")) as StructuredToolResult;
+    const first = await save.executeWithArtifacts!({ kind: "html", title: "Garden plan", description: "A test page.", why: W, source: "<main>plan</main>" }, context("t1")) as StructuredToolResult;
     const saved = JSON.parse(first.text);
     expect(saved.version).toBe(1);
     expect(saved.look["desktop 1280px"]).toEqual(["Scrolls sideways by 120px at 390px wide"]);
     expect(first.images).toHaveLength(2);
-    const fixed = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan", replace: "plan!" }] }, context("t1")) as StructuredToolResult;
+    const fixed = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, why: W, edits: [{ find: "plan", replace: "plan!" }] }, context("t1")) as StructuredToolResult;
     expect(seen.at(-1)).toBe("<main>plan!</main>");
     expect(String(JSON.parse(fixed.text).look.next)).toContain("last look");
     // Its own fixes stay in version 1 (pass 197 A: one ask, one version).
     expect(JSON.parse(fixed.text).version).toBe(1);
-    const third = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan!", replace: "plan?" }] }, context("t1"));
+    const third = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, why: W, edits: [{ find: "plan!", replace: "plan?" }] }, context("t1"));
     expect(typeof third).toBe("string");
     expect(JSON.parse(third as string).look).toBeUndefined();
     // A new turn looks again.
-    const next = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan?", replace: "plan." }] }, context("t2"));
+    const next = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, why: W, edits: [{ find: "plan?", replace: "plan." }] }, context("t2"));
     expect(typeof next).toBe("object");
     expect(JSON.parse((next as StructuredToolResult).text).version).toBe(2);
-    const svg = await save.executeWithArtifacts!({ kind: "svg", title: "Mark", description: "A test page.", recommended: true, source: "<svg viewBox=\"0 0 1 1\"/>" }, context("t1"));
+    const svg = await save.executeWithArtifacts!({ kind: "svg", title: "Mark", description: "A test page.", recommended: true, why: W, source: "<svg viewBox=\"0 0 1 1\"/>" }, context("t1"));
     expect(typeof svg).toBe("string");
     expect(seen).toHaveLength(3);
   } finally { store.close(); }
@@ -69,7 +72,7 @@ test("a page saves as before when the look can't run", async () => {
   const store = new DemesneStore(":memory:");
   try {
     const save = foundrySaveTool(store, async () => null);
-    const saved = await save.executeWithArtifacts!({ kind: "html", title: "Plain", description: "A test page.", source: "<p>hi</p>" }, context("t1"));
+    const saved = await save.executeWithArtifacts!({ kind: "html", title: "Plain", description: "A test page.", why: W, source: "<p>hi</p>" }, context("t1"));
     expect(typeof saved).toBe("string");
     expect(JSON.parse(saved as string).version).toBe(1);
     expect(LOOKS_PER_TURN).toBe(2);
@@ -87,7 +90,7 @@ test("a model that sees gets the look's pictures in its next round, even without
     foundryLook: async () => ({ pages: [{ width: 1280, height: 800, issues: ["Text cut off in h1"], png }, { width: 390, height: 900, issues: [], png }], errors: [] }),
     processor: { providerId: "test", modelId: "look-test", vision: true, contextCapacity: 32768, maxOutputTokens: 1024, async listModels() { return []; },
       async *stream(messages) {
-        if (++round === 1) { yield { type: "tool_call_delta" as const, index: 0, idDelta: "save", nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ kind: "html", title: "Garden plan", description: "A test page.", source: "<h1>Garden</h1>" }) }; return; }
+        if (++round === 1) { yield { type: "tool_call_delta" as const, index: 0, idDelta: "save", nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ kind: "html", title: "Garden plan", description: "A test page.", why: W, source: "<h1>Garden</h1>" }) }; return; }
         pictures = messages.flatMap((message) => message.imageInputs ?? []).length;
         said = String(messages.findLast((message) => message.role === "tool")?.content);
         yield { type: "text_delta" as const, delta: "Looked" }; finished.resolve();

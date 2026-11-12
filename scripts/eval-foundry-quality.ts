@@ -144,7 +144,7 @@ const fake: TurnProcessor = {
   async listModels() { return [{ id: "stand-in", provider: "fake", contextWindow: 262144 }]; },
   async *stream(messages) {
     if (messages.some((message) => message.role === "tool")) { yield { type: "text_delta", delta: "Made it." }; yield { type: "finish", reason: "stop" }; return; }
-    yield { type: "tool_call_delta", index: 0, idDelta: `save-${messages.length}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Stand-in page", kind: "html", source: FAKE_PAGE }) };
+    yield { type: "tool_call_delta", index: 0, idDelta: `save-${messages.length}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Stand-in page", kind: "html", description: "A stand-in.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading." }, source: FAKE_PAGE }) };
     yield { type: "usage", usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 } };
     yield { type: "finish", reason: "tool_calls" };
   },

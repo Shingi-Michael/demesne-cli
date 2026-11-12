@@ -9,6 +9,9 @@ import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.
 import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 
+/// Why a test page looks the way it does (pass 218 A).
+const W = { direction: "Plain, for a test.", look_at: "The heading." };
+
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
 
 test("project overview mockups keep Foundry tools instead of becoming file inspection", () => {
@@ -62,7 +65,7 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
       }
       const results = messages.filter(message => message.role === "tool");
       const id = results[0]?.content ? JSON.parse(results[0].content).id : undefined;
-      const call = results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", description: "A test page.", source: "<h1>Garden one</h1>" } }
+      const call = results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", description: "A test page.", why: W, source: "<h1>Garden one</h1>" } }
         : results.length === 1 ? { name: "foundry_read", input: { id } }
         : results.length === 2 ? { name: "foundry_save", input: { id, source: "<h1>Garden two</h1>" } } : null;
       if (call) {
@@ -129,7 +132,7 @@ test("plan mode reads and makes Foundry pages, which change no project files", a
       yield { type: "finish", reason: "stop" }; return;
     }
     const call = results.length === 0 ? { name: "foundry_read", input: { id: artifact.id } }
-      : { name: "foundry_save", input: { id: artifact.id, source: "Changed" } };
+      : { name: "foundry_save", input: { id: artifact.id, why: W, source: "Changed" } };
     yield { type: "tool_call_delta", index: 0, idDelta: `plan-${results.length}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.input) };
     yield { type: "finish", reason: "tool_calls" };
   });
@@ -145,9 +148,9 @@ test("plan mode reads and makes Foundry pages, which change no project files", a
 test("foundry_save creates an artifact and keeps every version", async () => {
   const store = new DemesneStore(":memory:");
   const save = foundrySaveTool(store);
-  const created = JSON.parse(await save.execute({ title: "Landing", kind: "html", description: "A test page.", source: "<h1>One</h1>" }, context));
+  const created = JSON.parse(await save.execute({ title: "Landing", kind: "html", description: "A test page.", why: W, source: "<h1>One</h1>" }, context));
   expect(created.version).toBe(1);
-  const revised = JSON.parse(await save.execute({ id: created.id, source: "<h1>Two</h1>", note: "Bigger title" }, context));
+  const revised = JSON.parse(await save.execute({ id: created.id, why: W, source: "<h1>Two</h1>", note: "Bigger title" }, context));
   expect(revised.version).toBe(2);
 
   const latest = store.getFoundryArtifact(created.id)!;
@@ -176,7 +179,7 @@ test("foundry_save refuses a new artifact without a kind or title", async () => 
   const store = new DemesneStore(":memory:");
   const save = foundrySaveTool(store);
   await expect(save.execute({ title: "No kind", source: "x" }, context)).rejects.toThrow("kind");
-  await expect(save.execute({ kind: "svg", description: "A test page.", source: "<svg/>" }, context)).rejects.toThrow("title");
+  await expect(save.execute({ kind: "svg", description: "A test page.", why: W, source: "<svg/>" }, context)).rejects.toThrow("title");
   await expect(save.execute({ id: "missing", source: "x" }, context)).rejects.toThrow();
   store.close();
 });
@@ -188,7 +191,7 @@ test("artifact identity reaches live events and old replay without rewriting the
     const { turn } = store.createTurn(session.id, "Make a mockup");
     store.startTurn(turn.id);
     const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
-    const input = { title: "Mockup", kind: "html", description: "A test page.", source: "<button>Interact</button>" };
+    const input = { title: "Mockup", kind: "html", description: "A test page.", why: W, source: "<button>Interact</button>" };
     const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
     const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
     const event = store.settleToolCall(toolCallId, "completed", result);
@@ -212,7 +215,7 @@ test("a save that came back with the look's pictures still names its artifact (t
     const { turn } = store.createTurn(session.id, "Make a mockup");
     store.startTurn(turn.id);
     const { providerCallId } = store.startProviderCall(turn.id, "fixture", "fixture");
-    const input = { title: "Mockup", kind: "html", description: "A test page.", source: "<button>Interact</button>" };
+    const input = { title: "Mockup", kind: "html", description: "A test page.", why: W, source: "<button>Interact</button>" };
     const { toolCallId } = store.recordToolCall(turn.id, providerCallId, "save", "foundry_save", JSON.stringify(input));
     const result = await foundrySaveTool(store).execute(input, { ...context, sessionId: session.id, turnId: turn.id });
     // The engine adds a line per picture after the tool's JSON.
@@ -241,24 +244,24 @@ test("foundry_edit applies exact edits to the version it read and refuses a stal
   const store = new DemesneStore(":memory:");
   try {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
-    const created = JSON.parse(await save.execute({ title: "Garden", kind: "html", description: "A test page.", source: "<h1>Garden</h1><p>one</p><p>one</p>" }, context));
-    const edited = JSON.parse(await edit.execute({ id: created.id, base_version: 1, note: "Title",
+    const created = JSON.parse(await save.execute({ title: "Garden", kind: "html", description: "A test page.", why: W, source: "<h1>Garden</h1><p>one</p><p>one</p>" }, context));
+    const edited = JSON.parse(await edit.execute({ id: created.id, base_version: 1, note: "Title", why: W,
       edits: [{ find: "<h1>Garden</h1>", replace: "<h1>Tiny garden</h1>" }, { find: "one", replace: "two", all: true }] }, context));
     expect(edited).toMatchObject({ id: created.id, version: 2, edits: 2 });
     expect(store.getFoundryArtifact(created.id)!.source).toBe("<h1>Tiny garden</h1><p>two</p><p>two</p>");
     expect(store.getFoundryArtifact(created.id)!.versions[0]!.note).toBe("Title");
     // Edit source (or another chat) moved the artifact on: version 1 is stale.
-    await expect(edit.execute({ id: created.id, base_version: 1, edits: [{ find: "two", replace: "three", all: true }] }, context)).rejects.toThrow("[conflict] Foundry artifact is at version 2, not 1");
-    await expect(save.execute({ id: created.id, base_version: 1, source: "<h1>Lost</h1>" }, context)).rejects.toThrow("[conflict]");
+    await expect(edit.execute({ id: created.id, base_version: 1, why: W, edits: [{ find: "two", replace: "three", all: true }] }, context)).rejects.toThrow("[conflict] Foundry artifact is at version 2, not 1");
+    await expect(save.execute({ id: created.id, base_version: 1, why: W, source: "<h1>Lost</h1>" }, context)).rejects.toThrow("[conflict]");
     expect(store.getFoundryArtifact(created.id)!.version).toBe(2);
     // A whole-source save with the right base still works, and one without a base keeps working.
-    expect(JSON.parse(await save.execute({ id: created.id, base_version: 2, source: "<h1>Three</h1>" }, context)).version).toBe(3);
-    expect(JSON.parse(await save.execute({ id: created.id, source: "<h1>Four</h1>" }, context)).version).toBe(4);
+    expect(JSON.parse(await save.execute({ id: created.id, base_version: 2, why: W, source: "<h1>Three</h1>" }, context)).version).toBe(3);
+    expect(JSON.parse(await save.execute({ id: created.id, why: W, source: "<h1>Four</h1>" }, context)).version).toBe(4);
     // Misses and ambiguity are refused before anything is saved.
-    await expect(edit.execute({ id: created.id, base_version: 4, edits: [{ find: "missing", replace: "x" }] }, context)).rejects.toThrow("[no_match] Edit 1");
-    const saved = JSON.parse(await save.execute({ id: created.id, base_version: 4, source: "a a" }, context));
+    await expect(edit.execute({ id: created.id, base_version: 4, why: W, edits: [{ find: "missing", replace: "x" }] }, context)).rejects.toThrow("[no_match] Edit 1");
+    const saved = JSON.parse(await save.execute({ id: created.id, base_version: 4, why: W, source: "a a" }, context));
     await expect(edit.execute({ id: created.id, base_version: saved.version, edits: [{ find: "a", replace: "b" }] }, context)).rejects.toThrow("[ambiguous] Edit 1: find text occurs 2 times");
-    await expect(edit.execute({ id: created.id, edits: [{ find: "a", replace: "b" }] }, context)).rejects.toThrow("base_version");
+    await expect(edit.execute({ id: created.id, why: W, edits: [{ find: "a", replace: "b" }] }, context)).rejects.toThrow("base_version");
     await expect(edit.execute({ id: "missing", base_version: 1, edits: [{ find: "a", replace: "b" }] }, context)).rejects.toThrow("[not_found]");
     expect(store.getFoundryArtifact(created.id)!.version).toBe(saved.version);
   } finally { store.close(); }
@@ -273,8 +276,8 @@ test("a page's source leaves the transcript once its turn is over, in the calls,
   const page = "<h1>" + "a".repeat(100) + "</h1>";
   const messages: ModelMessage[] = [
     { role: "user", content: "Make a page" },
-    { role: "assistant", content: null, toolCalls: [{ id: "c1", name: "foundry_save", arguments: JSON.stringify({ title: "Garden", kind: "html", source: page }) }],
-      responses: { accountId: "acct", model: "m", output: [{ type: "reasoning", summary: [] }, { type: "function_call", call_id: "c1", name: "foundry_save", arguments: JSON.stringify({ title: "Garden", kind: "html", source: page }) }] } },
+    { role: "assistant", content: null, toolCalls: [{ id: "c1", name: "foundry_save", arguments: JSON.stringify({ title: "Garden", kind: "html", why: W, source: page }) }],
+      responses: { accountId: "acct", model: "m", output: [{ type: "reasoning", summary: [] }, { type: "function_call", call_id: "c1", name: "foundry_save", arguments: JSON.stringify({ title: "Garden", kind: "html", why: W, source: page }) }] } },
     { role: "tool", toolCallId: "c1", content: JSON.stringify({ id: "art", version: 1 }) },
     { role: "assistant", content: null, toolCalls: [{ id: "c2", name: "foundry_read", arguments: JSON.stringify({ id: "art" }) }] },
     { role: "tool", toolCallId: "c2", content: JSON.stringify({ id: "art", version: 1, source: page, versions: [] }) },
@@ -289,7 +292,7 @@ test("a page's source leaves the transcript once its turn is over, in the calls,
   expect(text).not.toContain("aaaa");
   expect(text.split(FORGOTTEN_SOURCE)).toHaveLength(4);
   const save = forgotten[1] as Extract<ModelMessage, { role: "assistant" }>;
-  expect(JSON.parse(save.toolCalls![0]!.arguments)).toEqual({ title: "Garden", kind: "html", source: FORGOTTEN_SOURCE });
+  expect(JSON.parse(save.toolCalls![0]!.arguments)).toEqual({ title: "Garden", kind: "html", why: W, source: FORGOTTEN_SOURCE });
   expect(save.responses!.output[0]).toEqual({ type: "reasoning", summary: [] });
   expect(JSON.parse(String(save.responses!.output[1]!.arguments))).toMatchObject({ source: FORGOTTEN_SOURCE });
   expect(JSON.parse((forgotten[4] as Extract<ModelMessage, { role: "tool" }>).content)).toEqual({ id: "art", version: 1, source: FORGOTTEN_SOURCE, versions: [] });
@@ -306,7 +309,7 @@ test("the next turn's request carries a stub where the earlier turn's page was, 
     requests.push(structuredClone(messages));
     const results = messages.filter(message => message.role === "tool");
     const turn = messages.filter(message => message.role === "user").length;
-    const call = turn === 1 && results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", description: "A test page.", source: page } }
+    const call = turn === 1 && results.length === 0 ? { name: "foundry_save", input: { title: "Tiny garden", kind: "html", description: "A test page.", why: W, source: page } }
       : turn === 2 && results.length === 1 ? { name: "foundry_read", input: { id: JSON.parse(results[0]!.content).id } } : null;
     if (call) {
       yield { type: "tool_call_delta", index: 0, idDelta: `foundry-${turn}-${results.length}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.input) };
@@ -354,24 +357,24 @@ test("one ask, one version: saves in the turn that made the latest version chang
   try {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
     const t1 = { ...context, turnId: "t1" }, t2 = { ...context, turnId: "t2" };
-    const made = JSON.parse(await save.execute({ title: "Pricing", kind: "html", description: "A test page.", source: "<p>one</p>", note: "First take" }, t1));
-    const fixed = JSON.parse(await edit.execute({ id: made.id, base_version: 1, edits: [{ find: "one", replace: "uno" }], note: "Fix button" }, t1));
+    const made = JSON.parse(await save.execute({ title: "Pricing", kind: "html", description: "A test page.", why: W, source: "<p>one</p>", note: "First take" }, t1));
+    const fixed = JSON.parse(await edit.execute({ id: made.id, base_version: 1, why: W, edits: [{ find: "one", replace: "uno" }], note: "Fix button" }, t1));
     expect(fixed.version).toBe(1);
-    const again = JSON.parse(await save.execute({ id: made.id, base_version: 1, source: "<p>whole</p>" }, t1));
+    const again = JSON.parse(await save.execute({ id: made.id, base_version: 1, why: W, source: "<p>whole</p>" }, t1));
     expect(again.version).toBe(1);
     let found = store.getFoundryArtifact(made.id)!;
     expect(found.source).toBe("<p>whole</p>");
     expect(found.versions.map((item) => [item.version, item.note])).toEqual([[1, "First take"]]);
     expect(store.listFoundryVersions()).toHaveLength(1);
     // The next ask is the next version, and its own fixes fold into it.
-    const asked = JSON.parse(await edit.execute({ id: made.id, base_version: 1, edits: [{ find: "whole", replace: "two" }] }, t2));
+    const asked = JSON.parse(await edit.execute({ id: made.id, base_version: 1, why: W, edits: [{ find: "whole", replace: "two" }] }, t2));
     expect(asked.version).toBe(2);
-    expect(JSON.parse(await edit.execute({ id: made.id, base_version: 2, edits: [{ find: "two", replace: "dos" }] }, t2)).version).toBe(2);
+    expect(JSON.parse(await edit.execute({ id: made.id, base_version: 2, why: W, edits: [{ find: "two", replace: "dos" }] }, t2)).version).toBe(2);
     found = store.getFoundryArtifact(made.id)!;
     expect(found.versions.map((item) => item.version)).toEqual([2, 1]);
     expect(store.getFoundryArtifact(made.id, 1)!.source).toBe("<p>whole</p>");
     // Without a turn (an outside save) every save is a version, as before.
-    expect(JSON.parse(await edit.execute({ id: made.id, base_version: 2, edits: [{ find: "dos", replace: "tres" }] }, context)).version).toBe(3);
+    expect(JSON.parse(await edit.execute({ id: made.id, base_version: 2, why: W, edits: [{ find: "dos", replace: "tres" }] }, context)).version).toBe(3);
   } finally { store.close(); }
 });
 
@@ -381,10 +384,10 @@ test("a page holds at most three options", async () => {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
     const option = (name: string) => `<section data-option="${name}">x</section>`;
     const four = `<d-compare recommended="A">${["A", "B", "C", "D"].map(option).join("")}</d-compare>`;
-    await expect(save.execute({ title: "Too many", kind: "html", description: "A test page.", source: four }, context)).rejects.toThrow("too_many_options");
+    await expect(save.execute({ title: "Too many", kind: "html", description: "A test page.", why: W, source: four }, context)).rejects.toThrow("too_many_options");
     const three = `<d-compare recommended="A">${["A", "B", "C"].map(option).join("")}</d-compare>`;
-    const made = JSON.parse(await save.execute({ title: "Three", kind: "html", description: "A test page.", source: three }, context));
-    await expect(edit.execute({ id: made.id, base_version: 1, edits: [{ find: "</d-compare>", replace: `${option("D")}</d-compare>` }] }, context)).rejects.toThrow("at most 3");
+    const made = JSON.parse(await save.execute({ title: "Three", kind: "html", description: "A test page.", why: W, source: three }, context));
+    await expect(edit.execute({ id: made.id, base_version: 1, why: W, edits: [{ find: "</d-compare>", replace: `${option("D")}</d-compare>` }] }, context)).rejects.toThrow("at most 3");
   } finally { store.close(); }
 });
 
@@ -392,8 +395,8 @@ test("every mockup is described, and its versions are named (pass 208 A)", async
   const store = new DemesneStore(":memory:");
   try {
     const save = foundrySaveTool(store), edit = foundryEditTool(store), read = foundryReadTool(store);
-    await expect(save.execute({ title: "Roaster pricing", kind: "html", source: "<p>x</p>" }, context)).rejects.toThrow("needs a description");
-    const made = JSON.parse(await save.execute({ title: "Roaster pricing", kind: "html", description: "Three plans for the roastery. Look at the yearly toggle.", note: "First take", source: "<p>x</p>" }, { ...context, turnId: "t1" }));
+    await expect(save.execute({ title: "Roaster pricing", kind: "html", why: W, source: "<p>x</p>" }, context)).rejects.toThrow("needs a description");
+    const made = JSON.parse(await save.execute({ title: "Roaster pricing", kind: "html", description: "Three plans for the roastery. Look at the yearly toggle.", note: "First take", why: W, source: "<p>x</p>" }, { ...context, turnId: "t1" }));
     expect(made).toMatchObject({ description: "Three plans for the roastery. Look at the yearly toggle.", note: "First take" });
     // Renaming, describing and naming the version happen with no new version.
     const named = JSON.parse(await edit.execute({ id: made.id, title: "Roastery plans", note: "Yearly first", description: "Plans, yearly first." }, context));
@@ -401,9 +404,9 @@ test("every mockup is described, and its versions are named (pass 208 A)", async
     expect(store.getFoundryArtifact(made.id)!.versions).toHaveLength(1);
     await expect(edit.execute({ id: made.id }, context)).rejects.toThrow("needs edits, or a title");
     // A mockup made from another says so, and reading it shows the words.
-    const from = JSON.parse(await save.execute({ title: "Plans on a phone", kind: "html", description: "The plans at phone width.", based_on: made.id, source: "<p>y</p>" }, context));
+    const from = JSON.parse(await save.execute({ title: "Plans on a phone", kind: "html", description: "The plans at phone width.", based_on: made.id, why: W, source: "<p>y</p>" }, context));
     expect(store.getFoundryArtifact(from.id)!.basedOn).toEqual({ id: made.id, version: 1 });
-    await expect(save.execute({ title: "Nope", kind: "html", description: "x", based_on: "missing", source: "<p>z</p>" }, context)).rejects.toThrow("based_on");
+    await expect(save.execute({ title: "Nope", kind: "html", description: "x", based_on: "missing", why: W, source: "<p>z</p>" }, context)).rejects.toThrow("based_on");
     const listed = JSON.parse(await read.execute({}, context)) as { title: string; description?: string }[];
     expect(listed.find((item) => item.title === "Roastery plans")?.description).toBe("Plans, yearly first.");
     expect(JSON.parse(await read.execute({ id: from.id }, context)).basedOn).toEqual({ id: made.id, version: 1 });
@@ -415,7 +418,7 @@ test("one ask that makes several mockups marks the one it would use (pass 208 A)
   try {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
     const t1 = { ...context, turnId: "t1" };
-    const page = (title: string, extra: Record<string, unknown> = {}) => save.execute({ title, kind: "html", description: `${title}.`, source: `<p>${title}</p>`, ...extra }, t1);
+    const page = (title: string, extra: Record<string, unknown> = {}) => save.execute({ title, kind: "html", description: `${title}.`, why: W, source: `<p>${title}</p>`, ...extra }, t1);
     const calm = JSON.parse(await page("Calm"));
     // A second mockup in the ask with no pick is refused, and says how to pick.
     await expect(page("Bold")).rejects.toThrow("no_recommendation");
@@ -429,7 +432,7 @@ test("one ask that makes several mockups marks the one it would use (pass 208 A)
     expect(picks).toEqual([calm.id]);
     expect(store.listFoundryVersions().find((item) => item.artifactId === third.id)).toMatchObject({ turnId: "t1", recommended: false });
     // Another ask starts over.
-    expect(JSON.parse(await save.execute({ title: "Alone", kind: "html", description: "x", source: "<p>a</p>" }, { ...context, turnId: "t2" })).version).toBe(1);
+    expect(JSON.parse(await save.execute({ title: "Alone", kind: "html", description: "x", why: W, source: "<p>a</p>" }, { ...context, turnId: "t2" })).version).toBe(1);
   } finally { store.close(); }
 });
 
@@ -438,12 +441,12 @@ test("a page with several options names the one it would use (pass 208 A)", asyn
   try {
     const save = foundrySaveTool(store);
     const options = `<section data-option="A · Pills">a</section><section data-option="B · Tabs">b</section>`;
-    await expect(save.execute({ title: "No pick", kind: "html", description: "x", source: `<d-compare>${options}</d-compare>` }, context)).rejects.toThrow("no_recommendation");
-    expect(JSON.parse(await save.execute({ title: "Pick", kind: "html", description: "x", source: `<d-compare recommended="A">${options}</d-compare>` }, context)).version).toBe(1);
+    await expect(save.execute({ title: "No pick", kind: "html", description: "x", why: W, source: `<d-compare>${options}</d-compare>` }, context)).rejects.toThrow("no_recommendation");
+    expect(JSON.parse(await save.execute({ title: "Pick", kind: "html", description: "x", why: W, source: `<d-compare recommended="A">${options}</d-compare>` }, context)).version).toBe(1);
     // A page drawn without the part marks its pick on the option.
-    expect(JSON.parse(await save.execute({ title: "Own", kind: "html", description: "x", source: options.replace('data-option="A · Pills"', 'data-option="A · Pills" data-recommended') }, context)).version).toBe(1);
+    expect(JSON.parse(await save.execute({ title: "Own", kind: "html", description: "x", why: W, source: options.replace('data-option="A · Pills"', 'data-option="A · Pills" data-recommended') }, context)).version).toBe(1);
     // One option needs no pick.
-    expect(JSON.parse(await save.execute({ title: "One", kind: "html", description: "x", source: `<d-compare><section data-option="A">a</section></d-compare>` }, context)).version).toBe(1);
+    expect(JSON.parse(await save.execute({ title: "One", kind: "html", description: "x", why: W, source: `<d-compare><section data-option="A">a</section></d-compare>` }, context)).version).toBe(1);
   } finally { store.close(); }
 });
 
@@ -466,4 +469,34 @@ test("an older Foundry database gains descriptions, based on and picks", () => {
     expect(store.getFoundryArtifact(made.id)!.versions[0]!.recommended).toBe(false);
     store.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("every new page version says why it looks that way, and keeps it (pass 218 A)", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const save = foundrySaveTool(store), edit = foundryEditTool(store);
+    const t1 = { ...context, turnId: "t1" }, t2 = { ...context, turnId: "t2" };
+    // A page or a drawing without a why is turned back, and says what to send.
+    await expect(save.execute({ title: "Plans", kind: "html", description: "Plans.", source: "<p>a</p>" }, t1)).rejects.toThrow("why {direction, look_at, dropped}");
+    await expect(save.execute({ title: "Mark", kind: "svg", description: "Mark.", why: { direction: "Warm." }, source: "<svg/>" }, t1)).rejects.toThrow("Say why");
+    // Content Demesne designs needs none.
+    expect(JSON.parse(await save.execute({ title: "Brief", kind: "doc", description: "A brief.", source: "# Brief" }, { ...context, turnId: "t0" })).version).toBe(1);
+    const why = { direction: "Warm paper and a serif, for people who buy by taste.", look_at: "The dark middle plan.", dropped: "A comparison table; it felt like homework." };
+    const saved = JSON.parse(await save.execute({ title: "Plans", kind: "html", description: "Plans.", why, source: "<p>a</p>" }, t1));
+    expect(saved.why).toEqual({ direction: why.direction, look: why.look_at, dropped: why.dropped });
+    expect(saved.message).toContain("say the same why");
+    // Fixing its own page in the same ask keeps the why it gave.
+    expect(JSON.parse(await edit.execute({ id: saved.id, base_version: 1, edits: [{ find: "a", replace: "b" }] }, t1)).why.look).toBe("The dark middle plan.");
+    // A later ask makes a new version, which needs its own why.
+    await expect(edit.execute({ id: saved.id, base_version: 1, edits: [{ find: "b", replace: "c" }] }, t2)).rejects.toThrow("Say why");
+    await edit.execute({ id: saved.id, base_version: 1, why: { direction: "Same paper.", look_at: "The bigger price." }, edits: [{ find: "b", replace: "c" }] }, t2);
+    const found = store.getFoundryArtifact(saved.id)!;
+    expect(found.versions.map((item) => item.why?.look)).toEqual(["The bigger price.", "The dark middle plan."]);
+    expect(found.versions[0]!.why!.dropped).toBe("");
+    // The long page gets it per version, and a why can be set without a new version.
+    await edit.execute({ id: saved.id, why: { direction: "Same paper.", look_at: "The price.", dropped: "Bold red." } }, t2);
+    const shelf = store.listFoundryVersions().filter((item) => item.artifactId === saved.id);
+    expect(shelf.map((item) => item.why?.look)).toEqual(["The price.", "The dark middle plan."]);
+    expect(store.getFoundryArtifact(saved.id)!.version).toBe(2);
+  } finally { store.close(); }
 });

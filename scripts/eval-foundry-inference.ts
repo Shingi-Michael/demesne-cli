@@ -163,7 +163,7 @@ const fake: TurnProcessor = {
     const asked = lastUser(messages), read = messages.some((message) => message.role === "tool");
     const call = (name: string, input: unknown) => ({ type: "tool_call_delta" as const, index: 0, idDelta: `${name}-${messages.length}`, nameDelta: name, argumentsDelta: JSON.stringify(input) });
     if (!read && !/^hey$/.test(asked)) { yield call("list_files", { path: "." }); yield { type: "finish", reason: "tool_calls" }; return; }
-    if (/show|look|page|age/i.test(asked)) { yield call("foundry_save", { title: "Try", kind: "html", source: "<p>hi</p>" }); yield { type: "finish", reason: "tool_calls" }; return; }
+    if (/show|look|page|age/i.test(asked)) { yield call("foundry_save", { title: "Try", kind: "html", description: "A stand-in.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading." }, source: "<p>hi</p>" }); yield { type: "finish", reason: "tool_calls" }; return; }
     yield { type: "text_delta", delta: "Done in words." }; yield { type: "finish", reason: "stop" };
   },
   // Frozen, like a real provider's: the path the real run takes.

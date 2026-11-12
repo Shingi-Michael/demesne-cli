@@ -29,3 +29,15 @@ Your files are plain Markdown, up to 8 KB each. Write them however you like; sho
 The guide reaches the model as its own numbered block in its instructions, from the moment the chat has Foundry's tools, with your rules marked as winning. It used to be one long paragraph inside the `foundry_save` tool's description, with nowhere for your rules to go. The tool's description now only says how the tool is called.
 
 The ready kinds (deck, doc, dashboard) are drawn by Demesne from content, so the guide applies to pages the model designs itself: `html` and `svg`.
+
+## Every mockup says why
+
+Each version of a page the model designs (`html` or `svg`) carries a short **why**, written when it is saved:
+
+- **Direction**: who it is for and the mood it went for.
+- **Look at**: what leads, and so what to look at first.
+- **Dropped**: what it tried or considered and left out. Left empty when nothing was.
+
+On the Foundry page the why sits under the description as three quiet lines, one per version, so the history reads as a line of decisions. The model's answer in the chat says the same thing in plain words, so you never have to open Foundry to learn it.
+
+`foundry_save` and `foundry_edit` take it as `why: {direction, look_at, dropped}`. A save that makes a new page version without it is turned back with a hint. The model fixing its own page in the same ask (after a look or a try) keeps the why it already gave. A later ask is a new version, so it says what changed and why. `foundry_edit` with only `id` and `why` sets the why of the latest version without making a new one. Versions saved before this, and the ready kinds, have none. It is stored per version in the `why` column of `foundry_versions`.

@@ -24,6 +24,7 @@ import type { ThemeStore } from "./themes.ts";
 import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
+import { designGuideBlock, loadDesignGuides } from "./design-guide.ts";
 import { forgetFoundrySources, FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { WEB_TOOL_NAMES } from "./web.ts";
 import { UPDATE_PLAN } from "./plan.ts";
@@ -104,6 +105,8 @@ interface AgentEngineOptions extends AgentConfig {
   sources?: SourceStore;
   /// Lines added to the system prompt for this chat (its Heartbeat address).
   sessionContext?: (sessionId: string) => string | null;
+  /// Where the person's own design guide lives (~ by default; tests point it elsewhere).
+  designHome?: string;
   /// Other agents working in a project (Heartbeat), for the overlap check.
   agentsIn?: (workspaceRoot: string) => Promise<NearbyAgent[]>;
   /// Whether a chat is the always-on assistant's: it gets the assistant's
@@ -369,6 +372,7 @@ export class AgentEngine {
         : agentSystemPrompt({ workspaceRoot: root, plain, definitions, content: turn.content,
         planOnly: turn.planOnly, orchestrate: orchestrating, autoApprove: this.store.isSessionAutoApprove(session.id), acceptEdits: this.store.isSessionAcceptEdits(session.id),
         attended: turn.permissionMode === "ask" && !turn.fromDrive && !turn.fromRoutine,
+        designing: sent.some((tool) => tool.name === "foundry_save"), home: this.options.designHome,
         delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available(session.workspace?.root).length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, modelSees: inference.vision === true, configured: this.configuredSystemPrompt, sessionContext: [this.options.sessionContext?.(session.id), sourcesContext(keptSources)].filter(Boolean).join("\n") || undefined }) + moreToolsSection(deferrable);
       const unplannedMessages: ProviderMessage[] = [
         { role: "system", content: systemPrompt + (noting ? NOTE_INSTRUCTION : "") + (finalizing
@@ -1469,6 +1473,8 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; plain?: boo
   modelSees?: boolean; configured?: string; sessionContext?: string;
   /// Someone is at the window: a chat turn, not Drive, a routine or mail.
   attended?: boolean;
+  /// Foundry's tools are with the model this round (loaded, or never deferred): the design guide comes with them.
+  designing?: boolean; home?: string;
   /// How readily to send sub-agents, and whether they run on your agent tools.
   delegate?: { often: SubagentOften; onAgents: boolean } }): string {
   const base = options.configured?.trim() || defaultSystemPrompt(options.workspaceRoot, options.autoApprove === true && !options.planOnly, options.plain === true);
@@ -1485,6 +1491,8 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; plain?: boo
     options.definitions.some((tool) => tool.name === "foundry_save")
       ? options.attended === false ? FOUNDRY_UNATTENDED_GUIDANCE : FOUNDRY_GUIDANCE
       : null,
+    options.designing ?? options.definitions.some((tool) => tool.name === "foundry_save")
+      ? designGuideBlock(loadDesignGuides(options.workspaceRoot, options.home)) : null,
     !options.planOnly && options.autoApprove
       ? "Session auto-approve is enabled: the user authorizes all tool approvals, including file changes, host commands and publishing, within the requested task. Execute necessary actions without requesting tool approval. Follow explicit read-only or no-edit instructions; workspace restrictions and tool validation still apply."
       : !options.planOnly && options.acceptEdits

@@ -6,7 +6,7 @@ import { DemesneClient } from "../../../packages/client/src/index.ts";
 import type { ModelMessage, PermissionMode, SessionStateResponse } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
-import { applyFoundryEdits, DESIGN_BRIEF, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
@@ -229,17 +229,10 @@ test("the tools carry the design brief, the kit and the library rules", () => {
     expect(text).toContain("cdnjs.cloudflare.com");
     expect(text).toContain('href=\\"foundry://kit/base.css\\"');
     expect(text).toContain('src=\\"foundry://kit/anime.js\\"');
-    expect(text).toContain("prefers-reduced-motion: reduce");
+    // How it should look is the design guide's (design-guide.test.ts), not the tool's.
+    expect(text).toContain("follow the Design guide in your instructions");
+    expect(text).not.toContain("Avoid stock AI looks");
     expect(JSON.stringify(foundryEditTool(store).definition)).toContain("base_version");
-    expect(DESIGN_BRIEF).toContain("phone width");
-    expect(DESIGN_BRIEF).toContain("the kit is the floor");
-    // Pass 200 A: layout is even; off-centre only on purpose, on the grid.
-    expect(DESIGN_BRIEF).toContain("cards side by side the same height");
-    expect(DESIGN_BRIEF).not.toContain("an asymmetric layout");
-    expect(DESIGN_BRIEF).not.toContain("little CSS");
-    // Sizes, spaces and colours come from the kit's scales (the quality eval found 8-16 sizes and 12-25 colours without them).
-    expect(DESIGN_BRIEF).toContain("var(--text-xs|sm|md|lg|xl|display)");
-    expect(DESIGN_BRIEF).toContain("var(--space-1…8)");
     expect(JSON.stringify(foundryReadTool(store).definition)).toContain("base_version");
   } finally { store.close(); }
 });
@@ -392,7 +385,6 @@ test("a page holds at most three options", async () => {
     const three = `<d-compare recommended="A">${["A", "B", "C"].map(option).join("")}</d-compare>`;
     const made = JSON.parse(await save.execute({ title: "Three", kind: "html", description: "A test page.", source: three }, context));
     await expect(edit.execute({ id: made.id, base_version: 1, edits: [{ find: "</d-compare>", replace: `${option("D")}</d-compare>` }] }, context)).rejects.toThrow("at most 3");
-    expect(DESIGN_BRIEF).toContain("never more than three");
   } finally { store.close(); }
 });
 

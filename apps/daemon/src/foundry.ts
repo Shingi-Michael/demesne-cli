@@ -52,23 +52,10 @@ const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet"
   + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>); foundry_read id "kit:parts" lists them. `
   + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
-/// The design brief every artifact follows. The kit is the floor, not the
-/// ceiling: a brief that only said "lean on the kit" and listed don'ts made
-/// every page the same plain template (own CSS fell to a third, no fonts,
-/// no motion), so this one says what good looks like.
-export const DESIGN_BRIEF = "Design brief: make it look designed, never like a template; the kit is the floor, not the ceiling. "
-  + "First pick a direction in a few words (who it is for, the mood) and let it decide the rest. Title of two to four words. "
-  + "One focal point and a clear hierarchy, from the kit's scales and nothing else: text sizes var(--text-xs|sm|md|lg|xl|display) (12 14 18 24 32 48px; one bigger hero size at most), spaces var(--space-1…8) (4 8 12 16 24 32 48 64px), tight leading and tracking on big text, dense areas against quiet ones. "
-  + "A small palette: the kit's ink tints, --accent and at most two colours of your own (tints of them via color-mix); small text never lighter than --muted. "
-  + "Layout is even: one grid whose columns share edges, the same gap between every item in a row, cards side by side the same height (stretch them), padding the same on both sides, and centred things truly centred; break symmetry only on purpose and still on the grid. "
-  + "One strong move per page: an oversized number or headline, a bold colour field, a deliberate off-centre layout on the grid, an SVG illustration or a striking chart. "
-  + "Write as much CSS of your own as the design needs, on the kit's variables and scales: set --accent (and --ink/--paper for a tinted page) on :root, and a display face from Google Fonts when it fits. "
-  + "Depth and detail where they earn it: layered surfaces, soft shadows only on things that float, real data, hover/selected/empty states, small SVG icons. "
-  + "Asked for options or ideas: two or three genuinely different directions (never more than three), each named, the one you would pick first with recommended set on the <d-compare>; say in the chat which you would pick and why. "
-  + "A mockup is the working thing at real size, not a poster of it: no headline or notes above it (say what it is in the chat), it fills the page, and every control does something: tabs and links go somewhere, inputs take typing, buttons change what shows. Options go in one <d-compare>, one at a time. "
-  + "A mockup of an existing app matches that app's look (Demesne: build on <d-demesne>, views for its tabs and chats; no menus or side panels). People open it in a pane about 620px wide: it reads and works there, and at phone width with no horizontal scroll. Real content, never lorem ipsum. "
-  + "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce. "
-  + "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.";
+/// How a page should look is not here: the design guide (design-guide.ts)
+/// rides in the system prompt with the person's own rules, and this
+/// description keeps to how the tool is called.
+const DESIGN_POINTER = "How it should look: follow the Design guide in your instructions, rule by rule, with the person's own rules first.";
 
 /// The ready kinds (apps/desktop/electron/foundry-kinds.ts): the model sends
 /// content and Demesne draws it, so a deck, a report or a dashboard looks
@@ -85,7 +72,7 @@ export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: a
   + "await demesne.ask(question) returns the chat model's answer as text, for a button the person presses (never on load or in a loop; a few a minute); await demesne.pick({accept}) lets them choose a file ({name, type, text} or {name, type, dataURL}). "
   + "Use them when the page is a tool to keep (a tracker, checklist, planner, journal, quiz): load on start, save on every change, show a saved state.";
 
-const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + REMEMBER_RULES + " " + DESIGN_BRIEF;
+const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
 
 /// What stands in for a page's source once its turn is over.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";

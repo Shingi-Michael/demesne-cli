@@ -82,14 +82,7 @@ export const TRY_RUNTIME = String.raw`(() => {
       const names = [...new Set([...document.querySelectorAll(CONTROLS)].filter(shown).map((el) => cut(name(el), 30)).filter(Boolean))].slice(0, 10);
       return { found: false, names };
     }
-    const el = hits[0];
-    el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-    const box = el.getBoundingClientRect();
-    const x = Math.round(Math.min(Math.max(box.left + box.width / 2, 1), innerWidth - 2)), y = Math.round(Math.min(Math.max(box.top + box.height / 2, 1), innerHeight - 2));
-    const top = document.elementFromPoint(x, y);
-    const covered = top && top !== el && !el.contains(top) && !top.contains(el) && !(el.labels && [...el.labels].some((label) => label.contains(top))) ? describe(top) : null;
-    const disabled = el.disabled === true || el.getAttribute("aria-disabled") === "true";
-    return { found: true, x, y, many: hits.length, what: role(el) + ' "' + cut(name(el), 30) + '"', covered, disabled, offscreen: box.bottom < 0 || box.top > innerHeight };
+    return place(hits[0], hits.length);
   }
   // What a person would notice changed: the visible text, the controls' states and the scroll.
   function fingerprint() {
@@ -118,7 +111,17 @@ export const TRY_RUNTIME = String.raw`(() => {
     }
     return out;
   }
-  window.__demesneTry = { find, fingerprint, tree };
+  // place: where an element is and whether a person could reach it (the model's browser finds by number, browser-runtime.ts).
+  function place(el, many) {
+    el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    const box = el.getBoundingClientRect();
+    const x = Math.round(Math.min(Math.max(box.left + box.width / 2, 1), innerWidth - 2)), y = Math.round(Math.min(Math.max(box.top + box.height / 2, 1), innerHeight - 2));
+    const top = document.elementFromPoint(x, y);
+    const covered = top && top !== el && !el.contains(top) && !top.contains(el) && !(el.labels && [...el.labels].some((label) => label.contains(top))) ? describe(top) : null;
+    const disabled = el.disabled === true || el.getAttribute("aria-disabled") === "true";
+    return { found: true, x, y, many, what: role(el) + ' "' + cut(name(el), 30) + '"', covered, disabled, offscreen: box.bottom < 0 || box.top > innerHeight };
+  }
+  window.__demesneTry = { find, fingerprint, tree, kit: { CONTROLS, shown, name, role, cut, clean, place } };
   return true;
 })()`;
 

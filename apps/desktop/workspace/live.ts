@@ -12,6 +12,7 @@ import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
+import { browserTarget } from "./browser-row.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { ring as threadRing, threadBriefHTML, threadMergeHTML, threadListHTML, threadReportHTML, threadsFootHTML, threadTabsHTML } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
@@ -186,6 +187,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === ROUTINE_TOOL) return routineTarget(tool);
   if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
   if (tool.name === "look_at_page") return pageName(tool.input.url);
+  if (tool.name === "browser") return browserTarget(tool);
   if (tool.name === "open") return [tool.input.target, tool.input.app].filter((one): one is string => typeof one === "string" && Boolean(one)).map((one) => /^[a-z][a-z0-9+.-]*:\/\//i.test(one) ? pageName(one) : one.split(/[\\/]/).at(-1) ?? one).join(" in ");
   if (tool.name === "show") return typeof tool.input.url === "string" ? pageName(tool.input.url) : String(tool.input.title ?? tool.input.path ?? "").split("/").at(-1) ?? "";
   if (tool.name === "web_search") return typeof tool.input.query === "string" ? tool.input.query : "";
@@ -301,6 +303,7 @@ const verb = (tool: ToolEntry) =>
     update_plan: "Planned",
     wait_for: "Waited for",
     look_at_page: "Opened",
+    browser: BROWSER_VERBS[String(tool.input.action)] ?? "Browser",
     open: "Opened",
     show: "Showed",
     list_files: "List",
@@ -323,6 +326,9 @@ const verb = (tool: ToolEntry) =>
     github_check_log: "Read the log of",
     github_reply: tool.input.comment ? "Replied on" : "Commented on",
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
+/// The model's own browser, as the step rows name what it did there.
+const BROWSER_VERBS: Record<string, string> = { open: "Opened", read: "Read the page", text: "Read the page", click: "Clicked", type: "Typed", key: "Pressed", scroll: "Scrolled", hover: "Pointed at",
+  back: "Went back", forward: "Went forward", reload: "Reloaded", wait: "Waited", picture: "Looked at the page", close: "Closed its browser" };
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: WorkspaceRun) =>

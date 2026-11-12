@@ -2929,13 +2929,11 @@ html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.d
    a summary card on top, glass groups, a bright switch, steppers on numbers, and a tinted nav row. */
 #page[data-kind="settings"] { overflow-x: clip; }
 .st-page { position: relative; isolation: isolate; }
-.st-light { position: absolute; z-index: -1; left: 0; right: 0; top: -44px; height: 300px; pointer-events: none;
-  background: radial-gradient(ellipse 45% 50% at 45% 40%, color-mix(in srgb, var(--page) 20%, transparent), transparent 100%); }
 #page[data-kind="settings"] .cp-title { font-size: 30px; letter-spacing: -.01em; }
 
 .st-hero { display: flex; align-items: center; gap: 20px; margin: 18px 0 14px; padding: 18px 20px; border-radius: 16px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--page) 18%, transparent), color-mix(in srgb, var(--page) 4%, transparent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page) 30%, transparent), inset 0 1px 0 rgb(var(--ink-fg) / .06); }
+  background: linear-gradient(180deg, rgb(var(--ink-fg) / .055), rgb(var(--ink-fg) / .025));
+  box-shadow: inset 0 0 0 1px var(--hair), inset 0 1px 0 rgb(var(--ink-fg) / .06); }
 .st-hero-tx { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
 .st-hero-tx b { color: var(--t1); font-size: 20px; font-weight: 600; line-height: 26px; }
 .st-hero-tx small { color: var(--t2); font-size: 13px; line-height: 19px; }
@@ -2946,7 +2944,7 @@ html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.d
 .st-hero-meter { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .st-hero-meter small { color: var(--t3); font-size: 12px; }
 .st-hero-spark { width: 200px; height: 44px; }
-.st-hero-spark i:not(.none) { background: color-mix(in srgb, var(--page) 85%, transparent); }
+.st-hero-spark i:not(.none) { background: color-mix(in srgb, var(--page) 60%, var(--t3)); }
 
 .st-chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 99px; background: rgb(var(--ink-fg) / .06);
   box-shadow: inset 0 0 0 1px var(--hair); color: var(--t2); font-size: 12px; white-space: nowrap; }
@@ -2956,7 +2954,7 @@ html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.d
 .st-chip.bad i { background: #ef8b8b; }
 .st-bars { display: inline-flex; gap: 4px; }
 .st-bars i { width: 30px; height: 6px; border-radius: 3px; background: rgb(var(--ink-fg) / .1); }
-.st-bars i.on { background: var(--page); box-shadow: 0 0 8px color-mix(in srgb, var(--page) 50%, transparent); }
+.st-bars i.on { background: color-mix(in srgb, var(--page) 70%, var(--t2)); }
 .st-swatch { display: inline-flex; padding: 3px; border-radius: 10px; background: color-mix(in srgb, rgb(var(--ink-base)) 55%, transparent); box-shadow: inset 0 0 0 1px var(--hair2); }
 .st-swatch i { width: 22px; height: 22px; border-radius: 7px; }
 .st-swatch i + i { margin-left: 3px; }
@@ -2972,7 +2970,7 @@ html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.d
 /* switch */
 .desktop #page[data-kind="settings"] .settings-toggle { width: 38px; height: 22px; border-radius: 11px; border: 0; background: rgb(var(--ink-fg) / .1); box-shadow: inset 0 0 0 1px var(--hair2); }
 .desktop #page[data-kind="settings"] .settings-toggle i { top: 2px; left: 2px; width: 18px; height: 18px; background: rgb(var(--ink-fg) / .75); box-shadow: 0 1px 3px rgb(0 0 0 / .35); }
-.desktop #page[data-kind="settings"] .settings-toggle.on { background: linear-gradient(180deg, color-mix(in srgb, var(--page, var(--acc)) 100%, #fff 12%), var(--page, var(--acc))); box-shadow: 0 0 10px color-mix(in srgb, var(--page, var(--acc)) 35%, transparent); }
+.desktop #page[data-kind="settings"] .settings-toggle.on { background: color-mix(in srgb, var(--page, var(--acc)) 72%, rgb(var(--ink-fg) / .5)); box-shadow: none; }
 .desktop #page[data-kind="settings"] .settings-toggle.on i { left: 18px; background: #fff; }
 
 /* stepper */
@@ -2988,22 +2986,21 @@ html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.d
 
 /* buttons */
 #page[data-kind="settings"] .st-link { background: linear-gradient(180deg, rgb(var(--ink-fg) / .07), rgb(var(--ink-fg) / .03)); box-shadow: inset 0 0 0 1px var(--hair2), inset 0 1px 0 rgb(var(--ink-fg) / .06); }
-#page[data-kind="settings"] .st-link.key { background: color-mix(in srgb, var(--page) 22%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page) 45%, transparent); color: var(--t1); }
+#page[data-kind="settings"] .st-link.key { background: rgb(var(--ink-fg) / .1); box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); }
 #page[data-kind="settings"] .st-link:hover { background: rgb(var(--ink-fg) / .1); }
-#page[data-kind="settings"] .st-link.key:hover { background: color-mix(in srgb, var(--page) 32%, transparent); }
+#page[data-kind="settings"] .st-link.key:hover { background: rgb(var(--ink-fg) / .14); }
 
 /* nav */
 #desktop-sidebar .st-search { background: color-mix(in srgb, rgb(var(--ink-base)) 50%, transparent); box-shadow: inset 0 0 0 1px var(--hair2); }
 #desktop-sidebar .st-nav .ico { fill: none; color: var(--t2); opacity: .6; }
 #desktop-sidebar .st-nav:hover .ico { opacity: .9; }
-#desktop-sidebar .st-nav.on { background: linear-gradient(90deg, color-mix(in srgb, var(--page) 20%, transparent), color-mix(in srgb, var(--page) 7%, transparent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page) 28%, transparent); color: var(--t1); }
+#desktop-sidebar .st-nav.on { background: var(--tone2); box-shadow: none; color: var(--t1); }
 #desktop-sidebar .st-nav.on .ico { color: var(--page); opacity: 1; fill: none; }
 #desktop-sidebar .st-nav-group { margin: 16px 0 4px; padding-left: 10px; color: var(--t4); font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; }
-#page[data-kind="settings"] .pm-mode.on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page) 60%, transparent); background: color-mix(in srgb, var(--page) 12%, transparent); }
-#page[data-kind="settings"] .ov-tile { background: linear-gradient(160deg, color-mix(in srgb, var(--page) 9%, transparent), rgb(var(--ink-fg) / .02) 60%);
+#page[data-kind="settings"] .pm-mode.on { box-shadow: inset 0 0 0 1px var(--hair2); background: rgb(var(--ink-fg) / .07); }
+#page[data-kind="settings"] .ov-tile { background: linear-gradient(180deg, rgb(var(--ink-fg) / .045), rgb(var(--ink-fg) / .02));
   box-shadow: inset 0 0 0 1px var(--hair), inset 0 1px 0 rgb(var(--ink-fg) / .06); }
-#page[data-kind="settings"] .ov-tile:hover { background: linear-gradient(160deg, color-mix(in srgb, var(--page) 15%, transparent), rgb(var(--ink-fg) / .03) 60%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page) 35%, transparent); }
+#page[data-kind="settings"] .ov-tile:hover { background: rgb(var(--ink-fg) / .06); box-shadow: inset 0 0 0 1px var(--hair2); }
 
 /* Top bar, improved (Figma "Top bar, improved"): the same greys on one grid.
    One centre line (the open tab's middle, 28px down), every control 28px tall,

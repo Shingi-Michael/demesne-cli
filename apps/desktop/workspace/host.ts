@@ -1772,9 +1772,10 @@ export class WorkspaceHost {
       return this.snapshot();
     }
     if (method === "draft") {
+      // The window already shows what you typed: keep the draft without
+      // sending the whole state back, which redrew the window on every key.
       this.draft = string(args.text, "draft");
-      this.restored = false;
-      this.publish();
+      if (this.restored) { this.restored = false; this.publish(); }
       return;
     }
     if (method === "plan-submit")

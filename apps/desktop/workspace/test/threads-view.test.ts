@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { DriveFix } from "@demesne/protocol";
-import { threadLine, threadListHTML, threadProgress, threadsFootHTML, threadState, type ThreadsView } from "../threads-view.ts";
+import { threadDoing, threadLine, threadListHTML, threadProgress, threadsFootHTML, threadState, type ThreadsView } from "../threads-view.ts";
 
 const fix = (id: string, more: Partial<DriveFix> = {}): DriveFix => ({ id, workspace: "/p", title: `Thread ${id}`, signals: [], branch: `thread/${id}`, path: `/w/${id}`, base: "abc",
   sessionId: `s-${id}`, turnId: `t-${id}`, status: "running", startedAt: new Date().toISOString(), finishedAt: null, from: "orch", thread: { brief: "Do it.", files: [`${id}.ts`] }, ...more });
@@ -14,8 +14,12 @@ test("a thread's state, ring and line follow its job", () => {
   expect(threadProgress(fix("a", { activity: { steps: 0, last: null } }))).toBeLessThan(0.2);
   expect(threadProgress(fix("a", { activity: { steps: 300, last: null } }))).toBe(0.9);
   expect(threadProgress(fix("a", { status: "ready" }))).toBe(1);
-  expect(threadLine(fix("a", { activity: { steps: 3, last: "Reading live.ts" } }))).toBe("Reading live.ts…");
-  expect(threadLine(fix("a", { status: "ready", diff: { files: 1, additions: 4, deletions: 2, paths: ["a.ts"] }, checks: [{ command: "bun test", passed: true }] }))).toContain("checks passed");
+  expect(threadLine(fix("a", { activity: { steps: 3, last: "read_file apps/desktop/live.ts" } }))).toBe("Reading live.ts");
+  expect(threadLine(fix("a", { status: "ready", diff: { files: 1, additions: 4, deletions: 2, paths: ["a.ts"] }, checks: [{ command: "bun test", passed: true }] }))).toBe('Ready · <span class="add">+4</span> <span class="del">−2</span>');
+  expect(threadLine(fix("a", { status: "ready", checks: [{ command: "bun test", passed: false }] }))).toBe("Ready · a check failed");
+  expect(threadLine(fix("a", { status: "applied" }))).toBe("Merged");
+  expect(threadLine(fix("a", { status: "failed", error: "It ran out of steps." }))).toBe('<span class="danger">Stopped</span> · It ran out of steps.');
+  expect(threadLine(fix("a", { status: "starting" }))).toBe("Starting");
 });
 
 test("the list lights the open row, and only the person's pick moves it", () => {
@@ -43,13 +47,29 @@ test("pass 211 A: stage marks, sent back, checked, waits, and Merge on each read
   const back = fix("b", { review: { sentBack: 1, note: "a check failed (bun test)" } });
   const waits = fix("c", { status: "starting", sessionId: null, thread: { brief: "", files: [], after: first.id } });
   expect(threadState(waits)).toBe("waits");
-  expect(threadLine(waits, [first, back, waits])).toBe("Waits for “Thread a”");
-  expect(threadLine(back)).toContain("Sent back</span>: a check failed (bun test)");
-  expect(threadLine(first)).toStartWith("Checked · ");
+  expect(threadLine(waits, [first, back, waits])).toBe("After Thread a");
+  expect(threadLine(back)).toContain("Sent back</span> · a check failed (bun test)");
+  expect(threadLine(first)).toStartWith("Ready · ");
   expect(threadLine(fix("d", { status: "ready", review: { sentBack: 0, note: "no checks ran" } }))).toContain("Ready · no checks ran");
   const html = threadListHTML(view([first, back, waits]));
   expect(html.match(/data-action="thread-merge"/g)).toHaveLength(1);
-  expect(html).toContain('class="th-stage"');
-  expect(html.match(/<i class="d"><\/i>/g)!.length).toBeGreaterThanOrEqual(4);
-  expect(html).toContain('<i class=" c"></i>');
+});
+
+test("pass 216 A: each thread is one line in plain words, with its minutes or Merge at the end", () => {
+  expect(threadDoing("run_command sh -c while [ ! -f /tmp/gate ]; do sleep 1; done")).toBe("Running a command");
+  expect(threadDoing("run_command bun test apps/desktop --bail")).toBe("Running bun test desktop");
+  expect(threadDoing("run_command /usr/bin/git status")).toBe("Running git status");
+  expect(threadDoing("edit_file src/csv.ts")).toBe("Editing csv.ts");
+  expect(threadDoing("write_file docs/export.md")).toBe("Writing export.md");
+  expect(threadDoing("search_files toCSV")).toBe("Searching");
+  expect(threadDoing("remember")).toBe("Working");
+  expect(threadDoing(null)).toBe("Working");
+  const html = threadListHTML(view([fix("a", { activity: { steps: 2, last: "edit_file src/a.ts" } }), fix("b", { status: "ready" }), fix("c", { status: "applied" })]));
+  expect(html).not.toContain("th-label");
+  expect(html).not.toContain("th-stage");
+  expect(html).toContain('<span class="th-line">Editing a.ts</span><span class="th-end">1m</span>');
+  expect(html).toContain('class="th-item ready"');
+  expect(html).toContain('class="th-item merged"');
+  expect(html.match(/class="th-end"/g)).toHaveLength(1);
+  expect(html).toContain("Only touches a.ts");
 });

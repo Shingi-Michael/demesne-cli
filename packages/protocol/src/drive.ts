@@ -129,6 +129,9 @@ export interface DriveFix {
   diff?: { files: number; additions: number; deletions: number; paths: string[] };
   checks?: { command: string; passed: boolean }[];
   prUrl?: string; error?: string;
+  /// A thread whose work was merged outside Demesne: onto your branch by
+  /// hand, or through a pull request on GitHub.
+  mergedElsewhere?: "branch" | "github";
   /// The turn finished but changed nothing (for a proposal, often the right answer).
   unchanged?: boolean;
   /// A mission's receipt (Markdown built from its task ledger and recorded

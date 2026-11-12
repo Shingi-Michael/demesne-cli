@@ -80,7 +80,7 @@ export function threadLine(fix: DriveFix, list: DriveFix[] = []): string {
   if (state === "waits") return esc(`After ${list.find((item) => item.id === fix.thread?.after)?.title ?? "the thread it's built on"}`);
   if (state === "work") return fix.review?.sentBack ? `<span class="sent">Sent back</span>${fix.review.note ? ` · ${esc(fix.review.note)}` : ""}`
     : fix.status === "starting" && !fix.activity?.last ? "Starting" : esc(threadDoing(fix.activity?.last));
-  if (state === "merged") return "Merged";
+  if (state === "merged") return fix.mergedElsewhere === "github" ? "Merged on GitHub" : "Merged";
   if (state === "failed") return `<span class="danger">Stopped</span>${fix.error ? ` · ${esc(fix.error)}` : ""}`;
   const failed = fix.checks?.some((check) => !check.passed) ? "a check failed" : "";
   return ["Ready", counts(fix.diff), failed, !fix.review?.checked && fix.review?.note && fix.review.note !== failed ? esc(fix.review.note) : ""].filter(Boolean).join(" · ");
@@ -91,7 +91,8 @@ function threadTip(fix: DriveFix): string {
   const state = threadState(fix);
   const checks = !fix.checks?.length ? "" : fix.checks.every((check) => check.passed) ? "checks passed" : "a check failed";
   return [fix.title, fix.thread?.files.length ? `Only touches ${fix.thread.files.join(", ")}` : "", state === "ready" ? [fix.review?.checked ? "checked by the orchestrator" : "", checks].filter(Boolean).join(" · ") : "",
-    state === "failed" ? fix.error ?? "" : ""].filter(Boolean).join("\n");
+    state === "failed" ? fix.error ?? "" : "",
+    fix.mergedElsewhere === "github" ? "Its pull request was merged on GitHub. Pull to bring it into this checkout." : fix.mergedElsewhere ? "Merged outside Demesne: your branch already holds its work." : ""].filter(Boolean).join("\n");
 }
 
 /// The threads a chat started, each as one line where it started them (pass

@@ -47,6 +47,8 @@ async function run(argv: string[], cwd: string, timeoutMs = 60_000) {
 }
 
 const ACTIVE = new Set(["starting", "running", "ready", "failed"]);
+/// How often ready threads are looked over for a merge made elsewhere.
+const NOTICE_EVERY_MS = 5_000, GITHUB_EVERY_MS = 60_000;
 const firstLine = (text: string) => text.split("\n").find((line) => line.trim())?.trim().slice(0, 300) ?? "";
 
 export function fixPrompt(fix: Pick<DriveFix, "branch" | "signals">) {
@@ -133,6 +135,9 @@ export const AWAY_MINUTES = 8 * 60;
 export class DriveFixes {
   private fixes: DriveFix[] = [];
   private done = new Map<string, Promise<void>>();
+  private noticing = new Map<string, Promise<void>>();
+  private noticedAt = new Map<string, number>();
+  private askedGitHub = new Map<string, number>();
   /// Away runs, newest last per workspace, and the loops working them.
   private aways: DriveAway[] = [];
   private awayLoops = new Map<string, Promise<void>>();
@@ -181,6 +186,8 @@ export class DriveFixes {
 
   threads(from: string): DriveFix[] {
     const workspace = this.fixes.find((fix) => fix.thread && fix.from === from)?.workspace;
+    // Whoever is looking at the threads is how they get looked over.
+    if (workspace) void this.noticeMerged(workspace);
     return workspace ? this.list(workspace).filter((fix) => fix.thread && fix.from === from) : [];
   }
 
@@ -569,6 +576,63 @@ export class DriveFixes {
     this.save();
     this.settle(fix, before);
     return fix;
+  }
+
+  /// A ready thread whose work was merged somewhere else stops offering
+  /// Merge. Looked for each time the threads are read, a few seconds apart;
+  /// GitHub is asked at most once a minute, and only for a branch that was
+  /// pushed.
+  noticeMerged(workspace: string): Promise<void> {
+    const running = this.noticing.get(workspace);
+    if (running) return running;
+    if (this.now() - (this.noticedAt.get(workspace) ?? -Infinity) < NOTICE_EVERY_MS) return Promise.resolve();
+    this.noticedAt.set(workspace, this.now());
+    const pass = (async () => {
+      for (const fix of this.fixes.filter((item) => item.workspace === workspace && item.thread && item.status === "ready")) {
+        const where = await this.mergedElsewhere(fix).catch(() => null);
+        if (!where || fix.status !== "ready") continue;
+        await this.cleanup(fix, true);
+        Object.assign(fix, { status: "applied", mergedElsewhere: where, finishedAt: fix.finishedAt ?? new Date(this.now()).toISOString() });
+        this.save();
+        this.settle(fix, "ready");
+      }
+    })().finally(() => this.noticing.delete(workspace));
+    this.noticing.set(workspace, pass);
+    return pass;
+  }
+
+  /// Where a ready thread's work already landed, if it did: "branch" when
+  /// your checkout holds it (merged, cherry-picked, or squashed and pulled),
+  /// "github" when its pull request was merged there. Null while it still
+  /// has work of its own, or words since it finished that aren't committed.
+  private async mergedElsewhere(fix: DriveFix): Promise<"branch" | "github" | null> {
+    const tip = await this.git(["git", "rev-parse", "--verify", "--quiet", `refs/heads/${fix.branch}`], fix.workspace);
+    if (!tip.ok || !tip.out || tip.out === fix.base) return null;
+    if (existsSync(fix.path)) {
+      const dirty = await this.git(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", ...(fix.linked ?? []).map((rel) => `:(exclude,top)${rel}`)], fix.path);
+      if (!dirty.ok || dirty.out) return null;
+    }
+    if ((await this.git(["git", "merge-base", "--is-ancestor", tip.out, "HEAD"], fix.workspace)).ok) return "branch";
+    const cherry = await this.git(["git", "cherry", "HEAD", tip.out, fix.base], fix.workspace);
+    const commits = cherry.out.split("\n").filter(Boolean);
+    if (cherry.ok && commits.length && commits.every((line) => line.startsWith("-"))) return "branch";
+    // Squashed: no commit matches, but taking the thread's change back out
+    // of your checkout would apply cleanly, so all of it is there.
+    const patch = await this.git(["git", "diff", "--binary", `${fix.base}..${tip.out}`], fix.workspace);
+    if (patch.ok && patch.out) {
+      const file = join(dirname(this.stateFile), `thread-${fix.id}.merged.patch`);
+      writeFileSync(file, `${patch.out}\n`, { mode: 0o600 });
+      try {
+        // Forward too: a change that also applies forward isn't there yet.
+        const back = await this.git(["git", "apply", "--check", "--reverse", "--whitespace=nowarn", file], fix.workspace);
+        if (back.ok && !(await this.git(["git", "apply", "--check", "--whitespace=nowarn", file], fix.workspace)).ok) return "branch";
+      } finally { rmSync(file, { force: true }); }
+    }
+    if (this.now() - (this.askedGitHub.get(fix.id) ?? -Infinity) < GITHUB_EVERY_MS) return null;
+    if (!(await this.git(["git", "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${fix.branch}`], fix.workspace)).ok) return null;
+    this.askedGitHub.set(fix.id, this.now());
+    const merged = await this.git(["gh", "pr", "list", "--head", fix.branch, "--state", "merged", "--json", "url", "--limit", "1"], fix.workspace, 20_000);
+    try { return merged.ok && (JSON.parse(merged.out || "[]") as unknown[]).length ? "github" : null; } catch { return null; }
   }
 
   /// A thread that no longer applies: its work is laid on top of your

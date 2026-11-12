@@ -24,7 +24,9 @@ export interface ThreadsState {
 
 const ACTIVE = new Set(["starting", "running"]);
 const OPEN = new Set(["starting", "running", "ready", "failed"]);
-const FAST = 2500, SLOW = 20_000;
+/// A ready thread is looked at often enough that a merge made somewhere
+/// else takes its Merge away within a few seconds.
+const FAST = 2500, READY = 6000, SLOW = 20_000;
 
 export class ThreadWatch {
   state: ThreadsState = { from: null, list: [], open: null, closed: false, busy: null, message: null };
@@ -68,7 +70,7 @@ export class ThreadWatch {
     if (!this.state.open && !this.state.closed && this.state.list.length) await this.show(this.state.list[0]!.id);
     else if (this.state.open && !this.state.list.some((fix) => fix.id === this.state.open)) { this.stopFollowing(); this.state.open = null; this.options.publish(); }
     if (this.state.list.length || this.state.from === from)
-      this.timer = setTimeout(() => void this.refresh(), this.state.list.some((fix) => ACTIVE.has(fix.status)) ? FAST : SLOW);
+      this.timer = setTimeout(() => void this.refresh(), this.state.list.some((fix) => ACTIVE.has(fix.status)) ? FAST : this.state.list.some((fix) => fix.status === "ready") ? READY : SLOW);
   }
 
   /// A thread's job, by its job id.

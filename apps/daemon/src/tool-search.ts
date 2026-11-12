@@ -12,7 +12,7 @@ export const TOOL_SEARCH = "tool_search";
 /// Sent whole every time: reading, editing, running, asking, planning,
 /// delegating and searching the web.
 export const CORE_TOOLS = new Set([
-  "read_file", "read_files", "list_files", "search_files", "edit_file", "write_file", "run_command",
+  "read_file", "read_files", "list_files", "search_files", "edit_file", "write_file", "run_command", "run_tests",
   "git_status", "git_diff", "ask_user", "update_plan", "subagent", "agents", "web_search", "view_image", "propose_next",
   // Offered only when a chat has sources (sources.ts), so it rides whole.
   "read_source",

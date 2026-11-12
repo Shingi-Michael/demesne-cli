@@ -181,6 +181,7 @@ function stepTarget(tool: ToolEntry) {
   if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
   if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
+  if (tool.name === "run_tests") { const files = Array.isArray(tool.input.files) ? tool.input.files.map((file) => String(file).split("/").at(-1)) : []; return [files.length > 2 ? `${files.length} files` : files.join(", "), typeof tool.input.name === "string" ? `“${tool.input.name}”` : ""].filter(Boolean).join(" ") || "all tests"; }
   if (tool.name === ROUTINE_TOOL) return routineTarget(tool);
   if (tool.name === "wait_for") return waitingFor(tool.input.pattern);
   if (tool.name === "look_at_page") return pageName(tool.input.url);
@@ -294,6 +295,7 @@ const verb = (tool: ToolEntry) =>
     web_search: "Searched the web",
     web_fetch: "Read",
     remember: "Remembered",
+    run_tests: "Ran tests",
     routine: ROUTINE_VERBS[String(tool.input.action)] ?? "Routines",
     update_plan: "Planned",
     wait_for: "Waited for",

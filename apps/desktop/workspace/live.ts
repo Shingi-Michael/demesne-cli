@@ -298,7 +298,7 @@ const verb = (tool: ToolEntry) =>
     search_files: "Search",
     web_search: "Searched the web",
     web_fetch: "Read",
-    remember: "Remembered",
+    remember: tool.input.design === true ? "Design rule kept" : "Remembered",
     run_tests: "Ran tests",
     routine: ROUTINE_VERBS[String(tool.input.action)] ?? "Routines",
     update_plan: "Planned",

@@ -4,6 +4,7 @@ dist/
 .demesne/*
 !.demesne/config.toml
 !.demesne/commands/
+!.demesne/design.md
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

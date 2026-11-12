@@ -1,5 +1,5 @@
-/** Real Electron check: the Assistant row under New chat opens the
- * assistant's one chat. A routine's question there is a quiet line with its
+/** Real Electron check: the Assistant, found by typing it in Search (it has
+ * no row of its own since pass 213), opens the assistant's one chat. A routine's question there is a quiet line with its
  * time and name, each day starts with a day line, the chat never joins the
  * list of chats, and a routine written from it runs there. */
 import { _electron as electron, type Page } from "playwright";
@@ -25,15 +25,19 @@ try {
   page.setDefaultTimeout(10000);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.getByRole("heading", { name: "Make room for your next idea." }).waitFor({ timeout: 30000 });
+  await page.locator("#sidebar-open-project").waitFor({ timeout: 30000 });
   await desktop.evaluate(({ dialog }, workspace) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] }); }, f.workspace);
   await page.getByRole("button", { name: "Open a project", exact: false }).click();
   await page.waitForFunction(() => document.getElementById("sidebar-sessions")?.dataset.workspace);
   const row = page.locator("#sidebar-assistant");
-  await row.waitFor();
-  // It sits right under New chat.
-  assert.equal(await page.locator(".sidebar-nav > *").nth(1).getAttribute("id"), "sidebar-assistant");
-  await row.click();
+  // No row of its own: it is hidden until Search asks for it.
+  assert.equal(await row.isHidden(), true, "the Assistant has no row in the sidebar");
+  const openAssistant = async () => {
+    await page!.locator("#sidebar-search").fill("assist");
+    await row.waitFor();
+    await row.click();
+  };
+  await openAssistant();
   await eventually(async () => (await page!.locator("#workspace-title").textContent()) === "Assistant");
   assert.equal(await row.getAttribute("aria-current"), "page", "the row is selected while its chat is open");
   const sessionId = (await f.client.assistant()).sessionId!;
@@ -52,7 +56,7 @@ try {
   store.startTurn(turn.id);
   store.completeTurn(turn.id);
   store.close();
-  await row.click();
+  await openAssistant();
   await eventually(async () => (await page!.locator("#workspace-title").textContent()) === "Assistant");
   const routine = page.locator("#conversation .routine-asked");
   await routine.waitFor();
@@ -75,7 +79,7 @@ try {
   await page.locator('.sidebar-nav [data-action="new-session"]').click();
   await eventually(async () => (await page!.locator("#workspace-title").textContent()) !== "Assistant");
   assert.equal(await row.getAttribute("aria-current"), null);
-  await row.click();
+  await openAssistant();
   await eventually(async () => (await page!.locator("#conversation .request").count()) === 1);
   assert.equal((await f.client.assistant()).sessionId, sessionId, "the same chat comes back");
   // A routine written from its chat runs in its chat.

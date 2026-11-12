@@ -1304,7 +1304,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 /* Settings, a page (pass 71). The sidebar becomes its list: Back to chats,
    the search, then the sections in four groups. Rows sit on hairline rings,
    with no fills; choices unfold under their row, numbers are typed. */
-#desktop-sidebar.settings-open > :is(.sidebar-nav, #sidebar-projects, #sidebar-order-status) { display: none; }
+#desktop-sidebar.settings-open > :is(.sidebar-nav, #sidebar-projects, #sidebar-order-status, #sidebar-housed) { display: none; }
 #settings-nav { display: flex; flex: 1; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-bottom: 12px; }
 #settings-nav[hidden], #desktop-shell.sidebar-collapsed #settings-nav { display: none; }
 .st-back { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; margin-bottom: 4px; border-radius: var(--r); color: var(--t3); font-size: 12.5px; text-align: left; }
@@ -2833,3 +2833,33 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop #question .ask-card { box-sizing: border-box; padding-left: 32px; }
 .desktop #question :is(.ask-q, .ask-foot) { position: relative; padding: 0; }
 .desktop #question .ask-q i { position: absolute; left: -25.5px; top: 6.5px; transform: none; }
+
+/* Sidebar, pass 213: where you go on top, chats in the middle, who is here at the bottom. */
+#desktop-sidebar .sidebar-nav button.sidebar-new { height: 36px; margin-bottom: 3px; background: color-mix(in srgb, var(--t1) 7%, transparent); color: var(--t1); font-weight: 500; }
+#desktop-sidebar .sidebar-nav button.sidebar-new:hover { background: color-mix(in srgb, var(--t1) 11%, transparent); }
+#desktop-sidebar .sidebar-nav button.sidebar-new .ico { color: var(--t1); }
+#desktop-sidebar .sidebar-key { margin-left: auto; padding: 0; background: none; border: 0; box-shadow: none; color: var(--t4); font-family: inherit; font-size: 12px; line-height: 1; letter-spacing: .02em; }
+.sidebar-say { margin-left: auto; color: var(--t3); font-size: 12px; white-space: nowrap; }
+.sidebar-say.new { color: var(--acc); }
+.sidebar-label { display: flex; align-items: center; gap: 6px; height: 26px; margin: 10px 0 2px; padding: 0 6px 0 10px; color: var(--t4); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.sidebar-label > span { flex: 1; min-width: 0; }
+.sidebar-label > b { color: #e8b04a; font-weight: 600; letter-spacing: 0; }
+.sidebar-label-button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: var(--r-sm); color: var(--t3); }
+.sidebar-label-button:hover { background: var(--surface2); color: var(--t1); }
+.sidebar-label-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+#desktop-sidebar #sidebar-open-project.sidebar-label-button { width: 22px; height: 22px; padding: 0; gap: 0; }
+.sidebar-need .sidebar-group-chats { margin-left: 0; box-shadow: none; }
+.sidebar-reason { color: var(--t2) !important; }
+#sidebar-housed { flex: none; margin: 4px 0 6px; }
+.sidebar-housed-label { margin-top: 4px; }
+.sidebar-today { height: 22px; padding: 0 6px; border-radius: var(--r-sm); color: var(--t3); font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.sidebar-today:hover { background: var(--surface2); color: var(--t1); }
+.sidebar-today b { color: var(--acc); font-weight: 500; }
+.sidebar-agents-line { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px; }
+#desktop-sidebar .sidebar-agents-line .sidebar-housed-row { width: auto; height: 28px; gap: 6px; padding: 0 9px 0 4px; border-radius: 14px; background: color-mix(in srgb, var(--t1) 4%, transparent); font-size: 12.5px; }
+#desktop-sidebar .sidebar-agents-line .sidebar-housed-row:hover { background: var(--surface2); box-shadow: none; }
+.sidebar-agents-line .agent-face { position: relative; overflow: visible; width: 19px; height: 19px; flex: none; }
+.sidebar-agents-line .agent-face.working::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 1.5px var(--side, var(--surface)); }
+.sidebar-agents-line .agent-face.acc::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--blossom, #f2b6c8); box-shadow: 0 0 0 1.5px var(--side, var(--surface)); }
+.sidebar-assistant { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border-radius: var(--r); color: var(--t2); font-size: 13.5px; text-align: left; }
+.sidebar-assistant:hover { background: var(--surface2); color: var(--t1); }

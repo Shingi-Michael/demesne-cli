@@ -65,8 +65,8 @@ try {
   const rows = page.locator(".sidebar-housed-row:not(.sidebar-today)");
   await rows.first().waitFor({ timeout: 20_000 });
   expect(await rows.count() === 2, "two installed agents listed");
-  expect(await page.locator("#sidebar-housed .sidebar-housed-row:not(.sidebar-today)").count() === 2 && await page.locator(".sidebar-project .sidebar-housed-row").count() === 0, "agents sit in their own list at the top, not under a project");
-  expect((await rows.first().innerText()).includes("Claude Code") && (await rows.first().innerText()).includes("ready"), "Claude Code is ready");
+  expect(await page.locator("#sidebar-housed .sidebar-housed-row:not(.sidebar-today)").count() === 2 && await page.locator(".sidebar-project .sidebar-housed-row").count() === 0, "agents sit on their own line at the bottom, not under a project");
+  expect((await rows.first().innerText()).includes("Claude Code") && (await rows.first().getAttribute("aria-label"))?.includes("ready"), "Claude Code is ready");
   await page.screenshot({ path: join(output, "agents-listed.png") });
   await rows.first().click();
   await page.waitForFunction(() => document.querySelector(".sidebar-housed-row.on") !== null, undefined, { timeout: 10_000 });

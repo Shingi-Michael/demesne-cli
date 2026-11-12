@@ -279,4 +279,7 @@ document.addEventListener("demesne:working", (event) => {
 // The shortcuts live in tooltips, not on the rows.
 document.querySelector("#desktop-sidebar .sidebar-nav [data-action='new-session']")?.setAttribute("title", `New chat (${mac ? "⌘N" : "Ctrl+N"})`);
 el("sidebar-search").setAttribute("title", `Search (${mac ? "⌘K" : "Ctrl+K"})`);
+// New chat and Search show their keys on the row (pass 213).
+el("sidebar-new-key").textContent = mac ? "⌘N" : "Ctrl N";
+el("sidebar-search-key").textContent = mac ? "⌘K" : "Ctrl K";
 document.querySelector(".sidebar-settings")?.setAttribute("title", `Settings (${mac ? "⌘," : "Ctrl+,"})`);

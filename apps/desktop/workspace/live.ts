@@ -664,7 +664,11 @@ function sidebarDay(date: string) {
 function renderAssistantRow() {
   const row = document.getElementById("sidebar-assistant"), rail = document.getElementById("rail-assistant");
   const assistant = state?.assistant ?? null;
-  for (const button of [row, rail]) if (button) button.hidden = !assistant;
+  // Pass 213: the Assistant has no row of its own; it comes up in Search,
+  // and in Needs you when it waits on you or did something while you were away.
+  const query = (document.getElementById("sidebar-search") as HTMLInputElement | null)?.value.trim().toLowerCase() ?? "";
+  if (row) row.hidden = !assistant || !query || !"assistant".includes(query);
+  if (rail) rail.hidden = true;
   if (!assistant || !row) return;
   const open = inAssistant() && !pageOpen;
   const asks = open ? Boolean(state!.approvals.length || state!.questions.length) : assistant.waiting;
@@ -683,6 +687,58 @@ function renderAssistantRow() {
   const badge = rail?.querySelector<HTMLElement>(".rail-badge");
   if (badge) { badge.hidden = !tone; badge.classList.toggle("blue", tone !== "warn"); }
 }
+/// Why the assistant waits in Needs you: it asks you something, or it did
+/// something (a routine, a reply) while you were elsewhere. "" when neither.
+function assistantWhy() {
+  const assistant = state?.assistant;
+  if (!assistant || (inAssistant() && !pageOpen)) return "";
+  if (assistant.waiting) return "asks you";
+  const id = assistant.sessionId;
+  return id && assistant.status === "completed" && assistant.updatedAt && id in seenChats && seenChats[id] !== assistant.updatedAt ? "finished" : "";
+}
+/// What Scheduled and Foundry say on their rows (pass 213): when the next
+/// routine runs, and how many mockups arrived since you last looked.
+let places: { next: string | null; foundryNew: number } = { next: null, foundryNew: 0 };
+const FOUNDRY_SEEN = "demesne-foundry-seen";
+function foundrySeenAt() {
+  try { const at = Number(localStorage.getItem(FOUNDRY_SEEN)); if (at) return at; localStorage.setItem(FOUNDRY_SEEN, String(Date.now())); } catch { /* storage off */ }
+  return Date.now();
+}
+function foundryLooked() {
+  try { localStorage.setItem(FOUNDRY_SEEN, String(Date.now())); } catch { /* storage off */ }
+  places = { ...places, foundryNew: 0 };
+  renderPlaces();
+}
+export function nextWords(next: string | null | undefined, now = new Date()) {
+  if (!next) return "";
+  const at = new Date(next);
+  if (Number.isNaN(at.getTime())) return "";
+  const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/\s?([AP])M$/i, (_, half: string) => ` ${half.toLowerCase()}m`);
+  const day = Math.round((new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime() - new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) / 86_400_000);
+  return day <= 0 ? `next ${time}` : day === 1 ? `tomorrow ${time}` : `next ${at.toLocaleDateString([], { weekday: "short" })}`;
+}
+function renderPlaces() {
+  const scheduled = document.getElementById("sidebar-say-scheduled"), foundry = document.getElementById("sidebar-say-foundry");
+  if (scheduled) scheduled.textContent = nextWords(places.next);
+  if (foundry) foundry.textContent = places.foundryNew ? `${places.foundryNew} new` : "";
+}
+async function refreshPlaces() {
+  if (!state) return;
+  try {
+    const routines = await api<Routine[]>("routines");
+    const next = routines.filter((routine) => routine.on && routine.next).map((routine) => routine.next!).sort()[0] ?? null;
+    places = { ...places, next };
+  } catch { /* keeps the last words */ }
+  try {
+    const seen = foundrySeenAt();
+    const shelf = await api<FoundryListResponse>("foundry-shelf");
+    const versions = shelf.versions ?? shelf.artifacts.map((item) => ({ createdAt: item.updatedAt }));
+    places = { ...places, foundryNew: pageOpen === "foundry" ? 0 : versions.filter((version) => Date.parse(version.createdAt) > seen).length };
+  } catch { /* keeps the last words */ }
+  renderPlaces();
+}
+setTimeout(() => { void refreshPlaces(); }, 1500);
+setInterval(() => { void refreshPlaces(); }, 120_000);
 function renderSidebar() {
   renderAssistantRow();
   const list = document.getElementById("sidebar-sessions");
@@ -747,15 +803,15 @@ function renderSidebar() {
   // time (or its project, when the list is by date or state). Pointing at it
   // shows Pin and Archive there instead. The tooltip and the accessible name
   // say in words what the mark shows.
-  const row = (item: typeof sessions[number], right: string, nested: boolean) => {
+  const row = (item: typeof sessions[number], right: string, nested: boolean, reason = "") => {
     const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !pageOpen;
     const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
     const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
     const pr = pullRequests.get(id);
-    const side = tone || pr || (id === current?.id && !inSession()) ? "" : right;
-    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
+    const side = reason || (tone || pr || (id === current?.id && !inSession()) ? "" : right);
+    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age${reason ? " sidebar-reason" : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
       .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
     // archives with Delete on the row, so they stay out of the tab order.
@@ -782,32 +838,36 @@ function renderSidebar() {
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
     if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${chip}</span></div>${backLine}${prLine}`;
+    // Under Needs you a row says why it is there instead of its PR chip.
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !reason ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${reason ? "" : chip}</span></div>${backLine}${reason ? "" : prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   // The agents: a letter tile, the name, and how it is (a dot
   // while it works or has a new reply). Clicking opens its chat.
   const todayCount = newSince(socialsView, todaySeen());
-  const todayRow = btn("today-page", `<span class="agent-mark today-mark" aria-hidden="true">✿</span><span class="housed-name">Today</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}${socialsView?.reel && reelSeen() !== socialsView.reel.id ? `<i class="today-reel" title="This week's reel is ready"></i>` : ""}<small>${todayCount ? `${todayCount} new` : ""}</small>`, {}, `sidebar-housed-row sidebar-today${pageOpen === "today" ? " on" : ""}`);
   const storyRings = unseenStories(socialsView, todayUi.storySeen);
   const helping = helpingAgents();
-  const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><p class="sidebar-housed-label">Agents</p>${todayRow}${housed.map((agent) => {
+  // Pass 213: the agents sit on one line at the bottom, above you, always in
+  // the same spot; their feed, Today, is on the label's line.
+  const todayLink = btn("today-page", `<span>Today${todayCount ? ` · <b>${todayCount} new</b>` : ""}</span>${todayDot.size ? `<i class="today-dot" title="An agent answered you"></i>` : ""}${socialsView?.reel && reelSeen() !== socialsView.reel.id ? `<i class="today-reel" title="This week's reel is ready"></i>` : ""}`, {}, `sidebar-today${pageOpen === "today" ? " on" : ""}`)
+    .replace("<button ", `<button title="Today, your agents' feed" `);
+  const housedLines = () => `<div class="sidebar-housed" role="group" aria-label="Agents"><div class="sidebar-label sidebar-housed-label"><span>Agents</span>${todayLink}</div><div class="sidebar-agents-line">${housed.map((agent) => {
     const helps = helping.has(agent.id);
     const tone = agent.state === "working" || helps ? "working" : agent.sessionId && tones.get(agent.sessionId) === "acc" ? "acc" : "";
     const word = helps && agent.state !== "working" ? "helping" : tone === "working" ? "working" : tone === "acc" ? "new reply" : "ready";
-    return btn("agent-open", `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts, Date.now(), socialsView?.moods))}</span><span class="housed-name">${h(agent.name)}</span>${tone ? dot(tone) : ""}<small>${word}</small>`,
+    return btn("agent-open", `<span class="agent-mark agent-face${storyRings.has(agent.id) ? " has-story" : ""}${tone ? ` ${tone}` : ""}" data-provider="${h(agent.id)}" aria-hidden="true">${agentFace(agent.id, agentMood(agent.id, agent.state === "working" ? "working" : agent.sessionId ? tones.get(agent.sessionId) ?? "" : "", socialsView?.posts, Date.now(), socialsView?.moods))}</span><span class="housed-name">${h(agent.name)}</span>`,
       { id: agent.id }, `sidebar-housed-row${agent.sessionId && agent.sessionId === current?.id && !pageOpen ? " on" : ""}`)
-      .replace("<button ", `<button title="${h(socialsView?.moods?.[agent.id] ? moodTitle(agent.name, socialsView.moods[agent.id]) : agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`)}" `);
-  }).join("")}</div>`;
+      .replace("<button ", `<button aria-label="${h(`${agent.name}, ${word}`)}" title="${h(`${socialsView?.moods?.[agent.id] ? moodTitle(agent.name, socialsView.moods[agent.id]) : agent.address ? `${agent.name} · ${agent.address}` : `${agent.name}, run by Demesne`} · ${word}`)}" `);
+  }).join("")}</div></div>`;
   // An orchestrator's threads hang under its row (pass 211 A), each with its
   // ring; one opens on the right, beside its orchestrator.
   const threadLines = (id: string) => {
     const mine = state!.threads.list.filter((fix) => fix.from === id && fix.status !== "discarded");
     return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-open", `${threadRing(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id }, `sidebar-thread${state!.threads.open === fix.id && !state!.threads.closed ? " on" : ""}`)).join("")}</div>` : "";
   };
-  const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
+  const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false, reason?: (item: typeof sessions[number]) => string) => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
-    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)) + threadLines(item.id));
+    const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item), reason?.(item) ?? "") + (reason ? "" : threadLines(item.id)));
     if (items.length > limit) rows.push(btn("project-more", `Show ${items.length - limit} more`, { key }, "sidebar-more"));
     else if (!query && expandedProjectChats.has(key) && items.length > SIDEBAR_ROWS) rows.push(btn("project-more", "Show fewer", { key }, "sidebar-more"));
     return rows;
@@ -840,13 +900,29 @@ function renderSidebar() {
     housedList.hidden = !show;
     housedList.innerHTML = show ? housedLines() : "";
   }
-  // Chats you asked to bring back lead the list once they're due, until you
-  // open them; the time they came back sits on the right.
+  // Needs you (pass 213): every chat waiting on you, from any project, with
+  // why: it asks you something, it finished while you were away, its PR has
+  // news, or it came back when you asked. A chat you bring back leaves its
+  // project's list until you open it; the others stay there too.
   const backChats = listed.filter((item) => backOf(item) === "back" && item.id !== current?.id && matches(item));
-  const backList = document.getElementById("sidebar-back");
-  if (backList) {
-    backList.hidden = !backChats.length;
-    backList.innerHTML = backChats.length ? group("back", "Back now", groupRows("back", backChats, (item) => item.backAt === "merge" ? "merged" : new Date(item.backAt!).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })), 0) : "";
+  const needWhy = (item: typeof sessions[number]): string => {
+    if (item.id === current?.id && !pageOpen) return "";
+    if (backChats.includes(item)) return "back now";
+    const tone = tones.get(item.id) ?? "", pr = pullRequests.get(item.id);
+    if (tone === "warn") return "asks you";
+    if (pr && pr.state === "open" && prNew(item.id, pr)) return `#${pr.number} news`;
+    if (tone === "bad") return "failed";
+    if (tone === "acc") return "finished";
+    return "";
+  };
+  const needChats = listed.filter((item) => matches(item) && needWhy(item));
+  const assistantNeed = !query ? assistantWhy() : "";
+  const needList = document.getElementById("sidebar-need");
+  if (needList) {
+    const count = needChats.length + (assistantNeed ? 1 : 0);
+    needList.hidden = !count;
+    const lead = assistantNeed ? btn("assistant-open", `${dot(assistantNeed === "asks you" ? "warn" : "acc")}<span class="sidebar-session-name">Assistant</span><span class="sidebar-session-age sidebar-reason">${assistantNeed}</span>`, {}, "sidebar-session") : "";
+    needList.innerHTML = count ? `<section class="sidebar-group-block sidebar-need" data-group="need"><p class="sidebar-label"><span>Needs you</span><b>${count}</b></p><div class="sidebar-group-chats">${lead ? `<div class="sidebar-item">${lead}</div>` : ""}${groupRows("need", needChats, () => "", () => false, needWhy).join("")}</div></section>` : "";
   }
   const isBack = (item: typeof sessions[number]) => backChats.includes(item);
   // Pinned chats lead the list, whichever project they are in.
@@ -1658,14 +1734,17 @@ function renderFoot() {
   const you = state.you || "You", first = you.split(/\s+/)[0] || you;
   const plan = state.model.provider === "Codex" ? "Codex plan" : state.chatgptAccount?.planEnabled ? "ChatGPT plan" : state.model.provider || "";
   const light = isLightTheme(state.theme);
-  const html = [first, plan, light].join("\0");
+  const limits = currentPlan(), top = limits && planUsed(limits);
+  const used = top ? `${Math.round(top.window.usedPercent)}% used` : "";
+  const planLine = [plan, used].filter(Boolean).join(" · ");
+  const html = [first, planLine, light].join("\0");
   const foot = document.querySelector<HTMLElement>(".sidebar-foot");
   if (!foot || foot.dataset.html === html) return;
   foot.dataset.html = html;
   el("sidebar-avatar").textContent = first[0]?.toUpperCase() ?? "";
   el("sidebar-you").textContent = first;
   el("sidebar-you").title = you;
-  el("sidebar-plan").textContent = plan;
+  el("sidebar-plan").textContent = planLine;
   el("sidebar-plan").title = state.chatgptAccount?.email ?? plan;
   const theme = el("sidebar-theme"), word = light ? "Dark theme" : "Light theme";
   theme.innerHTML = light ? ICON_MOON : ICON_SUN;
@@ -3890,6 +3969,7 @@ function openPage(kind: "" | PageKind) {
   if (kind && stage && kind !== was) stage.scrollTop = 0;
   if (was === "settings" && kind !== "settings") clearGoogleAIForm();
   pageOpen = kind;
+  if (kind === "foundry") foundryLooked();
   sidebarSignature = heroSignature = "";
   // The rail on the edge is Foundry's alone.
   if (kind !== "foundry") { railQuery = ""; paintRail(); }

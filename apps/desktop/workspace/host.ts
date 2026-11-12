@@ -66,6 +66,7 @@ import { WorkspaceSession } from "./session-model.ts";
 import { lastAsk, waitingAsk, type AwayAsk } from "./away.ts";
 import { SelfBuilder } from "./self-build.ts";
 import { glanceOf } from "./glance.ts";
+import { projectFace } from "./project-face.ts";
 import { backState } from "./back-later.ts";
 import { DEFAULT_DRIVE_LIMITS } from "@demesne/protocol";
 import { SETTINGS_KEYS, type SettingsInfo } from "./settings-page.ts";
@@ -1943,6 +1944,11 @@ export class WorkspaceHost {
       const { pullRequests } = await this.client.sessionPullRequests(ids, args.fresh === true);
       for (const [id, pr] of Object.entries(pullRequests)) pr.state === "merged" ? this.mergedPullRequests.add(id) : this.mergedPullRequests.delete(id);
       return pullRequests;
+    }
+    // Each project's face in the sidebar: its own icon, when it has one.
+    if (method === "project-faces") {
+      const paths = Array.isArray(args.paths) ? args.paths.filter((path): path is string => typeof path === "string" && path.length <= 4096).slice(0, 60) : [];
+      return Object.fromEntries(paths.map((path) => [path, projectFace(path)]));
     }
     if (method === "session-glance") {
       const id = string(args.id, "id", 200);

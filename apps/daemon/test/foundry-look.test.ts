@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DemesneStore } from "@demesne/storage";
 import type { StructuredToolResult } from "../src/artifacts.ts";
 import { foundryEditTool, foundrySaveTool } from "../src/foundry.ts";
-import { LOOKS_PER_TURN, lookCommand, lookReport, type FoundryLook, type LookResult } from "../src/foundry-look.ts";
+import { designReport, LOOKS_PER_TURN, lookCommand, lookReport, type FoundryLook, type LookResult } from "../src/foundry-look.ts";
 
 /// Why a test page looks the way it does (pass 218 A).
 const W = { direction: "Plain, for a test.", look_at: "The heading." };
@@ -50,7 +50,10 @@ test("a saved HTML page comes back with its look, twice per turn at most; SVG go
     expect(saved.version).toBe(1);
     expect(saved.look["desktop 1280px"]).toEqual(["Scrolls sideways by 120px at 390px wide"]);
     expect(first.images).toHaveLength(2);
-    const fixed = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, why: W, edits: [{ find: "plan", replace: "plan!" }] }, context("t1")) as StructuredToolResult;
+    // A fix after a look that found problems says what it fixes first, by rule (step 3).
+    await expect(edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan", replace: "plan!" }] }, context("t1"))).rejects.toThrow("Critique before you fix");
+    await expect(save.executeWithArtifacts!({ id: saved.id, base_version: 1, source: "<main>plan!</main>" }, context("t1"))).rejects.toThrow("fix it with foundry_edit");
+    const fixed = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, why: W, critique: "Rule 11: it scrolls sideways at phone width; I will let the row wrap.", edits: [{ find: "plan", replace: "plan!" }] }, context("t1")) as StructuredToolResult;
     expect(seen.at(-1)).toBe("<main>plan!</main>");
     expect(String(JSON.parse(fixed.text).look.next)).toContain("last look");
     // Its own fixes stay in version 1 (pass 197 A: one ask, one version).
@@ -103,4 +106,30 @@ test("a model that sees gets the look's pictures in its next round, even without
     expect(said).toContain("Text cut off in h1");
     expect(pictures).toBe(2);
   } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the model sees its page's design numbers against targets, by the guide's rule (step 3)", () => {
+  const design = { sizes: 9, body: 14, lead: 1.6, rhythm: 0.93, aligned: 0.9, colours: 5, surface: 0.1 };
+  const { off, ok } = designReport(design);
+  expect(off).toEqual([
+    "rule 3: 9 text sizes; aim for 3 to 6 from the kit's scale",
+    "rule 2: the biggest text is 1.6x the body; one thing should lead at 2.8x or more",
+    "rule 8: 10% of the first screen is more than blank paper; aim for a third or more",
+  ]);
+  expect(ok).toHaveLength(3);
+  expect(designReport(undefined)).toEqual({ off: [], ok: [] });
+  // Only the desktop picture's numbers count; numbers off target make it a page to critique and fix.
+  const looked: LookResult = { pages: [{ width: 1280, height: 900, issues: [], png: PNG, design }, { width: 390, height: 900, issues: [], png: PNG, design: { ...design, sizes: 4 } }], errors: [] };
+  const report = lookReport(looked, false);
+  expect(report.found).toBe(true);
+  expect((report.look.design as { off_target: string[] }).off_target).toHaveLength(3);
+  expect(String(report.look.next)).toContain("Critique before you fix");
+  expect(String(report.look.next)).toContain("never repeat it to the person");
+  // On target, nothing is owed; the last look owes nothing either.
+  const fine = { sizes: 4, body: 14, lead: 3.4, rhythm: 0.95, aligned: 0.9, colours: 5, surface: 0.5 };
+  expect(lookReport({ pages: [{ width: 1280, height: 900, issues: [], png: PNG, design: fine }], errors: [] }, false).found).toBe(false);
+  expect(lookReport(looked, true).found).toBe(false);
+  // Demesne draws the ready kinds, so a deck's numbers judge nothing.
+  expect(lookReport(looked, false, false).look.design).toBeUndefined();
+  expect(lookReport(looked, false, false).found).toBe(false);
 });

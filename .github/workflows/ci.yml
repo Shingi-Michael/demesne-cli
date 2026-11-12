@@ -1,9 +1,9 @@
 name: CI
 
+# Pull requests only: a merge to main already ran these on its pull
+# request, and each run spends the private repo's Actions minutes.
 on:
   pull_request:
-    branches: ["main"]
-  push:
     branches: ["main"]
   workflow_dispatch:
 

@@ -24,14 +24,29 @@ on:
 permissions:
   contents: write
 
+# Where releases are built. GitHub's macOS machines bill ten minutes for
+# every minute they run, so on a private repo a few merges a day spend the
+# month's Actions budget, and then nothing runs at all. With the repository
+# variable RELEASE_RUNNER set to "mac", every job runs on your own Mac
+# (a self-hosted runner, which costs no minutes) and builds the Mac app
+# only; Linux and Windows are built when it is unset. See docs/releases.md.
+env:
+  ON_MAC: ${{ vars.RELEASE_RUNNER == 'mac' }}
+
+# One release at a time; a merge that lands while one builds waits for it.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   version:
     name: Determine Version
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RELEASE_RUNNER == 'mac' && fromJSON('["self-hosted","macOS"]') || 'ubuntu-latest' }}
     outputs:
       version: ${{ steps.step_version.outputs.version }}
       tag: ${{ steps.step_version.outputs.tag }}
       should_release: ${{ steps.step_version.outputs.should_release }}
+      builds: ${{ steps.builds.outputs.builds }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +74,15 @@ jobs:
           else
             bun run scripts/version.ts --github
           fi
+      # Which apps to build, and where.
+      - id: builds
+        shell: bash
+        run: |
+          if [ "$ON_MAC" = "true" ]; then
+            echo 'builds={"include":[{"runner":["self-hosted","macOS"],"artifact":"demesne-darwin-arm64.zip"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'builds={"include":[{"runner":"macos-15","artifact":"demesne-darwin-arm64.zip"},{"runner":"ubuntu-22.04","artifact":"demesne-linux-amd64.deb"},{"runner":"windows-latest","artifact":"demesne-windows-x64.exe"}]}' >> "$GITHUB_OUTPUT"
+          fi
       # Each build uploads its files straight to this draft, since Actions
       # artifact storage has a quota that, once full, fails every upload.
       # The updater reads releases/latest, which never names a draft, so
@@ -76,45 +100,18 @@ jobs:
             gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" --generate-notes
           fi
 
-  # The build jobs upload straight to a draft release rather than through
-  # workflow artifacts, which count against the account's Actions storage
-  # quota (release assets don't). The release job publishes the draft once
-  # every build has uploaded, so a failed build still publishes nothing.
-  draft:
-    name: Draft Release
-    needs: [version]
-    if: needs.version.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          tag="${{ needs.version.outputs.tag }}"
-          if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --draft --target "${{ github.sha }}" --title "$tag" --generate-notes
-          fi
-
   # The desktop app, so installing demesne needs neither Bun nor Rust. Each
   # bundle carries its own daemon, desktop host and native image runtime.
   desktop:
     name: Desktop / ${{ matrix.artifact }}
-    needs: [version, draft]
+    needs: [version]
     if: needs.version.outputs.should_release == 'true'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            artifact: demesne-darwin-arm64.zip
-          # Built on 22.04 so the package also installs on 24.04.
-          - os: ubuntu-22.04
-            artifact: demesne-linux-amd64.deb
-          - os: windows-latest
-            artifact: demesne-windows-x64.exe
+      # Linux is built on 22.04 so the package also installs on 24.04.
+      matrix: ${{ fromJSON(needs.version.outputs.builds) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -229,7 +226,7 @@ jobs:
 
   release:
     needs: [version, desktop]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RELEASE_RUNNER == 'mac' && fromJSON('["self-hosted","macOS"]') || 'ubuntu-latest' }}
     if: needs.version.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4

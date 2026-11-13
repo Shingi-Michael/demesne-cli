@@ -43,39 +43,29 @@ d-stat .dp-d{font-size:12px;font-weight:500}d-stat .dp-d.up{color:var(--ok)}d-st
 d-chart{display:block;width:100%;color:var(--accent)}d-chart svg{display:block;width:100%;height:auto;overflow:visible}
 d-chart text{fill:var(--muted);font:11px var(--font)}
 /* Demesne's own look */
-d-demesne{display:block;--dm-side:linear-gradient(180deg,#5b5c60,#4f5054);--dm-shell:#161617;--dm-main:#1c1c1e;--dm-raised:#262628;--dm-bubble:#2c2c2f;--dm-t1:rgba(235,236,239,.94);--dm-t2:rgba(235,236,239,.68);--dm-t3:rgba(235,236,239,.46);--dm-hair:rgba(235,236,239,.09);--dm-pink:#f2b6c8;--dm-blue:#7eaef0;color:var(--dm-t1);font:14px/1.45 var(--font)}
+d-app>d-body{display:block}
+d-demesne>d-app{display:block;position:relative;max-width:none;height:var(--height,620px);min-height:0;margin:0;overflow:hidden;border-radius:12px;container:app/size;contain:layout paint style;box-shadow:0 0 0 1px rgba(128,128,128,.22),0 24px 60px -20px rgba(0,0,0,.45);text-align:left}
+/* The app's window is glass over the desktop; here a still backdrop stands in for what is behind it. */
+d-demesne>d-app.glass{background:linear-gradient(180deg,#5b5c60,#4f5054)}
+d-demesne[theme=light]>d-app.glass{background:linear-gradient(180deg,#e9e9eb,#dfdfe2)}
+d-app #mac-lights-hole .dp-lights{position:absolute;left:14px;top:14px}
+/* What the author adds inside the window has no kit under it (the kit stops at d-app): plain controls take Demesne's own tokens. */
+d-app .dm-main :where(button:not([class]),button.quiet,button.small,button.primary,button.danger):not(article.turn *){display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:var(--r-sm);background:var(--tone2);color:var(--t1);font-size:13px;font-weight:500;white-space:nowrap}
+d-app .dm-main :where(button.primary):not(article.turn *){background:var(--acc);color:var(--on-dusk)}
+d-app .dm-main :where(button.danger):not(article.turn *){color:var(--bad)}
+d-app .dm-main :where(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea):not(article.turn *){min-height:30px;padding:0 10px;border:0;border-radius:var(--r-sm);background:var(--tone);box-shadow:inset 0 0 0 1px var(--hair);color:var(--t1);font:inherit}
+d-app .dm-main :where(h1,h2,h3):not(article.turn *){margin:0;color:var(--t1);font-weight:600;letter-spacing:0}
+d-app .dm-main :where(h1):not(article.turn *){font-size:20px;line-height:28px}d-app .dm-main :where(h2):not(article.turn *){font-size:16px;line-height:24px}d-app .dm-main :where(h3):not(article.turn *){font-size:14px;line-height:22px}
+d-app .dm-main>:where(button,input,select){align-self:flex-start}
+d-app .dm-main :where(.muted,small):not(article.turn *){color:var(--t3)}d-app .dm-main :where(.secondary):not(article.turn *){color:var(--t2)}
+d-demesne{display:block;overflow-x:auto;--dm-side:linear-gradient(180deg,#5b5c60,#4f5054);--dm-shell:#161617;--dm-main:#1c1c1e;--dm-raised:#262628;--dm-bubble:#2c2c2f;--dm-t1:rgba(235,236,239,.94);--dm-t2:rgba(235,236,239,.68);--dm-t3:rgba(235,236,239,.46);--dm-hair:rgba(235,236,239,.09);--dm-pink:#f2b6c8;--dm-blue:#7eaef0;color:var(--dm-t1);font:14px/1.45 var(--font)}
 d-demesne[theme=light]{--dm-side:linear-gradient(180deg,#e9e9eb,#dfdfe2);--dm-shell:#ececee;--dm-main:#ffffff;--dm-raised:#f4f4f5;--dm-bubble:#efeff1;--dm-t1:rgba(22,24,28,.94);--dm-t2:rgba(22,24,28,.68);--dm-t3:rgba(22,24,28,.46);--dm-hair:rgba(22,24,28,.09);--dm-pink:#c2477a;--dm-blue:#2f6fdb}
-.dm-app{position:relative;display:flex;max-width:none;min-height:var(--height,620px);border-radius:12px;overflow:hidden;background:var(--dm-shell);box-shadow:0 0 0 1px rgba(255,255,255,.08),0 24px 60px -30px rgba(0,0,0,.7)}
-d-sidebar{display:flex;flex-direction:column;width:var(--side-width,240px);flex:none;background:var(--dm-side);color:rgba(255,255,255,.88);padding:44px 10px 0}
-d-demesne[theme=light] d-sidebar{color:var(--dm-t1)}
-.dm-lights{position:absolute;left:18px;top:16px}
-d-sidebar>button,.dm-tabs>button{all:unset;box-sizing:border-box;cursor:pointer}
-d-sidebar>.dm-nav{display:flex;align-items:center;gap:11px;height:32px;padding:0 10px;border-radius:8px;font-size:14px;white-space:nowrap}
-d-sidebar>.dm-nav:hover,d-sidebar>.dm-chat:hover{background:rgba(255,255,255,.07)}
-d-sidebar>.dm-nav.on{background:rgba(255,255,255,.12)}
-.dm-nav d-icon{opacity:.8}
-.dm-proj{display:flex;align-items:center;gap:8px;height:30px;white-space:nowrap;overflow:hidden;padding:0 10px;margin-top:10px;font-weight:600;font-size:14px}
-.dm-proj small{margin-left:auto;font-weight:400;font-size:12px;opacity:.55}
-d-sidebar>.dm-chat{display:flex;align-items:center;gap:8px;height:30px;margin-left:12px;padding:0 10px;border-radius:8px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.86}
-d-sidebar>.dm-chat.on{background:rgba(255,255,255,.12);opacity:1;box-shadow:inset 2px 0 0 var(--dm-blue)}
-.dm-foot{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding:10px 10px 12px}
-.dm-release{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--dm-pink)}
-.dm-user{display:flex;align-items:center;gap:9px;font-size:14px}
-.dm-right{flex:1;min-width:0;display:flex;flex-direction:column}
-.dm-tabs{display:flex;align-items:flex-end;gap:2px;height:44px;padding:0 12px;flex:none}
-.dm-tabs>.dm-tab{height:36px;max-width:220px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:10px 10px 0 0;font-size:14px;font-weight:500;color:var(--dm-t2);white-space:nowrap;overflow:hidden}
-.dm-tabs>.dm-tab:hover{color:var(--dm-t1)}
-.dm-tabs>.dm-tab.on{background:var(--dm-main);color:var(--dm-t1)}
-.dm-card{flex:1;display:flex;margin:0 8px 8px;border-radius:12px;background:var(--dm-main);overflow:hidden}
-.dm-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;padding:24px 32px 16px}
+.dm-main{display:flex;flex-direction:column;gap:16px;min-width:0}
 .dm-main>[data-view],d-message{animation:dp-in .22s ease-out}
 .dm-main>[data-view]{display:flex;flex-direction:column;gap:16px;min-width:0}
 /* The kit's own elements inside Demesne's chat take its colours. */
-d-demesne .dm-card{--ink:#ebecef;--paper:#1c1c1e;--secondary:rgba(235,236,239,.68);--muted:rgba(235,236,239,.6);--hair:rgba(235,236,239,.09);--tone:rgba(235,236,239,.05);--tone-2:rgba(235,236,239,.09);--accent:var(--dm-blue);--on-accent:#121417;color:var(--dm-t1)}
-d-demesne[theme=light] .dm-card{--ink:#16181c;--paper:#ffffff;--secondary:rgba(22,24,28,.68);--muted:rgba(22,24,28,.64);--hair:rgba(22,24,28,.09);--tone:rgba(22,24,28,.04);--tone-2:rgba(22,24,28,.08);--on-accent:#fff}
 @keyframes dp-in{from{opacity:0;transform:translateY(3px)}}
 @media (prefers-reduced-motion:reduce){.dm-main>[data-view],d-message{animation:none}}
-.dm-cards{width:270px;flex:none;display:flex;flex-direction:column;gap:12px;padding:16px 16px 16px 0}
 d-message{display:flex;gap:12px;max-width:100%}
 d-message[from=you]{align-self:flex-end;max-width:78%;padding:8px 12px;border-radius:12px;background:var(--dm-bubble,var(--tone-2))}
 .dm-d{flex:none;width:20px;font-weight:700;font-size:14px;line-height:20px;color:var(--dm-t1,var(--ink))}.dm-d i{font-style:normal;color:var(--dm-pink,#f2b6c8)}
@@ -99,17 +89,6 @@ d-toggle{display:inline-block;position:relative;width:36px;height:20px;border-ra
 d-toggle::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .18s}
 d-toggle[on]{background:var(--dm-blue,var(--accent))}d-toggle[on]::after{left:19px}
 [data-view][hidden]{display:none!important}
-/* Narrower than its design width by more than 15%: the part lays out at the room it has instead of shrinking. */
-d-demesne.dp-narrow d-sidebar{--side-width:168px;padding:40px 8px 0}
-d-demesne.dp-narrow d-sidebar>.dm-nav,d-demesne.dp-narrow d-sidebar>.dm-chat,d-demesne.dp-narrow .dm-proj{height:28px;font-size:13px}
-d-demesne.dp-narrow .dm-proj small{display:none}
-d-demesne.dp-narrow .dm-tabs>.dm-tab{padding:0 12px;font-size:13px}
-d-demesne.dp-narrow .dm-main{padding:16px 20px 12px}
-d-demesne.dp-narrow .dm-card{flex-direction:column}
-d-demesne.dp-narrow .dm-cards{width:auto;flex-direction:row;flex-wrap:wrap;padding:0 20px 16px}
-d-demesne.dp-narrow .dm-cards>*{flex:1 1 220px}
-d-demesne.dp-tight d-sidebar,d-demesne.dp-tight .dm-lights{display:none}
-d-demesne.dp-tight .dm-tabs{padding-left:8px}
 /* Options to choose between: a strip on top, one option at a time, at full size. */
 d-compare.dp-switch{display:flex;flex-direction:column;align-items:stretch;gap:16px}
 d-compare.dp-stack{display:flex;flex-direction:column;align-items:stretch;gap:40px}
@@ -124,6 +103,7 @@ d-seg,d-tabs{display:inline-flex;padding:2px;border-radius:9px;background:var(--
 d-seg button,d-tabs button{all:unset;cursor:pointer;padding:3px 11px;border-radius:7px;font-size:14px;color:var(--dm-t2,var(--secondary))}
 d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:var(--dm-t1,var(--ink));box-shadow:0 1px 2px rgba(0,0,0,.12)}
 `;
+  var KIT = doc.currentScript && /parts\.js(\?.*)?$/.test(doc.currentScript.src || "") ? doc.currentScript.src.replace(/parts\.js(\?.*)?$/, "") : "foundry://kit/";
   var style = doc.createElement("style");
   style.setAttribute("data-demesne-parts", "");
   style.textContent = CSS;
@@ -164,10 +144,11 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
   /// shrinking a whole app to fit a pane made 14px text 7px, too small to read
   /// or use.
   var MIN_ZOOM = 0.85;
-  var fitWidth = function (el, inner, width) {
+  var fitWidth = function (el, inner, width, least) {
     var fit = function () {
       var room = el.clientWidth, ratio = room && room < width ? room / width : 1, narrow = ratio < MIN_ZOOM;
-      var zoom = ratio < 1 && !narrow ? String(Math.floor(ratio * 1000) / 1000) : "", wide = narrow ? "100%" : width + "px";
+      // `least`: a window has a smallest size; in less room than that it keeps it and scrolls sideways.
+      var zoom = ratio < 1 && !narrow ? String(Math.floor(ratio * 1000) / 1000) : "", wide = narrow ? (least && room < least ? least + "px" : "100%") : width + "px";
       if (inner.style.zoom !== zoom) inner.style.zoom = zoom;
       if (inner.style.width !== wide) inner.style.width = wide;
       el.classList.toggle("dp-narrow", narrow);
@@ -338,7 +319,206 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
   });
 
   // Demesne's own pieces.
+  // Demesne itself (pass 220 A): the app's own markup, styled by the app's
+  // own stylesheet (kit/app.css, the shipped styles scoped to <d-app>), so a
+  // mockup starts out identical to the app and the change is the only
+  // difference. SHELL is the window as the app draws it for one chat;
+  // scripts/check-foundry-app.ts fails when the two drift apart.
+  var appStyle = function () {
+    if (doc.querySelector("[data-demesne-app]")) return;
+    var link = doc.createElement("link"); link.rel = "stylesheet"; link.href = KIT + "app.css"; link.setAttribute("data-demesne-app", "");
+    (doc.head || doc.documentElement).appendChild(link);
+  };
+  // The theme's colours, as the app sets them on its window (Cherry Blossom).
+  var APP_THEME = {
+    dark: ["demesne", '--shell-a:0.715;--panel-a:0.724;--back-a:0;--ink:#0B1218;--paper:#C5D2DC;--strong:#E6EEF4;--surface:#0E161D;--raised:#182530;--rule:#1E2C38;--borderBright:#2F4150;--secondary:#8FA1AF;--muted:#6B7D8B;--electric:#5AA9E6;--electricBright:#5AA9E6;--signal:#E5534B;--citron:#4CC38A;--thinking:#E5A93C;--thinkingSurface:#282821;--errorSurface:#281D23;--accentSurface:#172835;--menuSelection:#172835;--tileSelection:#213749;--diffAddedSurface:#0F2219;--diffRemovedSurface:#26161A;--userSurface:#0E161D;--inspect:#5AA9E6;--execute:#E5A93C;--toolSurface:#0E161D;--toolActive:#182530;--syntaxKeyword:#C49CE6;--syntaxString:#9CCF8D;--syntaxNumber:#E5A93C;--syntaxComment:#5F7280;--syntaxType:#6FC2D6;--syntaxFunction:#5AA9E6;--contextMessages:#5AA9E6;--contextTools:#C49CE6;--contextReserved:#E5A93C;--contextFree:#6B7D8B;--composerQueuedBorder:#6F582B;--composerStoppedBorder:#8F3B39;--composerRestoredBorder:#2C516D;'],
+    light: ["demesne-light", '--shell-a:0.715;--panel-a:0.724;--back-a:0;--ink:#F6F8FA;--paper:#1F2A33;--strong:#1F2A33;--surface:#EEF2F5;--raised:#E2E8ED;--rule:#CBD5DD;--borderBright:#A7B6C2;--secondary:#4B5D6B;--muted:#55687A;--electric:#1F62A8;--electricBright:#1A5591;--signal:#B3302A;--citron:#166A3F;--thinking:#8A5700;--thinkingSurface:#E2DFD8;--errorSurface:#E8DFE1;--accentSurface:#D5E1EC;--menuSelection:#D5E1EC;--tileSelection:#C7D5E3;--diffAddedSurface:#D4E2DF;--diffRemovedSurface:#E8DFE1;--userSurface:#EEF2F5;--inspect:#1F62A8;--execute:#8A5700;--toolSurface:#EEF2F5;--toolActive:#E2E8ED;--syntaxKeyword:#7A3E9D;--syntaxString:#2F6F1F;--syntaxNumber:#8A5600;--syntaxComment:#5E7684;--syntaxType:#0B6A74;--syntaxFunction:#1F5FAD;--contextMessages:#1F62A8;--contextTools:#7A3E9D;--contextReserved:#8A5700;--contextFree:#55687A;--composerQueuedBorder:#c1ac87;--composerStoppedBorder:#cb7e7b;--composerRestoredBorder:#9bb8d6;'],
+  };
+  // The d. mark and the app's other shared drawings (index.html).
+  var DEFS = '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><mask id="demesne-heart"><rect x="-40" y="-40" width="80" height="80" fill="#fff"/><circle r="5" fill="#000"/></mask><symbol id="demesne-mark" viewBox="0 0 100 100"><circle cx="43" cy="59" r="15" fill="none" stroke="currentColor" stroke-width="9"/><path d="M58 24V74" stroke="currentColor" stroke-width="9" stroke-linecap="round"/><g transform="translate(80 66) scale(.31)" fill="#e0457a" mask="url(#demesne-heart)"><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(0)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(72)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(144)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(216)"/><path d="M0 -3C-11 -9 -17 -24 -9 -35L0 -29.5L9 -35C17 -24 11 -9 0 -3Z" transform="rotate(288)"/></g></symbol></defs></svg>';
+  var SHELL = '<div id="desktop-shell" aria-busy="false"><aside id="desktop-sidebar" aria-label="Workspace navigation"><nav class="sidebar-nav" aria-label="Workspace"><button type="button" class="sidebar-new" aria-label="New chat"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New chat<kbd class="sidebar-key" id="sidebar-new-key">Ctrl N</kbd></button><label class="sidebar-search"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="sidebar-search" type="search" placeholder="Search" aria-label="Search chats and projects" autocomplete="off" style=""><kbd class="sidebar-key" id="sidebar-search-key">Ctrl K</kbd></label><button type="button" aria-label="Scheduled"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>Scheduled<small class="sidebar-say" id="sidebar-say-scheduled"></small></button><button type="button" aria-label="Foundry"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M4 15h16l-2 5H6z"></path><path d="M8 15V9h8v6"></path><path d="M10 9V5h4v4"></path></svg>Foundry<small class="sidebar-say" id="sidebar-say-foundry"></small></button></nav><nav id="sidebar-projects" aria-label="Chats and projects"><button type="button" id="sidebar-assistant" aria-label="Assistant" class="sidebar-assistant" hidden=""><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"></path></svg>Assistant<span class="sidebar-session-mark " aria-hidden="true" hidden=""></span></button><div id="sidebar-pinned" role="navigation" aria-label="Pinned" hidden=""></div><div class="sidebar-label" id="sidebar-projects-label"><span>Projects</span><button type="button" id="sidebar-open-project" class="sidebar-label-button" aria-label="Open a project"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 6v12"></path><path d="M6 12h12"></path></svg></button></div><div id="sidebar-sessions" role="navigation" aria-label="Conversations"><section class="sidebar-project active" style="--face:#5fb0c8"><div class="sidebar-project-header"><button aria-expanded="true" aria-current="location" type="button" class="sidebar-project-name"><span class="project-face" style="--face:#5fb0c8" aria-hidden="true"><b>w</b></span><span>workspace</span></button><span class="sidebar-project-state sidebar-project-branch"><svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg><span>master</span></span><button aria-label="New chat in workspace" type="button" class="sidebar-project-new"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12"></path><path d="M6 12h12"></path></svg></button><button aria-label="Group and sort" aria-expanded="false" type="button" class="sidebar-view-button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16"></path><path d="m3 8 4-4 4 4"></path><path d="M17 20V4"></path><path d="m13 16 4 4 4-4"></path></svg></button></div><div class="sidebar-project-chats" id="project-chats-0"><div class="sidebar-item"><button aria-label="Chat" aria-current="page" type="button" class="sidebar-session selected"><span class="sidebar-session-mark " aria-hidden="true"></span><span class="sidebar-session-name">Chat</span><span class="sidebar-session-age">now</span></button><span class="sidebar-row-actions"><button aria-label="Bring Chat back later" aria-expanded="false" tabindex="-1" type="button" class="sidebar-bell"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg></button><button aria-label="Pin Chat" tabindex="-1" type="button" class="sidebar-pin"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"></path><path d="M12 14v6"></path></svg></button><button aria-label="Archive Chat" tabindex="-1" type="button" class="sidebar-delete"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"></rect><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"></path><path d="M10 13h4"></path></svg></button></span></div></div></section></div><div id="sidebar-chats" role="navigation" aria-label="Just a chat" hidden=""></div></nav><nav id="settings-nav" aria-label="Settings" hidden=""></nav><div id="sidebar-order-status" role="status" class="sidebar-order-status"></div><div id="sidebar-housed" role="navigation" aria-label="Agents" hidden=""></div><div class="sidebar-release">Demesne · Cherry Blossom</div><div class="sidebar-foot"><span class="sidebar-avatar" id="sidebar-avatar" aria-hidden="true"></span><span class="sidebar-you" id="sidebar-you"></span><small class="sidebar-plan" id="sidebar-plan"></small><button type="button" class="sidebar-foot-button" aria-label="Customize"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"></path><circle cx="16" cy="7" r="2"></circle><circle cx="10" cy="17" r="2"></circle></svg></button><button type="button" id="sidebar-theme" class="sidebar-foot-button" aria-label="Light theme"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"></path></svg></button><button type="button" class="sidebar-settings sidebar-foot-button" aria-label="Settings"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button></div><div class="sidebar-rail" aria-label="Folded sidebar"><button type="button" class="rail-button" data-tip="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button><button type="button" class="rail-button" id="rail-search" data-tip="Search chats" aria-label="Search chats"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m20 20-4.5-4.5"></path></svg></button><button data-tip="Foundry" type="button" class="rail-button" aria-label="Foundry"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M4 15h16l-2 5H6z"></path><path d="M8 15V9h8v6"></path><path d="M10 9V5h4v4"></path></svg></button><button data-tip="0 branches to review" type="button" class="rail-button" id="rail-review" aria-label="Branches to review" hidden=""><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg><i class="rail-badge blue"></i></button><div class="rail-chats" id="rail-chats" aria-label="Open chats"><button type="button" class="rail-chat on" data-tip="Chat" aria-label="Chat" aria-current="page">M</button></div><div class="rail-foot"><button data-tip="Settings" type="button" class="rail-button" aria-label="Settings"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg></button></div></div></aside><div id="desktop-toolbar"><button id="desktop-toggle-sidebar" type="button" aria-label="Toggle sidebar" aria-expanded="true"><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M9 4v16"></path></svg></button><div id="workspace-pins" role="tablist" aria-label="Pinned chats"></div><div id="workspace-tabs" role="tablist" aria-label="Open chats"><div class="bar-tab on"><button type="button" role="tab"  tabindex="0" aria-selected="true" aria-label="Chat"><span class="sidebar-session-mark " aria-hidden="true"></span><span class="bar-tab-words"><span class="bar-tab-name" id="workspace-title">Chat</span><span class="bar-tab-sub" aria-hidden="true">workspace</span></span></button><button aria-label="Close Chat" tabindex="-1" type="button" class="bar-tab-close">×</button></div></div><button id="workspace-more" type="button" class="bar-more" hidden=""></button><button id="workspace-new-tab" type="button" class="bar-tab-new" aria-label="Open a new chat">+</button><span id="workspace-call"></span><div id="thread-tabs" hidden=""></div><div id="bar-drive"><button id="drive-pill" type="button" aria-haspopup="dialog" aria-expanded="false"><span class="bf-dot idea" aria-hidden="true"></span><span class="dp-word">Drive</span><span class="dp-about"></span></button></div><header id="header"><button aria-label="This conversation" type="button" class="header-more">⋯</button></header></div><div class="app live-app cards-on" id="app"><div class="status" id="status" hidden=""><span></span><div class="spacer"></div><div class="context"><div class="meter"><i style="--usage:8%"></i></div><span></span></div></div><div class="workspace" id="workspace" role="tabpanel"><main id="main"><div id="banner" hidden=""></div><div class="stage" id="stage"><div id="page" class="page" hidden=""></div><div id="conversation"><article class="turn" ><div class="turn-content"><div class="request"><span class="text">Chat</span><span class="request-meta"><span class="ask-actions"><button type="button" class="">edit</button><button type="button" class="">retry</button><button type="button" class="">rewind</button></span><time>01:35</time></span></div><div class="response "><div class="answer"><span class="answer-mark" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"></use></svg></span><div class="markdown"></div></div><div class="turn-receipt"><span></span><span><button aria-expanded="false" type="button" class="receipt-files">1 file changed <span class="counts"><span class="plus">+1</span><span class="minus">−1</span></span><svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></span><span><span class="receipt-checks success">checks passed</span></span><span><button type="button" class="receipt-steps">2 steps</button></span><span class="receipt-actions"><button type="button" class="receipt-action copy-answer"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>Copy</button><button type="button" class="receipt-action"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path></svg>Undo changes</button></span></div></div></div><div class="live-activity working-line" role="status" hidden=""><span class="wl-mark"></span><span class="wl-line"><span class="wl-words"></span><span class="wl-glint" aria-hidden="true"><span class="wl-words wl-copy"></span></span></span></div><div class="fd-chips" hidden=""></div></article></div><div id="question"></div><div id="branch-done" hidden=""></div><div id="plain-line" hidden=""></div></div><div id="timeline" aria-hidden="true" hidden=""><i class="tl-line"><i class="tl-view"></i></i><div class="tl-marks"></div><span class="tl-label" hidden=""></span></div><nav id="foundry-rail" aria-label="Mockups" hidden=""><div class="fr-in"></div></nav><div id="drop-zone" hidden="">Drop files to attach</div><div id="input-area"><div id="threads-foot" hidden=""></div><div id="approval" hidden=""></div><div id="composer-slot"><div id="completion" class="popover" hidden=""></div><div id="context-card" hidden=""></div><form class="composer" id="composer"><div class="composer-box"><div id="queue-label" hidden=""><span>Restored · not sent <span class="muted">the turn did not finish</span></span><button type="button" class="">Clear ×</button></div><div id="attach-row" hidden=""></div><textarea aria-label="Message" rows="1" spellcheck="false" placeholder="Continue the conversation…"></textarea><div id="mention-chips"></div><button type="submit" class="send" aria-label="Send"><span id="tokens">~0 tok</span><kbd>↵</kbd><span id="send-label">send</span><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"></path><path d="M20 4v7a4 4 0 0 1-4 4H4"></path></svg><svg class="ico send-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button></div><div class="composer-bar"><input type="file" id="attach-input" multiple="" hidden="" style=""><button type="button" class="cb cb-plus" aria-label="Attach files"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button><button type="button" id="composer-talk" class="cb cb-talk" aria-label="Talk" hidden=""><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg></button><button type="button" id="composer-mode" class="cb mode-auto" aria-label="Mode: Auto"><span class="mode-list"><span class="mode-opt mode-ask" data-mode="ask">Ask</span><span class="mode-opt mode-edits" data-mode="edits">Accept edits</span><span class="mode-opt mode-plan" data-mode="plan">Plan</span><span class="mode-opt mode-auto on" data-mode="auto">Auto</span><span class="mode-opt mode-orchestrate" data-mode="orchestrate">Orchestrate</span></span><kbd>Alt+M</kbd></button><button type="button" id="composer-where" class="cb" aria-expanded="false" hidden="">in workspace<span class="where-caret" aria-hidden="true">⌄</span></button><div class="hints"><button type="button"><kbd>/</kbd> commands</button><button type="button" id="hint-mention"><kbd>@</kbd> files</button></div><span class="sp"></span><button type="button" id="composer-model" class="cb">Qwen3.8 27B</button><button type="button" id="composer-context" class="cb" aria-label="Context used" aria-expanded="false"><span class="cw-context">8%</span></button></div><div id="where-row" class="where-row" role="group" aria-label="Where this chat lives" hidden=""></div></form></div></div><div id="overlay" class="popover modal" hidden="" role="dialog" aria-label="Dialog"></div></main><aside id="thread-pane" class="thread-pane" aria-label="Thread" hidden=""></aside><aside id="cards" aria-label="This chat"><section class="card env" data-card="where"><button type="button" class="card-head" aria-expanded="false"><span class="env-row"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg><span class="env-v">This computer</span><span class="env-r"><i class="env-dot on"></i></span></span><span class="env-row"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="6" cy="18" r="2.5"></circle><circle cx="18" cy="8" r="2.5"></circle><path d="M6 8.5v7M18 10.5a7 7 0 0 1-7 7H8.5"></path></svg><span class="env-v">master</span><span class="env-r">1 uncommitted</span></span><span class="env-row"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg><span class="env-v">Qwen3.8 27B</span><span class="env-r">262k</span></span></button><div class="card-body"><div class="env-more"></div></div></section></aside></div></div></div><div id="notice" role="status" hidden=""></div>';
+  var BLOCK = /^(P|UL|OL|DIV|PRE|TABLE|H[1-6]|BLOCKQUOTE|HR|SECTION|FIGURE|D-[A-Z]+)$/;
+  var mark = function (item, on, cls) { item.classList.toggle(cls, on); if (on) item.setAttribute("aria-current", "page"); else item.removeAttribute("aria-current"); };
+  /// A message inside Demesne is a turn, as the app draws one.
+  var turn = function (shell, el) {
+    var article = shell.__turn.cloneNode(true), you = el.getAttribute("from") === "you";
+    if (you) {
+      article.querySelector(".response").remove();
+      var text = article.querySelector(".request .text"); text.textContent = ""; adopt(el, text);
+      article.querySelector("time").textContent = el.getAttribute("time") || "";
+      article.setAttribute("data-asked", "");
+    } else {
+      var before = el.previousElementSibling;
+      if (before && before.matches("article.turn[data-asked]") && !el.hasAttribute("data-view")) { before.removeAttribute("data-asked"); article = before; article.querySelector(".turn-content").appendChild(shell.__turn.querySelector(".response").cloneNode(true)); }
+      else article.querySelector(".request").remove();
+      var into = article.querySelector(".markdown"), line = null;
+      Array.prototype.slice.call(el.childNodes).forEach(function (node) {
+        if (node.nodeType === 1 && BLOCK.test(node.nodeName)) { line = null; into.appendChild(node); return; }
+        if (!line) { if (node.nodeType === 3 && !node.nodeValue.trim()) return; line = doc.createElement("p"); into.appendChild(line); }
+        line.appendChild(node);
+      });
+      var receipt = article.querySelector(".turn-receipt"), spans = receipt.children;
+      spans[0].textContent = el.getAttribute("meta") || "";
+      var files = el.getAttribute("files"), checks = el.getAttribute("checks"), steps = el.getAttribute("steps");
+      // With no files changed there is nothing to undo: the app offers to ask again.
+      if (files) spans[1].querySelector("button").firstChild.nodeValue = files + " ";
+      else { spans[1].remove(); receipt.querySelector(".receipt-actions").lastChild.outerHTML = '<button type="button" class="receipt-action ask-again"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 5v6h-6"></path></svg>Ask again</button>'; }
+      var checked = receipt.querySelector(".receipt-checks"), stepped = receipt.querySelector(".receipt-steps");
+      if (checks) checked.textContent = checks; else checked.parentElement.remove();
+      if (steps) stepped.textContent = steps; else stepped.parentElement.remove();
+      if (!el.getAttribute("meta") && !files && !checks && !steps && el.hasAttribute("bare")) receipt.remove();
+    }
+    // The app's own small print under a turn is the frame, not the design.
+    Array.prototype.forEach.call(article.querySelectorAll(".turn-receipt, .request-meta"), function (print) { print.setAttribute("data-chrome", ""); });
+    if (article.isConnected) { el.remove(); return article; }
+    if (el.hasAttribute("data-view")) article.setAttribute("data-view", el.getAttribute("data-view"));
+    if (el.id) article.id = el.id;
+    el.replaceWith(article);
+    return article;
+  };
+  /// A card in the right column, as the app draws one.
+  var sideCard = function (el) {
+    var card = doc.createElement("section"), open = el.childNodes.length > 0;
+    card.className = "card" + (open ? " open" : "");
+    card.innerHTML = '<button type="button" class="card-head" aria-expanded="' + open + '">' + icon(el.getAttribute("icon") || "file").replace("<svg", '<svg class="ico"') + '<span class="card-line">' + esc(el.getAttribute("title") || "") + '</span><span class="card-sum">' + esc(el.getAttribute("note") || "") + '</span></button><div class="card-body"></div>';
+    adopt(el, card.querySelector(".card-body"));
+    card.querySelector(".card-head").addEventListener("click", function () { var on = card.classList.toggle("open"); this.setAttribute("aria-expanded", on); });
+    el.replaceWith(card);
+  };
+  /// The composer inside Demesne is the app's own: typing and Enter put the
+  /// message in the chat, then the next reply. The <d-composer> stays, hidden,
+  /// so its "send" event still reaches the page.
+  var compose = function (app, host, c) {
+    c.__drawn = true;
+    var area = app.querySelector("#input-area"), input = area.querySelector("textarea"), model = c.getAttribute("model") || host.getAttribute("model") || "GPT-6.1";
+    var replies = list(c.getAttribute("reply")), next = 0, mode = c.getAttribute("mode") || "Ask", anchor = doc.createComment("composer");
+    input.placeholder = c.getAttribute("placeholder") || "Ask anything";
+    area.querySelector("#composer-model").textContent = model;
+    Array.prototype.forEach.call(area.querySelectorAll(".mode-opt"), function (option) {
+      var on = same(option.textContent, mode); option.classList.toggle("on", on);
+      if (on) { area.querySelector("#composer-mode").className = "cb mode-" + option.getAttribute("data-mode"); area.querySelector("#composer-mode").setAttribute("aria-label", "Mode: " + option.textContent); }
+    });
+    c.replaceWith(anchor); c.hidden = true; area.appendChild(c); area.hidden = false;
+    var say = function (from, text) {
+      var message = doc.createElement("d-message");
+      if (from) message.setAttribute("from", from); else message.setAttribute("meta", model + " · " + (1 + text.length % 4) + "s");
+      message.textContent = text; anchor.before(message);
+      var last = anchor.previousElementSibling; if (last && last.scrollIntoView) last.scrollIntoView({ block: "end" });
+    };
+    var send = function () {
+      var text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      say("you", text);
+      var event = new CustomEvent("send", { detail: { text: text }, bubbles: true, cancelable: true });
+      if (!c.dispatchEvent(event)) return;
+      setTimeout(function () { say("", replies.length ? replies[next++ % replies.length] : "Got it."); }, 500);
+    };
+    area.querySelector("form").addEventListener("submit", function (event) { event.preventDefault(); send(); });
+    input.addEventListener("keydown", function (event) { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(); } });
+  };
+  var sideRow = function (el) {
+    var row = doc.createElement("div"); row.className = "card-row";
+    row.innerHTML = '<span class="card-label">' + esc(el.getAttribute("title")) + '</span><span class="card-right">' + esc(el.getAttribute("note") || "") + "</span>";
+    adopt(el, row.lastChild); el.replaceWith(row);
+  };
+  define("d-demesne", function (el) {
+    appStyle();
+    var theme = el.getAttribute("theme") || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    if (!APP_THEME[theme]) theme = "dark";
+    el.setAttribute("theme", theme);
+    if (el.getAttribute("height")) el.style.setProperty("--height", /^\d+$/.test(el.getAttribute("height")) ? el.getAttribute("height") + "px" : el.getAttribute("height"));
+    var kids = Array.prototype.slice.call(el.childNodes);
+    var mac = el.getAttribute("os") !== "other";
+    var app = doc.createElement("d-app");
+    app.className = "glass" + (mac ? " mac-chrome" : "");
+    app.setAttribute("data-theme", APP_THEME[theme][0]); app.setAttribute("data-appearance", theme); app.setAttribute("style", APP_THEME[theme][1]);
+    app.innerHTML = '<d-body class="desktop"><div id="mac-lights-hole" data-chrome aria-hidden="true">' + (mac ? '<span class="dp-lights"><i></i><i></i><i></i></span>' : "") + "</div>" + DEFS + SHELL + '<div id="notice" role="status" hidden></div></d-body>';
+    var $ = function (selector) { return app.querySelector(selector); };
+    var itemT = $(".sidebar-item"), tabT = $(".bar-tab"); app.__turn = $("article.turn");
+    itemT.remove(); tabT.remove(); app.__turn.remove();
+    ["#desktop-sidebar", "#desktop-toolbar", "#input-area", "#cards"].forEach(function (chrome) { $(chrome).setAttribute("data-chrome", ""); });
+    if (mac) { $("#sidebar-new-key").textContent = "⌘N"; $("#sidebar-search-key").textContent = "⌘K"; $("#composer-mode kbd").textContent = "⌥M"; }
+    // The project, its chats, the open tabs.
+    // branch="" is a folder that is not a git checkout, as the app shows one.
+    var project = el.getAttribute("project") || "demesne-cli", branch = el.hasAttribute("branch") ? el.getAttribute("branch") : "main", page = el.getAttribute("page") || "";
+    var chats = list(el.getAttribute("chats") || "Tidy the sidebar|Drive picks that land"), current = el.getAttribute("chat") || chats[0];
+    $(".sidebar-project-name > span:last-child").textContent = project;
+    $(".project-face b").textContent = project.charAt(0).toLowerCase();
+    if (branch) $(".sidebar-project-branch span").textContent = branch; else $(".sidebar-project-branch").remove();
+    chats.forEach(function (chat, index) {
+      var item = itemT.cloneNode(true), button = item.querySelector(".sidebar-session");
+      item.querySelector(".sidebar-session-name").textContent = chat; button.setAttribute("aria-label", chat);
+      Array.prototype.forEach.call(item.querySelectorAll(".sidebar-row-actions button"), function (action) { action.setAttribute("aria-label", action.getAttribute("aria-label").replace("Chat", chat)); });
+      item.querySelector(".sidebar-session-age").textContent = index ? index + "h" : "now";
+      mark(button, same(chat, current) && !page, "selected");
+      $(".sidebar-project-chats").appendChild(item);
+    });
+    Array.prototype.forEach.call(app.querySelectorAll(".sidebar-nav > button"), function (button) { button.classList.toggle("on", !!page && same(button.getAttribute("aria-label"), page)); });
+    var tabs = list(el.getAttribute("tabs") || el.getAttribute("tab") || (page || current));
+    tabs.forEach(function (name, index) {
+      var tab = tabT.cloneNode(true), button = tab.querySelector("[role=tab]"), label = tab.querySelector(".bar-tab-name");
+      if (index) label.removeAttribute("id"); label.textContent = name; tab.querySelector(".bar-tab-sub").textContent = project;
+      button.setAttribute("aria-label", name); button.setAttribute("aria-selected", index === 0); tab.classList.toggle("on", index === 0);
+      tab.querySelector(".bar-tab-close").setAttribute("aria-label", "Close " + name);
+      $("#workspace-tabs").appendChild(tab);
+    });
+    var user = el.getAttribute("user") || "Mike";
+    $("#sidebar-you").textContent = user; $("#sidebar-avatar").textContent = user.charAt(0).toUpperCase();
+    $("#sidebar-plan").textContent = el.getAttribute("plan") || "";
+    // Drive's pill, as it sits with nothing running; drive="3 ideas" says more, drive="none" is a project without it.
+    if (el.getAttribute("drive") === "none") $("#drive-pill").hidden = true;
+    else $(".dp-about").textContent = el.getAttribute("drive") ? "· " + el.getAttribute("drive") : "";
+    // What the author wrote: cards go to the right column, the rest is the
+    // chat (or the page, when page="…" names one).
+    var main = doc.createElement("div"); main.className = "dm-main";
+    var cards = $("#cards"), env = cards.querySelectorAll(".env-row .env-v"), own = false;
+    kids.forEach(function (kid) {
+      if (kid.nodeType === 1 && kid.getAttribute("slot") === "cards") { kid.removeAttribute("slot"); cards.appendChild(kid); own = true; }
+      else main.appendChild(kid);
+    });
+    if (branch) env[1].textContent = branch; else env[1].innerHTML = "<em>Not a git checkout</em>";
+    cards.querySelector(".env-row .env-r:not(:has(i))").textContent = "";
+    env[2].textContent = el.getAttribute("model") || "GPT-6.1"; cards.querySelectorAll(".env-row .env-r")[2].textContent = "";
+    if (el.getAttribute("cards") === "none" && !own) { cards.hidden = true; $("#app").classList.remove("cards-on"); }
+    $("#input-area").hidden = true;
+    if (page) { $("#page").hidden = false; $("#page").appendChild(main); $("#conversation").hidden = true; }
+    else $("#conversation").appendChild(main);
+    el.appendChild(app);
+    // The author's messages, cards and composer become the app's own.
+    Array.prototype.forEach.call(cards.querySelectorAll(":scope > d-card"), sideCard);
+    Array.prototype.forEach.call(cards.querySelectorAll("d-row"), sideRow);
+    Array.prototype.forEach.call(main.querySelectorAll("d-message"), function (message) { message.__drawn = true; turn(app, message); });
+    var composer = main.querySelector("d-composer"); if (composer) compose(app, el, composer);
+    fitWidth(el, app, Number(el.getAttribute("width")) || 1100, 640);
+    // Going somewhere: the tab, sidebar item or chat of that name lights up,
+    // and the view of that name shows. Clicking a sidebar item or chat with no
+    // tab of its name renames the open tab, as Demesne does.
+    el.__select = function (name, from) {
+      var tabs = app.querySelectorAll(".bar-tab"), items = app.querySelectorAll(".sidebar-nav > button, .sidebar-session");
+      var label = function (item) { return item.getAttribute("aria-label") || item.textContent; };
+      var tab = Array.prototype.find.call(tabs, function (t) { return same(t.querySelector(".bar-tab-name").textContent, name); });
+      var item = from || Array.prototype.find.call(items, function (i) { return same(label(i), name); });
+      if (!tab && from && from.classList.contains("sidebar-session")) { tab = app.querySelector(".bar-tab.on") || tabs[0]; if (tab) tab.querySelector(".bar-tab-name").textContent = name; }
+      if (tab) Array.prototype.forEach.call(tabs, function (t) { t.classList.toggle("on", t === tab); t.querySelector("[role=tab]").setAttribute("aria-selected", t === tab); });
+      if (item) Array.prototype.forEach.call(items, function (i) { if (i.classList.contains("sidebar-session")) mark(i, i === item, "selected"); else if (!i.classList.contains("sidebar-new")) i.classList.toggle("on", i === item); });
+      go(el, name);
+      el.dispatchEvent(new CustomEvent("go", { detail: { name: name }, bubbles: true }));
+    };
+    app.addEventListener("click", function (event) {
+      var tab = event.target.closest(".bar-tab [role=tab]"), item = event.target.closest(".sidebar-nav > button:not(.sidebar-new), .sidebar-session");
+      if (tab && app.contains(tab)) el.__select(tab.querySelector(".bar-tab-name").textContent.trim());
+      else if (item && app.contains(item)) el.__select((item.getAttribute("aria-label") || item.textContent).trim(), item);
+    });
+    app.addEventListener("submit", function (event) { event.preventDefault(); });
+    firstViews(el);
+    go(el, tabs[0]) || go(el, current) || go(el, page);
+  });
+
   define("d-message", function (el) {
+    // Inside Demesne a message is one of the app's turns (d-demesne draws
+    // the ones it starts with; this is for those added later).
+    if (el.closest("d-demesne")) { var shell = el.closest("d-app"); if (shell && shell.__turn) turn(shell, el); else el.__drawn = false; return; }
     var said = doc.createElement("div"); said.className = "dm-said"; adopt(el, said);
     if (el.getAttribute("from") !== "you") {
       var mark = doc.createElement("span"); mark.className = "dm-d"; mark.innerHTML = "d<i>.</i>"; el.appendChild(mark);
@@ -351,6 +531,7 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
   /// can answer itself: listen for "send" (event.detail.text) and call
   /// event.preventDefault() to skip the reply.
   define("d-composer", function (el) {
+    if (el.closest("d-demesne")) { var inside = el.closest("d-app"); if (!inside) el.__drawn = false; else if (!el.hidden) compose(inside, el.closest("d-demesne"), el); return; }
     var placeholder = el.getAttribute("placeholder") || "Ask anything", model = el.getAttribute("model") || "GPT-6.1";
     var replies = list(el.getAttribute("reply")), turn = 0;
     el.innerHTML = '<div class="dm-box"><input type="text" aria-label="' + esc(placeholder) + '" placeholder="' + esc(placeholder) + '"><button type="button" aria-label="Send">' + icon("arrow-up") + '</button></div><div class="dm-under"><span>＋</span><span>' + esc(el.getAttribute("mode") || "Ask") + "</span><span>" + esc(model) + "</span></div>";
@@ -375,10 +556,12 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     button.addEventListener("click", send);
   });
   define("d-card", function (el) {
+    if (el.parentElement && el.parentElement.id === "cards" && el.closest("d-app")) { sideCard(el); return; }
     var title = el.getAttribute("title");
     if (title) { var head = doc.createElement("div"); head.className = "dm-ch"; head.innerHTML = (el.getAttribute("icon") ? icon(el.getAttribute("icon")).replace("<svg", '<svg style="width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.75"') : "") + esc(title); el.prepend(head); el.removeAttribute("title"); }
   });
   define("d-row", function (el) {
+    if (el.closest("d-app #cards")) { sideRow(el); return; }
     var text = doc.createElement("div"); text.className = "dm-rt";
     text.innerHTML = "<b>" + esc(el.getAttribute("title")) + "</b>" + (el.getAttribute("note") ? "<small>" + esc(el.getAttribute("note")) + "</small>" : "");
     el.prepend(text); el.removeAttribute("title");
@@ -394,58 +577,6 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
   };
   define("d-seg", segmented);
   define("d-tabs", segmented);
-  define("d-sidebar", function (el) {
-    var on = el.getAttribute("page") || "", chats = list(el.getAttribute("chats") || "Tidy the sidebar|Drive picks that land"), current = el.getAttribute("chat") || chats[0];
-    var nav = [["plus", "New chat"], ["sparkles", "Assistant"], ["search", "Search"], ["clock", "Scheduled"], ["foundry", "Foundry"], ["sliders", "Customize"]];
-    var extra = doc.createElement("div"); adopt(el, extra);
-    el.innerHTML = nav.map(function (n) { return '<button type="button" class="dm-nav' + (n[1].toLowerCase() === on.toLowerCase() ? " on" : "") + '"><d-icon name="' + n[0] + '"></d-icon>' + n[1] + "</button>"; }).join("")
-      + '<div class="dm-proj"><d-icon name="folder"></d-icon>' + esc(el.getAttribute("project") || "demesne-cli") + "<small>main</small></div>"
-      + chats.map(function (chat) { return '<button type="button" class="dm-chat' + (chat === current && !on ? " on" : "") + '">' + esc(chat) + "</button>"; }).join("")
-      + '<div class="dm-foot"><span class="dm-release">Demesne · Cherry Blossom</span><span class="dm-user"><d-avatar name="' + esc(el.getAttribute("user") || "Mike") + '" size="24"></d-avatar>' + esc(el.getAttribute("user") || "Mike") + "</span></div>";
-    if (extra.childNodes.length) el.querySelector(".dm-foot").before(extra);
-    // A click picks the item: inside Demesne the shell follows it, on its own the page's views do.
-    el.addEventListener("click", function (event) {
-      var item = event.target.closest(".dm-nav,.dm-chat");
-      if (!item || item.parentElement !== el) return;
-      var name = item.textContent.trim(), shell = el.closest("d-demesne");
-      if (shell && shell.__select) { shell.__select(name, item); return; }
-      Array.prototype.forEach.call(el.querySelectorAll(".dm-nav,.dm-chat"), function (other) { other.classList.toggle("on", other === item); });
-      go(doc, name);
-    });
-  });
-  define("d-demesne", function (el) {
-    var cards = Array.prototype.filter.call(el.children, function (child) { return child.getAttribute("slot") === "cards"; });
-    var main = doc.createElement("div"); main.className = "dm-main"; adopt(el, main);
-    if (el.getAttribute("height")) el.style.setProperty("--height", /^\d+$/.test(el.getAttribute("height")) ? el.getAttribute("height") + "px" : el.getAttribute("height"));
-    var tabs = list(el.getAttribute("tabs") || el.getAttribute("tab") || "New chat");
-    var app = doc.createElement("div"); app.className = "dm-app";
-    app.innerHTML = '<span class="dp-lights dm-lights" data-chrome><i></i><i></i><i></i></span><d-sidebar data-chrome page="' + esc(el.getAttribute("page") || "") + '" chats="' + esc(el.getAttribute("chats") || "") + '" chat="' + esc(el.getAttribute("chat") || "") + '" project="' + esc(el.getAttribute("project") || "demesne-cli") + '"></d-sidebar>'
-      + '<div class="dm-right"><div class="dm-tabs" data-chrome>' + tabs.map(function (tab, i) { return '<button type="button" role="tab" class="dm-tab' + (i === 0 ? " on" : "") + '" aria-selected="' + (i === 0) + '">' + esc(tab) + "</button>"; }).join("") + '</div><div class="dm-card"></div></div>';
-    var card = app.querySelector(".dm-card"); card.appendChild(main);
-    if (cards.length) { var column = doc.createElement("div"); column.className = "dm-cards"; cards.forEach(function (c) { c.removeAttribute("slot"); column.appendChild(c); }); card.appendChild(column); }
-    el.appendChild(app);
-    fitWidth(el, app, Number(el.getAttribute("width")) || 1100);
-    // Going somewhere: the tab, sidebar item or chat of that name lights up,
-    // and the view of that name shows. Clicking a sidebar item or chat with no
-    // tab of its name renames the open tab, as Demesne does.
-    el.__select = function (name, from) {
-      var tabs = app.querySelectorAll(".dm-tab"), items = app.querySelectorAll("d-sidebar>.dm-nav,d-sidebar>.dm-chat");
-      var tab = Array.prototype.find.call(tabs, function (t) { return same(t.textContent, name); });
-      var item = from || Array.prototype.find.call(items, function (i) { return same(i.textContent, name); });
-      if (!tab && from && from.classList.contains("dm-chat")) { tab = app.querySelector(".dm-tab.on") || tabs[0]; if (tab) tab.textContent = name; }
-      if (tab) Array.prototype.forEach.call(tabs, function (t) { t.classList.toggle("on", t === tab); t.setAttribute("aria-selected", t === tab); });
-      if (item) Array.prototype.forEach.call(items, function (i) { i.classList.toggle("on", i === item); });
-      go(el, name);
-      el.dispatchEvent(new CustomEvent("go", { detail: { name: name }, bubbles: true }));
-    };
-    app.querySelector(".dm-tabs").addEventListener("click", function (event) {
-      var tab = event.target.closest(".dm-tab");
-      if (tab) el.__select(tab.textContent.trim());
-    });
-    firstViews(el);
-    go(el, tabs[0]) || go(el, el.getAttribute("chat") || "") || go(el, el.getAttribute("page") || "");
-  });
-
   // Believable sample data, the same on every run.
   var PEOPLE = ["Amara Okafor", "Lucas Brandt", "Mei Tanaka", "Sofia Marín", "Tomás Silva", "Priya Raman", "Jonah Weiss", "Leila Haddad", "Oskar Lind", "Nia Mensah", "Hugo Laurent", "Yuki Mori"];
   var seeded = function (seed) { var s = seed || 7; return function () { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; };

@@ -71,12 +71,15 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "anime.js": { path: "vendor/anime.umd.min.js", type: "application/javascript; charset=utf-8", then: "kit/motion.js" },
   // Parts: frames, Demesne's own shell and pieces, icons, avatars, charts.
   "parts.js": { path: "kit/parts.js", type: "application/javascript; charset=utf-8" },
+  // Demesne's own styles, scoped to the window <d-demesne> draws (foundry-kit/scope-app.ts); parts.js loads it.
+  "app.css": { path: "kit/app.css", type: "text/css; charset=utf-8" },
   // The ready kinds (foundry-kinds.ts): how a Deck, a Doc and a Dashboard look and move.
   "kinds.css": { path: "kit/kinds.css", type: "text/css; charset=utf-8" },
   "kinds.js": { path: "kit/kinds.js", type: "application/javascript; charset=utf-8" },
   // Pages that remember: demesne.save / load / ask / pick. Demesne puts it in front of every page (withRemember).
   "remember.js": { path: "kit/remember.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
+  ...Object.fromEntries([400, 500].map((weight) => [`fonts/jetbrains-mono-latin-${weight}-normal.woff2`, { path: `vendor/fonts/jetbrains-mono-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
 /** A page's own calls to Demesne: foundry://data/<id> keeps what the page
  * saves, foundry://ask/<id> asks the chat's model. Null for anything else. */

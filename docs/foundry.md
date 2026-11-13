@@ -41,6 +41,19 @@ The guide reaches the model as its own numbered block in its instructions, from 
 
 The ready kinds (deck, doc, dashboard) are drawn by Demesne from content, so the guide applies to pages the model designs itself: `html` and `svg`.
 
+## A mockup of Demesne is drawn with Demesne's own styles
+
+Foundry used to keep a small hand-made copy of the app for mockups of Demesne, and the copy drifted: it still listed Assistant and Customize, had no right cards, and drew the composer differently. Now there is no copy of the look.
+
+- `<d-demesne>` draws the window with the app's own markup and loads the app's own stylesheet, `foundry://kit/app.css`. That file is made at build time from the four sheets the window loads (`ui.css`, `live.css`, `desktop.css`, `workspace.css`) by `apps/desktop/foundry-kit/scope-app.ts`.
+- The app's rules assume they own the page, so they are fenced in: everything sits in `@scope (d-app)`, `html` becomes the scope's root and `body` a `<d-body>` inside it, viewport units and width queries become container units and container queries, and the whole sheet is one cascade layer.
+- Because it is a layer, a mockup changes the app by its real names (`.sidebar-new{…}`, `#composer .composer-box{…}`) and always wins, without out-weighing the app's selectors.
+- The kit's own styles (`base.css`) stop at the window, so nothing from the kit leaks into the app's look.
+- Messages, the composer and cards the author writes (`<d-message>`, `<d-composer>`, `<d-card slot="cards">`) become the app's own turns, composer and right cards.
+- `scripts/check-foundry-app.ts` opens the real app and the part on the same chat at the same size and fails when a piece of the window sits somewhere else, has other type or colours, is missing, or is invented. When the app's markup changes, bring `SHELL` in `apps/desktop/foundry-kit/parts.js` along and run it.
+
+The window is glass over your desktop; in a mockup a still grey backdrop stands in for what is behind it.
+
 ## It remembers the course
 
 A page's source leaves the chat once its turn is over, so a later ask used to start from a title alone. Now reading a mockup (`foundry_read`) hands back its brief with the source: for each ask so far, what you asked, the direction taken, what leads, what was dropped and what it started from. The first ask and the newest five are kept. The model is told to answer the newest ask, keep every earlier decision you did not change, and never bring back what was dropped unless you ask. (`briefOf` in `apps/daemon/src/foundry.ts`.)

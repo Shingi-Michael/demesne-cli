@@ -185,3 +185,5 @@ html[data-kind=dashboard] body{background:color-mix(in srgb,var(--ink) 4%,var(--
 .k-figure.is-donut .k-plot svg{max-width:460px}
 @media (max-width:760px){.dash{padding:var(--space-5) var(--space-4)}.dash-grid{grid-template-columns:minmax(0,1fr)}.span-all,.span-half,.span-note,.span-third{grid-column:1/-1}}
 .dash .span-all .k-plot svg{max-height:300px}
+/* On the Foundry page Foundry plays the slides; the deck draws no buttons (pass 221 A). */
+.in-foundry .deck-strip,.in-foundry .deck-bar{display:none!important}

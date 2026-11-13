@@ -62,6 +62,8 @@
     // Saves run in order, so the last one written is the one kept.
     var run = queue.then(function () { return all(); }).then(function (data) {
       if (text === undefined) delete data[key]; else data[key] = JSON.parse(text);
+      // While Foundry plays a demo, what it types is not the person's: kept for the page, never saved.
+      if (window.__demesneDemo && window.__demesneDemo.playing) return value;
       if (!inside()) {
         var store = local();
         if (store) try { if (text === undefined) store.removeItem(prefix + key); else store.setItem(prefix + key, text); } catch (error) {}

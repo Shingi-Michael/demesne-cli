@@ -96,8 +96,8 @@ describe("Demesne daemon", () => {
     const processor: TurnProcessor = {
       providerId: "planned-provider",
       modelId: "planned-model",
-      // Room for the tool definitions (about 4.2k tokens) and the design guide (about 2.4k) under the soft limit.
-      contextCapacity: 10_240,
+      // Room for the tool definitions (about 5k tokens) and the design guide (about 2.4k) under the soft limit.
+      contextCapacity: 11_264,
       maxOutputTokens: 1_536,
       async listModels() {
         return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }];
@@ -138,7 +138,7 @@ describe("Demesne daemon", () => {
     for (const start of starts) {
       expect(start.payload.contextPlan).toEqual(expect.objectContaining({
         schemaVersion: 3,
-        capacityTokens: 10_240,
+        capacityTokens: 11_264,
         budgetStatus: "within_soft_limit",
       }));
     }

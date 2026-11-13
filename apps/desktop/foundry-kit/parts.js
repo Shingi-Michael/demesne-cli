@@ -94,6 +94,7 @@ d-compare.dp-switch{display:flex;flex-direction:column;align-items:stretch;gap:1
 d-compare.dp-stack{display:flex;flex-direction:column;align-items:stretch;gap:40px}
 d-compare.dp-stack>.dp-rec{outline:2px solid #f2b6c8;outline-offset:10px;border-radius:12px}
 d-compare.dp-switch>[hidden]{display:none}
+d-compare.dp-one{display:block}d-compare.dp-one>[hidden]{display:none}
 .dp-strip{position:sticky;top:0;z-index:20;display:flex;flex-direction:row;align-items:center;gap:4px;padding:6px;border-radius:12px;background:color-mix(in srgb,var(--paper) 90%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:inset 0 0 0 1px var(--hair);flex-wrap:wrap}
 .dp-strip>button{padding:4px 12px;border-radius:99px;background:transparent;color:var(--secondary);font-size:14px}
 .dp-strip>button.on{background:var(--tone-2);color:var(--ink)}
@@ -231,12 +232,15 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     phone.firstChild.appendChild(body); el.appendChild(phone);
   });
 
-  /// On Foundry's long page (?stack=1) options stack one under another, each
-  /// named, so you compare them by scrolling (pass 196 A); the recommended
-  /// one comes first with a pink edge (pass 197 A).
+  /// On Foundry's long page (?stack=1) each option gets a stage of its own
+  /// (pass 221 A): the page shows one option (?option=N, else the
+  /// recommended one) with nothing drawn on it, and tells the Foundry page
+  /// the names, which it writes on the line above each stage.
   var STACK = /[?&]stack=1(&|$)/.test(location.search);
+  var ONE = /[?&]option=(\d+)(&|$)/.exec(location.search);
   define("d-compare", function (el) {
     var rec = el.getAttribute("recommended");
+    if (STACK && el.getAttribute("layout") !== "side") { stage(el, rec); return; }
     if (STACK) {
       el.classList.add("dp-stack");
       var first = rec && Array.prototype.find.call(el.children, function (option) { return (option.getAttribute("data-option") || option.getAttribute("title") || "").indexOf(rec) === 0; });
@@ -251,6 +255,17 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
       option.prepend(head); option.removeAttribute("title");
     });
   });
+
+  function stage(el, rec) {
+    var options = Array.prototype.filter.call(el.children, function (option) { return option.getAttribute("data-option") || option.getAttribute("title"); });
+    if (!options.length) return;
+    var names = options.map(function (option) { var name = option.getAttribute("data-option") || option.getAttribute("title"); option.setAttribute("data-option", name); option.removeAttribute("title"); return name; });
+    var best = rec ? names.findIndex(function (name) { return name.indexOf(rec) === 0; }) : -1;
+    var shown = ONE ? Math.min(Number(ONE[1]), options.length - 1) : best < 0 ? 0 : best;
+    el.classList.add("dp-one");
+    options.forEach(function (option, i) { option.hidden = i !== shown; });
+    if (!ONE) try { parent.postMessage({ demesne: "options", shown: shown, rec: best, options: names.map(function (name, i) { return { name: name, note: options[i].getAttribute("note") || "" }; }) }, "*"); } catch (error) {}
+  }
 
   /// Options as a strip on top: one at a time at full size. You choose in the
   /// chat, never on the page.

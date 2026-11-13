@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
-import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 
@@ -44,7 +44,7 @@ Anywhere:
 - <d-avatar name="Amara Okafor" size="28"> initials on a steady colour. demesne.sample.people(n) gives 12 names; demesne.sample.series(n, start, drift, seed) a believable number series.
 - <d-chart type="line|area|bar|donut" values="4,6,5,8" labels="Mon,Tue,Wed,Thu" height="200"> in --accent.
 - <d-stat label="This week" value="32.4 km" delta="+12%">.
-- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: a strip on top names them, one shows at a time at full size; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
+- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: on the Foundry page each option gets its own stage, named on the line above it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
 The parts are the frame; the idea inside is yours to design.`;
 
@@ -75,7 +75,14 @@ export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: a
   + "await demesne.ask(question) returns the chat model's answer as text, for a button the person presses (never on load or in a loop; a few a minute); await demesne.pick({accept}) lets them choose a file ({name, type, text} or {name, type, dataURL}). "
   + "Use them when the page is a tool to keep (a tracker, checklist, planner, journal, quiz): load on start, save on every change, show a saved state.";
 
-const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
+/// Pass 221 A: Foundry draws the surface and plays the demo, so the page
+/// holds only the thing being made.
+export const STAGE_RULES = "The page holds only the thing, with only the controls the real thing has. "
+  + "surface says where it sits; Foundry draws that frame and backdrop around the page (part and page grow to fit), so draw neither. "
+  + "demo says how it moves: foundry_try steps, each with a short say; Foundry plays them with a pointer, the words under the page. "
+  + "So never put Replay, Play demo, Next step or an option switcher in the page.";
+
+const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
 
 /// What stands in for a page's source once its turn is over.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";
@@ -200,8 +207,52 @@ export function searchFoundry(store: DemesneStore, query: string) {
 const savedResult = (saved: FoundryArtifactDetail) => {
   const current = saved.versions.find((item) => item.version === saved.version);
   return { id: saved.id, title: saved.title, kind: saved.kind, version: saved.version, description: saved.description,
-    note: current?.note ?? "", ...(current?.recommended ? { recommended: true } : {}), ...(current?.why ? { why: current.why } : {}) };
+    note: current?.note ?? "", ...(current?.recommended ? { recommended: true } : {}), ...(current?.why ? { why: current.why } : {}),
+    ...(current?.stage?.surface ? { surface: current.stage.surface } : {}), ...(current?.stage?.demo ? { demo: current.stage.demo } : {}) };
 };
+
+/// Pass 221 A: where it sits and how its demo goes.
+const SURFACE_SCHEMA = {
+  type: "object",
+  description: "Where it sits. Kept until changed.",
+  properties: {
+    frame: { type: "string", enum: [...FOUNDRY_FRAMES] },
+    width: { type: "integer", minimum: 120, maximum: 2400 },
+    height: { type: "integer", minimum: 0, maximum: 2400, description: "0: fits content." },
+    backdrop: { type: "string", enum: [...FOUNDRY_BACKDROPS] },
+    title: { type: "string", maxLength: 80, description: "Window title or browser address." },
+  },
+  required: ["frame"],
+  additionalProperties: false,
+} as const;
+const DEMO_SCHEMA = {
+  type: "array", maxItems: DEMO_MAX_STEPS,
+  description: "foundry_try steps, each with an optional say. Kept until changed.",
+  items: { type: "object" },
+} as const;
+
+function stageOf(input: Record<string, unknown>): FoundryStage | null {
+  try { return parseStage({ surface: input.surface, demo: input.demo }); }
+  catch (error) { throw new Error(`[invalid_input] ${error instanceof Error ? error.message : String(error)}. Hint: surface is {frame: "phone"}; demo is a list of foundry_try steps with say`); }
+}
+
+/// A page that draws a button only a demo needs (Replay, Play demo, Next
+/// step) is sent back once per ask: the demo belongs to Foundry. A second
+/// save goes through, for the page whose real design has one.
+const controlAsked = new Set<string>();
+function checkControls(kind: FoundryKind | undefined, source: string, id: string | undefined, turnId: string | undefined) {
+  if (kind !== "html") return;
+  const found = demoControls(source);
+  if (!found.length || !turnId) return;
+  const key = `${turnId}:${id ?? "new"}`;
+  if (controlAsked.has(key)) return;
+  controlAsked.add(key);
+  if (controlAsked.size > 300) controlAsked.delete(controlAsked.values().next().value!);
+  throw new Error(`[demo_control] The page draws ${found.map((text) => `“${text}”`).join(", ")}, which only runs a demo; the real thing would not have it. `
+    + "Hint: take it out and give the steps as demo (foundry_try steps with say); Foundry plays them under the page. If it really is part of the design, save again unchanged");
+}
+
+const stageSaid = (stage: FoundryStage | null) => stage?.demo ? " Foundry plays its demo under the page; check every step changes something with foundry_try {id, demo: true}." : "";
 
 const clean = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : undefined;
 
@@ -305,6 +356,8 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           based_on: { type: "string", description: "Made from another mockup: its id." },
           recommended: { type: "boolean", description: "True on the one you would use when an ask makes several." },
           why: WHY_SCHEMA,
+          surface: SURFACE_SCHEMA,
+          demo: DEMO_SCHEMA,
         },
         required: ["source"],
         additionalProperties: false,
@@ -330,17 +383,19 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
       if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
+      const stage = stageOf(input);
+      checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source, id, context.turnId);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
       try {
         saved = store.saveFoundryArtifact({ id, kind, title: clean(input.title, 200), source: input.source, note: clean(input.note, 300) ?? "", baseVersion,
-          description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}), why,
+          description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${stageSaid(stage)}${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -368,7 +423,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       name: "foundry_edit",
       description: "Change part of a Foundry artifact without resending it: exact find-and-replace edits on the version you read, saved as a new version. "
         + "Each find must match exactly once (all: true replaces every occurrence). Refused if the artifact moved past base_version. "
-        + "With no edits it only changes title, note, description, recommended or why, with no new version.",
+        + "With no edits it only changes title, note, description, recommended, why, surface or demo, with no new version.",
       inputSchema: {
         type: "object",
         properties: {
@@ -392,6 +447,8 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           description: { type: "string", maxLength: 600, description: "What it is and what to look at." },
           recommended: { type: "boolean", description: "True on the one you would use." },
           why: WHY_SCHEMA,
+          surface: SURFACE_SCHEMA,
+          demo: DEMO_SCHEMA,
           critique: { type: "string", maxLength: 1200, description: "After a look found problems: rules broken, by number, and the fix." },
         },
         required: ["id"],
@@ -405,11 +462,11 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       // Names and words only: no new version, no look.
       if (input.edits === undefined || (Array.isArray(input.edits) && input.edits.length === 0)) {
-        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended, why: whyOf(input.why) };
-        if (!words.title?.trim() && !words.description?.trim() && !words.note?.trim() && recommended === undefined && !words.why) throw new Error("[invalid_input] foundry_edit needs edits, or a title, note, description, recommended or why to change. Hint: pass edits to change the page");
+        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended, why: whyOf(input.why), stage: stageOf(input) };
+        if (!words.title?.trim() && !words.description?.trim() && !words.note?.trim() && recommended === undefined && !words.why && !words.stage) throw new Error("[invalid_input] foundry_edit needs edits, or a title, note, description, recommended, why, surface or demo to change. Hint: pass edits to change the page");
         if (!store.getFoundryArtifact(input.id)) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
         const saved = store.describeFoundryArtifact(input.id, words);
-        return JSON.stringify({ ...savedResult(saved), message: `Updated its ${[words.title && "name", words.note && "version name", words.description && "description", recommended !== undefined && (recommended ? "pick" : "unpick"), words.why && "why"].filter(Boolean).join(", ")}; the page itself is unchanged.` });
+        return JSON.stringify({ ...savedResult(saved), message: `Updated its ${[words.title && "name", words.note && "version name", words.description && "description", recommended !== undefined && (recommended ? "pick" : "unpick"), words.why && "why", words.stage?.surface && "surface", words.stage?.demo && "demo"].filter(Boolean).join(", ")}; the page itself is unchanged.${stageSaid(words.stage)}` });
       }
       const baseVersion = baseVersionOf(input);
       if (baseVersion === undefined) throw new Error("[invalid_input] foundry_edit needs base_version. Hint: pass the version you read");
@@ -427,16 +484,18 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const why = whyOf(input.why);
       checkWhy(store, current.kind, input.id, context.turnId, why);
       checkCritique(input.id, context.turnId, input.critique);
+      const stage = stageOf(input);
+      checkControls(current.kind, source, input.id, context.turnId);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
       try {
         saved = store.saveFoundryArtifact({ id: input.id, title: clean(input.title, 200), source, note: clean(input.note, 300) ?? "", baseVersion,
-          description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}), why,
+          description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${stageSaid(stage)}${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -463,6 +522,11 @@ export function briefOf(found: FoundryArtifactDetail): { brief?: Record<string, 
     ...(why?.dropped ? { dropped: why.dropped } : {}), ...(why?.from ? { starts_from: why.from } : {}) })), keep: BRIEF_KEEP };
 }
 
+const stageRead = (found: FoundryArtifactDetail) => {
+  const stage = found.versions.find((item) => item.version === found.version)?.stage;
+  return { ...(stage?.surface ? { surface: stage.surface } : {}), ...(stage?.demo ? { demo: stage.demo } : {}) };
+};
+
 export function foundryReadTool(store: DemesneStore): AgentTool {
   return {
     definition: {
@@ -486,7 +550,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
-        ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...briefOf(found), source: found.source,
+        ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...briefOf(found), ...stageRead(found), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };
@@ -544,7 +608,8 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
         + "After each step you hear what visibly changed, or that nothing did, or that the control is covered, disabled or not found; then the page's tree (every heading and control: name, place, size, state) and a picture. "
         + "Use it after making or changing a page that has controls: run its main path (add an item, switch a tab, open and close a dialog, submit the form), at phone width too when layout matters. "
         + "Steps: {click: name}, {type: text, into?: name}, {key: Enter|Tab|Escape|Backspace|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight}, {scroll: px}, {hover: name}, {wait: ms}. "
-        + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). Pages that remember start empty here.",
+        + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). Pages that remember start empty here. "
+        + "demo: true runs the version's saved demo instead of steps.",
       inputSchema: {
         type: "object",
         properties: {
@@ -552,8 +617,9 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
           version: { type: "integer", minimum: 1 },
           width: { type: "string", enum: ["desktop", "phone"], description: "desktop is 1280px (default), phone is 390px." },
           steps: { type: "array", minItems: 1, maxItems: TRY_STEPS, items: { type: "object" } },
+          demo: { type: "boolean", description: "Run the saved demo instead of steps." },
         },
-        required: ["id", "steps"],
+        required: ["id"],
         additionalProperties: false,
       },
     },
@@ -563,10 +629,16 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
     async executeWithArtifacts(input, context) {
       const args = isRecord(input) ? input : {};
       if (typeof args.id !== "string" || !args.id) throw new Error("[invalid] id is required. Hint: foundry_read without id lists the artifacts");
-      let steps: TryStep[];
-      try { steps = parseSteps(args.steps); } catch (error) { throw new Error(`[invalid] ${error instanceof Error ? error.message : String(error)}`); }
       const found = store.getFoundryArtifact(args.id, typeof args.version === "number" ? args.version : undefined);
       if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
+      let steps: TryStep[];
+      if (args.demo === true && args.steps === undefined) {
+        const demo = found.versions.find((item) => item.version === found.version)?.stage?.demo;
+        if (!demo?.length) throw new Error("[invalid] This version has no demo. Hint: save one with foundry_edit {id, demo}, or pass steps");
+        steps = demo.map(({ say: _say, ...step }) => step as TryStep);
+      } else {
+        try { steps = parseSteps(args.steps); } catch (error) { throw new Error(`[invalid] ${error instanceof Error ? error.message : String(error)}`); }
+      }
       if (!LOOKED_KINDS.has(found.kind)) throw new Error(`[invalid] A ${found.kind} artifact has nothing to try; only pages, decks, docs and dashboards do`);
       const key = `${context.turnId ?? ""}:${found.id}`, seen = tries.get(key) ?? 0;
       if (seen >= TRIES_PER_TURN) throw new Error(`[limit] This page was tried ${TRIES_PER_TURN} times this turn; answer with what you found`);

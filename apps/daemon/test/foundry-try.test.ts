@@ -61,3 +61,18 @@ test("the look points a page with controls at foundry_try, and plan mode may try
   expect(String(lookReport(look, true).look.next)).not.toContain("foundry_try");
   expect(PLAN_MODE_TOOL_NAMES.has("foundry_try")).toBe(true);
 });
+
+test("foundry_try demo: true runs the version's saved demo, without its words (pass 221 A)", async () => {
+  const plans: { steps: unknown[] }[] = [];
+  const { store, run, done } = setup(async (_page, plan) => {
+    plans.push(plan);
+    return { width: plan.width, steps: [{ step: "hover “Drive picks”", ok: true, said: "something appeared" }], tree: [], errors: [], pictures: [] };
+  });
+  try {
+    const plain = store.saveFoundryArtifact({ title: "Plain", kind: "html", source: "<p>x</p>" });
+    await expect(run({ id: plain.id, demo: true })).rejects.toThrow(/no demo/);
+    const page = store.saveFoundryArtifact({ title: "Pins", kind: "html", source: "<p>x</p>", stage: { demo: [{ hover: "Drive picks", say: "Point at it" }, { click: "Pin" }] } });
+    await run({ id: page.id, demo: true });
+    expect(plans[0]!.steps).toEqual([{ hover: "Drive picks" }, { click: "Pin" }]);
+  } finally { done(); }
+});

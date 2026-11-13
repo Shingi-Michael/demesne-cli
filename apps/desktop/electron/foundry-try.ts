@@ -121,7 +121,7 @@ export const TRY_RUNTIME = String.raw`(() => {
     const disabled = el.disabled === true || el.getAttribute("aria-disabled") === "true";
     return { found: true, x, y, many, what: role(el) + ' "' + cut(name(el), 30) + '"', covered, disabled, offscreen: box.bottom < 0 || box.top > innerHeight };
   }
-  window.__demesneTry = { find, fingerprint, tree, kit: { CONTROLS, shown, name, role, cut, clean, place } };
+  window.__demesneTry = { find, fingerprint, tree, kit: { CONTROLS, shown, name, role, cut, clean, place, candidates } };
   return true;
 })()`;
 

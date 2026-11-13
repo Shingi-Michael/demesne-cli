@@ -6,6 +6,9 @@
 (function () {
   "use strict";
   var doc = document, root = doc.documentElement, kind = root.getAttribute("data-kind");
+  // On the Foundry page (pass 221 A) a deck draws no buttons of its own:
+  // Foundry plays its slides, and the arrow keys still move.
+  if (/[?&]stack=1(&|$)/.test(location.search)) root.classList.add("in-foundry");
 
   // Each slide's words get smaller until they fit its box (never under 55%).
   function fit(slide) {

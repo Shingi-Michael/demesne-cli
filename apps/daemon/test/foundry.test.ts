@@ -610,3 +610,50 @@ test("reading a mockup hands back its brief: each ask, its direction and what wa
     expect(after.brief).toHaveLength(2);
   } finally { store.close(); }
 });
+
+describe("Foundry sets the surface and plays the demo (pass 221 A)", () => {
+  const surface = { frame: "phone", backdrop: "dark" }, demo = [{ hover: "Drive picks", say: "Point at a chat" }, { click: "Pin Drive picks", say: "Click the pin" }];
+
+  test("a save keeps its surface and demo with the version, and later versions carry them until changed", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store), edit = foundryEditTool(store), read = foundryReadTool(store);
+      const made = JSON.parse(await save.execute({ title: "Pin a chat", kind: "html", description: "Pinning.", why: W, source: "<p>one</p>", surface, demo }, { ...context, turnId: "t1" }));
+      expect(made).toMatchObject({ surface: { frame: "phone", backdrop: "dark" }, demo });
+      expect(made.message).toMatch(/foundry_try \{id, demo: true\}/);
+      const next = JSON.parse(await edit.execute({ id: made.id, base_version: 1, why: W, edits: [{ find: "one", replace: "two" }] }, { ...context, turnId: "t2" }));
+      expect(next.version).toBe(2);
+      expect(next.surface).toEqual({ frame: "phone", backdrop: "dark" });
+      // Words only: a new surface without a new version.
+      const moved = JSON.parse(await edit.execute({ id: made.id, surface: { frame: "part", width: 320 } }, { ...context, turnId: "t3" }));
+      expect(moved).toMatchObject({ version: 2, surface: { frame: "part", width: 320 }, demo });
+      expect(JSON.parse(await read.execute({ id: made.id }, context))).toMatchObject({ surface: { frame: "part", width: 320 }, demo });
+      expect(store.listFoundryVersions()[0]!.stage).toEqual({ surface: { frame: "part", width: 320 }, demo });
+      await expect(save.execute({ title: "Bad", kind: "html", description: "x", why: W, source: "<p>x</p>", surface: { frame: "tablet" } }, { ...context, turnId: "t4" })).rejects.toThrow(/\[invalid_input\] surface frame/);
+      await expect(save.execute({ title: "Bad", kind: "html", description: "x", why: W, source: "<p>x</p>", demo: [{ jump: 1 }] }, { ...context, turnId: "t5" })).rejects.toThrow(/\[invalid_input\]/);
+    } finally { store.close(); }
+  });
+
+  test("a page that draws a Replay or Next step button is sent back once per ask", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store);
+      const input = { title: "Pins", kind: "html", description: "Pinning.", why: W, source: "<main>…</main><button>▶ Replay demo</button><button>Next step</button>" };
+      await expect(save.execute(input, { ...context, turnId: "t1" })).rejects.toThrow(/\[demo_control\].*“▶ Replay demo”, “Next step”.*give the steps as demo/);
+      // Saved again unchanged, it goes through: some real designs have one.
+      expect(JSON.parse(await save.execute(input, { ...context, turnId: "t1" })).version).toBe(1);
+      // A page whose controls are real is never stopped.
+      expect(JSON.parse(await save.execute({ ...input, title: "Player", source: "<button>Play</button><button>Next</button>" }, { ...context, turnId: "t2" })).version).toBe(1);
+    } finally { store.close(); }
+  });
+
+  test("the tool tells the model the page holds only the thing", () => {
+    const store = new DemesneStore(":memory:");
+    const words = foundrySaveTool(store).definition.description;
+    expect(words).toContain("never put Replay, Play demo, Next step or an option switcher in the page");
+    expect(PARTS_GUIDE).toContain("each option gets its own stage");
+    const schema = foundrySaveTool(store).definition.inputSchema as { properties: Record<string, unknown> };
+    expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(["surface", "demo"]));
+    store.close();
+  });
+});

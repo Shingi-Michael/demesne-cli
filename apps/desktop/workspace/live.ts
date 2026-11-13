@@ -54,6 +54,7 @@ import { fileChipHTML, isPicture, MAX_FILE_BYTES, refusal, sizeWord } from "./fi
 import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, usedSources, type SourcesView } from "./sources-card.ts";
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
 import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
+import { watchFoundryStages } from "./foundry-stage.ts";
 import { previewable, type FilePreview } from "@demesne/protocol";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
@@ -4258,6 +4259,8 @@ document.addEventListener("keydown", (event) => {
     paintRail();
   }
 });
+/// Surfaces, options and demos on the long page (pass 221 A).
+let foundryStagesStop: (() => void) | null = null;
 /// Documents render through the app's sanitizer when they scroll near.
 let foundryDocWatch: IntersectionObserver | null = null;
 function watchFoundryDocs(root: HTMLElement) {
@@ -4340,10 +4343,11 @@ function renderPage() {
   const googleFocus = active instanceof HTMLElement && googleAIForm?.element.contains(active) ? active : null;
   const field = !googleFocus && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
     ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
+  foundryStagesStop?.(); foundryStagesStop = null;
   root.innerHTML = html;
   root.dataset.html = html;
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); }
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.googleProvider!;

@@ -9,10 +9,11 @@ import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { BROWSER_HOST_FLAG, runBrowserHost } from "./browser-host.ts";
 import { withChanges } from "./foundry-changed.ts";
+import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -239,6 +240,8 @@ if (!lookJob) void app.whenReady().then(async () => {
       let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
       if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
+      // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
+      if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}`);
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });

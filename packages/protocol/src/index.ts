@@ -1,3 +1,4 @@
+import type { FoundryStage } from "./foundry-stage.ts";
 export const PROTOCOL_VERSION = 1 as const;
 export * from "./drive.ts";
 export * from "./panels.ts";
@@ -1158,6 +1159,7 @@ export * from "./drive-report.ts";
 export * from "./thread-report.ts";
 export * from "./thread-note.ts";
 export * from "./foundry-try.ts";
+export * from "./foundry-stage.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 
@@ -1282,6 +1284,8 @@ export interface FoundryVersion {
   why: FoundryWhy | null;
   /// The person's message that made it (pass 219 A), cut to 600 characters; "" when none.
   ask?: string;
+  /// Where it sits and how its demo goes (pass 221 A); null when the model gave neither.
+  stage?: FoundryStage | null;
   byteLength: number;
 }
 
@@ -1319,6 +1323,8 @@ export interface FoundryShelfVersion {
   recommended?: boolean;
   why?: FoundryWhy | null;
   ask?: string;
+  /// Its surface and demo (pass 221 A).
+  stage?: FoundryStage | null;
 }
 
 export interface FoundryListResponse {

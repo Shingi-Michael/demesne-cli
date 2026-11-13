@@ -4,7 +4,7 @@
 /// goes to the chat. HTML and SVG
 /// render in a foundry:// frame that has no network, no app access and no
 /// shared origin; Markdown renders through the app's sanitizer.
-import type { FoundryArtifact, FoundryKind, FoundryShelfVersion } from "@demesne/protocol";
+import { drawnSurface, type FoundryArtifact, type FoundryKind, type FoundryShelfVersion } from "@demesne/protocol";
 import { dayWord } from "./chats-page.ts";
 
 const h = (value: unknown) =>
@@ -30,6 +30,30 @@ export const frameURL = (id: string, version: number) => `foundry://artifact/${e
 /// ask change it in place (pass 197 A), so the frame loads the fixed page.
 const frame = (id: string, version: number, title: string, at: string) =>
   `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1&at=${Date.parse(at) || 0}`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
+
+/// The bar a window or a browser surface draws above the page (pass 221 A).
+const CHROME: Partial<Record<string, number>> = { window: 30, browser: 38 };
+const GROW_START = 480;
+
+/// A version's stage (pass 221 A): the surface the model chose, drawn by
+/// Foundry around the page at its real size (the Foundry page scales it down
+/// only to fit), on its backdrop; and, when it has a demo or is a deck, the
+/// quiet line under it that the demo's words appear in. Without a surface it
+/// is the plain stage it always was.
+export function stageHTML(artifact: Pick<FoundryArtifact, "id" | "title" | "kind">, version: Pick<FoundryShelfVersion, "version" | "createdAt" | "stage">) {
+  const inner = frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt);
+  const demo = version.stage?.demo?.length ? version.stage.demo : null, deck = artifact.kind === "deck";
+  const plays = `${demo ? ` data-demo="${h(JSON.stringify(demo))}"` : ""}${deck ? " data-deck" : ""}`;
+  const line = demo || deck ? '<p class="fd-demo" aria-live="polite"></p>' : "";
+  const surface = version.stage?.surface && artifact.kind !== "svg" ? drawnSurface(version.stage.surface) : null;
+  if (!surface) return `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}"${plays}>${inner}</div>${line}`;
+  const fluid = surface.frame === "page" && !version.stage!.surface!.width, bar = CHROME[surface.frame] ?? 0, grow = !surface.height;
+  const width = fluid ? 0 : surface.width, height = bar + (grow ? GROW_START : surface.height);
+  const chrome = surface.frame === "window" ? `<div class="fd-chrome" aria-hidden="true"><i></i><i></i><i></i><span>${h(surface.title)}</span></div>`
+    : surface.frame === "browser" ? `<div class="fd-chrome" aria-hidden="true"><i></i><i></i><i></i><span class="fd-url">${h(surface.title || "example.com")}</span></div>` : "";
+  return `<div class="fd-stage fd-s s-${surface.frame} b-${surface.backdrop}${fluid ? " fd-fluid" : ""}" data-ow="${width}" data-oh="${height}" data-bar="${bar}"${grow ? " data-grow" : ""}${plays}>`
+    + `<div class="fd-fit" style="--ow:${width}px;--oh:${height}px"><div class="fd-surface">${chrome}<div class="fd-screen">${inner}</div></div></div></div>${line}`;
+}
 
 export interface FoundryView {
   list: FoundryArtifact[] | null;
@@ -99,7 +123,7 @@ export function foundryPage(view: FoundryView) {
     const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
     const body = artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
-      : `<div class="fd-stage ${artifact.kind === "svg" ? "graphic" : `k-${artifact.kind}`}">${frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt)}</div>`;
+      : stageHTML(artifact, version);
     return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${asked}${words}${because}${ver}${body}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");

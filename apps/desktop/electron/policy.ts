@@ -78,9 +78,13 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "kinds.js": { path: "kit/kinds.js", type: "application/javascript; charset=utf-8" },
   // Pages that remember: demesne.save / load / ask / pick. Demesne puts it in front of every page (withRemember).
   "remember.js": { path: "kit/remember.js", type: "application/javascript; charset=utf-8" },
+  // Foundry plays a page's demo (pass 221 A): put in front of pages on the Foundry page, with the try runtime.
+  "demo.js": { path: "kit/demo.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
   ...Object.fromEntries([400, 500].map((weight) => [`fonts/jetbrains-mono-latin-${weight}-normal.woff2`, { path: `vendor/fonts/jetbrains-mono-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
+/** The kinds whose pages can play a demo on the Foundry page. */
+export const FOUNDRY_DEMO_KINDS = new Set(["html", "deck", "doc", "dashboard"]);
 /** A page's own calls to Demesne: foundry://data/<id> keeps what the page
  * saves, foundry://ask/<id> asks the chat's model. Null for anything else. */
 export function foundryPageCall(value: string): { what: "data" | "ask"; id: string } | null {

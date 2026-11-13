@@ -54,6 +54,19 @@ Foundry used to keep a small hand-made copy of the app for mockups of Demesne, a
 
 The window is glass over your desktop; in a mockup a still grey backdrop stands in for what is behind it.
 
+## The page holds only the thing
+
+A mockup used to carry controls that were not part of the design: Foundry's own option strip and deck buttons were drawn inside it, and since Foundry could not play a demo, models wrote Replay and Next step buttons into the page. Every page also sat in the same tall white box. Now Foundry owns the surface and the demo, and the page holds only what is being made.
+
+- **Surface.** `foundry_save` and `foundry_edit` take `surface: {frame, width, height, backdrop, title}`. The frame is `window`, `browser`, `phone`, `part` (just the piece, at its own size) or `page`; the backdrop is `desk`, `paper`, `dark` or `white`. The Foundry page draws that frame and backdrop around the page at real size and only shrinks it to fit. A part or a page with no height grows to its content (the page tells the Foundry page its height). Without a surface a page sits in the plain stage as before.
+- **Demo.** They also take `demo`: the steps `foundry_try` uses (`click`, `type`, `key`, `hover`, `scroll`, `wait`), each with an optional `say`. While the mockup is on screen the Foundry page plays it on the page itself with a drawn pointer, and the `say` lines appear under the stage, never on the drawing. Hover styles work because each `:hover` rule in the page gets a twin the pointer can set. Moving into the stage stops the demo and the page is yours to use; a moment after you leave it starts again on a fresh page. What a demo types is never saved to the page's memory. `foundry_try {id, demo: true}` runs the saved demo, so the model checks it before you see it. A step that finds nothing ends the demo quietly.
+- **Kept until changed.** A surface or a demo stays on later versions until a save gives a new one; `foundry_edit` with only `surface` or `demo` changes them without a new version.
+- **Options** in `<d-compare>` get a stage each on the Foundry page, named on the line above it with the recommended one first; nothing is drawn inside them.
+- **Decks** draw no strip or arrows on the Foundry page: they play their slides, with the slide count under the stage, and the arrow keys still move.
+- **Demo-only buttons are sent back.** A save whose page draws a button whose whole text is Replay, Play demo, Next step, Previous step or the like is refused once per ask with the reason (`[demo_control]`); saved again unchanged, it goes through, for the rare design that really has one.
+
+The player is `apps/desktop/foundry-kit/demo.js`, put in front of pages on the Foundry page with the try runtime (`foundry-try.ts`); the stages are `apps/desktop/workspace/foundry-stage.ts`. `xvfb-run -a bun scripts/check-foundry-demo.ts` checks it in the real app.
+
 ## It remembers the course
 
 A page's source leaves the chat once its turn is over, so a later ask used to start from a title alone. Now reading a mockup (`foundry_read`) hands back its brief with the source: for each ask so far, what you asked, the direction taken, what leads, what was dropped and what it started from. The first ask and the newest five are kept. The model is told to answer the newest ask, keep every earlier decision you did not change, and never bring back what was dropped unless you ask. (`briefOf` in `apps/daemon/src/foundry.ts`.)

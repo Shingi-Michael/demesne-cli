@@ -140,7 +140,9 @@ try {
     assert.match(inner.url(), /&stack=1&at=\d+$/, "the long page asks for options stacked, at the version's last change");
     await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined));
     assert.equal(await inner.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()), "8px", "foundry://kit/base.css is served to the frame");
-    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline, "the page is served as written");
+    // As written, plus the one script Foundry puts in front of it to play a demo (pass 221 A).
+    assert.equal(await inner.evaluate(() => document.querySelectorAll("script:not([src])").length), inline + 1, "the page is served as written");
+    assert.equal(await inner.evaluate(() => typeof (window as unknown as { __demesneDemo?: unknown }).__demesneDemo), "object", "the demo player is in front of it");
     assert.equal(await inner.evaluate(() => "__demesnePrevious" in window), false, "no assembly");
     assert.equal(await inner.evaluate(() => document.querySelectorAll("button.demesne-pick").length), 0, "no Pick button on the page");
   };
@@ -216,21 +218,23 @@ try {
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-wall.png") });
   await backToChat();
-  // A deck is content Demesne draws: slides with a strip.
+  // A deck is content Demesne draws; on Foundry it plays its slides, with no buttons drawn on it (pass 221 A).
   await send("Make a slide deck for the launch");
   await chips.filter({ hasText: "Deck · v1" }).first().waitFor();
   await chips.filter({ hasText: "Deck · v1" }).first().click();
+  await page.mouse.move(5, 5);
   const deck = (await f.client.foundryList()).artifacts.find(found => found.title === "Q1 launch")!;
   const deckFrame = frameOf(deck.id, 1);
   await eventually(async () => await deckFrame.locator(".deck-stage > .slide").count() === 3 && await deckFrame.locator(".deck-thumb").count() === 3);
   assert.equal(await deckFrame.locator("html").getAttribute("data-look"), "forest");
   assert.equal(await deckFrame.locator(".slide.on").getAttribute("data-layout"), "title");
   assert.equal(await foundry.getByRole("button", { name: "Play the deck" }).count(), 0, "no Play button");
-  await deckFrame.locator(".deck-thumb").nth(1).click();
-  await eventually(async () => await deckFrame.locator(".slide.on").getAttribute("data-layout") === "number");
+  assert(!(await deckFrame.locator(".deck-thumb").first().isVisible()) && !(await deckFrame.locator(".deck-next").isVisible()), "no strip or arrows drawn on the deck");
+  await eventually(async () => await deckFrame.locator(".slide.on").getAttribute("data-layout") === "number", 12000);
+  assert.match((await item(deck.id, 1).locator(".fd-demo").textContent())!, /Slide 2 of 3/, "the slide count is under the stage");
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-deck.png") });
-  console.log("PASS: a deck is drawn from content and walks with its strip.");
+  console.log("PASS: a deck is drawn from content and plays its slides on Foundry, with nothing drawn on it.");
   await backToChat();
   // Pass 208 A: "@" offers mockups by name; the model gets that one by id,
   // and the name in your message opens it.

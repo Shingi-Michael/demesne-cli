@@ -3463,7 +3463,8 @@ function renderConversation() {
     }
     const rewind = rewindIn(run);
     const at = rewind && run.entries.findIndex((entry) => entry.type === "tool" && entry.toolCallId === rewind.toolCallId);
-    saved.artifacts.update(rewoundBy(run) ? [] : typeof at === "number" && at >= 0 ? run.entries.slice(0, at + 1) : run.entries);
+    // The link arrives with the finished turn, never while the model is still making or editing.
+    saved.artifacts.update(rewoundBy(run) || active(run) ? [] : typeof at === "number" && at >= 0 ? run.entries.slice(0, at + 1) : run.entries);
     workingLine(saved.working, run);
     saved.signature = signature;
     saved.run = run;

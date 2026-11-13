@@ -114,6 +114,11 @@ try {
   await page.locator("#conversation .turn").first().waitFor();
   assert(await page.locator("#page").isHidden(), "nothing opens while Foundry works");
   making.resolve();
+  // While the model is still answering, the turn isn't done: no link yet.
+  await page.locator("#conversation").getByText("Here is your mockup.").waitFor();
+  await page.waitForTimeout(400);
+  assert.equal(await chips.count(), 0, "the link waits for the finished turn");
+  response.resolve();
   // The page arrives as a link (its chip) in the chat; it opens only when clicked.
   await chips.first().filter({ hasText: "Idea garden" }).waitFor();
   assert.equal(await chips.first().locator(".fd-chip-desc").textContent(), "A small page to try in the chat.", "the chip says what it is");
@@ -162,7 +167,6 @@ try {
   await page.screenshot({ path: join(output, "foundry-open.png") });
   console.log("PASS: /foundry makes a link that opens Foundry's long page at that mockup, live.");
   await backToChat();
-  response.resolve();
   await eventually(async () => (await f.client.getSessionState(artifact.sessionId!)).session.turns.at(-1)?.status === "completed");
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "foundry-chat.png") });

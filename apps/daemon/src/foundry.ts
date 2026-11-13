@@ -80,7 +80,7 @@ export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: a
 export const STAGE_RULES = "The page holds only the thing, with only the controls the real thing has. "
   + "surface says where it sits; Foundry draws that frame and backdrop around the page (part and page grow to fit), so draw neither. "
   + "demo says how it moves: foundry_try steps, each with a short say; Foundry plays them with a pointer, the words under the page. "
-  + "So never put Replay, Play demo, Next step or an option switcher in the page.";
+  + "So never put Replay, Play demo, Next step, an option switcher or a state switcher (Empty · Loading · Error, Show error, Simulate) in the page.";
 
 const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
 
@@ -239,17 +239,12 @@ function stageOf(input: Record<string, unknown>): FoundryStage | null {
 /// A page that draws a button only a demo needs (Replay, Play demo, Next
 /// step) is sent back once per ask: the demo belongs to Foundry. A second
 /// save goes through, for the page whose real design has one.
-const controlAsked = new Set<string>();
-function checkControls(kind: FoundryKind | undefined, source: string, id: string | undefined, turnId: string | undefined) {
+function checkControls(kind: FoundryKind | undefined, source: string) {
   if (kind !== "html") return;
   const found = demoControls(source);
-  if (!found.length || !turnId) return;
-  const key = `${turnId}:${id ?? "new"}`;
-  if (controlAsked.has(key)) return;
-  controlAsked.add(key);
-  if (controlAsked.size > 300) controlAsked.delete(controlAsked.values().next().value!);
-  throw new Error(`[demo_control] The page draws ${found.map((text) => `“${text}”`).join(", ")}, which only runs a demo; the real thing would not have it. `
-    + "Hint: take it out and give the steps as demo (foundry_try steps with say); Foundry plays them under the page. If it really is part of the design, save again unchanged");
+  if (!found.length) return;
+  throw new Error(`[demo_control] The page draws ${found.map((text) => `“${text}”`).join(", ")}, which only runs a demo or fakes a state; the real thing would not have it, and Foundry does not keep a page that does. `
+    + "Hint: take it out. Give the steps as demo (foundry_try steps with say) and Foundry plays them under the page; reach a state the way the real thing does (an empty list by removing its last item), or make it its own option in <d-compare>. A real control with one of these words gets the words the real product uses (\"Continue\", not \"Next step\")");
 }
 
 const stageSaid = (stage: FoundryStage | null) => stage?.demo ? " Foundry plays its demo under the page; check every step changes something with foundry_try {id, demo: true}." : "";
@@ -384,7 +379,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
       const stage = stageOf(input);
-      checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source, id, context.turnId);
+      checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
@@ -485,7 +480,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       checkWhy(store, current.kind, input.id, context.turnId, why);
       checkCritique(input.id, context.turnId, input.critique);
       const stage = stageOf(input);
-      checkControls(current.kind, source, input.id, context.turnId);
+      checkControls(current.kind, source);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;

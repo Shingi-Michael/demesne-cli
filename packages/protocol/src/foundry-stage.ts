@@ -116,19 +116,37 @@ export function stageFromText(text: string | null | undefined): FoundryStage | n
   } catch { return null; }
 }
 
-/// Buttons that only exist to run a demo or switch options: the real thing
-/// would not have them, so a page that draws one is sent back (pass 221 A).
-export const DEMO_CONTROL = /^(?:[▶►⏵↻⟳⟲]\s*)?(?:replay|re-play)(?:\s*[↻⟳⟲])?$|^(?:[▶►⏵↻⟳⟲]\s*)?(?:play|run|watch|start|restart|replay|reset|rewind|skip)\s+(?:the\s+)?(?:demo|animation|walkthrough|sequence|tour)$|^(?:next|previous|prev)\s+step(?:\s*[→›»])?$|^(?:[←‹«]\s*)?(?:previous|prev)\s+step$/iu;
+/// Buttons that only exist to run a demo, switch options or fake a state:
+/// the real thing would not have them, so a page that draws one is sent
+/// back (pass 221 A).
+const STATE = "empty|loading|error|success|offline|hover|pressed|focus(?:ed)?|disabled|default|filled|full|done|failed";
+export const DEMO_CONTROL = new RegExp([
+  String.raw`^(?:[▶►⏵↻⟳⟲]\s*)?(?:replay|re-play)(?:\s*[↻⟳⟲])?$`,
+  String.raw`^(?:[▶►⏵↻⟳⟲]\s*)?(?:play|run|watch|start|restart|replay|reset|rewind|skip|stop|pause)\s+(?:the\s+)?(?:demo|animation|walkthrough|sequence|tour|simulation)$`,
+  String.raw`^(?:next|previous|prev)\s+step(?:\s*[→›»])?$|^(?:[←‹«]\s*)?(?:previous|prev)\s+step$`,
+  String.raw`^(?:demo(?:\s+mode)?|simulate|simulation)$`,
+  String.raw`^(?:show|simulate|trigger|toggle|preview|fake|force|see)\s+(?:the\s+|an?\s+)?(?:${STATE})(?:\s+state)?$`,
+  String.raw`^(?:simulate|fake)\s+\S+(?:\s+\S+)?$`,
+  String.raw`^(?:${STATE})\s+state$`,
+  String.raw`^(?:state|states|view state|demo state)\s*:.*$`,
+].join("|"), "iu");
+/// Names that only a pretend state has: a row of them is a state switcher.
+const STATE_WORD = /^(?:empty|loading|error|success|offline|hover|pressed|focus(?:ed)?|disabled)$/iu, ONLY_PRETEND = /^(?:empty|loading|hover|pressed|focus(?:ed)?|disabled|offline)$/iu;
 
 /// The demo-only controls a page draws, by their text: buttons whose whole
-/// visible text is "Replay", "Play demo", "Next step" and the like.
+/// visible text is "Replay", "Play demo", "Next step", "Show error state"
+/// and the like, and a row of state names (Empty · Loading · Error) that
+/// only switches what the page pretends.
 export function demoControls(source: string): string[] {
-  const found = new Set<string>();
+  const found = new Set<string>(), states: string[] = [];
   const body = source.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
-  for (const match of body.matchAll(/<(button|a)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
-    const text = match[2]!.replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&[a-z]+;|&#\d+;/gi, "").replace(/\s+/g, " ").trim();
+  const words = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&[a-z]+;|&#\d+;/gi, "").replace(/\s+/g, " ").trim();
+  for (const match of body.matchAll(/<(button|a|label|option|(?:div|span|li)(?=[^>]*\brole\s*=\s*["']?(?:button|tab|radio)))\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const text = words(match[2]!);
     if (text && DEMO_CONTROL.test(text)) found.add(text);
+    else if (text && STATE_WORD.test(text) && !states.some((seen) => seen.toLowerCase() === text.toLowerCase())) states.push(text);
     if (found.size >= 5) break;
   }
+  if (states.length >= 2 && states.some((word) => ONLY_PRETEND.test(word))) found.add(states.join(" · "));
   return [...found];
 }

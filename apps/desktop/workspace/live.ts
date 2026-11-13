@@ -2519,7 +2519,8 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     ? btn("rewind", `${ICON_UNDO}Rewind to here`, { turnId: run.id, toolCallId: tool.toolCallId }, "step-rewind").replace("<button ", '<button title="Put the files and the chat back to just after this step" ')
     : "";
   // Something made in Foundry opens from its step.
-  const made = (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done"
+  // Only once the turn is over, like the chip: never while it is still being made.
+  const made = (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done" && !active(run)
     ? btn("foundry-open-step", "Open ›", { id: tool.input.id ?? null, title: tool.input.title ?? null, message: tool.message ?? null }, "fd-step-open")
     : "";
   // A commit or a merge draws the tree under its step (repo-flow.ts); the

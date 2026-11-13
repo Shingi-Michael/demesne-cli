@@ -10,7 +10,7 @@ import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
 
 const prompt = "Mock a calmer tab bar";
 const source = `<!doctype html><link rel="stylesheet" href="foundry://kit/base.css"><main class="container"><h1>Calmer tabs</h1>${Array.from({ length: 40 }, (_, i) => `<button class="pill">Tab ${i}</button>`).join("")}</main>`;
-const args = JSON.stringify({ title: "Calmer tab bar", kind: "html", description: "A calmer tab bar.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading." }, source });
+const args = JSON.stringify({ title: "Calmer tab bar", kind: "html", description: "A calmer tab bar.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading.", starts_from: "new" }, source });
 const PIECES = 30;
 const f = await fixture({
   providerId: "fixture", modelId: "slow",

@@ -1264,6 +1264,8 @@ export interface FoundryWhy {
   look: string;
   /// Empty when nothing was dropped.
   dropped: string;
+  /// What a new mockup started from: the real thing the chat looked at, or "new".
+  from?: string;
 }
 
 export interface FoundryVersion {

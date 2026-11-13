@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,9 +8,10 @@ import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
 import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
+import { noteSeen } from "../src/foundry-seen.ts";
 
 /// Why a test page looks the way it does (pass 218 A).
-const W = { direction: "Plain, for a test.", look_at: "The heading." };
+const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new" };
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
 
@@ -481,20 +482,20 @@ test("every new page version says why it looks that way, and keeps it (pass 218 
     await expect(save.execute({ title: "Mark", kind: "svg", description: "Mark.", why: { direction: "Warm." }, source: "<svg/>" }, t1)).rejects.toThrow("Say why");
     // Content Demesne designs needs none.
     expect(JSON.parse(await save.execute({ title: "Brief", kind: "doc", description: "A brief.", source: "# Brief" }, { ...context, turnId: "t0" })).version).toBe(1);
-    const why = { direction: "Warm paper and a serif, for people who buy by taste.", look_at: "The dark middle plan.", dropped: "A comparison table; it felt like homework." };
+    const why = { direction: "Warm paper and a serif, for people who buy by taste.", look_at: "The dark middle plan.", starts_from: "new", dropped: "A comparison table; it felt like homework." };
     const saved = JSON.parse(await save.execute({ title: "Plans", kind: "html", description: "Plans.", why, source: "<p>a</p>" }, t1));
-    expect(saved.why).toEqual({ direction: why.direction, look: why.look_at, dropped: why.dropped });
+    expect(saved.why).toEqual({ direction: why.direction, look: why.look_at, dropped: why.dropped, from: "new" });
     expect(saved.message).toContain("say the same why");
     // Fixing its own page in the same ask keeps the why it gave.
     expect(JSON.parse(await edit.execute({ id: saved.id, base_version: 1, edits: [{ find: "a", replace: "b" }] }, t1)).why.look).toBe("The dark middle plan.");
     // A later ask makes a new version, which needs its own why.
     await expect(edit.execute({ id: saved.id, base_version: 1, edits: [{ find: "b", replace: "c" }] }, t2)).rejects.toThrow("Say why");
-    await edit.execute({ id: saved.id, base_version: 1, why: { direction: "Same paper.", look_at: "The bigger price." }, edits: [{ find: "b", replace: "c" }] }, t2);
+    await edit.execute({ id: saved.id, base_version: 1, why: { direction: "Same paper.", look_at: "The bigger price.", starts_from: "new" }, edits: [{ find: "b", replace: "c" }] }, t2);
     const found = store.getFoundryArtifact(saved.id)!;
     expect(found.versions.map((item) => item.why?.look)).toEqual(["The bigger price.", "The dark middle plan."]);
     expect(found.versions[0]!.why!.dropped).toBe("");
     // The long page gets it per version, and a why can be set without a new version.
-    await edit.execute({ id: saved.id, why: { direction: "Same paper.", look_at: "The price.", dropped: "Bold red." } }, t2);
+    await edit.execute({ id: saved.id, why: { direction: "Same paper.", look_at: "The price.", starts_from: "new", dropped: "Bold red." } }, t2);
     const shelf = store.listFoundryVersions().filter((item) => item.artifactId === saved.id);
     expect(shelf.map((item) => item.why?.look)).toEqual(["The price.", "The dark middle plan."]);
     expect(store.getFoundryArtifact(saved.id)!.version).toBe(2);
@@ -531,4 +532,57 @@ test("a mockup you can trace: its ask, a name that says what it is, what it was 
     expect(await titles("hours")).toEqual(["Opening hours"]);
     expect(await titles("nothing like this")).toEqual([]);
   } finally { store.close(); }
+});
+
+describe("a mockup of something that exists starts from it", () => {
+  const page = `<link rel="stylesheet" href="foundry://kit/base.css"><h1>Settings</h1>`;
+  const make = (store: DemesneStore) => {
+    const { session } = store.createSession("Look first");
+    const { turn } = store.createTurn(session.id, "make the settings rows calmer");
+    return { session, context: { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: turn.id } };
+  };
+  const input = (from: string | undefined, source = page) => ({ title: "Calmer settings rows", kind: "html", description: "Settings with calmer rows.", source,
+    why: { direction: "Calm.", look_at: "The rows.", ...(from ? { starts_from: from } : {}) } });
+
+  test("a new mockup says what it starts from", async () => {
+    const store = new DemesneStore(":memory:");
+    const { context } = make(store);
+    await expect(foundrySaveTool(store).execute(input(undefined), context)).rejects.toThrow(/starts_from/);
+    await foundrySaveTool(store).execute(input("new"), context);
+  });
+
+  test("something real is looked at first, and the check asks once", async () => {
+    const store = new DemesneStore(":memory:");
+    const { context } = make(store);
+    const save = foundrySaveTool(store);
+    await expect(save.execute(input("the Settings window"), context)).rejects.toThrow(/look_first/);
+    await save.execute(input("the Settings window"), context);
+  });
+
+  test("a page that draws Demesne cannot call itself new", async () => {
+    const store = new DemesneStore(":memory:");
+    const { context } = make(store);
+    await expect(foundrySaveTool(store).execute(input("new", `${page}<script src="foundry://kit/parts.js"></script><d-demesne></d-demesne>`), context)).rejects.toThrow(/Demesne, which exists/);
+  });
+
+  test("a capture, an interface file or saying it could not look all pass", async () => {
+    const store = new DemesneStore(":memory:");
+    const a = make(store), b = make(store), c = make(store), d = make(store);
+    noteSeen(a.session.id, "capture_window", {}, "Captured window 4: Demesne — Demesne");
+    noteSeen(b.session.id, "read_file", { path: "src/settings.css" }, "…");
+    noteSeen(d.session.id, "read_file", { path: "README.md" }, "…");
+    const save = foundrySaveTool(store);
+    await save.execute(input("a capture of Settings"), a.context);
+    await save.execute(input("src/settings.css"), b.context);
+    await save.execute(input("could not look: no window to capture"), c.context);
+    await expect(save.execute(input("the Settings window"), d.context)).rejects.toThrow(/look_first/);
+    expect(store.listFoundryArtifacts().length).toBe(3);
+  });
+
+  test("Today is the comparison, not one of the three options", async () => {
+    const store = new DemesneStore(":memory:");
+    const { context } = make(store);
+    const options = ["Today", "A", "B", "C"].map((name) => `<section data-option="${name}">x</section>`).join("");
+    await foundrySaveTool(store).execute(input("could not look: test", `${page}<d-compare recommended="A">${options}</d-compare>`), context);
+  });
 });

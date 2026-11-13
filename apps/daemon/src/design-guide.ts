@@ -39,7 +39,11 @@ export const DESIGN_RULES: readonly string[] = [
 ];
 
 /// How Demesne itself looks, for a mockup of Demesne (docs/interface-design.md).
-export const DEMESNE_LOOK = "A mockup of an existing app matches that app's look. Demesne itself: build on <d-demesne> with views for its tabs and chats; "
+export const DEMESNE_LOOK = "Something that exists (the person's app, site or screen, Demesne included) is mocked from the real thing, never from memory. "
+  + "Look first: capture_window its window, or read its real stylesheet and that screen's markup in the project; a picture the person attached counts. "
+  + "Then draw that screen as it is today, with its real colours, type sizes, spacing, radii and words, and change only what the ask is about. "
+  + "Show it as options on one page: \"Today\" first, exactly as it is, then the change, so the change is the only difference. It has failed if it does not read as their app with one thing changed, however good it looks. "
+  + "Demesne itself: capture_window with application Demesne, then build on <d-demesne> with views for its tabs and chats, corrected to what you saw; "
   + "no side panels and no menus where a direct action on the row fits; everything lives in the sidebar, the conversation column and the composer; "
   + "add as little surface as possible (fold a new fact into an existing row, chip or tooltip before adding anything); "
   + "blue is the primary action and new replies, amber needs you, green success, red failure, pink where you are; the Mac's own window buttons stay.";

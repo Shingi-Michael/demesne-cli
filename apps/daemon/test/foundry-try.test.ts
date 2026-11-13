@@ -8,7 +8,7 @@ import { FOUNDRY_LOOK_PREFIX, lookReport, type FoundryTry } from "../src/foundry
 import { PLAN_MODE_TOOL_NAMES } from "../src/engine.ts";
 
 /// Why a test page looks the way it does (pass 218 A).
-const W = { direction: "Plain, for a test.", look_at: "The heading." };
+const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new" };
 
 const PNG = Buffer.from("png").toString("base64");
 

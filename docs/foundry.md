@@ -17,6 +17,17 @@ Your files are plain Markdown, up to 8 KB each. Write them however you like; sho
 ```markdown
 # Design guide
 
+## It starts from what you have
+
+A mockup of something that exists (your app, your site, Demesne itself) is drawn from the real thing, not from memory.
+
+- Before the first save, the model looks: it captures the window, reads the project's real stylesheet and that screen's markup, opens the page in its browser, or uses a picture you attached.
+- Every new mockup says what it started from (`why.starts_from`): the thing it looked at, or "new" when nothing like it exists yet. A page that draws Demesne can never call itself new.
+- When it names something real and the chat has not looked at it, the save is refused once with how to look. If it truly cannot look (no window, no files), it says "could not look" and tells you so in its answer.
+- The page shows your screen as it is today first ("Today"), then the change, so the change is the only difference. Today is the comparison and does not count as one of the three options.
+
+What counts as looking is kept per chat (`apps/daemon/src/foundry-seen.ts`); the check is `checkStart` in `apps/daemon/src/foundry.ts`.
+
 ## Rules
 
 - Blue stays the accent. Pink only marks where you are.

@@ -96,7 +96,8 @@ export const LOOK_MEASURE = String.raw`(() => {
     // WCAG 2.1 AA (1.4.3): 4.5:1 for text, 3:1 for large text (24px, or 18.66px bold). A switched-off control is exempt.
     const style = getComputedStyle(el), size = parseFloat(style.fontSize), large = size >= 24 || (size >= 18.66 && Number(style.fontWeight) >= 700);
     const need = large ? 3 : 4.5;
-    if (el.closest(":disabled, [aria-disabled=true]")) continue;
+    // A switched-off control is exempt, and so is a frame's own chrome: Demesne's window is drawn with the app's styles, which are not this page's to fix.
+    if (el.closest(":disabled, [aria-disabled=true], [data-chrome]")) continue;
     if (ratio > 1.05 && ratio < need - 0.05) { faint++; say("Hard to read (" + ratio.toFixed(1) + ":1 contrast, needs " + need + ":1): " + label(el)); }
   }
 

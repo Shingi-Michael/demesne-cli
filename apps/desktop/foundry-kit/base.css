@@ -8,7 +8,10 @@
 @font-face{font-family:Inter;src:url(foundry://kit/fonts/inter-latin-400-normal.woff2) format("woff2");font-weight:400;font-display:swap}
 @font-face{font-family:Inter;src:url(foundry://kit/fonts/inter-latin-500-normal.woff2) format("woff2");font-weight:500;font-display:swap}
 @font-face{font-family:Inter;src:url(foundry://kit/fonts/inter-latin-600-normal.woff2) format("woff2");font-weight:600;font-display:swap}
-:root{
+/* Everything below stops at <d-app>, the window a <d-demesne> draws: inside
+   it the app's own styles apply (kit/app.css), not the kit's. */
+@scope (:root) to (d-app){
+:scope{
   color-scheme:light dark;
   --ink:#16181c;--paper:#ffffff;--accent:#2a66e0;--on-accent:#ffffff;
   --ok:#187840;--warn:#8f5d12;--bad:#bf3434;
@@ -24,11 +27,11 @@
   --font:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
 }
-@media (prefers-color-scheme:dark){:root{--ink:#e9eaec;--paper:#131416;--accent:#7aa7ff;--on-accent:#0b0d12;--ok:#5fcf8a;--warn:#e0b25a;--bad:#f07070}}
-html[data-theme=light]{--ink:#16181c;--paper:#ffffff;--accent:#2a66e0;--on-accent:#ffffff;--ok:#187840;--warn:#8f5d12;--bad:#bf3434}
-html[data-theme=dark]{--ink:#e9eaec;--paper:#131416;--accent:#7aa7ff;--on-accent:#0b0d12;--ok:#5fcf8a;--warn:#e0b25a;--bad:#f07070}
+@media (prefers-color-scheme:dark){:scope{--ink:#e9eaec;--paper:#131416;--accent:#7aa7ff;--on-accent:#0b0d12;--ok:#5fcf8a;--warn:#e0b25a;--bad:#f07070}}
+:where(:scope)[data-theme=light]{--ink:#16181c;--paper:#ffffff;--accent:#2a66e0;--on-accent:#ffffff;--ok:#187840;--warn:#8f5d12;--bad:#bf3434}
+:where(:scope)[data-theme=dark]{--ink:#e9eaec;--paper:#131416;--accent:#7aa7ff;--on-accent:#0b0d12;--ok:#5fcf8a;--warn:#e0b25a;--bad:#f07070}
 *,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+:where(:scope){-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);font:var(--text-sm)/1.5 var(--font);-webkit-font-smoothing:antialiased}
 .container{max-width:960px;margin:0 auto;padding:var(--space-5) var(--space-4)}
 .container.narrow{max-width:640px}
@@ -104,3 +107,4 @@ label.inline{display:inline-flex;align-items:center;gap:var(--space-2);margin:0;
 .hidden{display:none!important}
 @media (max-width:640px){.grid.two,.grid.three{grid-template-columns:1fr}h1{font-size:var(--text-lg)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+}

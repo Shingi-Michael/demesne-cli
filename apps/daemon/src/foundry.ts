@@ -441,6 +441,26 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
   return tool;
 }
 
+/// The course a mockup has been on, handed back with its source so a later
+/// ask stays on it: what the person asked each time, the direction taken,
+/// what leads and what was dropped. One entry per ask (its last version),
+/// the first ask and the newest five. Sources are forgotten between turns;
+/// this is not.
+export const BRIEF_KEEP = "Stay on this course. The next version answers the newest ask and keeps every earlier decision the person did not change; never bring back what was dropped unless they ask for it.";
+export function briefOf(found: FoundryArtifactDetail): { brief?: Record<string, unknown>[]; keep?: string } {
+  const asks = new Map<string, FoundryArtifactDetail["versions"][number]>();
+  for (const item of [...found.versions].sort((a, b) => a.version - b.version)) {
+    if (item.version > found.version || !(item.ask || item.why)) continue;
+    asks.set(item.turnId ?? `v${item.version}`, item);
+  }
+  const all = [...asks.values()];
+  const kept = all.length > 6 ? [all[0]!, ...all.slice(-5)] : all;
+  if (!kept.length) return {};
+  return { brief: kept.map(({ version, ask, why }) => ({ version, ...(ask ? { asked: ask.slice(0, 300) } : {}),
+    ...(why?.direction ? { direction: why.direction } : {}), ...(why?.look ? { look_at: why.look } : {}),
+    ...(why?.dropped ? { dropped: why.dropped } : {}), ...(why?.from ? { starts_from: why.from } : {}) })), keep: BRIEF_KEEP };
+}
+
 export function foundryReadTool(store: DemesneStore): AgentTool {
   return {
     definition: {
@@ -464,7 +484,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
-        ...(found.basedOn ? { basedOn: found.basedOn } : {}), source: found.source,
+        ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...briefOf(found), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };

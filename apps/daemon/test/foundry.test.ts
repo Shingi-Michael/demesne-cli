@@ -586,3 +586,27 @@ describe("a mockup of something that exists starts from it", () => {
     await foundrySaveTool(store).execute(input("could not look: test", `${page}<d-compare recommended="A">${options}</d-compare>`), context);
   });
 });
+
+test("reading a mockup hands back its brief: each ask, its direction and what was dropped", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const { session } = store.createSession("Brief");
+    const base = { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id };
+    const first = store.createTurn(session.id, "show me a pricing page").turn;
+    const saved = JSON.parse(await foundrySaveTool(store).execute({ title: "Pricing page", kind: "html", description: "Three plans.", source: "<p>a</p>",
+      why: { direction: "Warm paper, for small shops.", look_at: "The middle plan.", dropped: "A comparison table.", starts_from: "new" } }, { ...base, turnId: first.id }));
+    const second = store.createTurn(store.createSession("Brief, later").session.id, "make the price bigger").turn;
+    await foundryEditTool(store).execute({ id: saved.id, base_version: 1, why: { direction: "Same paper.", look_at: "The price.", dropped: "Bold red." }, edits: [{ find: "a", replace: "b" }] }, { ...base, turnId: second.id });
+    const read = JSON.parse(await foundryReadTool(store).execute({ id: saved.id }, { ...base, turnId: "t3" }));
+    expect(read.brief).toEqual([
+      { version: 1, asked: "show me a pricing page", direction: "Warm paper, for small shops.", look_at: "The middle plan.", dropped: "A comparison table.", starts_from: "new" },
+      { version: 2, asked: "make the price bigger", direction: "Same paper.", look_at: "The price.", dropped: "Bold red." },
+    ]);
+    expect(read.keep).toContain("never bring back what was dropped");
+    // The source is forgotten after the turn; the brief is not.
+    const [kept] = forgetFoundrySources([{ role: "assistant", content: null, toolCalls: [{ id: "c", name: "foundry_read", arguments: "{}" }] }, { role: "tool", toolCallId: "c", content: JSON.stringify(read) }] as ModelMessage[]).slice(1);
+    const after = JSON.parse((kept as { content: string }).content);
+    expect(after.source).toBe(FORGOTTEN_SOURCE);
+    expect(after.brief).toHaveLength(2);
+  } finally { store.close(); }
+});

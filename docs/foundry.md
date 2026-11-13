@@ -41,6 +41,10 @@ The guide reaches the model as its own numbered block in its instructions, from 
 
 The ready kinds (deck, doc, dashboard) are drawn by Demesne from content, so the guide applies to pages the model designs itself: `html` and `svg`.
 
+## It remembers the course
+
+A page's source leaves the chat once its turn is over, so a later ask used to start from a title alone. Now reading a mockup (`foundry_read`) hands back its brief with the source: for each ask so far, what you asked, the direction taken, what leads, what was dropped and what it started from. The first ask and the newest five are kept. The model is told to answer the newest ask, keep every earlier decision you did not change, and never bring back what was dropped unless you ask. (`briefOf` in `apps/daemon/src/foundry.ts`.)
+
 ## Every mockup says why
 
 Each version of a page the model designs (`html` or `svg`) carries a short **why**, written when it is saved:

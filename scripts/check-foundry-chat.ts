@@ -118,6 +118,7 @@ try {
   await page.locator("#conversation").getByText("Here is your mockup.").waitFor();
   await page.waitForTimeout(400);
   assert.equal(await chips.count(), 0, "the link waits for the finished turn");
+  assert.equal(await page.locator("#conversation .fd-step-open").count(), 0, "the step has no Open while the turn runs");
   response.resolve();
   // The page arrives as a link (its chip) in the chat; it opens only when clicked.
   await chips.first().filter({ hasText: "Idea garden" }).waitFor();

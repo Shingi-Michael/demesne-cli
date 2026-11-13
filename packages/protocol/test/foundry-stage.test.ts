@@ -37,5 +37,11 @@ describe("A mockup's surface and demo (pass 221 A)", () => {
       <button>Play</button><button>Next</button><button>Reset filters</button><button>Restart server</button><script>"<button>Replay</button>"</script>`;
     expect(demoControls(page)).toEqual(["▶ Replay", "Play demo", "Next step →", "Reset animation"]);
     expect(demoControls("<button>Save</button>")).toEqual([]);
+    // A pretend state, by button or by a row of state names, is the same thing.
+    expect(demoControls(`<button>Show error state</button><button>Simulate failure</button><a>Demo mode</a><label>State: empty</label>`)).toEqual(["Show error state", "Simulate failure", "Demo mode", "State: empty"]);
+    expect(demoControls(`<div class="seg"><button>Default</button><button>Empty</button><button>Loading</button><button>Error</button></div>`)).toEqual(["Empty · Loading · Error"]);
+    expect(demoControls(`<div role="tab">Hover</div><div role="tab">Pressed</div>`)).toEqual(["Hover · Pressed"]);
+    // A real filter of outcomes is a control the product has.
+    expect(demoControls(`<button>All</button><button>Error</button><button>Success</button><button>Done</button>`)).toEqual([]);
   });
 });

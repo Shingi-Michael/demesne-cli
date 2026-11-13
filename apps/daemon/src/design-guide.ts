@@ -34,7 +34,7 @@ export const DESIGN_RULES: readonly string[] = [
   "Options: two or three genuinely different directions (never more than three), each named, in one <d-compare> with recommended set on the one you would pick; say in the chat which and why.",
   "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce.",
   "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.",
-  "Every state it can be in is designed, not only the happy one: a control has hover, pressed, focused and disabled; a list or a screen has empty, loading and error. Show the ones the ask touches, and make them reachable by using the page.",
+  "Every state it can be in is designed, not only the happy one: a control has hover, pressed, focused and disabled; a list or a screen has empty, loading and error. Show the ones the ask touches, reached by using the page; never a state switcher in it.",
   "Words are part of the design. A button starts with a verb and says what happens (\"Save changes\", never \"Submit\" or \"OK\"). An error says what happened, why, and how to fix it. An empty state says what goes here and how to start. A confirmation names the thing (\"Delete 3 files?\", never \"Are you sure?\") and its buttons say the two outcomes. One word for one thing throughout.",
 ];
 

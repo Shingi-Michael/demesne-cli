@@ -634,14 +634,15 @@ describe("Foundry sets the surface and plays the demo (pass 221 A)", () => {
     } finally { store.close(); }
   });
 
-  test("a page that draws a Replay or Next step button is sent back once per ask", async () => {
+  test("a page that draws a Replay or Next step button is always sent back", async () => {
     const store = new DemesneStore(":memory:");
     try {
       const save = foundrySaveTool(store);
       const input = { title: "Pins", kind: "html", description: "Pinning.", why: W, source: "<main>…</main><button>▶ Replay demo</button><button>Next step</button>" };
-      await expect(save.execute(input, { ...context, turnId: "t1" })).rejects.toThrow(/\[demo_control\].*“▶ Replay demo”, “Next step”.*give the steps as demo/);
-      // Saved again unchanged, it goes through: some real designs have one.
-      expect(JSON.parse(await save.execute(input, { ...context, turnId: "t1" })).version).toBe(1);
+      await expect(save.execute(input, { ...context, turnId: "t1" })).rejects.toThrow(/\[demo_control\].*“▶ Replay demo”, “Next step”.*Give the steps as demo/);
+      // Saved again unchanged, it is still sent back: the page holds only the thing.
+      await expect(save.execute(input, { ...context, turnId: "t1" })).rejects.toThrow(/\[demo_control\]/);
+      await expect(save.execute({ ...input, source: "<main><button>Empty</button><button>Loading</button><button>Error</button></main>" }, { ...context, turnId: "t1" })).rejects.toThrow(/“Empty · Loading · Error”.*own option/);
       // A page whose controls are real is never stopped.
       expect(JSON.parse(await save.execute({ ...input, title: "Player", source: "<button>Play</button><button>Next</button>" }, { ...context, turnId: "t2" })).version).toBe(1);
     } finally { store.close(); }
@@ -650,7 +651,7 @@ describe("Foundry sets the surface and plays the demo (pass 221 A)", () => {
   test("the tool tells the model the page holds only the thing", () => {
     const store = new DemesneStore(":memory:");
     const words = foundrySaveTool(store).definition.description;
-    expect(words).toContain("never put Replay, Play demo, Next step or an option switcher in the page");
+    expect(words).toContain("never put Replay, Play demo, Next step, an option switcher or a state switcher");
     expect(PARTS_GUIDE).toContain("each option gets its own stage");
     const schema = foundrySaveTool(store).definition.inputSchema as { properties: Record<string, unknown> };
     expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(["surface", "demo"]));

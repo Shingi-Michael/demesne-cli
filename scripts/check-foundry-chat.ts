@@ -49,14 +49,14 @@ const f = await fixture({
       assert(tools.some(tool => tool.name === "foundry_edit"));
       const read = JSON.parse(current[0]!.content ?? "{}") as { version: number };
       yield call("foundry_edit", { id: previous.id, base_version: read.version, note: "Blue",
-        why: { direction: "Same page, cooler.", look_at: "The blue badge." }, edits: [{ find: "#285b48", replace: "#3158ba" }] });
+        why: { direction: "Same page, cooler.", look_at: "The blue badge.", starts_from: "new" }, edits: [{ find: "#285b48", replace: "#3158ba" }] });
       yield { type: "finish", reason: "tool_calls" }; return;
     }
     if (!current.length) {
       assert(tools.some(tool => tool.name === "foundry_save"));
       const graphic = /graphic/i.test(request), document = /document/i.test(request), deck = /slide deck/i.test(request);
       const save = call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : deck ? "Q1 launch" : "Idea garden",
-        description: "A small page to try in the chat.", note: "First take", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading." },
+        description: "A small page to try in the chat.", note: "First take", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading.", starts_from: "new" },
         kind: graphic ? "svg" : document ? "markdown" : deck ? "deck" : "html",
         source: deck ? "---\ntheme: forest\n---\n# Q1 launch\nWhat the free tier did.\n\n---\n\n# 3.1×\nSign-ups a week.\n\n---\n\n## Sign-ups\n```chart\nlabels: W1, W2, W3\nvalues: 1200, 2400, 3700\n```"
           : graphic ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#285b48"/></svg>'

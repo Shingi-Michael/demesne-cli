@@ -192,13 +192,14 @@ interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: 
 /// A version's why, kept as JSON text; '' when it has none.
 const whyText = (why: FoundryWhy | null | undefined) => {
   const direction = why?.direction?.trim().slice(0, 300) ?? "", look = why?.look?.trim().slice(0, 300) ?? "", dropped = why?.dropped?.trim().slice(0, 300) ?? "";
-  return direction || look || dropped ? JSON.stringify({ direction, look, dropped }) : "";
+  const from = why?.from?.trim().slice(0, 300) ?? "";
+  return direction || look || dropped ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}) }) : "";
 };
 const parseWhy = (text: string | null | undefined): FoundryWhy | null => {
   if (!text) return null;
   try {
     const value = JSON.parse(text) as Partial<FoundryWhy>;
-    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? "") };
+    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? ""), ...(value.from ? { from: String(value.from) } : {}) };
   } catch { return null; }
 };
 

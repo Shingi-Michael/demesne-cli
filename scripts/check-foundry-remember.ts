@@ -35,7 +35,7 @@ const f = await fixture({
     }
     const at = messages.findLastIndex(message => message.role === "user");
     if (messages.slice(at + 1).some(message => message.role === "tool")) { yield { type: "text_delta", delta: "Your checklist remembers what you tick." }; yield { type: "finish", reason: "stop" }; return; }
-    yield { type: "tool_call_delta", index: 0, idDelta: "save-1", nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Lisbon checklist", kind: "html", description: "A packing checklist that remembers.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading." }, source: checklist }) };
+    yield { type: "tool_call_delta", index: 0, idDelta: "save-1", nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Lisbon checklist", kind: "html", description: "A packing checklist that remembers.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading.", starts_from: "new" }, source: checklist }) };
     yield { type: "finish", reason: "tool_calls" };
   },
 });

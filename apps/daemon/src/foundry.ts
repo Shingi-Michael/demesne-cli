@@ -11,7 +11,8 @@ import type { DemesneStore } from "@demesne/storage";
 import { LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
 import { FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
-import type { AgentTool } from "./tools.ts";
+import type { AgentTool, ToolContext } from "./tools.ts";
+import { seenIn } from "./foundry-seen.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
 export const FOUNDRY_TOOL_NAMES = new Set(["foundry_read", "foundry_save", "foundry_edit", "foundry_try"]);
@@ -127,7 +128,8 @@ export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[]
 export const MAX_OPTIONS = 3;
 function checkOptions(kind: string | undefined, source: string) {
   if (kind !== undefined && kind !== "html") return;
-  const count = source.match(/\bdata-option\s*=/g)?.length ?? 0;
+  // "Today", the screen as it is now, is the comparison and not one of the three.
+  const count = (source.match(/\bdata-option\s*=/g)?.length ?? 0) - (/\bdata-option\s*=\s*["']today\b/i.test(source) ? 1 : 0);
   if (count > MAX_OPTIONS) throw new Error(`[too_many_options] This page has ${count} options; at most ${MAX_OPTIONS}. Hint: keep the best ${MAX_OPTIONS}, recommended first`);
   // Several options always come with the one you would use (pass 208 A).
   // (recommended="A" on the <d-compare>, or data-recommended on the option of a page drawn without it).
@@ -211,6 +213,7 @@ const WHY_SCHEMA = {
     direction: { type: "string", maxLength: 300, description: "Who it is for, the mood." },
     look_at: { type: "string", maxLength: 300, description: "What leads." },
     dropped: { type: "string", maxLength: 300, description: "What you left out, and why." },
+    starts_from: { type: "string", maxLength: 300, description: "New mockups: the real thing you looked at (window, files), or \"new\"." },
   },
   required: ["direction", "look_at"],
   additionalProperties: false,
@@ -222,7 +225,8 @@ function whyOf(value: unknown): FoundryWhy | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new Error("[invalid_input] why is an object: {direction, look_at, dropped}");
   const text = (key: string) => typeof value[key] === "string" ? (value[key] as string).trim().slice(0, 300) : "";
-  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped") };
+  const from = text("starts_from");
+  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped"), ...(from ? { from } : {}) };
   return why.direction || why.look || why.dropped ? why : undefined;
 }
 
@@ -237,6 +241,32 @@ function checkWhy(store: DemesneStore, kind: FoundryKind | undefined, id: string
     if (latest?.turnId === turnId && latest.why) return;
   }
   throw new Error("[invalid_input] Say why it looks this way: why {direction, look_at, dropped}. Hint: a sentence each; direction is who it is for and the mood, look_at is what leads, dropped is what you left out");
+}
+
+/// A new mockup of something that exists starts from the real thing, not
+/// from memory: it says what it starts from, and when that is something real
+/// (or the page draws Demesne itself) the chat has looked at it first: a
+/// window capture, the project's interface files, a page in the browser, or
+/// a picture the person attached. Refused once per ask, so a chat that
+/// cannot look is never stuck.
+const lookAsked = new Set<string>();
+const COULD_NOT = /^could not look/i;
+function checkStart(store: DemesneStore, kind: FoundryKind | undefined, source: string, why: FoundryWhy | undefined, based: boolean, context: ToolContext) {
+  if (kind !== "html" && kind !== "svg") return;
+  const from = why?.from ?? "";
+  if (!from) throw new Error("[invalid_input] Say what it starts from: why.starts_from. Hint: the real thing you looked at (\"a capture of the Settings window; src/settings.css\"), or \"new\" when nothing like it exists yet");
+  const demesne = /<d-demesne\b/i.test(source);
+  if (/^new\b/i.test(from) && !demesne) return;
+  if (based || COULD_NOT.test(from) || !context.turnId || !context.sessionId) return;
+  if (seenIn(context.sessionId).length) return;
+  if (store.getSession(context.sessionId)?.turns.some((turn) => turn.attachments?.some((file) => file.kind !== "file"))) return;
+  if (lookAsked.has(context.turnId)) return;
+  lookAsked.add(context.turnId);
+  if (lookAsked.size > 300) lookAsked.delete(lookAsked.values().next().value!);
+  throw new Error(`[look_first] ${demesne ? "This draws Demesne, which exists" : "This starts from something that exists"}, and this chat has not looked at it, so it would be drawn from memory. `
+    + "Hint: look first. Load and call capture_window (application Demesne for Demesne itself), or read the real stylesheet and that screen's markup in the project. "
+    + "Then draw the screen as it is today, with its real colours, sizes, spacing and words, and change only what was asked: \"Today\" as the first option, your change as the next. "
+    + "If you cannot look, save again with starts_from beginning \"could not look:\" and say so in your answer");
 }
 
 function baseVersionOf(input: Record<string, unknown>) {
@@ -296,6 +326,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       if (!id) checkPick(store, context.turnId, recommended);
       const why = whyOf(input.why);
       checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
+      if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;

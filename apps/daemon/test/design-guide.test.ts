@@ -31,7 +31,9 @@ test("Demesne's rules are numbered, and say what the old paragraph said", () => 
   expect(block).toContain("no side panels and no menus");
   expect(block).not.toContain("The person's own design rules");
   // About the size of the paragraph it replaces.
-  expect(block.length).toBeLessThan(4600);
+  // Something that exists is mocked from the real thing.
+  expect(block).toContain("never from memory");
+  expect(block.length).toBeLessThan(5000);
 });
 
 test("your guide for every chat and the project's are both read, the project's last", () => {

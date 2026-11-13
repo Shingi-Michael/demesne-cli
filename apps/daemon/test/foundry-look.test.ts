@@ -8,7 +8,7 @@ import { foundryEditTool, foundrySaveTool } from "../src/foundry.ts";
 import { designReport, LOOKS_PER_TURN, lookCommand, lookReport, type FoundryLook, type LookResult } from "../src/foundry-look.ts";
 
 /// Why a test page looks the way it does (pass 218 A).
-const W = { direction: "Plain, for a test.", look_at: "The heading." };
+const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new" };
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64").toString("base64");
 const result = (issues: string[] = []): LookResult => ({ pages: [{ width: 1280, height: 900, issues, png: PNG }, { width: 390, height: 2000, issues: [], png: PNG }], errors: [] });

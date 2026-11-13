@@ -26,6 +26,7 @@ import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { designGuideBlock, loadDesignGuides } from "./design-guide.ts";
 import { forgetFoundrySources, FOUNDRY_TOOL_NAMES } from "./foundry.ts";
+import { noteSeen } from "./foundry-seen.ts";
 import { WEB_TOOL_NAMES } from "./web.ts";
 import { UPDATE_PLAN } from "./plan.ts";
 import { forgetThrough, nextForgetThrough } from "./forget-reads.ts";
@@ -1302,6 +1303,7 @@ export class AgentEngine {
       // A command the chat ran (a formatter, a codegen) may have changed files
       // it had seen: those changes are its own, not another agent's.
       if (workspaceRoot) this.noteFiles(sessionId, workspaceRoot, call.name === "run_command" ? [...this.seenFiles.get(sessionId)?.keys() ?? []] : touchedFiles(call.name, input));
+      noteSeen(sessionId, call.name, input, result);
       if (repo) await this.recordRepoFlow(turnId, toolCallId, repo);
       this.store.settleToolCall(toolCallId, "completed", result, recordedToolChanges(workspaceRoot, snapshotTargets));
       return result;

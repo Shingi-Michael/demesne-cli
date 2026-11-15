@@ -22,6 +22,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { DemesneClient } from "../packages/client/src/index.ts";
 import { loadConfig } from "../packages/config/src/index.ts";
+import { demoControls } from "../packages/protocol/src/index.ts";
 import type { ProviderStreamEvent } from "../packages/providers/src/index.ts";
 import { createDaemonApp } from "../apps/daemon/src/app.ts";
 import { electronLook, type LookResult } from "../apps/daemon/src/foundry-look.ts";
@@ -87,7 +88,9 @@ if (pagesDir) {
   process.exit(0);
 }
 
-const READS = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history", "session_tools", "foundry_read", "foundry_save", "foundry_edit"]);
+const READS = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history", "session_tools", "foundry_read", "foundry_save", "foundry_edit",
+  // What a chat reaches for on the way to a page: finding a tool, a read-only helper, its checklist, a picture, trying its own page.
+  "tool_search", "subagent", "agents", "update_plan", "view_image", "foundry_try"]);
 // Generous, like a real chat: a model that reads first still gets to make its page.
 const MAX_ROUNDS = 20;
 interface Watch { rounds: number; calls: string[]; outputTokens: number; error: string | null }
@@ -191,10 +194,15 @@ try {
     if (made) {
       const detail = await client.foundryGet(made.id);
       Object.assign(result, { title: detail.title, kind: detail.kind, bytes: Buffer.byteLength(detail.source), versions: detail.version });
+      // Pass 221 A: where it sits, how its demo goes, and anything in the page that only fakes one.
+      const stage = detail.versions?.find((version) => version.version === detail.version)?.stage ?? detail.versions?.[0]?.stage;
+      const said = JSON.stringify(await client.getSessionState(session.id));
+      Object.assign(result, { surface: stage?.surface?.frame ?? null, demoSteps: stage?.demo?.length ?? 0,
+        controls: detail.kind === "html" ? demoControls(detail.source) : [], refused: said.split("[demo_control]").length - 1 });
       if (detail.kind !== "markdown") Object.assign(result, await measure(item.id, detail.kind, detail.title, detail.source));
     }
     results.push(result);
-    console.log(`${String(result.score ?? "-").padStart(3)}  ${item.id.padEnd(18)} ${result.title ?? "(no page)"}  ${result.seconds}s, ${result.rounds} rounds, ${result.outputTokens} out${result.error ? `  [${result.error}]` : ""}`);
+    console.log(`${String(result.score ?? "-").padStart(3)}  ${item.id.padEnd(18)} ${result.title ?? "(no page)"}  ${result.seconds}s, ${result.rounds} rounds, ${result.outputTokens} out${made ? `, ${result.surface ?? "no surface"}, demo ${result.demoSteps}${result.refused ? `, refused ${result.refused}` : ""}${result.controls?.length ? `, DRAWS ${result.controls.join(" | ")}` : ""}` : ""}${result.error ? `  [${result.error}]` : ""}`);
   }
 } finally {
   await server.stop(true);

@@ -71,6 +71,8 @@ export interface PageResult {
   score: number | null; checks: Record<Check, number> | null; design: DesignNumbers | null;
   issues: string[]; shots: string[];
   seconds: number; rounds: number; outputTokens: number; calls: string[]; error: string | null;
+  /// The frame it chose, its demo's steps, demo-only controls left in the page, and how often one was sent back.
+  surface?: string | null; demoSteps?: number; controls?: string[]; refused?: number;
 }
 export interface Report { model: string; when: string; label: string; results: PageResult[] }
 

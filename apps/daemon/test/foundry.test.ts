@@ -648,6 +648,24 @@ describe("Foundry sets the surface and plays the demo (pass 221 A)", () => {
     } finally { store.close(); }
   });
 
+  test("a page with controls and no demo is asked for one; with a demo, or with nothing to press, it is not", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store), edit = foundryEditTool(store);
+      const input = { title: "Plans", kind: "html", description: "Plans.", why: W, source: "<main><button>Choose Plus</button></main>" };
+      const first = JSON.parse(await save.execute(input, { ...context, turnId: "d1" }));
+      expect(first.message).toMatch(/controls and no demo.*foundry_edit \{id: "[\w-]+", demo: \[\.\.\.\]\} with no edits/);
+      // The demo alone goes on with no new version, and the ask is gone.
+      const added = JSON.parse(await edit.execute({ id: first.id, demo: [{ click: "Choose Plus", say: "Pick a plan" }] }, { ...context, turnId: "d1" }));
+      expect(added.version).toBe(1);
+      expect(added.message).not.toContain("no demo");
+      const again = JSON.parse(await edit.execute({ id: first.id, base_version: 1, why: W, edits: [{ find: "Plus", replace: "Pro" }] }, { ...context, turnId: "d1" }));
+      expect(again.message).toContain("Foundry plays its demo");
+      const still = JSON.parse(await save.execute({ ...input, title: "Poster", source: "<main><h1>Hello</h1></main>" }, { ...context, turnId: "d2" }));
+      expect(still.message).not.toContain("no demo");
+    } finally { store.close(); }
+  });
+
   test("the tool tells the model the page holds only the thing", () => {
     const store = new DemesneStore(":memory:");
     const words = foundrySaveTool(store).definition.description;

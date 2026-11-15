@@ -8,7 +8,7 @@
 /// once its turn is over (forgetFoundrySources): the artifact is stored,
 /// and foundry_read brings it back when the agent needs it.
 import type { DemesneStore } from "@demesne/storage";
-import { LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
+import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
 import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
@@ -79,7 +79,7 @@ export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: a
 /// holds only the thing being made.
 export const STAGE_RULES = "The page holds only the thing, with only the controls the real thing has. "
   + "surface says where it sits; Foundry draws that frame and backdrop around the page (part and page grow to fit), so draw neither. "
-  + "demo says how it moves: foundry_try steps, each with a short say; Foundry plays them with a pointer, the words under the page. "
+  + "demo says how it moves: foundry_try steps, each with a short say; Foundry plays them with a pointer, the words under the page. A page with something to press always gets one, of its main path. "
   + "So never put Replay, Play demo, Next step, an option switcher or a state switcher (Empty · Loading · Error, Show error, Simulate) in the page.";
 
 const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
@@ -247,7 +247,15 @@ function checkControls(kind: FoundryKind | undefined, source: string) {
     + "Hint: take it out. Give the steps as demo (foundry_try steps with say) and Foundry plays them under the page; reach a state the way the real thing does (an empty list by removing its last item), or make it its own option in <d-compare>. A real control with one of these words gets the words the real product uses (\"Continue\", not \"Next step\")");
 }
 
-const stageSaid = (stage: FoundryStage | null) => stage?.demo ? " Foundry plays its demo under the page; check every step changes something with foundry_try {id, demo: true}." : "";
+/// Something to press, in the page's own markup or the kit's parts.
+const HAS_CONTROLS = /<(?:button|a|input|select|textarea|details|d-tabs|d-seg|d-toggle)\b|\bonclick\s*=|\brole\s*=\s*["']?(?:button|tab|switch)/i;
+/// What a save says about the demo: how to check one, or, for a page with
+/// controls and none, to write it (a real model otherwise never does).
+const stageSaid = (stage: FoundryStage | null | undefined, page?: { kind: FoundryKind; source: string; id: string }) => stage?.demo
+  ? " Foundry plays its demo under the page; check every step changes something with foundry_try {id, demo: true}."
+  : page && page.kind === "html" && HAS_CONTROLS.test(page.source.replace(/<script\b[\s\S]*?<\/script>/gi, ""))
+    ? ` It has controls and no demo, so on Foundry it sits still. Give it one now: foundry_edit {id: "${page.id}", demo: [...]} with no edits, its main path in 2 to 6 steps (click, type, hover by the control's name), each with a short say.`
+    : "";
 
 const clean = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : undefined;
 
@@ -390,7 +398,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${stageSaid(stage)}${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -490,7 +498,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${stageSaid(stage)}${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -580,7 +588,7 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
-  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN, artifact.kind === "html");
+  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN, artifact.kind === "html", APP_WINDOW.test(artifact.source));
   if (report.found) critiqueOwed.add(key); else critiqueOwed.delete(key);
   if (critiqueOwed.size > 200) critiqueOwed.delete(critiqueOwed.values().next().value!);
   return { text: JSON.stringify({ ...saved, look: report.look }), images: report.images };

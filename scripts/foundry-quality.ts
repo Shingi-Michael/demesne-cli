@@ -50,15 +50,16 @@ const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ramp = (value: number, zero: number, full: number) => clamp((value - zero) / (full - zero));
 
 /// Each check 0..1 from the desktop page's numbers and the faults found at every width.
-export function checks(design: DesignNumbers, faults: number): Record<Check, number> {
+/// appWindow: a mockup of the app itself, which no headline leads and whose surfaces are the app's own; those two checks pass.
+export function checks(design: DesignNumbers, faults: number, appWindow = false): Record<Check, number> {
   return {
     faults: clamp(1 - faults / 6),
     sizes: design.sizes <= 2 ? 0.5 : design.sizes <= 6 ? 1 : ramp(design.sizes, 12, 6),
-    lead: ramp(design.lead, 1.4, 2.8),
+    lead: appWindow ? 1 : ramp(design.lead, 1.4, 2.8),
     rhythm: ramp(design.rhythm, 0.6, 0.9),
     aligned: ramp(design.aligned, 0.4, 0.85),
     colours: design.colours <= 2 ? 0.4 : design.colours <= 8 ? 1 : ramp(design.colours, 18, 8),
-    surface: ramp(design.surface ?? 0, 0.05, 0.35),
+    surface: appWindow ? 1 : ramp(design.surface ?? 0, 0.05, 0.35),
   };
 }
 

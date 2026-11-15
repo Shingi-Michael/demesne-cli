@@ -25,7 +25,7 @@ import { loadConfig } from "../packages/config/src/index.ts";
 import { demoControls } from "../packages/protocol/src/index.ts";
 import type { ProviderStreamEvent } from "../packages/providers/src/index.ts";
 import { createDaemonApp } from "../apps/daemon/src/app.ts";
-import { electronLook, type LookResult } from "../apps/daemon/src/foundry-look.ts";
+import { APP_WINDOW, electronLook, type LookResult } from "../apps/daemon/src/foundry-look.ts";
 import { serveDaemon } from "../apps/daemon/src/http-server.ts";
 import type { TurnInference, TurnProcessor } from "../apps/daemon/src/processor.ts";
 import { createProcessor, signedInAccounts } from "../apps/daemon/src/providers-from-config.ts";
@@ -61,7 +61,7 @@ async function measure(id: string, kind: string, title: string, source: string):
   const issues = [...look.pages.flatMap((page) => page.issues.map((issue) => `${page.width}px: ${issue}`)), ...look.errors.map((error) => `console: ${error}`)];
   const design = look.pages[0]?.design as DesignNumbers | undefined;
   if (!design) return { score: null, checks: null, design: null, issues: [...issues, "No design numbers (an older app build?)"], shots };
-  const parts = checks(design, issues.length);
+  const parts = checks(design, issues.length, APP_WINDOW.test(source));
   return { score: score(parts), checks: parts, design, issues, shots };
 }
 

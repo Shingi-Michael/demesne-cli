@@ -225,15 +225,30 @@ const SURFACE_SCHEMA = {
   required: ["frame"],
   additionalProperties: false,
 } as const;
+const DEMO_STEP = 'one of {click: "Choose Plus"}, {hover: "Pin"}, {type: "Milk", into: "Item"}, {key: "Enter"}, {scroll: 400}, {wait: 300}, plus say: "what it shows"';
 const DEMO_SCHEMA = {
   type: "array", maxItems: DEMO_MAX_STEPS,
-  description: "foundry_try steps, each with an optional say. Kept until changed.",
-  items: { type: "object" },
+  description: `The main path as steps, each ${DEMO_STEP}. A control is named by its text or label, or a CSS selector. Kept until changed.`,
+  items: { type: "object", properties: {
+    click: { type: "string" }, hover: { type: "string" }, type: { type: "string" }, into: { type: "string" },
+    key: { type: "string" }, scroll: { type: "number" }, wait: { type: "number" }, say: { type: "string" } } },
 } as const;
 
+const stageError = (error: unknown) => `${error instanceof Error ? error.message : String(error)}. Hint: surface is {frame: "phone"}; a demo step is ${DEMO_STEP}`;
 function stageOf(input: Record<string, unknown>): FoundryStage | null {
   try { return parseStage({ surface: input.surface, demo: input.demo }); }
-  catch (error) { throw new Error(`[invalid_input] ${error instanceof Error ? error.message : String(error)}. Hint: surface is {frame: "phone"}; demo is a list of foundry_try steps with say`); }
+  catch (error) { throw new Error(`[invalid_input] ${stageError(error)}`); }
+}
+/// With a page: a demo that does not read is left off and said, never a
+/// reason to send the whole page again.
+function stageWithPage(input: Record<string, unknown>): { stage: FoundryStage | null; dropped: string } {
+  try { return { stage: parseStage({ surface: input.surface, demo: input.demo }), dropped: "" }; }
+  catch (error) {
+    if (input.demo === undefined || input.demo === null) throw new Error(`[invalid_input] ${stageError(error)}`);
+    let surface: FoundryStage | null;
+    try { surface = parseStage({ surface: input.surface }); } catch (bad) { throw new Error(`[invalid_input] ${stageError(bad)}`); }
+    return { stage: surface, dropped: ` The page is saved but its demo was not kept: ${stageError(error)}. Give the demo again with foundry_edit {id, demo: [...]} and no edits.` };
+  }
 }
 
 /// A page that draws a button only a demo needs (Replay, Play demo, Next
@@ -248,7 +263,7 @@ function checkControls(kind: FoundryKind | undefined, source: string) {
 }
 
 /// Something to press, in the page's own markup or the kit's parts.
-const HAS_CONTROLS = /<(?:button|a|input|select|textarea|details|d-tabs|d-seg|d-toggle)\b|\bonclick\s*=|\brole\s*=\s*["']?(?:button|tab|switch)/i;
+const HAS_CONTROLS = /<(?:button|a|input|select|textarea|details|d-tabs|d-seg|d-toggle)\b|<d-demesne\b(?![^>]*\binert\b)|\bonclick\s*=|\brole\s*=\s*["']?(?:button|tab|switch)/i;
 /// What a save says about the demo: how to check one, or, for a page with
 /// controls and none, to write it (a real model otherwise never does).
 const stageSaid = (stage: FoundryStage | null | undefined, page?: { kind: FoundryKind; source: string; id: string }) => stage?.demo
@@ -386,7 +401,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
       if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
-      const stage = stageOf(input);
+      const { stage, dropped } = stageWithPage(input);
       checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
@@ -398,7 +413,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -487,7 +502,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const why = whyOf(input.why);
       checkWhy(store, current.kind, input.id, context.turnId, why);
       checkCritique(input.id, context.turnId, input.critique);
-      const stage = stageOf(input);
+      const { stage, dropped } = stageWithPage(input);
       checkControls(current.kind, source);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
@@ -498,7 +513,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);

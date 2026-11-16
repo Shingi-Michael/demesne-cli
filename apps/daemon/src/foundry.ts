@@ -8,7 +8,7 @@
 /// once its turn is over (forgetFoundrySources): the artifact is stored,
 /// and foundry_read brings it back when the agent needs it.
 import type { DemesneStore } from "@demesne/storage";
-import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
+import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
 import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
@@ -589,6 +589,10 @@ function checkCritique(id: string | undefined, turnId: string | undefined, criti
   throw new Error(`[invalid_input] Critique before you fix: ${through ? "fix it with foundry_edit and pass" : "pass"} critique, the Design guide rules the page breaks (by number) and the numbers off target, with what you will change. Hint: a few lines; it is not shown to the person`);
 }
 
+/// Which design targets judge a page: an app window and a part are not posters (foundry-look.ts designReport).
+const judgedAs = (source: string, surface: unknown): Judged =>
+  APP_WINDOW.test(source) ? "app" : (surface as { frame?: unknown } | undefined)?.frame === "part" ? "part" : "page";
+
 /// After a page is saved: render it, and hand the model the faults
 /// found and a picture at each width. Twice per artifact per turn at most.
 async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<string, number>, text: string, context: { turnId?: string; signal: AbortSignal }): Promise<string | StructuredToolResult> {
@@ -603,7 +607,7 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
-  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN, artifact.kind === "html", APP_WINDOW.test(artifact.source));
+  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN, artifact.kind === "html", judgedAs(artifact.source, saved.surface));
   if (report.found) critiqueOwed.add(key); else critiqueOwed.delete(key);
   if (critiqueOwed.size > 200) critiqueOwed.delete(critiqueOwed.values().next().value!);
   return { text: JSON.stringify({ ...saved, look: report.look }), images: report.images };
@@ -624,7 +628,7 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       name: "foundry_try",
       description: "Use a Foundry page the way a person would, to check that it works: run up to 12 steps on its latest version (or one you name) in a hidden window, with real clicks and typing. "
         + "After each step you hear what visibly changed, or that nothing did, or that the control is covered, disabled or not found; then the page's tree (every heading and control: name, place, size, state) and a picture. "
-        + "Use it after making or changing a page that has controls: run its main path (add an item, switch a tab, open and close a dialog, submit the form), at phone width too when layout matters. "
+        + "Use it after making or changing a page that has controls: run the path the ask is about (switch the tab, add the item), at phone width too when layout matters. "
         + "Steps: {click: name}, {type: text, into?: name}, {key: Enter|Tab|Escape|Backspace|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight}, {scroll: px}, {hover: name}, {wait: ms}. "
         + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). Pages that remember start empty here. "
         + "demo: true runs the version's saved demo instead of steps.",

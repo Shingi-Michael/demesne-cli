@@ -29,7 +29,7 @@ export const DESIGN_RULES: readonly string[] = [
   "Lists and settings are rows with hairline dividers in one rounded box, one line per row; state is a single mark with a word beside it, never colour alone.",
   "Depth and detail where they earn it: layered surfaces, soft shadows only on things that float, hover/selected/empty states, small SVG icons. Write as much CSS of your own as the design needs, on the kit's variables.",
   "Real content, never lorem ipsum: believable names, numbers and dates.",
-  "A mockup is the working thing at real size, not a poster of it: no headline or notes above it, it fills the page, and every control does something (tabs and links go somewhere, inputs take typing, buttons change what shows).",
+  "A mockup is the working thing at real size, not a poster of it: no headline or notes above it, it fills the page, and the controls the ask is about work (tabs go somewhere, inputs take typing); the rest are drawn and may stay still.",
   "It reads and works about 620px wide, and at phone width with no horizontal scroll. Text has 4.5:1 contrast on what is behind it (3:1 from 24px up), and on a phone anything to tap is at least 44px each way.",
   "Options: two or three genuinely different directions (never more than three), each named, in one <d-compare> with recommended set on the one you would pick; say in the chat which and why.",
   "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce.",

@@ -29,7 +29,7 @@ import { APP_WINDOW, electronLook, electronTry, type LookResult } from "../apps/
 import { serveDaemon } from "../apps/daemon/src/http-server.ts";
 import type { TurnInference, TurnProcessor } from "../apps/daemon/src/processor.ts";
 import { createProcessor, signedInAccounts } from "../apps/daemon/src/providers-from-config.ts";
-import { checks, compareLines, contactSheet, QUALITY_CASES, score, type DesignNumbers, type PageResult, type Report } from "./foundry-quality.ts";
+import { checks, compareLines, contactSheet, fitOf, QUALITY_CASES, score, type DesignNumbers, type Judged, type PageResult, type Report } from "./foundry-quality.ts";
 
 const repo = resolve(import.meta.dir, "..");
 const flag = (name: string) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : undefined; };
@@ -49,7 +49,7 @@ if (!existsSync(lookCommand[0]!) || (!process.env.DEMESNE_ELECTRON && !existsSyn
 const render = electronLook(lookCommand);
 
 /// Render one page and turn it into a result's numbers and pictures.
-async function measure(id: string, kind: string, title: string, source: string): Promise<Pick<PageResult, "score" | "checks" | "design" | "issues" | "shots">> {
+async function measure(id: string, kind: string, title: string, source: string, surface?: string | null): Promise<Pick<PageResult, "score" | "checks" | "design" | "issues" | "shots">> {
   writeFileSync(join(out, "pages", `${id}.${kind === "svg" ? "svg" : "html"}`), source);
   const look: LookResult | null = await render({ kind, source, title }, AbortSignal.timeout(60_000)).catch(() => null);
   if (!look?.pages.length) return { score: null, checks: null, design: null, issues: ["The app could not render the page"], shots: [] };
@@ -61,7 +61,8 @@ async function measure(id: string, kind: string, title: string, source: string):
   const issues = [...look.pages.flatMap((page) => page.issues.map((issue) => `${page.width}px: ${issue}`)), ...look.errors.map((error) => `console: ${error}`)];
   const design = look.pages[0]?.design as DesignNumbers | undefined;
   if (!design) return { score: null, checks: null, design: null, issues: [...issues, "No design numbers (an older app build?)"], shots };
-  const parts = checks(design, issues.length, APP_WINDOW.test(source));
+  const judged: Judged = APP_WINDOW.test(source) ? "app" : surface === "part" ? "part" : "page";
+  const parts = checks(design, issues.length, judged);
   return { score: score(parts), checks: parts, design, issues, shots };
 }
 
@@ -201,10 +202,11 @@ try {
       const said = JSON.stringify(await client.getSessionState(session.id));
       Object.assign(result, { surface: stage?.surface?.frame ?? null, demoSteps: stage?.demo?.length ?? 0,
         controls: detail.kind === "html" ? demoControls(detail.source) : [], refused: said.split("[demo_control]").length - 1 });
-      if (detail.kind !== "markdown") Object.assign(result, await measure(item.id, detail.kind, detail.title, detail.source));
+      if (item.fit) result.fit = fitOf(item.fit, { source: detail.source, surface: stage?.surface?.frame ?? null });
+      if (detail.kind !== "markdown") Object.assign(result, await measure(item.id, detail.kind, detail.title, detail.source, stage?.surface?.frame ?? null));
     }
     results.push(result);
-    console.log(`${String(result.score ?? "-").padStart(3)}  ${item.id.padEnd(18)} ${result.title ?? "(no page)"}  ${result.seconds}s, ${result.rounds} rounds, ${result.outputTokens} out${made ? `, ${result.surface ?? "no surface"}, demo ${result.demoSteps}${result.refused ? `, refused ${result.refused}` : ""}${result.controls?.length ? `, DRAWS ${result.controls.join(" | ")}` : ""}` : ""}${result.error ? `  [${result.error}]` : ""}`);
+    console.log(`${String(result.score ?? "-").padStart(3)}  ${item.id.padEnd(18)} ${result.title ?? "(no page)"}  ${result.seconds}s, ${result.rounds} rounds, ${result.outputTokens} out${made ? `, ${result.surface ?? "no surface"}, demo ${result.demoSteps}${result.refused ? `, refused ${result.refused}` : ""}${result.controls?.length ? `, DRAWS ${result.controls.join(" | ")}` : ""}${result.fit ? `, as asked ${Math.round(result.fit.score * 100)}%${result.fit.misses.length ? ` (${result.fit.misses.join("; ")})` : ""}` : ""}` : ""}${result.error ? `  [${result.error}]` : ""}`);
   }
 } finally {
   await server.stop(true);

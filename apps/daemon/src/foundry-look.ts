@@ -97,7 +97,7 @@ export function tryReport(result: TryResult): { report: Record<string, unknown>;
   const bad = result.steps.filter((step) => !step.ok);
   const next = bad.length || result.errors.length
     ? "Fix what went wrong (unless a step was meant to change nothing) with one foundry_edit, then try the same steps again once."
-    : "Every step did something. Answer, or try the controls not clicked yet.";
+    : "Every step did something. Answer.";
   return {
     report: { width: `${result.width}px`, steps: result.steps.map((step) => `${step.ok ? "✓" : "✕"} ${step.step}: ${step.said}`),
       tree_after: result.tree, ...(result.errors.length ? { console_errors: result.errors } : {}), pictures: result.pictures.map((p) => `after ${p.after}`), next },
@@ -122,15 +122,21 @@ export const DESIGN_TARGETS: readonly { key: string; rule: number; ok: (value: n
 /// target, by rule. Empty when none were measured.
 /// An app window (<d-demesne>) is not a poster: no headline leads it and its
 /// surfaces are the app's own, which the numbers leave out. Those two
-/// targets do not judge it.
-export const APP_WINDOW = /<d-demesne\b/i, NOT_FOR_APP_WINDOWS = ["lead", "surface"];
-export function designReport(design: Record<string, number> | undefined, appWindow = false): { off: string[]; ok: string[] } {
+/// targets do not judge it. Nor do they judge a part (surface part: a button,
+/// a row, a toast at its own size): told that nothing leads and the screen is
+/// mostly blank, a model grows the small thing into a page. A part may also
+/// hold one text size and two colours.
+export const APP_WINDOW = /<d-demesne\b/i, NOT_FOR_APP_WINDOWS = ["lead", "surface"], SMALL_IS_FINE = ["sizes", "colours"];
+export type Judged = "page" | "app" | "part";
+export function designReport(design: Record<string, number> | undefined, judged: Judged | boolean = "page"): { off: string[]; ok: string[] } {
+  const as: Judged = judged === true ? "app" : judged === false ? "page" : judged;
   const off: string[] = [], ok: string[] = [];
   if (!design) return { off, ok };
   for (const target of DESIGN_TARGETS) {
-    if (appWindow && NOT_FOR_APP_WINDOWS.includes(target.key)) continue;
+    if (as !== "page" && NOT_FOR_APP_WINDOWS.includes(target.key)) continue;
     const value = design[target.key];
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (as === "part" && SMALL_IS_FINE.includes(target.key) && value < 3) continue;
     (target.ok(value) ? ok : off).push(`rule ${target.rule}: ${target.say(value)}`);
   }
   return { off, ok };
@@ -153,21 +159,26 @@ export const CRITIQUE_HOW = "Critique before you fix, looking at the pictures in
 /// one fix. Later saves in the turn go without, so a page can't loop.
 export const LOOKS_PER_TURN = 2;
 
+/// What a look says about trying the page: the asked path and nothing more.
+export const TRY_THE_ASK = "If the page has controls, run the path the ask is about once with foundry_try before you answer. "
+  + "A control off that path is drawn, not built: it may stay still. Never add a dialog, a form, a screen or data to make one work.";
+
 /// What the save's result says about the look, and the pictures it carries.
 /// designed: a page the model designed itself (html), the only kind its design numbers judge; Demesne draws the ready kinds.
-export function lookReport(look: LookResult, last: boolean, designed = true, appWindow = false): { look: Record<string, unknown>; images: ImageOutput[]; found: boolean } {
+export function lookReport(look: LookResult, last: boolean, designed = true, judged: Judged | boolean = "page"): { look: Record<string, unknown>; images: ImageOutput[]; found: boolean } {
   const name = (width: number) => width >= 800 ? `desktop ${width}px` : `phone ${width}px`;
   const problems = Object.fromEntries(look.pages.map((page) => [name(page.width), page.issues.length ? page.issues : "no layout problems found"]));
-  const design = designReport(designed ? look.pages.find((page) => page.width >= 800)?.design : undefined, appWindow);
+  const design = designReport(designed ? look.pages.find((page) => page.width >= 800)?.design : undefined, judged);
   const found = look.pages.some((page) => page.issues.length) || look.errors.length > 0 || design.off.length > 0;
   const next = last
     ? "This was the last look this turn: answer now."
     : found
       ? CRITIQUE_HOW
       : "Glance at the pictures; if nothing is off, answer without saving again.";
-  // A page with controls gets its main path tried once (foundry_try) before the answer.
-  // A mockup is for using: every control gets one click (foundry_try), so a dead one is found before the person is.
-  const tryIt = last ? "" : " If the page has controls, click each of them once with foundry_try (up to 12 steps) before you answer; one that changes nothing is dead: make it do something.";
+  // The path the ask is about gets tried once (foundry_try) before the answer.
+  // Only that path: "click every control and make the dead ones do something"
+  // (pass 164) is what grew a small ask into dialogs, forms and saved data.
+  const tryIt = last ? "" : ` ${TRY_THE_ASK}`;
   return {
     look: { ...problems, ...(look.errors.length ? { console_errors: look.errors } : {}),
       ...(design.off.length || design.ok.length ? { design: { ...(design.off.length ? { off_target: design.off } : {}), ...(design.ok.length ? { on_target: design.ok } : {}) } } : {}),

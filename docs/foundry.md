@@ -98,6 +98,15 @@ After a page is saved, Foundry renders it off screen at 1280 and 390 pixels wide
 
 These are the same numbers the quality eval scores (`scripts/foundry-quality.ts`); until now only the eval saw them. They judge pages the model designs (`html`); the ready kinds are drawn by Demesne.
 
+Not every page is a poster, so not every number judges every page:
+
+- A mockup of the app itself (`<d-demesne>`) is not judged on Lead or Surface: no headline leads a window, and its surfaces are the app's own.
+- A small thing saved on the `part` surface (a button, a row, a toast) is not judged on Lead or Surface either, and it may hold one text size and two colours. Told that "nothing leads" and "the screen is mostly blank", a model grows a small ask into a page.
+
+After a look, the model tries the path the ask is about once with `foundry_try`. Controls off that path are drawn, not built, and may stay still: the model is told never to add a dialog, a form, a screen or data to make one work. (Until pass 222 it was told to click every control and make each dead one do something, which is how "a little dashboard" came back with two dialogs and saved data.)
+
+The quality eval (`scripts/eval-foundry-quality.ts`) has twelve whole-page asks and three small ones (`small-pin`, `small-toast`, `small-toggle`). Beside the look score it prints **As asked**: for the asks that fix something, the share of those points the page keeps (the surface the ask names, how many versions it asked for, and no more dialogs, forms, controls or bytes than the ask needs), with each miss in words.
+
 When the look finds a fault or a number off target, the fix has to say what it is fixing first. `foundry_edit` takes a `critique`: the rules the page breaks, by number, and what will change. A fix without one is turned back, and a whole new source through `foundry_save` is pointed to `foundry_edit`. A number can stay off target on purpose, with the reason in the critique. The critique is the model's own working: it is not kept and never shown to you. One fix per ask, as before.
 
 The critique runs in a fixed order, so nothing is skipped: first impression (what the eye lands on in two seconds), usability, hierarchy, consistency with the guide and the numbers, then accessibility. Each problem is marked critical, moderate or minor, the fix goes to the first two, and one thing that works is named so the fix doesn't undo it.

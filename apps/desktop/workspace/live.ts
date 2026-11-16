@@ -38,7 +38,7 @@ import { foundryOrder, foundryPage, shelfKey } from "./foundry-page.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
-import { planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
+import { planLook, planMoved, planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { waitingFor, waitRow } from "./wait-row.ts";
 import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
 import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
@@ -2838,7 +2838,7 @@ function runHTML(run: WorkspaceRun, index: number) {
   // latest trace unless the reader explicitly collapses it.
   // A step serving a live page keeps the trace open so its preview shows.
   const live = active(run), fold = run.status === "completed" && !cut && !stepsOpen.has(run.id) && !items.some((tool) => serving(tool));
-  let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }).replace('<div class="plan-ribbon', `<div style="--pr-phase:-${Math.round(performance.now() % 1400)}ms" class="plan-ribbon`) : "", steps = "";
+  let body = plan ? planRibbonHTML(plan, { runId: run.id, live, open: planOpen.has(run.id) }) : "", steps = "";
   // Files sent with the message were read with it (pass 205 A): one line each.
   const sentFiles = run.status === "queued" ? [] : (run.attachments ?? []).filter((one) => one.kind === "file");
   if (sentFiles.length) body += `<div class="steps file-reads">${sentFiles.map((file) => `<div class="tool-row file-read">${stepIconFor("read")}<span class="verb">Read</span><code class="target"><span class="name">${h(file.filename)}</span></code><span class="sp"></span><small class="meta"><span class="success">✓</span> ${file.size != null ? h(sizeWord(file.size)) : ""}</small></div>`).join("")}</div>`;
@@ -3263,10 +3263,13 @@ function morph(old: Element, fresh: Element) {
 const foldKey = (fold: Element) => (fold.previousElementSibling as HTMLElement | null)?.dataset.args ?? "";
 function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, retained: Array<[HTMLElement, HTMLElement]>) {
   const old = [...content.childNodes];
-  // The checklist ribbon is the same element from step to step: its segments
-  // fill and its light keeps moving instead of being drawn anew (it stuttered).
+  // The checklist ribbon is the same element from step to step and into its
+  // pill: its line fills and its light keeps moving instead of being drawn
+  // anew (it stuttered), its name rolls, and it shrinks when the turn ends.
   const ribbon = content.querySelector(".plan-ribbon"), freshRibbon = fragment.querySelector(".plan-ribbon");
-  if (ribbon && freshRibbon && ribbon.classList.contains("ended") === freshRibbon.classList.contains("ended")) {
+  let ribbonWas: ReturnType<typeof planLook> | null = null;
+  if (ribbon && freshRibbon) {
+    ribbonWas = planLook(ribbon);
     morph(ribbon, freshRibbon);
     retained = [...retained, [freshRibbon as HTMLElement, ribbon as HTMLElement]];
   }
@@ -3274,6 +3277,10 @@ function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, reta
   const shown = new Set([...content.querySelectorAll(".step-fold")].map(foldKey));
   for (const fold of fragment.querySelectorAll<HTMLElement>(".step-fold")) if (shown.has(foldKey(fold))) fold.classList.add("steady");
   content.append(fragment);
+  // A move into a parent the page has not styled yet starts whatever is
+  // moving in the element over. Reading the new parent's style first lets
+  // the ribbon's light, shine and fills carry on through the move.
+  if (ribbon && ribbonWas && freshRibbon?.parentElement) void getComputedStyle(freshRibbon.parentElement).display;
   for (const [slot, element] of retained) {
     const parent = slot.parentElement!;
     if (element.isConnected && parent.moveBefore) parent.moveBefore(element, slot);
@@ -3281,6 +3288,7 @@ function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, reta
     slot.remove();
   }
   for (const node of old) if (!retained.some(([, element]) => element === node)) node.remove();
+  if (ribbon && ribbonWas) planMoved(ribbon, ribbonWas);
 }
 /// An open checklist longer than it shows scrolls to the step it is on.
 function planInView() {

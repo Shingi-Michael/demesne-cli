@@ -1,8 +1,10 @@
 /** Real Electron check: while the model works through its checklist
  * (update_plan), the ribbon and the chat's words stay the same nodes: no
  * rebuild on each step, no animation starting over. (Mike: "when the model
- * uses a checklist there is a stutter in the chat and the ribbon".)
- * Usage: xvfb-run -a bun scripts/check-plan-steady.ts (after prepare-desktop). */
+ * uses a checklist there is a stutter in the chat and the ribbon".) When the
+ * turn ends the same ribbon becomes the pill, which opens the list.
+ * Usage: xvfb-run -a bun scripts/check-plan-steady.ts (after prepare-desktop).
+ * SHOTS=dir saves pictures of the ribbon running, the pill, and the pill open. */
 import { _electron as electron } from "playwright";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
@@ -46,31 +48,57 @@ try {
   await page.evaluate(() => {
     const w = window as any, turn = document.querySelector("#conversation .turn:last-of-type")!;
     // Each distinct ribbon element seen, sampled every frame (a move keeps it).
-    w.ribbons = new Set(); w.segs = new Set(); w.slides = 0;
-    const sample = () => { const r = turn.querySelector(".plan-ribbon"); if (r && !r.classList.contains("ended")) { w.ribbons.add(r); for (const i of r.querySelectorAll(".pr-segs i")) w.segs.add(i); } };
-    // Each time the light (re)starts, where it is must follow the clock, so a
-    // redraw never sends it back to the start.
-    w.phaseOff = [];
+    w.ribbons = new Set(); w.all = new Set(); w.names = new Set(); w.segs = new Set(); w.slides = 0;
+    const sample = () => {
+      const r = turn.querySelector(".plan-ribbon"); if (!r) return;
+      w.all.add(r);
+      if (r.classList.contains("ended")) return;
+      w.ribbons.add(r); w.names.add(r.querySelector(".pr-name")); for (const i of r.querySelectorAll(".pr-segs i")) w.segs.add(i);
+    };
+    // The light starts once on each part of the line as it becomes the step
+    // being worked on. A redraw in between must never start it again.
+    w.shines = 0; w.fills = 0; w.folds = 0;
     document.addEventListener("animationstart", (event) => {
-      if ((event as AnimationEvent).animationName !== "pr-slide") return;
-      w.slides++;
-      requestAnimationFrame(() => { for (const a of document.getAnimations() as CSSAnimation[]) if (a.animationName === "pr-slide") {
-        const phase = ((Number(a.currentTime) - Number(a.effect!.getTiming().delay)) % 1400 + 1400) % 1400, clock = performance.now() % 1400;
-        const off = Math.abs(phase - clock); w.phaseOff.push(Math.round(Math.min(off, 1400 - off)));
-      } });
+      if ((event as AnimationEvent).animationName === "pr-slide") w.slides++;
+      if ((event.target as Element).classList.contains("pr-name")) w.shines++;
+    }, true);
+    // Each part fills (a transition), and the list folds open (another).
+    document.addEventListener("transitionrun", (event) => {
+      const what = (event as TransitionEvent).propertyName, on = event.target as Element;
+      if (what === "background-size" && on.parentElement?.classList.contains("pr-segs")) w.fills++;
+      if (what === "grid-template-rows" && on.classList.contains("pr-fold")) w.folds++;
     }, true);
     w.jumps = 0; let last = turn.getBoundingClientRect().top;
     const tick = () => { sample(); const top = turn.getBoundingClientRect().top; if (Math.abs(top - last) > 0.5) w.jumps++; last = top; w.frame = requestAnimationFrame(tick); }; tick();
   });
+  const shots = process.env.SHOTS, ribbon = page.locator("#conversation .turn:last-of-type .plan-ribbon");
+  if (shots) { await page.locator("#conversation .turn:last-of-type .pr-ct", { hasText: "3 of 4" }).waitFor(); await page.waitForTimeout(250); await page.screenshot({ path: join(shots, "ribbon-running.png") }); }
   await page.locator("#conversation .turn:last-of-type").getByText("All done.").waitFor({ timeout: 60000 });
-  const seen = await page.evaluate(() => { const w = window as any; cancelAnimationFrame(w.frame); return { ribbons: w.ribbons.size, segments: w.segs.size, slideStarts: w.slides, worstPhaseOff: Math.max(0, ...w.phaseOff), jumps: w.jumps }; });
+  const seen = await page.evaluate(() => { const w = window as any; cancelAnimationFrame(w.frame); return { ribbons: w.ribbons.size, all: w.all.size, names: w.names.size, segments: w.segs.size, slideStarts: w.slides, shineStarts: w.shines, fills: w.fills, jumps: w.jumps }; });
   console.log(JSON.stringify(seen));
   assert.deepEqual(errors, []);
   if (process.env.REPORT_ONLY) process.exit(0);
-  // While it ran (the turn ending may redraw it once, as the ribbon folds into its pill):
   assert.equal(seen.ribbons, 1, `the checklist ribbon was drawn anew ${seen.ribbons - 1} times while the turn worked`);
-  assert.equal(seen.segments, STEPS.length, "its segments are the same elements throughout (so they fill rather than snap)");
-  assert(seen.worstPhaseOff < 120, `the ribbon's moving light jumped back by up to ${seen.worstPhaseOff}ms when the turn redrew`);
+  assert.equal(seen.all, 1, "the ribbon that ran is the element that became the pill (so it shrinks rather than being swapped)");
+  assert.equal(seen.names, 1, "the step's name is the same element throughout (so it rolls rather than snaps)");
+  assert.equal(seen.segments, STEPS.length, "the parts of its line are the same elements throughout (so they fill rather than snap)");
+  assert(seen.slideStarts <= STEPS.length, `the ribbon's moving light started ${seen.slideStarts} times for ${STEPS.length} steps: a redraw started it over`);
+  assert(seen.shineStarts <= 1, `the shine on the step's name started ${seen.shineStarts} times: a redraw started it over`);
+  assert.equal(seen.fills, STEPS.length, "each part of the line fills as its step is done, rather than snapping to green");
+  // Ended, it is a pill that says how many steps and opens the same list.
+  await ribbon.locator(".pr-name", { hasText: `${STEPS.length} steps` }).waitFor();
+  assert.match(await ribbon.getAttribute("class") ?? "", /\bended all\b/);
+  await page.waitForTimeout(700);
+  const pill = await ribbon.locator(".pr-card").boundingBox();
+  assert(pill && pill.width < 160 && pill.height < 40, `the ended ribbon is a small pill: ${JSON.stringify(pill)}`);
+  if (shots) await page.screenshot({ path: join(shots, "ribbon-pill.png") });
+  await ribbon.locator(".pr-bar").click();
+  await page.waitForTimeout(700);
+  assert.equal(await ribbon.locator(".pr-row.d").count(), STEPS.length, "the open pill lists every step, ticked");
+  assert.equal(await page.evaluate(() => (window as any).folds), 1, "the list folds open rather than snapping");
+  const open = await ribbon.locator(".pr-card").boundingBox(), last = await ribbon.locator(".pr-row").last().boundingBox();
+  assert(open && last && open.height > 120 && last.y + last.height <= open.y + open.height, `the list shows inside the pill: ${JSON.stringify(open)}`);
+  if (shots) await page.screenshot({ path: join(shots, "ribbon-pill-open.png") });
   console.log("Plan steady check passed.");
 } finally {
   await desktop.close().catch(() => {});

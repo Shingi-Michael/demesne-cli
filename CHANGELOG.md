@@ -4,6 +4,7 @@ Current release status is **0.1.0 plus unreleased development on main**. The ent
 
 ## [Unreleased]
 
+- The checklist ribbon is cleaner (pass 226 A): one soft glass ribbon with the name of the step it is on, which step that is ("2 of 5"), and a fine line under them that fills in green a step at a time. Silver is now, green is done. Click the ribbon and the list opens inside it. The name rolls once when a step finishes, and when the turn ends the same ribbon shrinks into a small pill ("5 steps") that still opens the list.
 - Threads are checked as they land (pass 211 A): a thread that changed files outside its claim or failed a check goes back once with what to fix, then the orchestrator reads its work against the brief and can send it back once more. Each ready thread has its own Merge, a thread that no longer applies settles its own conflicts, up to six threads run at once, a thread can wait for another (`after`) and start on its branch, and threads hang under their orchestrator in the sidebar. See [Threads](docs/threads.md).
 - Every new chat starts on **Auto**: edits and commands run without asking. The mode word under the composer still switches a chat to Ask, Accept edits or Plan.
 - **Just a chat** can make changes: a chat with no project works in your home folder, reading and editing files and running commands there (paths like `Desktop/notes.md`). Demesne's own data folder and config stay out of its file tools, and key folders (`.ssh`, `.aws`, `.gnupg`) stay hidden as before. Threads and remembered rules still need a project.

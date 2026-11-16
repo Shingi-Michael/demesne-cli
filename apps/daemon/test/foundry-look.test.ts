@@ -135,3 +135,10 @@ test("the model sees its page's design numbers against targets, by the guide's r
   expect(lookReport(looked, false, false).look.design).toBeUndefined();
   expect(lookReport(looked, false, false).found).toBe(false);
 });
+
+test("an app window is not judged on a leading headline or its surfaces", async () => {
+  const { designReport } = await import("../src/foundry-look.ts");
+  const numbers = { sizes: 4, lead: 1.1, rhythm: 0.95, aligned: 0.9, colours: 5, surface: 0 };
+  expect(designReport(numbers).off.length).toBe(2);
+  expect(designReport(numbers, true).off).toEqual([]);
+});

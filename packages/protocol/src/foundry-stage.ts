@@ -72,6 +72,18 @@ export function parseSurface(value: unknown): FoundrySurface {
   return out;
 }
 
+/// A step written the way models tend to ({action: "click", selector: "#go"})
+/// is the same step: read it as {click: "#go"} rather than send the page back.
+function plainStep(step: Record<string, unknown>): Record<string, unknown> {
+  const action = typeof step.action === "string" ? step.action.toLowerCase() : "";
+  if (!["click", "hover", "type", "key", "scroll", "wait"].includes(action) || step[action] !== undefined) return step;
+  const { action: _action, selector, target, name, text, value, ...rest } = step;
+  const on = selector ?? target ?? name;
+  if (action === "click" || action === "hover") return { ...rest, [action]: on };
+  if (action === "type") return { ...rest, type: text ?? value, ...(on !== undefined ? { into: on } : {}) };
+  return { ...rest, [action]: value ?? text ?? on ?? rest.ms ?? rest.by };
+}
+
 /// The model's demo, checked: foundry_try's steps, each with an optional say.
 export function parseDemo(value: unknown): FoundryDemoStep[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`demo must be a list of one to ${DEMO_MAX_STEPS} steps`);
@@ -86,7 +98,7 @@ export function parseDemo(value: unknown): FoundryDemoStep[] {
   const steps = parseSteps(value.map((raw) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
     const { say: _say, ...step } = raw as Record<string, unknown>;
-    return step;
+    return plainStep(step);
   }));
   return steps.map((step, index) => (says[index] ? { ...step, say: says[index] } : step));
 }

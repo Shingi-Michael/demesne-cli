@@ -630,7 +630,8 @@ describe("Foundry sets the surface and plays the demo (pass 221 A)", () => {
       expect(JSON.parse(await read.execute({ id: made.id }, context))).toMatchObject({ surface: { frame: "part", width: 320 }, demo });
       expect(store.listFoundryVersions()[0]!.stage).toEqual({ surface: { frame: "part", width: 320 }, demo });
       await expect(save.execute({ title: "Bad", kind: "html", description: "x", why: W, source: "<p>x</p>", surface: { frame: "tablet" } }, { ...context, turnId: "t4" })).rejects.toThrow(/\[invalid_input\] surface frame/);
-      await expect(save.execute({ title: "Bad", kind: "html", description: "x", why: W, source: "<p>x</p>", demo: [{ jump: 1 }] }, { ...context, turnId: "t5" })).rejects.toThrow(/\[invalid_input\]/);
+      // With a page, a demo that does not read is left off (the next test).
+      expect(JSON.parse(await save.execute({ title: "Bad demo", kind: "html", description: "x", why: W, source: "<p>x</p>", demo: [{ jump: 1 }] }, { ...context, turnId: "t5" })).message).toContain("demo was not kept");
     } finally { store.close(); }
   });
 
@@ -645,6 +646,39 @@ describe("Foundry sets the surface and plays the demo (pass 221 A)", () => {
       await expect(save.execute({ ...input, source: "<main><button>Empty</button><button>Loading</button><button>Error</button></main>" }, { ...context, turnId: "t1" })).rejects.toThrow(/“Empty · Loading · Error”.*own option/);
       // A page whose controls are real is never stopped.
       expect(JSON.parse(await save.execute({ ...input, title: "Player", source: "<button>Play</button><button>Next</button>" }, { ...context, turnId: "t2" })).version).toBe(1);
+    } finally { store.close(); }
+  });
+
+  test("a page with controls and no demo is asked for one; with a demo, or with nothing to press, it is not", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store), edit = foundryEditTool(store);
+      const input = { title: "Plans", kind: "html", description: "Plans.", why: W, source: "<main><button>Choose Plus</button></main>" };
+      const first = JSON.parse(await save.execute(input, { ...context, turnId: "d1" }));
+      expect(first.message).toMatch(/controls and no demo.*foundry_edit \{id: "[\w-]+", demo: \[\.\.\.\]\} with no edits/);
+      // The demo alone goes on with no new version, and the ask is gone.
+      const added = JSON.parse(await edit.execute({ id: first.id, demo: [{ click: "Choose Plus", say: "Pick a plan" }] }, { ...context, turnId: "d1" }));
+      expect(added.version).toBe(1);
+      expect(added.message).not.toContain("no demo");
+      const again = JSON.parse(await edit.execute({ id: first.id, base_version: 1, why: W, edits: [{ find: "Plus", replace: "Pro" }] }, { ...context, turnId: "d1" }));
+      expect(again.message).toContain("Foundry plays its demo");
+      const still = JSON.parse(await save.execute({ ...input, title: "Poster", source: "<main><h1>Hello</h1></main>" }, { ...context, turnId: "d2" }));
+      expect(still.message).not.toContain("no demo");
+    } finally { store.close(); }
+  });
+
+  test("a demo that does not read is left off, and the page is still saved", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store), edit = foundryEditTool(store);
+      const saved = JSON.parse(await save.execute({ title: "Plans", kind: "html", description: "Plans.", why: W, surface: { frame: "phone" },
+        source: "<main><button>Choose Plus</button></main>", demo: [{ press: "Choose Plus" }] }, { ...context, turnId: "k1" }));
+      expect(saved.version).toBe(1);
+      expect(saved.surface).toEqual({ frame: "phone" });
+      expect(saved.demo).toBeUndefined();
+      expect(saved.message).toMatch(/saved but its demo was not kept: Step 1.*\{click: "Choose Plus"\}.*foundry_edit \{id, demo: \[\.\.\.\]\} and no edits/);
+      // Given alone, a demo that does not read is still an error to fix.
+      await expect(edit.execute({ id: saved.id, demo: [{ press: "x" }] }, { ...context, turnId: "k1" })).rejects.toThrow(/\[invalid_input\].*a demo step is/);
     } finally { store.close(); }
   });
 

@@ -120,10 +120,15 @@ export const DESIGN_TARGETS: readonly { key: string; rule: number; ok: (value: n
 
 /// The desktop picture's numbers as lines the model can act on: what is off
 /// target, by rule. Empty when none were measured.
-export function designReport(design: Record<string, number> | undefined): { off: string[]; ok: string[] } {
+/// An app window (<d-demesne>) is not a poster: no headline leads it and its
+/// surfaces are the app's own, which the numbers leave out. Those two
+/// targets do not judge it.
+export const APP_WINDOW = /<d-demesne\b/i, NOT_FOR_APP_WINDOWS = ["lead", "surface"];
+export function designReport(design: Record<string, number> | undefined, appWindow = false): { off: string[]; ok: string[] } {
   const off: string[] = [], ok: string[] = [];
   if (!design) return { off, ok };
   for (const target of DESIGN_TARGETS) {
+    if (appWindow && NOT_FOR_APP_WINDOWS.includes(target.key)) continue;
     const value = design[target.key];
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
     (target.ok(value) ? ok : off).push(`rule ${target.rule}: ${target.say(value)}`);
@@ -150,10 +155,10 @@ export const LOOKS_PER_TURN = 2;
 
 /// What the save's result says about the look, and the pictures it carries.
 /// designed: a page the model designed itself (html), the only kind its design numbers judge; Demesne draws the ready kinds.
-export function lookReport(look: LookResult, last: boolean, designed = true): { look: Record<string, unknown>; images: ImageOutput[]; found: boolean } {
+export function lookReport(look: LookResult, last: boolean, designed = true, appWindow = false): { look: Record<string, unknown>; images: ImageOutput[]; found: boolean } {
   const name = (width: number) => width >= 800 ? `desktop ${width}px` : `phone ${width}px`;
   const problems = Object.fromEntries(look.pages.map((page) => [name(page.width), page.issues.length ? page.issues : "no layout problems found"]));
-  const design = designReport(designed ? look.pages.find((page) => page.width >= 800)?.design : undefined);
+  const design = designReport(designed ? look.pages.find((page) => page.width >= 800)?.design : undefined, appWindow);
   const found = look.pages.some((page) => page.issues.length) || look.errors.length > 0 || design.off.length > 0;
   const next = last
     ? "This was the last look this turn: answer now."

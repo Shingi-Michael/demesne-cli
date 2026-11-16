@@ -25,7 +25,7 @@ import { loadConfig } from "../packages/config/src/index.ts";
 import { demoControls } from "../packages/protocol/src/index.ts";
 import type { ProviderStreamEvent } from "../packages/providers/src/index.ts";
 import { createDaemonApp } from "../apps/daemon/src/app.ts";
-import { electronLook, type LookResult } from "../apps/daemon/src/foundry-look.ts";
+import { APP_WINDOW, electronLook, electronTry, type LookResult } from "../apps/daemon/src/foundry-look.ts";
 import { serveDaemon } from "../apps/daemon/src/http-server.ts";
 import type { TurnInference, TurnProcessor } from "../apps/daemon/src/processor.ts";
 import { createProcessor, signedInAccounts } from "../apps/daemon/src/providers-from-config.ts";
@@ -61,7 +61,7 @@ async function measure(id: string, kind: string, title: string, source: string):
   const issues = [...look.pages.flatMap((page) => page.issues.map((issue) => `${page.width}px: ${issue}`)), ...look.errors.map((error) => `console: ${error}`)];
   const design = look.pages[0]?.design as DesignNumbers | undefined;
   if (!design) return { score: null, checks: null, design: null, issues: [...issues, "No design numbers (an older app build?)"], shots };
-  const parts = checks(design, issues.length);
+  const parts = checks(design, issues.length, APP_WINDOW.test(source));
   return { score: score(parts), checks: parts, design, issues, shots };
 }
 
@@ -164,7 +164,9 @@ mkdirSync(join(root, "data"));
 writeFileSync(join(root, "data", "trusted-workspaces.json"), JSON.stringify({ trusted: [repo] }));
 const token = "foundry-quality";
 const app = createDaemonApp({ databasePath: join(root, "data/state.sqlite"), authToken: token, processor: watched(processor), heartbeat: { enabled: false },
-  foundryLook: process.argv.includes("--no-look") ? undefined : render });
+  foundryLook: process.argv.includes("--no-look") ? undefined : render,
+  // The model can try its page and its demo, as it can in a real chat.
+  foundryTry: process.argv.includes("--no-look") ? undefined : electronTry(lookCommand) });
 const server = serveDaemon(app, { hostname: "127.0.0.1", port: 0 });
 const client = new DemesneClient({ server: server.url.href, token });
 

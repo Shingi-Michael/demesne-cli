@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { demoControls, drawnSurface, parseDemo, parseStage, parseSurface, stageFromText, stageText } from "../src/foundry-stage.ts";
 
 describe("A mockup's surface and demo (pass 221 A)", () => {
+  test("a step written as an action and a selector is the same step", () => {
+    expect(parseDemo([{ action: "click", selector: "#start", say: "Begin" }, { action: "type", text: "Milk", target: "Item" }, { action: "wait", value: 300 }]))
+      .toEqual([{ click: "#start", say: "Begin" }, { type: "Milk", into: "Item" }, { wait: 300 }]);
+  });
+
   test("a surface names a frame, and may size it and pick what it sits on", () => {
     expect(parseSurface({ frame: "phone" })).toEqual({ frame: "phone" });
     expect(parseSurface({ frame: "window", width: 900.4, height: 560, backdrop: "paper", title: " Settings " })).toEqual({ frame: "window", width: 900, height: 560, backdrop: "paper", title: "Settings" });

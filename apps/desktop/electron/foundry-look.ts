@@ -1,6 +1,6 @@
 /// Foundry's look: the app started as `Demesne --foundry-look=<job.json>`
-/// renders one page off screen at a desktop and a phone width, measures it
-/// (foundry-look-measure.ts), takes a picture of each, prints the result as
+/// renders one page off screen at the width it is drawn for, measures it
+/// (foundry-look-measure.ts), takes a picture, prints the result as
 /// one JSON line and quits. The daemon runs it after a page is saved, so the
 /// model sees what it made and can fix what is off once. Nothing shows: no
 /// window, no Dock icon, its own profile, and the page under the same policy
@@ -15,7 +15,8 @@ import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryP
 
 /// try: run these steps on the page instead of looking at it (foundry-try.ts).
 /// url: open the person's own app instead (look_at_page: a local dev server or a project file).
-export interface LookJob { kind: string; source: string; title: string; try?: TryPlan; url?: string }
+/// phone: the page is a phone screen (surface phone), looked at at a phone's width instead of the desktop's.
+export interface LookJob { kind: string; source: string; title: string; phone?: boolean; try?: TryPlan; url?: string }
 export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
 export interface LookResult { pages: LookPage[]; errors: string[] }
 
@@ -25,8 +26,11 @@ export function lookJobPath(argv: string[]): string | null {
   return arg ? arg.slice("--foundry-look=".length) || null : null;
 }
 
-/// Desktop first screen and the whole phone page, capped so a picture stays small.
-const VIEWS = [{ width: 1280, height: 800, maxHeight: 1600, scaleTo: 960 }, { width: 390, height: 844, maxHeight: 2400, scaleTo: 390 }];
+/// A page is looked at once, at the size it is drawn for: the desktop's first
+/// screen, or the whole page of a phone screen. Capped so a picture stays small.
+/// (Every page used to get a phone-width look too. For desktop work it only
+/// found faults nobody would see, and models wrote phone rules to chase them.)
+const DESKTOP_VIEW = { width: 1280, height: 800, maxHeight: 1600, scaleTo: 960 }, PHONE_VIEW = { width: 390, height: 844, maxHeight: 2400, scaleTo: 390 };
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function runFoundryLook(path: string) {
@@ -62,7 +66,7 @@ export function runFoundryLook(path: string) {
     if (job.url) { done(await tryPage(session, job.try ?? { width: 1280, steps: [] }, job.url)); return; }
     if (job.try) { done(await tryPage(session, job.try)); return; }
     const errors: string[] = [], pages: LookPage[] = [];
-    for (const view of VIEWS) {
+    for (const view of [job.phone ? PHONE_VIEW : DESKTOP_VIEW]) {
       const win = new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
         webPreferences: { session, offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
       try {

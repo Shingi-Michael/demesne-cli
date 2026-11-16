@@ -1,7 +1,8 @@
 /// Foundry looks at its own page. After a page is saved, the desktop app is
 /// started off screen (`--foundry-look`, apps/desktop/electron/foundry-look.ts)
-/// to render it at 1280 and 390px wide, measure layout faults and take a
-/// picture of each. The save's result carries both, so the model sees what
+/// to render it once at the width it is drawn for (1280px, or 390px for a
+/// phone screen), measure layout faults and take a picture. The save's
+/// result carries both, so the model sees what
 /// it made and fixes what is off once, in the same turn. Without the desktop
 /// app (the CLI alone, or Linux with no display) pages save as before.
 import { existsSync } from "node:fs";
@@ -17,7 +18,8 @@ export const FOUNDRY_LOOK_PREFIX = "foundry-look-";
 /// design: the page's design numbers (apps/desktop/electron/foundry-look-measure.ts DesignMeasure), shown to the model with targets and scored by eval-foundry-quality.
 export interface LookedPage { width: number; height: number; issues: string[]; png: string; design?: Record<string, number> }
 export interface LookResult { pages: LookedPage[]; errors: string[] }
-export type FoundryLook = (page: { kind: string; source: string; title: string }, signal: AbortSignal) => Promise<LookResult | null>;
+/// phone: the page is a phone screen (surface phone); it is looked at at a phone's width, everything else at the desktop's.
+export type FoundryLook = (page: { kind: string; source: string; title: string; phone?: boolean }, signal: AbortSignal) => Promise<LookResult | null>;
 
 /// The app binary that can render a page: DEMESNE_ELECTRON (with
 /// DEMESNE_ELECTRON_APP for an unpacked app folder), else the app this daemon
@@ -169,7 +171,7 @@ export const TRY_THE_ASK = "If the page has controls, run the path the ask is ab
 export function lookReport(look: LookResult, last: boolean, designed = true, judged: Judged | boolean = "page"): { look: Record<string, unknown>; images: ImageOutput[]; found: boolean } {
   const name = (width: number) => width >= 800 ? `desktop ${width}px` : `phone ${width}px`;
   const problems = Object.fromEntries(look.pages.map((page) => [name(page.width), page.issues.length ? page.issues : "no layout problems found"]));
-  const design = designReport(designed ? look.pages.find((page) => page.width >= 800)?.design : undefined, judged);
+  const design = designReport(designed ? look.pages[0]?.design : undefined, judged);
   const found = look.pages.some((page) => page.issues.length) || look.errors.length > 0 || design.off.length > 0;
   const next = last
     ? "This was the last look this turn: answer now."

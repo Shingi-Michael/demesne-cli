@@ -61,7 +61,8 @@ export const LOOK_MEASURE = String.raw`(() => {
   }
 
   // Text over text.
-  const boxes = texts.slice(0, 300).map((el) => [el, el.getBoundingClientRect()]);
+  // A review's ring carries its number on the corner of the piece it outlines: that is drawn over the screen on purpose.
+  const boxes = texts.filter((el) => !el.closest(".dr-ring")).slice(0, 300).map((el) => [el, el.getBoundingClientRect()]);
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
     const [a, ra] = boxes[i], [b, rb] = boxes[j];
     if (a.contains(b) || b.contains(a)) continue;

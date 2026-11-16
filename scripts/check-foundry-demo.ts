@@ -48,6 +48,9 @@ try {
   await page.locator("#composer-model").waitFor();
   const editor = page.locator("textarea");
   const idle = () => page!.waitForFunction(() => !(window.demesneInspect?.() as { host?: { busy?: boolean } })?.host?.busy);
+  // Enter is lost while the window has no chat yet: send once it has one and is idle.
+  await page.waitForFunction(() => { const host = (window.demesneInspect?.() as { host?: { session?: string; busy?: boolean } })?.host; return !!host?.session && !host.busy; });
+  await page.waitForTimeout(200);
   await editor.fill("/foundry pin a chat"); await editor.press("Enter");
   const chips = page.locator("#conversation .fd-chip");
   await chips.first().filter({ hasText: "Pin a chat" }).waitFor();

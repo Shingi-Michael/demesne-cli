@@ -642,7 +642,8 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     Array.prototype.forEach.call(cards.querySelectorAll("d-row"), sideRow);
     Array.prototype.forEach.call(main.querySelectorAll("d-message"), function (message) { message.__drawn = true; turn(app, message); });
     var composer = main.querySelector("d-composer"); if (composer) compose(app, el, composer);
-    fitWidth(el, app, Number(el.getAttribute("width")) || 1100, 640);
+    // The real window is never narrower than 900px. In less room it keeps that and scrolls inside its frame: squeezed to 640, a page drawn for the app clipped and overlapped (pass 223 runs).
+    fitWidth(el, app, Number(el.getAttribute("width")) || 1100, 900);
     // Going somewhere: the tab, sidebar item or chat of that name lights up,
     // and the view of that name shows. Clicking a sidebar item or chat with no
     // tab of its name renames the open tab, as Demesne does.

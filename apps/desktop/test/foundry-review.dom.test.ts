@@ -83,6 +83,22 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("A review sheet drawn by 
     expect(measured.issues).toEqual([]);
   });
 
+  test("the Demesne window keeps its real smallest width on a narrow page, and scrolls inside its own frame", async () => {
+    // From the pass 223 runs: squeezed to 640px, a Settings page drawn for the app was clipped by the window eight times.
+    const narrow = await browser.newPage({ viewport: { width: 390, height: 800 } });
+    try {
+      await narrow.route("https://window.test/**", (route) => route.fulfill({ contentType: "text/html", body: PAGE.slice(0, PAGE.indexOf("<body>") + 6)
+        + `<style>.two{display:grid;grid-template-columns:260px 260px;gap:16px;padding:24px}</style><d-demesne tabs="Settings" chat="Settings" cards="none" height="520"><div data-view="Settings"><div class="two"><b>Drive waits for you</b><b>Daemon running</b></div></div></d-demesne></body></html>` }));
+      await narrow.goto("https://window.test/");
+      await narrow.waitForTimeout(1500);
+      const seen = await narrow.evaluate(() => ({ wide: document.documentElement.scrollWidth, app: Math.round(document.querySelector("d-demesne > d-app")!.getBoundingClientRect().width), frame: Math.round(document.querySelector("d-demesne")!.getBoundingClientRect().width) }));
+      expect(seen.wide).toBe(390);
+      expect(seen.app).toBe(900);
+      expect(seen.frame).toBeLessThanOrEqual(390);
+      expect((await narrow.evaluate(LOOK_MEASURE) as LookMeasure).issues).toEqual([]);
+    } finally { await narrow.close(); }
+  });
+
   test("a cut-out piece takes the room there is: it never holds a grid or a narrow page open", async () => {
     // From the pass 223 run: three crops in a grid page scrolled a phone-wide page sideways by 290px.
     const narrow = await browser.newPage({ viewport: { width: 390, height: 800 } });

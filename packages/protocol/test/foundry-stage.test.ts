@@ -74,6 +74,13 @@ describe("A review of something that exists (pass 223 A)", () => {
     expect(reviewProblem("<main>not a review</main>")).toBeNull();
     expect(reviewProblem(review([part("Save", ["Today", "A", "B"])], ""))).toContain("the screen as it is today");
     expect(reviewProblem(review([]))).toContain("names no part");
+    // Real models built the whole sheet in a script three times in five; the refusal says so instead of "has none".
+    const built = "<script>const sheet = `" + good.replace(/`/g, "") + "`;</script><script src=\"foundry://kit/parts.js\"></script><script>document.body.innerHTML = sheet;</script>";
+    expect(reviewProblem(built)).toContain("built by a script");
+    expect(reviewProblem(built)).toContain("plain markup");
+    expect(reviewProblem(`<d-review id="r"></d-review><script>r.innerHTML = '<section data-today marks=".a">x</section><section data-part="Save" why="w">y</section>';</script>`)).toContain("built by a script");
+    // A script that only fills a section is fine: the sections themselves are in the page.
+    expect(reviewProblem(good + `<script>document.querySelector("[data-today]").append("more");</script>`)).toBeNull();
     expect(reviewProblem(review(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"])), '<section data-today marks="a|b|c|d"></section>'))).toContain("[too_many_parts]");
     expect(reviewProblem(review([part("Save", ["Today", "A", "B"])], "<section data-today><main>screen</main></section>"))).toContain("No part is marked");
     expect(reviewProblem(review([part("Save", ["Today", "A", "B"], "")]))).toContain("does not say why");

@@ -659,6 +659,7 @@ describe("a review of something that exists (pass 223 A)", () => {
   test("the model is told what a review is, where to find its parts, and that options are the rule", () => {
     expect(PARTS_GUIDE).toContain("<d-review>");
     expect(PARTS_GUIDE).toContain("<d-crop");
+    expect(PARTS_GUIDE).toContain("as plain markup in the page, never from a script");
     const store = new DemesneStore(":memory:");
     try {
       expect(foundrySaveTool(store).definition.description).toContain("<d-review>");

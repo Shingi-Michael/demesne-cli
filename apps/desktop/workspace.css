@@ -146,7 +146,9 @@ html[data-theme="demesne-light"] .agent-mark[data-provider="gemini"] { backgroun
 /* A pinned chat with nothing to say carries the pin as its mark. */
 .sidebar-pin-mark { display: grid; place-items: center; flex: none; width: 16px; color: var(--t4); }
 .sidebar-pin-mark .ico { width: 12px; height: 12px; }
-.sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A long title runs off and fades out, with no three dots. --room is what
+   the row's buttons or pull request chip take from its end. */
+.sidebar-session-name { --room: 0px; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--room) - 28px), transparent calc(100% - var(--room))); mask-image: linear-gradient(to right, #000 calc(100% - var(--room) - 28px), transparent calc(100% - var(--room))); }
 .sidebar-session-age { flex: none; color: var(--t3); font-size: 11px; font-variant-numeric: tabular-nums; }
 /* The time is small, so it keeps 4.5:1 against the sidebar in light too. */
 html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
@@ -157,7 +159,6 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-thread:hover { color: var(--t2); box-shadow: inset 0 0 0 1px var(--hair); }
 .sidebar-thread.on { color: var(--t1); background: var(--tone); }
 .sidebar-thread .th-ring { width: 13px; height: 13px; flex: none; }
-.sidebar-thread .sidebar-session-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-row-actions { position: absolute; top: 50%; right: 5px; display: flex; gap: 1px; margin-top: -11px; opacity: 0; pointer-events: none; transition: opacity 140ms var(--ease); }
 .sidebar-row-actions button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 8px; color: var(--t3); }
 .sidebar-row-actions button:hover { color: var(--t1); background: var(--tone2); }
@@ -173,7 +174,9 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    draw over each other while the pointer leaves the row. */
 .sidebar-session-age { transition: visibility 0s linear 140ms; }
 .sidebar-item:hover .sidebar-session-age, .sidebar-session:focus-visible .sidebar-session-age { transition-delay: 0s; }
-.sidebar-item:hover .sidebar-session-name, .sidebar-session:focus-visible .sidebar-session-name { padding-right: 64px; }
+.sidebar-item:hover .sidebar-session-name, .sidebar-session:focus-visible .sidebar-session-name { --room: 42px; }
+/* A row that ends in a word already leaves that room: the buttons take the word's place. */
+.sidebar-item:hover .sidebar-session.has-side .sidebar-session-name, .sidebar-session.has-side:focus-visible .sidebar-session-name { --room: 0px; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-row-actions, .sidebar-session-age { transition: none; }
 }
@@ -1761,7 +1764,6 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 /* Bring it back later (pass 76 E): a bell beside Pin and Archive unfolds a
    few times under the row, as words; a chat that's due leads the list under
    Back now, in amber, until you open it. */
-.sidebar-row-actions .sidebar-bell.on { color: var(--warn); }
 .sidebar-back-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0 0 4px 12px; padding: 3px 8px 6px 12px; box-shadow: -1px 0 0 var(--hair2); font-size: 12px; line-height: 18px; }
 .sidebar-back-label { flex-basis: 100%; color: var(--t3); }
 .sidebar-back-line .sidebar-back-opt { padding: 0; border: 0; background: none; color: var(--t2); font: inherit; cursor: pointer; }
@@ -1782,8 +1784,8 @@ html.glass .bar-tab.on { background: var(--panel-glass, var(--panel)); }
 .sidebar-row-actions .sidebar-pr.merged { color: #b294f0; }
 html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color: #7a4fcf; }
 .sidebar-row-actions .sidebar-pr.closed span { text-decoration: line-through; }
-.sidebar-item.has-pr .sidebar-session-name { padding-right: 56px; }
-.sidebar-item.has-pr:hover .sidebar-session-name, .sidebar-item.has-pr .sidebar-session:focus-visible .sidebar-session-name { padding-right: 116px; }
+.sidebar-item.has-pr .sidebar-session-name { --room: 56px; }
+.sidebar-item.has-pr:hover .sidebar-session-name, .sidebar-item.has-pr .sidebar-session:focus-visible .sidebar-session-name { --room: 94px; }
 .sidebar-pr-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0 0 4px 12px; padding: 3px 8px 6px 12px; box-shadow: -1px 0 0 var(--hair2); color: var(--t3); font-size: 12px; line-height: 18px; }
 .sidebar-pr-head { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-pr-head b { color: var(--t1); font-weight: 500; }
@@ -2602,7 +2604,7 @@ html[data-theme="demesne-light"] body.desktop { --side-folder: #2f8aa6; }
 #desktop-sidebar .sidebar-group-icon { color: var(--side-folder); }
 #desktop-sidebar [aria-expanded="false"] > .sidebar-group-icon { color: var(--side-folder); opacity: .7; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats, .sidebar-agent-rows) { margin-left: 20px; }
-#desktop-sidebar .sidebar-session { height: 34px; font-size: 14px; }
+#desktop-sidebar .sidebar-session { height: 30px; font-size: 13px; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { box-shadow: inset 0 0 0 1px var(--hair), -2px 0 0 var(--acc); }
 #desktop-sidebar .sidebar-session-age { font-size: 11.5px; }
 #desktop-sidebar .sidebar-housed-label { font-size: 10.5px; letter-spacing: .09em; }
@@ -2915,10 +2917,10 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .sidebar-agents-rows .sidebar-housed-row small.acc { color: var(--blossom, #f2b6c8); }
 .sidebar-agents-rows .sidebar-housed-row small:not(.working):not(.acc) { color: var(--t4); }
 
-/* Sidebar facelift (Figma "Today, improved" + project light + rings):
-   every project has a face, the open project casts its colour on the glass,
-   and faces wear a ring for what is happening: a turning blue arc while
-   something works, amber while it asks you, pink when it replied.
+/* Sidebar facelift (Figma "Today, improved" + rings): every project has a
+   face, and faces wear a ring for what is happening: a turning blue arc while
+   something works, amber while it asks you, pink when it replied. The open
+   chat is plain grey; nothing casts a colour on the glass.
    Icons centre 19.5px in and labels start 41px in, chats included. */
 @property --spin { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 @keyframes face-spin { to { --spin: 360deg; } }
@@ -2931,17 +2933,12 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .project-face.ring-working::after { background: conic-gradient(from var(--spin), transparent 0 30%, color-mix(in srgb, var(--acc) 30%, transparent) 55%, var(--acc)); }
 :is(.sidebar-project-name, .sidebar-group-toggle)[aria-expanded="false"] > .project-face:not(.ring-warn, .ring-working) { opacity: .78; }
 #desktop-sidebar .sidebar-project-name { gap: 11px; }
-/* Where you are: the open project's light on the glass, and its open chat tinted the same. */
-#desktop-sidebar .sidebar-project { isolation: isolate; }
-#desktop-sidebar #sidebar-projects { overflow-x: hidden; }
-#desktop-sidebar .sidebar-project.active:not(.drop-before)::before { content: ""; position: absolute; z-index: -1; inset: -24px 0 -48px -12px; pointer-events: none; background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--face) 24%, transparent), color-mix(in srgb, var(--face) 9%, transparent) 55%, transparent 100%); }
-html[data-theme="demesne-light"] #desktop-sidebar .sidebar-project.active:not(.drop-before)::before { background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--face) 20%, transparent), transparent 100%); }
-#desktop-sidebar .sidebar-project.active .sidebar-session.selected { background: color-mix(in srgb, var(--face) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--face) 20%, transparent); }
 /* Chats start on the project's name, their state in the face's column; no guide line. */
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) { margin-left: 0; box-shadow: none; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session { gap: 13.5px; padding-left: 11.5px; border-radius: var(--r); }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) :is(.sidebar-more, .sidebar-empty) { padding-left: 41px; border-radius: var(--r); }
-#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-rename { padding-left: 11.5px; gap: 13.5px; border-radius: var(--r); }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-rename { height: 30px; padding-left: 11.5px; gap: 13.5px; border-radius: var(--r); }
+#desktop-sidebar .sidebar-rename input { font-size: 13px !important; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .kid .sidebar-session { padding-left: 25px; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { background: color-mix(in srgb, var(--t1) 10%, transparent); box-shadow: none; }
 /* A state says itself where the time was, in its colour. */

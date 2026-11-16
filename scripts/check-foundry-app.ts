@@ -80,7 +80,7 @@ try {
   // The same chat, said to the part in its own words.
   const said = await page.evaluate(() => {
     const text = (selector: string) => document.querySelector(selector)?.textContent?.trim() ?? "";
-    return { project: text(".sidebar-project-name > span:last-child"), branch: text(".sidebar-project-branch span"), chat: text(".sidebar-session-name"), tab: text(".bar-tab.on .bar-tab-name"), age: text(".sidebar-session-age"),
+    return { project: text(".sidebar-project-name > span:last-child"), branch: text(".sidebar-project-branch span"), chat: text(".sidebar-session-name"), tab: text(".bar-tab.on .bar-tab-name"),
       you: text("#sidebar-you"), plan: text("#sidebar-plan"), drive: document.querySelector<HTMLElement>("#drive-pill")?.offsetParent ? text("#drive-pill .dp-about").replace(/^·\s*/, "") : "none", time: text(".request time"), meta: text(".turn-receipt > span"), model: text("#composer-model"),
       mode: text("#composer-mode .mode-opt.on"), placeholder: document.querySelector<HTMLTextAreaElement>("#composer textarea")!.placeholder, mac: document.documentElement.classList.contains("mac-chrome"),
       theme: document.documentElement.dataset.appearance ?? "dark", answer: document.querySelector(".answer .markdown")!.innerHTML.replace(/<!--.*?-->/g, "") };

@@ -8,9 +8,9 @@
 /// once its turn is over (forgetFoundrySources): the artifact is stored,
 /// and foundry_read brings it back when the agent needs it.
 import type { DemesneStore } from "@demesne/storage";
-import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
+import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
-import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 
@@ -46,13 +46,16 @@ Anywhere:
 - <d-stat label="This week" value="32.4 km" delta="+12%">.
 - <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: on the Foundry page each option gets its own stage, named on the line above it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
+A review of something that exists ("look at this and show me what needs work"), one page:
+- <d-review><section data-today marks="#desktop-toolbar | .sidebar-nav">the screen as it is</section><section data-part="Top bar" why="Three tabs, the Drive pill and the menu compete in one row."><d-compare recommended="Fewer"><section data-option="Today">…</section><section data-option="Fewer things">…</section><section data-option="Two rows">…</section></d-compare></section>…</d-review>. marks: one selector per part, in order (or data-mark="1" on the piece); Foundry outlines and numbers them, names each part and option, and puts your pick beside Today. At most three parts; each has Today and two or three options. Write no headings, numbers or captions yourself. Its why needs only starts_from: each part's own why says the rest.
+- <d-crop to="#desktop-toolbar" width="1100">…a whole window or screen…</d-crop> shows only the piece the selector names, at its own size: inside a part, draw the screen once per option and crop each to the piece, so every option is the real piece with one change.
 The parts are the frame; the idea inside is yours to design.`;
 
 const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet" href="${FOUNDRY_KIT_STYLE}"> (the kit: light and dark from the system, Inter at 14px, `
   + "one ink with --secondary/--muted/--hair/--tone tints, --accent, radii 8 and 12; plain elements styled; classes .container(.narrow) .card(.outlined/.raised) .row(.between) .stack .grid(.two/.three) "
   + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime). `
   + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
-  + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>); foundry_read id "kit:parts" lists them. `
+  + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>, <d-review> for a review of what exists); foundry_read id "kit:parts" lists them. `
   + "SVG is one <svg> with a viewBox. Under 512 KB.";
 
 /// How a page should look is not here: the design guide (design-guide.ts)
@@ -137,6 +140,8 @@ export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[]
 export const MAX_OPTIONS = 3;
 function checkOptions(kind: string | undefined, source: string) {
   if (kind !== undefined && kind !== "html") return;
+  // A review (pass 223 A) holds up to three parts, each with its own Today, options and pick.
+  if (REVIEW_PAGE.test(source)) { const problem = reviewProblem(source); if (problem) throw new Error(problem); return; }
   // "Today", the screen as it is now, is the comparison and not one of the three.
   const count = (source.match(/\bdata-option\s*=/g)?.length ?? 0) - (/\bdata-option\s*=\s*["']today\b/i.test(source) ? 1 : 0);
   if (count > MAX_OPTIONS) throw new Error(`[too_many_options] This page has ${count} options; at most ${MAX_OPTIONS}. Hint: keep the best ${MAX_OPTIONS}, recommended first`);
@@ -251,6 +256,12 @@ function stageWithPage(input: Record<string, unknown>): { stage: FoundryStage | 
   }
 }
 
+/// A review is one sheet that grows with its parts, whatever surface was named.
+const reviewStage = (stage: FoundryStage | null, source: string): FoundryStage | null =>
+  REVIEW_PAGE.test(source) ? { ...(stage ?? {}), surface: { frame: "page" } } : stage;
+/// What a saved review is told: its answer is the parts and the picks.
+const REVIEW_ANSWER = "In your answer, name the parts in order, your pick for each and why, in a few lines; the person answers there.";
+
 /// A page that draws a button only a demo needs (Replay, Play demo, Next
 /// step) is sent back once per ask: the demo belongs to Foundry. A second
 /// save goes through, for the page whose real design has one.
@@ -268,7 +279,7 @@ const HAS_CONTROLS = /<(?:button|a|input|select|textarea|details|d-tabs|d-seg|d-
 /// controls and none, to write it (a real model otherwise never does).
 const stageSaid = (stage: FoundryStage | null | undefined, page?: { kind: FoundryKind; source: string; id: string }) => stage?.demo
   ? " Foundry plays its demo under the page; check every step changes something with foundry_try {id, demo: true}."
-  : page && page.kind === "html" && HAS_CONTROLS.test(page.source.replace(/<script\b[\s\S]*?<\/script>/gi, ""))
+  : page && page.kind === "html" && !REVIEW_PAGE.test(page.source) && HAS_CONTROLS.test(page.source.replace(/<script\b[\s\S]*?<\/script>/gi, ""))
     ? ` It has controls and no demo, so on Foundry it sits still. Give it one now: foundry_edit {id: "${page.id}", demo: [...]} with no edits, its main path in 2 to 6 steps (click, type, hover by the control's name), each with a short say.`
     : "";
 
@@ -301,6 +312,15 @@ function whyOf(value: unknown): FoundryWhy | undefined {
   return why.direction || why.look || why.dropped ? why : undefined;
 }
 
+/// A review says why part by part, on the sheet: of the save's own why only
+/// what it started from is kept, so no Direction or Look at line sits above it.
+function whyFor(value: unknown, source: string): FoundryWhy | undefined {
+  if (!REVIEW_PAGE.test(source)) return whyOf(value);
+  if (!isRecord(value)) return undefined;
+  const from = typeof value.starts_from === "string" ? value.starts_from.trim().slice(0, 300) : "";
+  return { direction: "", look: "", dropped: "", ...(from ? { from } : {}) };
+}
+
 /// A save that makes a new html or svg version needs its why; fixing the
 /// version this same ask made (after a look or a try) keeps the one it has.
 function checkWhy(store: DemesneStore, kind: FoundryKind | undefined, id: string | undefined, turnId: string | undefined, why: FoundryWhy | undefined) {
@@ -326,15 +346,16 @@ function checkStart(store: DemesneStore, kind: FoundryKind | undefined, source: 
   if (kind !== "html" && kind !== "svg") return;
   const from = why?.from ?? "";
   if (!from) throw new Error("[invalid_input] Say what it starts from: why.starts_from. Hint: the real thing you looked at (\"a capture of the Settings window; src/settings.css\"), or \"new\" when nothing like it exists yet");
-  const demesne = /<d-demesne\b/i.test(source);
-  if (/^new\b/i.test(from) && !demesne) return;
+  // A review is of something that exists, whatever starts_from says.
+  const demesne = /<d-demesne\b/i.test(source), review = REVIEW_PAGE.test(source);
+  if (/^new\b/i.test(from) && !demesne && !review) return;
   if (based || COULD_NOT.test(from) || !context.turnId || !context.sessionId) return;
   if (seenIn(context.sessionId).length) return;
   if (store.getSession(context.sessionId)?.turns.some((turn) => turn.attachments?.some((file) => file.kind !== "file"))) return;
   if (lookAsked.has(context.turnId)) return;
   lookAsked.add(context.turnId);
   if (lookAsked.size > 300) lookAsked.delete(lookAsked.values().next().value!);
-  throw new Error(`[look_first] ${demesne ? "This draws Demesne, which exists" : "This starts from something that exists"}, and this chat has not looked at it, so it would be drawn from memory. `
+  throw new Error(`[look_first] ${demesne ? "This draws Demesne, which exists" : review ? "This reviews something that exists" : "This starts from something that exists"}, and this chat has not looked at it, so it would be drawn from memory. `
     + "Hint: look first. Load and call capture_window (application Demesne for Demesne itself), or read the real stylesheet and that screen's markup in the project. "
     + "Then draw the screen as it is today, with its real colours, sizes, spacing and words, and change only what was asked: \"Today\" as the first option, your change as the next. "
     + "If you cannot look, save again with starts_from beginning \"could not look:\" and say so in your answer");
@@ -397,11 +418,12 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const basedOn = id ? null : read && store.getFoundryArtifact(read.id) ? read : basedOnOf(store, input.based_on);
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       if (!id) checkPick(store, context.turnId, recommended);
-      const why = whyOf(input.why);
-      checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
+      const why = whyFor(input.why, input.source);
+      if (!(why && REVIEW_PAGE.test(input.source))) checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
       if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
-      const { stage, dropped } = stageWithPage(input);
+      const { stage: given, dropped } = stageWithPage(input);
+      const stage = reviewStage(given, input.source);
       checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
@@ -413,7 +435,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? ` ${REVIEW_ANSWER}` : why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -499,10 +521,11 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const source = applyFoundryEdits(current.source, edits);
       if (Buffer.byteLength(source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
       checkOptions(current.kind, source);
-      const why = whyOf(input.why);
-      checkWhy(store, current.kind, input.id, context.turnId, why);
+      const why = whyFor(input.why, source);
+      if (!(why && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, why);
       checkCritique(input.id, context.turnId, input.critique);
-      const { stage, dropped } = stageWithPage(input);
+      const { stage: given, dropped } = stageWithPage(input);
+      const stage = given?.surface ? reviewStage(given, source) : given;
       checkControls(current.kind, source);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
@@ -513,7 +536,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? ` ${REVIEW_ANSWER}` : why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -589,6 +612,10 @@ function checkCritique(id: string | undefined, turnId: string | undefined, criti
   throw new Error(`[invalid_input] Critique before you fix: ${through ? "fix it with foundry_edit and pass" : "pass"} critique, the Design guide rules the page breaks (by number) and the numbers off target, with what you will change. Hint: a few lines; it is not shown to the person`);
 }
 
+/// Which design targets judge a page: an app window and a part are not posters (foundry-look.ts designReport).
+const judgedAs = (source: string, surface: unknown): Judged =>
+  APP_WINDOW.test(source) || REVIEW_PAGE.test(source) ? "app" : (surface as { frame?: unknown } | undefined)?.frame === "part" ? "part" : "page";
+
 /// After a page is saved: render it, and hand the model the faults
 /// found and a picture at each width. Twice per artifact per turn at most.
 async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<string, number>, text: string, context: { turnId?: string; signal: AbortSignal }): Promise<string | StructuredToolResult> {
@@ -603,7 +630,7 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
-  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN, artifact.kind === "html", APP_WINDOW.test(artifact.source));
+  const report = lookReport(result, seen + 1 >= LOOKS_PER_TURN, artifact.kind === "html", judgedAs(artifact.source, saved.surface));
   if (report.found) critiqueOwed.add(key); else critiqueOwed.delete(key);
   if (critiqueOwed.size > 200) critiqueOwed.delete(critiqueOwed.values().next().value!);
   return { text: JSON.stringify({ ...saved, look: report.look }), images: report.images };
@@ -624,7 +651,7 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       name: "foundry_try",
       description: "Use a Foundry page the way a person would, to check that it works: run up to 12 steps on its latest version (or one you name) in a hidden window, with real clicks and typing. "
         + "After each step you hear what visibly changed, or that nothing did, or that the control is covered, disabled or not found; then the page's tree (every heading and control: name, place, size, state) and a picture. "
-        + "Use it after making or changing a page that has controls: run its main path (add an item, switch a tab, open and close a dialog, submit the form), at phone width too when layout matters. "
+        + "Use it after making or changing a page that has controls: run the path the ask is about (switch the tab, add the item), at phone width too when layout matters. "
         + "Steps: {click: name}, {type: text, into?: name}, {key: Enter|Tab|Escape|Backspace|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight}, {scroll: px}, {hover: name}, {wait: ms}. "
         + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). Pages that remember start empty here. "
         + "demo: true runs the version's saved demo instead of steps.",

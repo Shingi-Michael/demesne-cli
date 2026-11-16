@@ -142,3 +142,36 @@ test("an app window is not judged on a leading headline or its surfaces", async 
   expect(designReport(numbers).off.length).toBe(2);
   expect(designReport(numbers, true).off).toEqual([]);
 });
+
+test("a part is not judged as a poster: nothing has to lead, fill the screen or carry a palette", async () => {
+  const { designReport } = await import("../src/foundry-look.ts");
+  // Three chat rows with a pin: one text size, two colours, no headline, mostly blank paper.
+  const pin = { sizes: 1, lead: 1, rhythm: 0.95, aligned: 0.9, colours: 2, surface: 0.02 };
+  expect(designReport(pin).off.length).toBe(4);
+  expect(designReport(pin, "part").off).toEqual([]);
+  // Too much is still too much on a part.
+  expect(designReport({ ...pin, sizes: 9, colours: 12 }, "part").off.length).toBe(2);
+});
+
+test("a page saved on a part surface gets the part's look; the same page as a page is told to grow", async () => {
+  const store = new DemesneStore(":memory:");
+  const small = { sizes: 1, lead: 1, rhythm: 0.95, aligned: 0.9, colours: 2, surface: 0.02 };
+  const look: FoundryLook = async () => ({ pages: [{ width: 1280, height: 900, issues: [], png: PNG, design: small }], errors: [] });
+  try {
+    const save = foundrySaveTool(store, look, new Map());
+    const source = "<ul><li>Garden plan <button aria-label=\"Pin\">pin</button></li></ul>";
+    const part = JSON.parse((await save.executeWithArtifacts!({ kind: "html", title: "Pin on a row", description: "A test page.", why: W, surface: { frame: "part" }, source }, context("t1")) as StructuredToolResult).text);
+    expect(part.look.design?.off_target).toBeUndefined();
+    expect(String(part.look.next)).toContain("without saving again");
+    const whole = JSON.parse((await save.executeWithArtifacts!({ kind: "html", title: "Pin on a page", description: "A test page.", why: W, surface: { frame: "page" }, source }, context("t2")) as StructuredToolResult).text);
+    expect(whole.look.design.off_target.length).toBe(4);
+  } finally { store.close(); }
+});
+
+test("the look asks for the asked path only, and never for every control to work", () => {
+  const next = String(lookReport(result(), false).look.next);
+  expect(next).toContain("the path the ask is about");
+  expect(next).toContain("may stay still");
+  expect(next).not.toContain("each of them");
+  expect(next).not.toContain("make it do something");
+});

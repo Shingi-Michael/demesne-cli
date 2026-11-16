@@ -17,25 +17,91 @@
  * change. It says nothing about taste beyond these; the contact sheet is
  * for the eye. */
 
-export type Where = "project" | "chat";
-export interface QualityCase { id: string; where: Where; prompt: string }
+import { REVIEW_PAGE, reviewProblem } from "../packages/protocol/src/foundry-stage.ts";
 
-/// Twelve asks: four mockups of Demesne itself, the rest the kinds of page
-/// people ask Foundry for. Kept fixed so scores compare across changes.
+export type Where = "project" | "chat";
+/// What the ask itself fixes, where it does: the frame, how many versions,
+/// and how much the page may hold. A page is "as asked" by how many of
+/// these it keeps; looks are scored apart (the checks below).
+export interface Fit {
+  /// The surface the ask names ("a phone app screen", or a small thing: part).
+  surface?: string[];
+  /// Versions asked for by number ("two calmer versions"); a "Today" beside them is not counted.
+  /// An ask that names no number leaves this out: up to three options with a pick are always welcome.
+  options?: number;
+  /// More than this many is more than was asked (controls and bytes leave room for three options).
+  dialogs?: number; forms?: number; controls?: number; bytes?: number;
+  /// Things the ask names, each to be found in the page's words.
+  has?: RegExp[];
+  /// An open design question: two or three options and a pick are owed (pass 223 A).
+  offers?: true;
+  /// "Look at this and show me what needs work": one review sheet (<d-review>) that holds.
+  review?: true;
+}
+export interface QualityCase { id: string; where: Where; prompt: string; fit?: Fit }
+
+/// Twelve asks for whole pages (four mockups of Demesne itself, the rest the
+/// kinds of page people ask Foundry for), then small asks, which the first
+/// twelve never had: a ruler of whole pages only rewards whatever makes a
+/// page bigger. Last, reviews of something that exists (pass 223 A). Kept fixed so scores compare across changes; compare a run
+/// with an older one over the same ids (--only).
 export const QUALITY_CASES: QualityCase[] = [
-  { id: "demesne-settings", where: "project", prompt: "show me what a calmer, more organised Settings page for Demesne could look like" },
-  { id: "demesne-empty", where: "project", prompt: "what could Demesne's home look like for someone who has no chats yet? mock it" },
-  { id: "demesne-topbar", where: "project", prompt: "the top bar feels busy. show me two calmer versions side by side" },
+  { id: "demesne-settings", where: "project", prompt: "show me what a calmer, more organised Settings page for Demesne could look like", fit: { offers: true } },
+  { id: "demesne-empty", where: "project", prompt: "what could Demesne's home look like for someone who has no chats yet? mock it", fit: { offers: true } },
+  { id: "demesne-topbar", where: "project", prompt: "the top bar feels busy. show me two calmer versions side by side", fit: { options: 2, dialogs: 0, forms: 0 } },
   { id: "demesne-drive", where: "project", prompt: "mock how Drive could show the work it finished overnight when I open the app in the morning" },
   { id: "landing", where: "chat", prompt: "put together a landing page for a coffee subscription called Slow Pour" },
-  { id: "pricing", where: "chat", prompt: "make a pricing page for a notes app with three plans and a monthly/yearly switch" },
-  { id: "dashboard", where: "chat", prompt: "i want a little dashboard for my running: weekly km, a chart, and my next race" },
-  { id: "phone-app", where: "chat", prompt: "mock a phone app screen for booking a haircut at a small barber shop" },
+  { id: "pricing", where: "chat", prompt: "make a pricing page for a notes app with three plans and a monthly/yearly switch", fit: { dialogs: 0, forms: 0, has: [/month/i, /year/i] } },
+  { id: "dashboard", where: "chat", prompt: "i want a little dashboard for my running: weekly km, a chart, and my next race", fit: { dialogs: 0, forms: 0, controls: 9, has: [/km/i, /race/i] } },
+  { id: "phone-app", where: "chat", prompt: "mock a phone app screen for booking a haircut at a small barber shop", fit: { surface: ["phone"], dialogs: 0 } },
   { id: "onboarding", where: "chat", prompt: "show me the onboarding of a budgeting app as screens, from first launch to the first budget" },
   { id: "admin", where: "chat", prompt: "mock an admin page for a small online shop: orders with filters, and one order open" },
   { id: "chart", where: "chat", prompt: "visualize how my savings grow at 5% a year over 20 years starting with 1000" },
   { id: "announce", where: "chat", prompt: "make a one-page launch announcement for a calendar app called Fold" },
+  { id: "small-pin", where: "chat", prompt: "show me a pin button for a chat row in a sidebar list", fit: { surface: ["part"], offers: true, dialogs: 0, forms: 0, controls: 9, bytes: 12000, has: [/pin/i] } },
+  { id: "small-toast", where: "chat", prompt: "mock a small toast that says a file was saved, with an undo", fit: { surface: ["part"], dialogs: 0, forms: 0, controls: 6, bytes: 12000, has: [/saved/i, /undo/i] } },
+  { id: "small-toggle", where: "chat", prompt: "what would a settings row with a dark mode toggle look like", fit: { surface: ["part"], offers: true, dialogs: 0, forms: 0, controls: 6, bytes: 12000, has: [/dark/i] } },
+  { id: "review-settings", where: "project", prompt: "look at Demesne's Settings page and show me what most needs a redesign", fit: { review: true } },
+  { id: "review-sidebar", where: "project", prompt: "what in Demesne's sidebar most needs work? show me", fit: { review: true } },
 ];
+
+/// What a page holds, counted from its source (scripts and styles left out).
+export function holds(source: string) {
+  const picked = /<d-compare\b[^>]*\brecommended\s*=\s*["']?[^\s"'>]/i.test(source) || /<[^>]*\bdata-recommended\b[^>]*>/i.test(source);
+  const body = source.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
+  const count = (pattern: RegExp) => (body.match(pattern) ?? []).length;
+  const options = [...body.matchAll(/\bdata-option\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map((match) => match[1] ?? match[2] ?? "");
+  return {
+    options: options.filter((name) => !/^\s*today\b/i.test(name)).length,
+    dialogs: count(/<dialog\b|\brole\s*=\s*["']?(?:dialog|alertdialog)\b/gi),
+    forms: count(/<form\b/gi),
+    controls: count(/<(?:button|a|input|select|textarea|summary)\b|\brole\s*=\s*["']?(?:button|tab|switch|checkbox|radio)\b|<d-(?:toggle|seg|tabs)\b/gi),
+    bytes: Buffer.byteLength(source), picked,
+    words: body.replace(/<[^>]+>/g, " "),
+  };
+}
+
+/// How far a page is what was asked: the share of the ask's fixed points it
+/// keeps, and the ones it misses, in words.
+export function fitOf(fit: Fit, page: { source: string; surface?: string | null }): { score: number; misses: string[] } {
+  const held = holds(page.source), misses: string[] = [];
+  let points = 0;
+  const point = (ok: boolean, miss: string) => { points++; if (!ok) misses.push(miss); };
+  if (fit.surface) point(fit.surface.includes(page.surface ?? ""), `asked for ${fit.surface.join(" or ")}, saved as ${page.surface ?? "no surface"}`);
+  if (fit.options !== undefined) point(held.options === fit.options, `${held.options} versions, ${fit.options} asked for`);
+  for (const key of ["dialogs", "forms", "controls", "bytes"] as const) {
+    const most = fit[key];
+    if (most !== undefined) point(held[key] <= most, `${held[key]} ${key}, at most ${most} asked for`);
+  }
+  if (fit.offers) point(held.options >= 2 && held.options <= 3 && held.picked, held.options < 2 ? `${held.options === 1 ? "one direction" : "no options"}, two or three with a pick are owed` : !held.picked ? "options with no pick" : `${held.options} options, at most three`);
+  if (fit.review) {
+    const problem = reviewProblem(page.source);
+    point(REVIEW_PAGE.test(page.source), "not a review sheet (no <d-review>)");
+    point(REVIEW_PAGE.test(page.source) && !problem, problem ? problem.split(" Hint:")[0]!.replace(/^\[[a-z_]+\]\s*/, "") : "no parts with Today, options and a pick");
+  }
+  for (const named of fit.has ?? []) point(named.test(held.words), `nothing for ${named.source}`);
+  return { score: points ? (points - misses.length) / points : 1, misses };
+}
 
 export interface DesignNumbers { sizes: number; body: number; lead: number; rhythm: number; aligned: number; colours: number; surface: number }
 export const CHECKS = ["faults", "sizes", "lead", "rhythm", "aligned", "colours", "surface"] as const;
@@ -50,15 +116,20 @@ const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ramp = (value: number, zero: number, full: number) => clamp((value - zero) / (full - zero));
 
 /// Each check 0..1 from the desktop page's numbers and the faults found at every width.
-/// appWindow: a mockup of the app itself, which no headline leads and whose surfaces are the app's own; those two checks pass.
-export function checks(design: DesignNumbers, faults: number, appWindow = false): Record<Check, number> {
+/// What a page is decides which checks judge it. app: a mockup of the app
+/// itself, which no headline leads and whose surfaces are the app's own.
+/// part: a small thing at its own size (a button, a row, a card), which is
+/// not a poster either and may hold one text size and two colours.
+export type Judged = "page" | "app" | "part";
+export function checks(design: DesignNumbers, faults: number, judged: Judged | boolean = "page"): Record<Check, number> {
+  const as: Judged = judged === true ? "app" : judged === false ? "page" : judged, appWindow = as !== "page", part = as === "part";
   return {
     faults: clamp(1 - faults / 6),
-    sizes: design.sizes <= 2 ? 0.5 : design.sizes <= 6 ? 1 : ramp(design.sizes, 12, 6),
+    sizes: design.sizes <= 2 ? (part ? 1 : 0.5) : design.sizes <= 6 ? 1 : ramp(design.sizes, 12, 6),
     lead: appWindow ? 1 : ramp(design.lead, 1.4, 2.8),
     rhythm: ramp(design.rhythm, 0.6, 0.9),
     aligned: ramp(design.aligned, 0.4, 0.85),
-    colours: design.colours <= 2 ? 0.4 : design.colours <= 8 ? 1 : ramp(design.colours, 18, 8),
+    colours: design.colours <= 2 ? (part ? 1 : 0.4) : design.colours <= 8 ? 1 : ramp(design.colours, 18, 8),
     surface: appWindow ? 1 : ramp(design.surface ?? 0, 0.05, 0.35),
   };
 }
@@ -74,6 +145,8 @@ export interface PageResult {
   seconds: number; rounds: number; outputTokens: number; calls: string[]; error: string | null;
   /// The frame it chose, its demo's steps, demo-only controls left in the page, and how often one was sent back.
   surface?: string | null; demoSteps?: number; controls?: string[]; refused?: number;
+  /// How far it is what was asked (0 to 1) and what it misses; absent when the ask fixes nothing.
+  fit?: { score: number; misses: string[] };
 }
 export interface Report { model: string; when: string; label: string; results: PageResult[] }
 
@@ -85,6 +158,8 @@ export function summary(report: Report) {
     score: Math.round(mean(report.results.map((item) => item.score ?? 0))),
     made: made.length, of: report.results.length,
     checks: Object.fromEntries(CHECKS.map((check) => [check, Math.round(100 * mean(made.map((item) => item.checks![check])))])) as Record<Check, number>,
+    /// As asked, over the asks that fix something; a page not made keeps none of it.
+    fit: report.results.some((item) => item.fit) ? Math.round(100 * mean(report.results.filter((item) => item.fit).map((item) => item.score === null ? 0 : item.fit!.score))) : null,
     bytes: Math.round(mean(made.map((item) => item.bytes))),
     seconds: Math.round(mean(report.results.map((item) => item.seconds))),
     outputTokens: Math.round(mean(report.results.map((item) => item.outputTokens))),
@@ -97,6 +172,7 @@ export function compareLines(after: Report, before?: Report): string[] {
   const pair = (a: number | undefined, b: number) => a === undefined ? String(b) : `${a} → ${b}`;
   const lines = [
     `Score ${pair(then?.score, now.score)}   pages made ${pair(then?.made, now.made)} of ${now.of}`,
+    ...(now.fit === null ? [] : [`As asked ${pair(then?.fit ?? undefined, now.fit)}   (the frame, the count and the size the ask fixes)`]),
     ...CHECKS.map((check) => `  ${CHECK_WORDS[check].padEnd(32)} ${pair(then?.checks[check], now.checks[check])}`),
     `  ${"Source per page (bytes)".padEnd(32)} ${pair(then?.bytes, now.bytes)}`,
     `  ${"Seconds per ask".padEnd(32)} ${pair(then?.seconds, now.seconds)}`,
@@ -108,6 +184,7 @@ export function compareLines(after: Report, before?: Report): string[] {
       if (old) lines.push(`  ${item.id.padEnd(20)} ${old.score ?? "-"} → ${item.score ?? "-"}`);
     }
   }
+  for (const item of after.results) if (item.fit?.misses.length) lines.push(`  not as asked: ${item.id}: ${item.fit.misses.join("; ")}`);
   return lines;
 }
 
@@ -123,6 +200,7 @@ export function contactSheet(report: Report, before?: Report): string {
     const parts = item.checks ? CHECKS.map((check) => `<i title="${h(CHECK_WORDS[check])}" style="--v:${item.checks![check]}">${check}</i>`).join("") : "";
     return `<article><header>${head}</header><p class="ask">${h(item.prompt)}</p><div class="shots">${shots}</div><div class="bars">${parts}</div>`
       + `<p class="meta">${h(item.id)} · ${item.kind ?? "–"} · ${(item.bytes / 1024).toFixed(1)} KB · v${item.versions} · ${item.seconds}s · ${item.outputTokens} out${item.error ? ` · ${h(item.error)}` : ""}</p>`
+      + (item.fit ? `<p class="meta">as asked ${Math.round(item.fit.score * 100)}%${item.fit.misses.length ? `: ${h(item.fit.misses.join("; "))}` : ""}</p>` : "")
       + (item.issues.length ? `<details><summary>${item.issues.length} faults</summary><ul>${item.issues.map((issue) => `<li>${h(issue)}</li>`).join("")}</ul></details>` : "")
       + `</article>`;
   }).join("");

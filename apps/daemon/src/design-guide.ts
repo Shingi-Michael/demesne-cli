@@ -29,9 +29,9 @@ export const DESIGN_RULES: readonly string[] = [
   "Lists and settings are rows with hairline dividers in one rounded box, one line per row; state is a single mark with a word beside it, never colour alone.",
   "Depth and detail where they earn it: layered surfaces, soft shadows only on things that float, hover/selected/empty states, small SVG icons. Write as much CSS of your own as the design needs, on the kit's variables.",
   "Real content, never lorem ipsum: believable names, numbers and dates.",
-  "A mockup is the working thing at real size, not a poster of it: no headline or notes above it, it fills the page, and every control does something (tabs and links go somewhere, inputs take typing, buttons change what shows).",
+  "A mockup is the working thing at real size, not a poster of it: no headline or notes above it, it fills the page, and the controls the ask is about work (tabs go somewhere, inputs take typing); the rest are drawn and may stay still.",
   "It reads and works about 620px wide, and at phone width with no horizontal scroll. Text has 4.5:1 contrast on what is behind it (3:1 from 24px up), and on a phone anything to tap is at least 44px each way.",
-  "Options: two or three genuinely different directions (never more than three), each named, in one <d-compare> with recommended set on the one you would pick; say in the chat which and why.",
+  "Offer options: unless the ask fixes one exact thing (\"make this button blue\"), show two or three genuinely different directions (never more than three), each named, in one <d-compare> with recommended set on the one you would pick; say in the chat which and why.",
   "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce.",
   "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.",
   "Every state it can be in is designed, not only the happy one: a control has hover, pressed, focused and disabled; a list or a screen has empty, loading and error. Show the ones the ask touches, reached by using the page; never a state switcher in it.",
@@ -47,6 +47,14 @@ export const DEMESNE_LOOK = "Something that exists (the person's app, site or sc
   + "no side panels and no menus where a direct action on the row fits; everything lives in the sidebar, the conversation column and the composer; "
   + "add as little surface as possible (fold a new fact into an existing row, chip or tooltip before adding anything); "
   + "blue is the primary action and new replies, amber needs you, green success, red failure, pink where you are; the Mac's own window buttons stay.";
+
+/// Pass 223 A: asked to look at a design that exists and show what needs
+/// work, the model reviews before it draws and mocks only the parts that
+/// matter, each with options and a pick.
+export const REVIEW_HOW = "Asked to look at something that exists and show what needs work (or to redesign it with no piece named): review before you draw. "
+  + "Go through the real screen as you critique your own pages, rate each problem, and keep at most three parts, most important first. "
+  + "Save one <d-review> page (foundry_read id \"kit:parts\"): the screen as it is today with those parts marked, then each part alone at its own size, as \"Today\" beside two or three options and your pick, with one line on what is wrong, from what you saw. "
+  + "Redraw nothing else. A named piece skips the ranking.";
 
 export interface DesignGuide {
   /// Shown to the model so it knows where a rule came from and where to add one.
@@ -95,7 +103,7 @@ export function designGuideBlock(guides: readonly DesignGuide[], where = DESIGN_
   const theirs = guides.map((guide) => `From ${guide.path}:\n${guide.content}${guide.truncated ? "\n[cut at 8 KB; keep the guide to rules]" : ""}`).join("\n\n");
   return "# Design guide\n\nEvery Foundry page you design (kind html or svg) follows these rules. Check your page against them by number before you answer, and fix what breaks one.\n"
     + DESIGN_RULES.map((rule, index) => `${index + 1}. ${rule}`).join("\n")
-    + `\n${DEMESNE_LOOK}\n`
+    + `\n${DEMESNE_LOOK}\n${REVIEW_HOW}\n`
     + (theirs
       ? `\nThe person's own design rules. They win over every rule above where the two differ, and they are not suggestions:\n\n${theirs}\n`
       : "")

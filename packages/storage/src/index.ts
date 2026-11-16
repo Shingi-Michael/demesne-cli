@@ -196,7 +196,7 @@ interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: 
 const whyText = (why: FoundryWhy | null | undefined) => {
   const direction = why?.direction?.trim().slice(0, 300) ?? "", look = why?.look?.trim().slice(0, 300) ?? "", dropped = why?.dropped?.trim().slice(0, 300) ?? "";
   const from = why?.from?.trim().slice(0, 300) ?? "";
-  return direction || look || dropped ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}) }) : "";
+  return direction || look || dropped || from ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}) }) : "";
 };
 const parseWhy = (text: string | null | undefined): FoundryWhy | null => {
   if (!text) return null;

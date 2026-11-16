@@ -20,7 +20,12 @@ export const LOOK_MEASURE = String.raw`(() => {
     const style = getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
     const box = el.getBoundingClientRect();
-    return box.width > 0 && box.height > 0;
+    if (!(box.width > 0 && box.height > 0)) return false;
+    // What a <d-crop> cuts away is not on the page (pass 223 A): only the piece it shows is looked at.
+    const crop = el.parentElement && el.parentElement.closest("d-crop");
+    if (!crop) return true;
+    const cut = crop.getBoundingClientRect();
+    return box.right > cut.left && box.left < cut.right && box.bottom > cut.top && box.top < cut.bottom;
   };
   const skip = new Set(["SCRIPT", "STYLE", "LINK", "META", "TITLE", "BR", "TEMPLATE", "NOSCRIPT"]);
   const all = [...document.body.querySelectorAll("*")].filter((el) => !skip.has(el.tagName) && !el.closest("svg *")).slice(0, 4000).filter(shown);
@@ -215,7 +220,12 @@ export const DESIGN_MEASURE = String.raw`(() => {
     const style = getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
     const box = el.getBoundingClientRect();
-    return box.width > 0 && box.height > 0;
+    if (!(box.width > 0 && box.height > 0)) return false;
+    // What a <d-crop> cuts away is not on the page (pass 223 A): only the piece it shows is looked at.
+    const crop = el.parentElement && el.parentElement.closest("d-crop");
+    if (!crop) return true;
+    const cut = crop.getBoundingClientRect();
+    return box.right > cut.left && box.left < cut.right && box.bottom > cut.top && box.top < cut.bottom;
   };
   // Frame chrome from the parts (data-chrome: window bars, Demesne's sidebar and tabs) is the frame, not the design.
   const all = [...document.body.querySelectorAll("*")].filter((el) => !skip.has(el.tagName) && !el.closest("svg *") && !el.closest("[data-chrome]")).slice(0, 4000).filter(shown);

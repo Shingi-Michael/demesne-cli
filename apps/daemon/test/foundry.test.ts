@@ -7,7 +7,7 @@ import type { ModelMessage, PermissionMode, SessionStateResponse } from "@demesn
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
 import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
-import { selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
+import { FOUNDRY_GUIDANCE, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 import { noteSeen } from "../src/foundry-seen.ts";
 
 /// Why a test page looks the way it does (pass 218 A).
@@ -584,6 +584,71 @@ describe("a mockup of something that exists starts from it", () => {
     const { context } = make(store);
     const options = ["Today", "A", "B", "C"].map((name) => `<section data-option="${name}">x</section>`).join("");
     await foundrySaveTool(store).execute(input("could not look: test", `${page}<d-compare recommended="A">${options}</d-compare>`), context);
+  });
+});
+
+describe("a review of something that exists (pass 223 A)", () => {
+  const part = (name: string, options: string[], pick = options[1]) =>
+    `<section data-part="${name}" why="One line on what is wrong."><d-compare recommended="${pick}">${options.map((option) => `<section data-option="${option}"><button>${option}</button></section>`).join("")}</d-compare></section>`;
+  const review = (parts: string[]) => `<link rel="stylesheet" href="foundry://kit/base.css"><d-review><section data-today marks=".a | .b | .c | .d"><main>the screen</main></section>${parts.join("")}</d-review>`;
+  const make = (store: DemesneStore, looked = true) => {
+    const { session } = store.createSession("Review");
+    const { turn } = store.createTurn(session.id, "look at my settings page and show me what most needs a redesign");
+    if (looked) noteSeen(session.id, "read_file", { path: "src/settings.css" }, "…");
+    return { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: turn.id };
+  };
+  const input = (source: string, from = "src/settings.css", more: Record<string, unknown> = {}) => ({ title: "Settings, what needs work", kind: "html", description: "The parts of Settings that most need work.", source,
+    why: { direction: "Keep the page, fix three parts.", look_at: "The switches.", starts_from: from }, ...more });
+  const good = review([part("Switches", ["Today", "Grouped", "Three levels", "Important first"]), part("Save", ["Today", "Saves as you switch", "A bar that follows you"])]);
+
+  test("it is saved as one sheet, with up to three options beside Today in each part, and answers with the parts and picks", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      // Seven options and two Todays on one page: each part is held to its own three.
+      const saved = JSON.parse(await foundrySaveTool(store).execute(input(good, undefined, { surface: { frame: "window", width: 900, height: 600 } }), make(store)));
+      expect(saved.surface).toEqual({ frame: "page" });
+      // Why is said part by part on the sheet: no Direction or Look at line is kept to sit above it.
+      expect(saved.why).toEqual({ direction: "", look: "", dropped: "", from: "src/settings.css" });
+      const again = JSON.parse(await foundrySaveTool(store).execute({ ...input(good), title: "Settings again", why: { starts_from: "src/settings.css" } }, make(store)));
+      expect(again.version).toBe(1);
+      expect(saved.message).toContain("name the parts in order, your pick for each and why");
+      // Its drawings have buttons, and a review still needs no demo.
+      expect(saved.message).not.toContain("no demo");
+    } finally { store.close(); }
+  });
+
+  test("a review that falls short is sent back with what is missing", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store);
+      await expect(save.execute(input(review(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"])))), make(store))).rejects.toThrow("[too_many_parts]");
+      await expect(save.execute(input(review([part("Save", ["A", "B"])])), make(store))).rejects.toThrow('has no "Today"');
+      await expect(save.execute(input(review([part("Save", ["Today", "A"])])), make(store))).rejects.toThrow("one option beside Today");
+      await expect(save.execute(input(review([part("Save", ["Today", "A", "B"], "")])), make(store))).rejects.toThrow("[no_recommendation]");
+      expect(store.listFoundryArtifacts()).toHaveLength(0);
+    } finally { store.close(); }
+  });
+
+  test("a review is of something real: it is looked at first, even when it calls itself new", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store), unseen = make(store, false);
+      await expect(save.execute(input(good, "new"), unseen)).rejects.toThrow("This reviews something that exists");
+      // Asked once per ask, so a chat that cannot look is never stuck.
+      await save.execute(input(good, "could not look: no window here"), unseen);
+    } finally { store.close(); }
+  });
+
+  test("the model is told what a review is, where to find its parts, and that options are the rule", () => {
+    expect(PARTS_GUIDE).toContain("<d-review>");
+    expect(PARTS_GUIDE).toContain("<d-crop");
+    const store = new DemesneStore(":memory:");
+    try {
+      expect(foundrySaveTool(store).definition.description).toContain("<d-review>");
+      expect(FOUNDRY_GUIDANCE).toContain("is a review");
+      expect(FOUNDRY_GUIDANCE).toContain("unless they ask for one exact thing");
+      expect(FOUNDRY_GUIDANCE).not.toContain("changing the project's own UI is code work");
+    } finally { store.close(); }
   });
 });
 

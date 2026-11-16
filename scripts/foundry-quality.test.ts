@@ -66,6 +66,10 @@ describe("Foundry quality ruler", () => {
     const part = (name: string, options: string[]) => `<section data-part="${name}" why="What is wrong."><d-compare recommended="${options[1]}">${options.map((option) => `<section data-option="${option}">x</section>`).join("")}</d-compare></section>`;
     const sheet = (parts: string[]) => `<d-review><section data-today marks=".a | .b | .c | .d">screen</section>${parts.join("")}</d-review>`;
     expect(fitOf(ask, { source: sheet([part("Rows", ["Today", "A", "B"]), part("Save", ["Today", "A", "B", "C"])]) })).toEqual({ score: 1, misses: [] });
+    // An open question answered with a review offers its options part by part: two parts of two are not "four options" (pass 223 run).
+    const open = QUALITY_CASES.find((item) => item.id === "demesne-empty")!.fit!;
+    expect(fitOf(open, { source: sheet([part("Rows", ["Today", "A", "B"]), part("Save", ["Today", "A", "B"])]) })).toEqual({ score: 1, misses: [] });
+    expect(fitOf(open, { source: sheet([part("Rows", ["Today", "A"])]) }).score).toBe(0);
     // A whole redrawn page is not a review.
     expect(fitOf(ask, { source: `<d-demesne page="Settings"></d-demesne>` }).score).toBe(0);
     const four = fitOf(ask, { source: sheet(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"]))) });

@@ -93,7 +93,9 @@ export function fitOf(fit: Fit, page: { source: string; surface?: string | null 
     const most = fit[key];
     if (most !== undefined) point(held[key] <= most, `${held[key]} ${key}, at most ${most} asked for`);
   }
-  if (fit.offers) point(held.options >= 2 && held.options <= 3 && held.picked, held.options < 2 ? `${held.options === 1 ? "one direction" : "no options"}, two or three with a pick are owed` : !held.picked ? "options with no pick" : `${held.options} options, at most three`);
+  // A review sheet offers its options part by part (two parts of two options are not "four options").
+  if (fit.offers && REVIEW_PAGE.test(page.source)) { const problem = reviewProblem(page.source); point(!problem, problem ? problem.split(" Hint:")[0]!.replace(/^\[[a-z_]+\]\s*/, "") : ""); }
+  else if (fit.offers) point(held.options >= 2 && held.options <= 3 && held.picked, held.options < 2 ? `${held.options === 1 ? "one direction" : "no options"}, two or three with a pick are owed` : !held.picked ? "options with no pick" : `${held.options} options, at most three`);
   if (fit.review) {
     const problem = reviewProblem(page.source);
     point(REVIEW_PAGE.test(page.source), "not a review sheet (no <d-review>)");

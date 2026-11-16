@@ -8,10 +8,10 @@ import { createDaemonApp } from "../src/app.ts";
 import type { TurnProcessor } from "../src/processor.ts";
 import type { ProviderStreamLimits } from "../src/provider-limits.ts";
 
-async function run(stream: TurnProcessor["stream"], maxOutputTokens: number, limits: ProviderStreamLimits = {}) {
+async function run(stream: TurnProcessor["stream"], maxOutputTokens: number, limits: ProviderStreamLimits = {}, selected: ProviderStreamLimits = {}) {
   const root = mkdtempSync(join(tmpdir(), "demesne-stream-limits-"));
   const app = createDaemonApp({ databasePath: join(root, "state.sqlite"), ...limits,
-    processor: { providerId: "test", modelId: "reasoning-model", contextCapacity: 262144, maxOutputTokens,
+    processor: { streamLimits: selected, providerId: "test", modelId: "reasoning-model", contextCapacity: 262144, maxOutputTokens,
       async listModels() { return []; }, stream } });
   const client = new DemesneClient({ server: "http://localhost", fetch: ((input, init) =>
     Promise.resolve(app.fetch(new Request(input, init)))) as typeof fetch });
@@ -74,4 +74,15 @@ test("an explicit stream-event limit still aborts a large-budget request", async
   expect(events.at(-1)?.type).toBe("turn.failed");
   expect(events.at(-1)?.payload.message).toContain("event limit");
   expect(signal?.aborted).toBe(true);
+});
+
+ test("selected provider prefill deadline is used while explicit daemon limits still win", async () => {
+  for (const explicit of [false, true]) {
+    const events = await run(async function* () {
+      await Bun.sleep(80);
+      yield { type: "text_delta", delta: "Ready after prefill." };
+      yield { type: "finish", reason: "stop" };
+    }, 256, explicit ? { providerFirstEventTimeoutMs: 20 } : {}, { providerFirstEventTimeoutMs: 1000 });
+    expect(events.at(-1)?.type).toBe(explicit ? "turn.failed" : "turn.completed");
+  }
 });

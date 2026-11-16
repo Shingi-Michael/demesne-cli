@@ -1,7 +1,9 @@
+import type { ProviderStreamLimits } from "./provider-limits.ts";
 import type { ModelDescriptor, PlanLimits, RuntimeProfileStatus } from "@demesne/protocol";
 import type { ProviderMessage, ProviderStreamEvent, ProviderToolDefinition } from "@demesne/providers";
 
 export interface TurnInference {
+  readonly streamLimits?: Readonly<ProviderStreamLimits>;
   readonly providerId: string;
   readonly modelId: string;
   readonly profile: string | null;
@@ -30,6 +32,7 @@ export interface TurnInference {
 export interface StreamOptions { cacheKey?: string }
 
 export interface TurnProcessor {
+  readonly streamLimits?: Readonly<ProviderStreamLimits>;
   readonly providerId: string;
   readonly modelId: string;
   readonly contextCapacity?: number;
@@ -91,6 +94,7 @@ export function snapshotTurnInference(
   return Object.freeze({
     providerId,
     modelId,
+    streamLimits: Object.freeze({ ...processor.streamLimits }),
     profile,
     thinkingEnabled,
     preservesPromptCache,

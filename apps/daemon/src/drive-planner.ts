@@ -46,7 +46,7 @@ export const DRIVE_QUICK_TOKENS = 8_000;
 export async function planDrive(request: DriveRequest, inferenceFor: (thinking: boolean | undefined) => TurnInference, signal: AbortSignal, options: ProviderStreamLimits = {}, image?: { id: string; url: string }, progress?: (event: DriveProgress) => void | Promise<void>): Promise<DriveResponse> {
   let thinking = request.thinking;
   let inference = inferenceFor(thinking);
-  const limits = providerStreamLimits(inference.maxOutputTokens, options);
+  const limits = providerStreamLimits(inference.maxOutputTokens, options, inference.streamLimits);
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal.throwIfAborted(); signal.addEventListener("abort", abort, { once: true });

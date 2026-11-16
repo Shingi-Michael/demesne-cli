@@ -151,7 +151,7 @@ export class SessionCompactor {
         { thinkingEnabled: false, profile: inference.profile, contextPlan }));
       let text = ""; let hasReasoning = false; let outputTokens: number | null = null;
       let events = 0; let usageReceived = false;
-      const limits = providerStreamLimits(inference.maxOutputTokens, this.options);
+      const limits = providerStreamLimits(inference.maxOutputTokens, this.options, inference.streamLimits);
       for await (const event of withProviderDeadlines(inference.stream(messages, [], controller.signal), controller,
         limits.firstEventTimeoutMs, limits.requestTimeoutMs)) {
         signal.throwIfAborted();

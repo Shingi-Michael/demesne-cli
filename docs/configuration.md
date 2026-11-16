@@ -71,7 +71,7 @@ The same fields are supported under `[provider]` and `[additional_providers.NAME
 | `allow_http_endpoint` | Exact opt-in HTTP URL on the Tailscale `100.64.0.0/10` range |
 | `first_event_timeout_ms`, `request_timeout_ms` | Optional positive request deadlines |
 
-The default stream first-event deadline is at least 180 seconds, with profile-specific floors. The default overall deadline scales with the output allowance; it is at least 15 minutes. See [provider limits](../apps/daemon/src/provider-limits.ts). These deadlines are not reasoning budgets.
+Stream deadlines follow the selected provider, including additional providers and provider reloads. Local providers (loopback, private LAN, Tailscale, or `.local` endpoints) allow up to 12 hours before the first event by default: a near-full 256K prompt can take hours to process. Remote providers retain the 180-second default, with profile-specific floors. Set `first_event_timeout_ms` and `request_timeout_ms` in the relevant provider section to choose shorter or longer deadlines. An explicit overall deadline also bounds the first-event wait. The Stop action still cancels a pending request. The default overall deadline scales with the output allowance; it is at least 15 minutes. See [provider limits](../apps/daemon/src/provider-limits.ts). These deadlines are not reasoning budgets.
 
 HTTP is accepted on loopback. Other endpoints require HTTPS unless the exact Tailscale URL is explicitly allowed. ChatGPT and Codex credentials always go to the fixed official API/auth destinations; a custom `url` cannot redirect those tokens.
 

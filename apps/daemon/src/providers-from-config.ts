@@ -8,6 +8,7 @@ import { MultiProviderProcessor } from "./multi-provider-processor.ts";
 import {
   createRuntimeProfileVerifier,
   runtimeProfileDefaultMaxOutputTokens,
+  runtimeProfileMinimumFirstEventTimeoutMs,
   runtimeProfileSupportsPromptCache,
 } from "./ollama-runtime.ts";
 import { ProviderTurnProcessor } from "./provider-processor.ts";
@@ -110,6 +111,23 @@ function createSingleProcessor(settings: ProviderConfig, dataDirectory: string):
     configuredContextCapacity,
     allowedModelIds,
     settings.auth === "codex" || settings.auth === "chatgpt" || runtimeProfileSupportsPromptCache(runtimeProfile),
+    configuredStreamLimits(settings),
   );
 }
 
+
+/// Long local prompts can spend hours in prefill before emitting any event.
+/// Keep this policy on the selected provider, including reloads and fallbacks.
+export function configuredStreamLimits(settings: ProviderConfig) {
+  const first = settings.firstEventTimeoutMs ?? Math.max(
+    isLocalProvider(settings) ? 12 * 60 * 60 * 1000 : 180_000,
+    runtimeProfileMinimumFirstEventTimeoutMs(settings.runtimeProfile) ?? 0,
+  );
+  if (settings.requestTimeoutMs !== undefined && first > settings.requestTimeoutMs && settings.firstEventTimeoutMs !== undefined) {
+    throw new Error(`${settings.id ?? "provider"}: first_event_timeout_ms must not exceed request_timeout_ms`);
+  }
+  return {
+    providerFirstEventTimeoutMs: Math.min(first, settings.requestTimeoutMs ?? Infinity),
+    providerRequestTimeoutMs: settings.requestTimeoutMs,
+  };
+}

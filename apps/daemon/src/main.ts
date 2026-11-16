@@ -11,7 +11,6 @@ import { createDaemonApp } from "./app.ts";
 import { ntfy } from "./notify-phone.ts";
 import { serveDaemon } from "./http-server.ts";
 import {
-  runtimeProfileMinimumFirstEventTimeoutMs,
   runtimeProfileRequiresSingleInferenceSlot,
 } from "./ollama-runtime.ts";
 import { ProviderTurnProcessor } from "./provider-processor.ts";
@@ -37,29 +36,6 @@ for (const settings of [config.provider, ...Object.values(config.additionalProvi
   providerInferenceSlots[id] = slots;
 }
 const configuredRuntimeProfile = config.provider.runtimeProfile;
-// A strict profile knows the context capacity it verifies, so it also knows the
-// cold prefill budget that capacity implies. Without this floor the 180,000 ms
-// default aborts a legitimate near-capacity request before the model emits its
-// first event. An explicit value always wins so an operator can still tighten
-// the deadline deliberately.
-const profileFirstEventFloorMs = runtimeProfileMinimumFirstEventTimeoutMs(configuredRuntimeProfile);
-const providerFirstEventTimeoutMs = config.provider.firstEventTimeoutMs
-  ?? Math.max(180_000, profileFirstEventFloorMs ?? 0);
-const providerRequestTimeoutMs = config.provider.requestTimeoutMs
-  ?? Math.max(900_000, providerFirstEventTimeoutMs);
-if (providerFirstEventTimeoutMs > providerRequestTimeoutMs) {
-  throw new Error("provider.first_event_timeout_ms must not exceed provider.request_timeout_ms");
-}
-if (
-  profileFirstEventFloorMs !== undefined
-  && providerFirstEventTimeoutMs < profileFirstEventFloorMs
-) {
-  console.warn(
-    `Warning: the configured first-event timeout (${providerFirstEventTimeoutMs} ms) is below the `
-      + `${profileFirstEventFloorMs} ms cold-prefill budget measured for ${configuredRuntimeProfile}. `
-      + "Near-capacity requests may be aborted before the model emits its first event.",
-  );
-}
 if (runtimeProfileRequiresSingleInferenceSlot(configuredRuntimeProfile) && (config.provider.inferenceSlots ?? inferenceSlots) !== 1) {
   throw new Error(`provider.runtime_profile=${configuredRuntimeProfile} requires inference_slots=1`);
 }
@@ -112,9 +88,7 @@ try {
     // /subagent saves its choice where the rest of the user's settings live.
     saveSubagentModel: (model) => { updateUserConfig(process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(), { agent: { subagent_model: model } }); },
     saveSubagentOften: (often) => { updateUserConfig(process.env.DEMESNE_CONFIG_FILE || configFiles.user || userConfigPath(), { agent: { subagent_often: often } }); },
-    providerFirstEventTimeoutMs,
-    // Let each turn's output budget determine the default streaming deadline.
-    providerRequestTimeoutMs: config.provider.requestTimeoutMs,
+    // Stream deadlines travel with each selected provider, not the primary one.
   });
   server = serveDaemon(app, { hostname: host, port });
 } catch (error) {

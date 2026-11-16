@@ -344,7 +344,7 @@ export class AgentEngine {
     const pendingContextDrops: HistoryTurn[] = [];
     const maxModelRounds = this.options.maxModelRounds ?? DEFAULT_AGENT_LIMITS.maxModelRounds;
     const maxToolCalls = this.options.maxToolCalls ?? DEFAULT_AGENT_LIMITS.maxToolCalls;
-    let streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options);
+    let streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options, inference.streamLimits);
     if (![maxModelRounds, maxToolCalls].every((value) => Number.isSafeInteger(value) && value > 0)) throw new Error("Agent turn limits must be positive integers");
     let budgetReason: string | undefined;
 
@@ -546,7 +546,7 @@ export class AgentEngine {
               inference = next;
               used.add(next);
               triedProviders.push(next.providerId);
-              streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options);
+              streamLimits = providerStreamLimits(inference.maxOutputTokens, this.options, inference.streamLimits);
               continue;
             }
           }

@@ -1,3 +1,4 @@
+import type { ProviderStreamLimits } from "./provider-limits.ts";
 import type {
   ProviderAdapter,
   ProviderMessage,
@@ -28,6 +29,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
     private readonly configuredContextCapacity?: number,
     allowedModelIds?: readonly string[],
     readonly preservesPromptCache = false,
+    readonly streamLimits: Readonly<ProviderStreamLimits> = {},
   ) {
     this.providerId = provider.id;
     this.currentModelId = modelId;
@@ -117,6 +119,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
     }
     return Object.freeze({
       providerId: this.providerId,
+      streamLimits: Object.freeze({ ...this.streamLimits }),
       modelId: model,
       profile,
       thinkingEnabled,

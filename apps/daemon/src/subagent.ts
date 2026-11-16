@@ -103,7 +103,7 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
   const { inference, signal } = options;
   const allowed = options.toolNames ?? SUBAGENT_TOOLS;
   const definitions = options.tools.definitions().filter((definition) => SUBAGENT_TOOLS.has(definition.name) && allowed.has(definition.name));
-  const streamLimits = providerStreamLimits(inference.maxOutputTokens, options.limits);
+  const streamLimits = providerStreamLimits(inference.maxOutputTokens, options.limits, inference.streamLimits);
   const messages: ProviderMessage[] = [{ role: "system", content: options.system ?? instructions(options.workspaceRoot) }, { role: "user", content: options.prompt }];
   const used = new Map<string, number>();
   let toolCalls = 0, reasoning = 0;

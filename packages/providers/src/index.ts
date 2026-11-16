@@ -31,7 +31,8 @@ export interface ProviderRequest {
 }
 
 /// Local and open models whose chat template switches thinking on and off.
-const SWITCHABLE_THINKING = /qwen3|qwq|deepseek-r1/i;
+const SWITCHABLE_THINKING = /qwen3|qwq|deepseek-r1|gemma[-_. ]?4/i;
+const GEMMA_THINKING = /gemma[-_. ]?4/i;
 const EFFORTS = ["low", "medium", "high"];
 
 export type ProviderStreamEvent =
@@ -89,7 +90,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   private readonly includeUsage: boolean;
   private readonly reasoningEffort: OpenAICompatibleOptions["reasoningEffort"];
   /// Listed reasoning models; effort-capable models start at medium.
-  private readonly thinkingModels = new Set<string>();
+  private readonly thinkingModels = new Map<string, Pick<ModelDescriptor, "reasoningLevels" | "defaultReasoningLevel">>();
   private readonly openRouterIgnore: readonly string[];
   private readonly configuredContextWindow: number | undefined;
   private readonly fetchImplementation: typeof fetch;
@@ -126,6 +127,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     }
     if (body.data.length > MODEL_COUNT_LIMIT) throw new ProviderError(`Model endpoint exceeded the ${MODEL_COUNT_LIMIT} model limit`);
     const seen = new Set<string>();
+    const thinkingModels = new Map<string, Pick<ModelDescriptor, "reasoningLevels" | "defaultReasoningLevel">>();
     const models = body.data.flatMap((value): ModelDescriptor[] => {
       if (!isRecord(value) || typeof value.id !== "string" || !value.id) return [];
       // Google lists "models/gemini-…" but its chat endpoint only answers to
@@ -135,19 +137,25 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       seen.add(value.id);
       const contextWindow = readContextWindow(value);
       const maxOutputTokens = isRecord(value.top_provider) ? positiveInteger(value.top_provider.max_completion_tokens) : undefined;
-      const reasoningLevels = this.baseUrl.hostname === "openrouter.ai"
+      const declared = readThinkingLevels(value);
+      const reasoningLevels = declared ?? (this.baseUrl.hostname === "openrouter.ai"
         ? Array.isArray(value.supported_parameters) && value.supported_parameters.includes("reasoning") ? ["off", ...EFFORTS] : undefined
-        : SWITCHABLE_THINKING.test(value.id) ? ["off", "on"] : undefined;
-      if (reasoningLevels) this.thinkingModels.add(value.id);
+        : SWITCHABLE_THINKING.test(value.id) ? ["off", "on"] : undefined);
+      const advertisedDefault = typeof value.default_reasoning_level === "string" ? value.default_reasoning_level : undefined;
+      const defaultReasoningLevel = defaultThinkingLevel(reasoningLevels,
+        advertisedDefault ?? (GEMMA_THINKING.test(value.id) ? "on" : undefined));
+      if (reasoningLevels) thinkingModels.set(value.id, { reasoningLevels, defaultReasoningLevel });
       return [{
         id: value.id,
         provider: this.id,
         ...(typeof value.owned_by === "string" ? { ownedBy: value.owned_by } : {}),
         ...(contextWindow ? { contextWindow } : {}),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
-        ...(reasoningLevels ? { reasoningLevels, defaultReasoningLevel: defaultThinkingLevel(reasoningLevels) } : {}),
+        ...(reasoningLevels ? { reasoningLevels, defaultReasoningLevel } : {}),
       }];
     });
+    this.thinkingModels.clear();
+    for (const [id, capabilities] of thinkingModels) this.thinkingModels.set(id, capabilities);
     if (this.id !== "ollama") return models.map((model) => this.withConfiguredContext(model));
     const runtimeContexts = await this.ollamaRuntimeContexts(signal);
     const enriched = await mapWithConcurrency(models, MODEL_METADATA_CONCURRENCY, async (model) => {
@@ -162,13 +170,17 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     // A chosen level wins over the turn's on/off and the configured effort.
     // Otherwise prefer medium for listed effort-capable models; binary local
     // templates keep their supported off/on fallback.
+    const discovered = this.thinkingModels.get(request.model);
+    const fallback = this.baseUrl.hostname !== "openrouter.ai" && SWITCHABLE_THINKING.test(request.model)
+      ? GEMMA_THINKING.test(request.model) ? "on" : "off" : undefined;
     const level = request.reasoningLevel
-      ?? (request.thinkingEnabled === undefined && !this.reasoningEffort && (this.thinkingModels.has(request.model) || (this.baseUrl.hostname !== "openrouter.ai" && SWITCHABLE_THINKING.test(request.model))) ? this.baseUrl.hostname === "openrouter.ai" ? "medium" : "off" : undefined);
-    const thinkingEnabled = level === "off" ? false : level ? true : request.thinkingEnabled;
+      ?? (request.thinkingEnabled === undefined && !this.reasoningEffort
+        ? discovered?.defaultReasoningLevel ?? fallback : undefined);
+    const thinkingEnabled = level === "off" || level === "none" ? false : level ? true : request.thinkingEnabled;
     const reasoningEffort = thinkingEnabled === false
       ? "none"
-      : level && EFFORTS.includes(level)
-        ? level as "low" | "medium" | "high"
+      : level && ["minimal", ...EFFORTS, "xhigh", "max"].includes(level)
+        ? level
         : thinkingEnabled === true && this.reasoningEffort === "none"
           ? "low"
           : this.reasoningEffort;
@@ -188,9 +200,10 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
         ...(this.id === "ollama" && thinkingEnabled !== undefined
           ? { think: thinkingEnabled }
           : {}),
-        // llama.cpp and LM Studio switch Qwen-style thinking in the template.
-        ...(!openRouter && this.id !== "ollama" && (level === "off" || level === "on")
-          ? { chat_template_kwargs: { enable_thinking: level === "on" } }
+        // Binary template controls work for Gemma, Qwen, and advertised on/off models.
+        ...(!openRouter && this.id !== "ollama" && (level === "off" || level === "on" || (thinkingEnabled !== undefined
+            && (discovered?.reasoningLevels?.includes("on") || SWITCHABLE_THINKING.test(request.model))))
+          ? { chat_template_kwargs: { enable_thinking: thinkingEnabled === true } }
           : {}),
         ...(request.maxOutputTokens !== undefined ? { max_tokens: request.maxOutputTokens } : {}),
         ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
@@ -607,3 +620,14 @@ function integerOrNull(value: unknown): number | null {
 }
 
 export { ChatGPTProvider, CodexProvider, CODEX_BACKEND_URL } from "./chatgpt.ts";
+
+/// Prefer a server's per-model capabilities over name heuristics. Unknown
+/// names can expose controls too; unsupported levels are never invented.
+function readThinkingLevels(model: Record<string, unknown>): string[] | undefined {
+  const values = model.supported_reasoning_levels ?? model.reasoning_levels;
+  if (!Array.isArray(values)) return undefined;
+  const allowed = new Set(["off", "on", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  const levels = [...new Set(values.map(value => typeof value === "string" ? value
+    : isRecord(value) && typeof value.effort === "string" ? value.effort : "").filter(value => allowed.has(value)))];
+  return levels.length ? levels : undefined;
+}

@@ -490,3 +490,49 @@ test("running usage on several chunks is reported once, as the last total", asyn
   const usage = events.filter((event) => event.type === "usage");
   expect(usage).toEqual([{ type: "usage", usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13 } }]);
 });
+
+ test("thinking controls follow each discovered model and refresh without stale capabilities", async () => {
+  let data: unknown[] = [
+    { id: "gemma-4-31b" }, { id: "gemma-3-27b" }, { id: "qwen3.8-27b" },
+    { id: "custom-alias", supported_reasoning_levels: [{effort: "off"}, {effort: "on"}], default_reasoning_level: "on" },
+    { id: "effort-model", reasoning_levels: ["low", "medium", "high", "max"] },
+  ];
+  const bodies: Record<string, any>[] = [];
+  const provider = new OpenAICompatibleProvider({baseUrl: "http://localhost:8081/v1", fetch: (async (input, init) => {
+    if (String(input).endsWith("/models")) return Response.json({data});
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response("data: [DONE]\n\n");
+  }) as typeof fetch});
+  const models = await provider.listModels();
+  expect(models.map(m => [m.id, m.reasoningLevels, m.defaultReasoningLevel])).toEqual([
+    ["gemma-4-31b", ["off", "on"], "on"], ["gemma-3-27b", undefined, undefined],
+    ["qwen3.8-27b", ["off", "on"], "off"], ["custom-alias", ["off", "on"], "on"],
+    ["effort-model", ["low", "medium", "high", "max"], "medium"],
+  ]);
+  const send = async (model: string, extra = {}) => {
+    for await (const _ of provider.stream({model, messages: [], ...extra}, new AbortController().signal)) {}
+    return bodies.at(-1)!;
+  };
+  expect((await send("gemma-4-31b")).chat_template_kwargs).toEqual({enable_thinking: true});
+  expect((await send("gemma-4-31b", {thinkingEnabled: false})).chat_template_kwargs).toEqual({enable_thinking: false});
+  expect((await send("qwen3.8-27b", {thinkingEnabled: true})).chat_template_kwargs).toEqual({enable_thinking: true});
+  expect((await send("custom-alias")).chat_template_kwargs).toEqual({enable_thinking: true});
+  expect((await send("effort-model")).reasoning_effort).toBe("medium");
+  expect((await send("effort-model", {reasoningLevel: "max"})).reasoning_effort).toBe("max");
+  const plain = await send("gemma-3-27b");
+  expect(plain).not.toHaveProperty("reasoning_effort");
+  expect(plain).not.toHaveProperty("chat_template_kwargs");
+  data = [{id: "custom-alias"}];
+  await provider.listModels();
+  expect(await send("custom-alias")).not.toHaveProperty("chat_template_kwargs");
+});
+
+test.each(["gemma-4-31b", "google/gemma-4-26B-A4B-it", "gemma4:31b"])("Gemma 4 defaults to thinking on even before discovery: %s", async model => {
+  let body: any;
+  const provider = new OpenAICompatibleProvider({baseUrl: "http://localhost:8081/v1", fetch: (async (_input, init) => {
+    body = JSON.parse(String(init?.body)); return new Response("data: [DONE]\n\n");
+  }) as typeof fetch});
+  for await (const _ of provider.stream({model, messages: []}, new AbortController().signal)) {}
+  expect(body.chat_template_kwargs).toEqual({enable_thinking: true});
+  expect(body).not.toHaveProperty("reasoning_effort");
+});

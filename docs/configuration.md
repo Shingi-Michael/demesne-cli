@@ -220,3 +220,9 @@ The exported [environment map](../packages/config/src/index.ts) is authoritative
 ## Apply changes
 
 Provider config edits require a daemon restart: when no work is running, stop the `demesned` process and the app starts it again. `/model`, reasoning selection, and `/subagent` have runtime routes. Reopen the desktop window after replacing its build. [Troubleshooting](troubleshooting.md#rebuilds-and-running-processes) explains binary resolution and background-service caveats.
+
+### Thinking controls for compatible providers
+
+Thinking choices come from each model's advertised `supported_reasoning_levels` (strings or `{ effort }` entries) or `reasoning_levels` when available. Demesne refreshes these capabilities when models are rediscovered. An optional `default_reasoning_level` selects a supported fallback; effort-capable models prefer medium.
+
+For servers that omit these fields, recognized Qwen/DeepSeek thinking models and Gemma 4 expose on/off controls. Gemma 4 defaults to on; Gemma 3 does not acquire thinking controls from its name. Gemma's binary switch does not imply support for low/medium/high effort. Explicit on/off choices are sent through the compatible server's chat template switch, or Ollama's `think` field. OpenRouter continues to use its reasoning API.

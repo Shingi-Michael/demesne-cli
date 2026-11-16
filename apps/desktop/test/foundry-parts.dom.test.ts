@@ -85,7 +85,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Foundry parts you can us
     expect(drawn.old).toBe(0);
     expect(drawn.body).toBe("desktop");
     expect(drawn.theme).toMatch(/^demesne/);
-    expect(drawn.session).toBe("14px");
+    expect(drawn.session).toBe("13px");
     expect(drawn.bubble).toBe(true);
     expect(drawn.mark).toBe(true);
     expect(drawn.composer).not.toBe("0px");

@@ -17,6 +17,8 @@
  * change. It says nothing about taste beyond these; the contact sheet is
  * for the eye. */
 
+import { REVIEW_PAGE, reviewProblem } from "../packages/protocol/src/foundry-stage.ts";
+
 export type Where = "project" | "chat";
 /// What the ask itself fixes, where it does: the frame, how many versions,
 /// and how much the page may hold. A page is "as asked" by how many of
@@ -31,17 +33,21 @@ export interface Fit {
   dialogs?: number; forms?: number; controls?: number; bytes?: number;
   /// Things the ask names, each to be found in the page's words.
   has?: RegExp[];
+  /// An open design question: two or three options and a pick are owed (pass 223 A).
+  offers?: true;
+  /// "Look at this and show me what needs work": one review sheet (<d-review>) that holds.
+  review?: true;
 }
 export interface QualityCase { id: string; where: Where; prompt: string; fit?: Fit }
 
 /// Twelve asks for whole pages (four mockups of Demesne itself, the rest the
 /// kinds of page people ask Foundry for), then small asks, which the first
 /// twelve never had: a ruler of whole pages only rewards whatever makes a
-/// page bigger. Kept fixed so scores compare across changes; compare a run
+/// page bigger. Last, reviews of something that exists (pass 223 A). Kept fixed so scores compare across changes; compare a run
 /// with an older one over the same ids (--only).
 export const QUALITY_CASES: QualityCase[] = [
-  { id: "demesne-settings", where: "project", prompt: "show me what a calmer, more organised Settings page for Demesne could look like" },
-  { id: "demesne-empty", where: "project", prompt: "what could Demesne's home look like for someone who has no chats yet? mock it" },
+  { id: "demesne-settings", where: "project", prompt: "show me what a calmer, more organised Settings page for Demesne could look like", fit: { offers: true } },
+  { id: "demesne-empty", where: "project", prompt: "what could Demesne's home look like for someone who has no chats yet? mock it", fit: { offers: true } },
   { id: "demesne-topbar", where: "project", prompt: "the top bar feels busy. show me two calmer versions side by side", fit: { options: 2, dialogs: 0, forms: 0 } },
   { id: "demesne-drive", where: "project", prompt: "mock how Drive could show the work it finished overnight when I open the app in the morning" },
   { id: "landing", where: "chat", prompt: "put together a landing page for a coffee subscription called Slow Pour" },
@@ -52,13 +58,16 @@ export const QUALITY_CASES: QualityCase[] = [
   { id: "admin", where: "chat", prompt: "mock an admin page for a small online shop: orders with filters, and one order open" },
   { id: "chart", where: "chat", prompt: "visualize how my savings grow at 5% a year over 20 years starting with 1000" },
   { id: "announce", where: "chat", prompt: "make a one-page launch announcement for a calendar app called Fold" },
-  { id: "small-pin", where: "chat", prompt: "show me a pin button for a chat row in a sidebar list", fit: { surface: ["part"], dialogs: 0, forms: 0, controls: 9, bytes: 12000, has: [/pin/i] } },
+  { id: "small-pin", where: "chat", prompt: "show me a pin button for a chat row in a sidebar list", fit: { surface: ["part"], offers: true, dialogs: 0, forms: 0, controls: 9, bytes: 12000, has: [/pin/i] } },
   { id: "small-toast", where: "chat", prompt: "mock a small toast that says a file was saved, with an undo", fit: { surface: ["part"], dialogs: 0, forms: 0, controls: 6, bytes: 12000, has: [/saved/i, /undo/i] } },
-  { id: "small-toggle", where: "chat", prompt: "what would a settings row with a dark mode toggle look like", fit: { surface: ["part"], dialogs: 0, forms: 0, controls: 6, bytes: 12000, has: [/dark/i] } },
+  { id: "small-toggle", where: "chat", prompt: "what would a settings row with a dark mode toggle look like", fit: { surface: ["part"], offers: true, dialogs: 0, forms: 0, controls: 6, bytes: 12000, has: [/dark/i] } },
+  { id: "review-settings", where: "project", prompt: "look at Demesne's Settings page and show me what most needs a redesign", fit: { review: true } },
+  { id: "review-sidebar", where: "project", prompt: "what in Demesne's sidebar most needs work? show me", fit: { review: true } },
 ];
 
 /// What a page holds, counted from its source (scripts and styles left out).
 export function holds(source: string) {
+  const picked = /<d-compare\b[^>]*\brecommended\s*=\s*["']?[^\s"'>]/i.test(source) || /<[^>]*\bdata-recommended\b[^>]*>/i.test(source);
   const body = source.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
   const count = (pattern: RegExp) => (body.match(pattern) ?? []).length;
   const options = [...body.matchAll(/\bdata-option\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map((match) => match[1] ?? match[2] ?? "");
@@ -67,7 +76,7 @@ export function holds(source: string) {
     dialogs: count(/<dialog\b|\brole\s*=\s*["']?(?:dialog|alertdialog)\b/gi),
     forms: count(/<form\b/gi),
     controls: count(/<(?:button|a|input|select|textarea|summary)\b|\brole\s*=\s*["']?(?:button|tab|switch|checkbox|radio)\b|<d-(?:toggle|seg|tabs)\b/gi),
-    bytes: Buffer.byteLength(source),
+    bytes: Buffer.byteLength(source), picked,
     words: body.replace(/<[^>]+>/g, " "),
   };
 }
@@ -83,6 +92,12 @@ export function fitOf(fit: Fit, page: { source: string; surface?: string | null 
   for (const key of ["dialogs", "forms", "controls", "bytes"] as const) {
     const most = fit[key];
     if (most !== undefined) point(held[key] <= most, `${held[key]} ${key}, at most ${most} asked for`);
+  }
+  if (fit.offers) point(held.options >= 2 && held.options <= 3 && held.picked, held.options < 2 ? `${held.options === 1 ? "one direction" : "no options"}, two or three with a pick are owed` : !held.picked ? "options with no pick" : `${held.options} options, at most three`);
+  if (fit.review) {
+    const problem = reviewProblem(page.source);
+    point(REVIEW_PAGE.test(page.source), "not a review sheet (no <d-review>)");
+    point(REVIEW_PAGE.test(page.source) && !problem, problem ? problem.split(" Hint:")[0]!.replace(/^\[[a-z_]+\]\s*/, "") : "no parts with Today, options and a pick");
   }
   for (const named of fit.has ?? []) point(named.test(held.words), `nothing for ${named.source}`);
   return { score: points ? (points - misses.length) / points : 1, misses };

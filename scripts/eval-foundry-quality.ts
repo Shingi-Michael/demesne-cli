@@ -22,7 +22,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { DemesneClient } from "../packages/client/src/index.ts";
 import { loadConfig } from "../packages/config/src/index.ts";
-import { demoControls } from "../packages/protocol/src/index.ts";
+import { demoControls, REVIEW_PAGE } from "../packages/protocol/src/index.ts";
 import type { ProviderStreamEvent } from "../packages/providers/src/index.ts";
 import { createDaemonApp } from "../apps/daemon/src/app.ts";
 import { APP_WINDOW, electronLook, electronTry, type LookResult } from "../apps/daemon/src/foundry-look.ts";
@@ -61,7 +61,7 @@ async function measure(id: string, kind: string, title: string, source: string, 
   const issues = [...look.pages.flatMap((page) => page.issues.map((issue) => `${page.width}px: ${issue}`)), ...look.errors.map((error) => `console: ${error}`)];
   const design = look.pages[0]?.design as DesignNumbers | undefined;
   if (!design) return { score: null, checks: null, design: null, issues: [...issues, "No design numbers (an older app build?)"], shots };
-  const judged: Judged = APP_WINDOW.test(source) ? "app" : surface === "part" ? "part" : "page";
+  const judged: Judged = APP_WINDOW.test(source) || REVIEW_PAGE.test(source) ? "app" : surface === "part" ? "part" : "page";
   const parts = checks(design, issues.length, judged);
   return { score: score(parts), checks: parts, design, issues, shots };
 }

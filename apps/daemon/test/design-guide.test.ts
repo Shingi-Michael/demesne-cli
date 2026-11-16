@@ -33,7 +33,10 @@ test("Demesne's rules are numbered, and say what the old paragraph said", () => 
   // About the size of the paragraph it replaces.
   // Something that exists is mocked from the real thing.
   expect(block).toContain("never from memory");
-  expect(block.length).toBeLessThan(5000);
+  // Pass 223 A: how to review something that exists rides along (about 500 characters).
+  expect(block).toContain("review before you draw");
+  expect(block).toContain("unless the ask fixes one exact thing");
+  expect(block.length).toBeLessThan(5600);
 });
 
 test("your guide for every chat and the project's are both read, the project's last", () => {

@@ -162,3 +162,60 @@ export function demoControls(source: string): string[] {
   if (states.length >= 2 && states.some((word) => ONLY_PRETEND.test(word))) found.add(states.join(" · "));
   return [...found];
 }
+
+/// Pass 223 A: a review of something that exists is one page built on
+/// <d-review>: the screen as it is today with the parts that most need work
+/// marked, then each part alone at its own size, as "Today" beside two or
+/// three options with a pick. Foundry draws the outlines, numbers and names
+/// (foundry-kit/parts.js); this reads the page's shape so a save can hold it
+/// to that.
+export const REVIEW_PAGE = /<d-review\b/i;
+export const MAX_REVIEW_PARTS = 3, REVIEW_OPTIONS = [2, 3] as const;
+export interface ReviewPart { name: string; why: string; options: string[]; today: boolean; recommended: boolean }
+export interface ReviewShape { today: boolean; marks: number; parts: ReviewPart[] }
+
+const TAG = (name: string) => new RegExp(`<${name}\\b(?:[^>"']|"[^"]*"|'[^']*')*>`, "gi");
+const attribute = (tag: string, name: string) => {
+  const found = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i").exec(tag);
+  return found ? (found[1] ?? found[2] ?? found[3] ?? "").trim() : null;
+};
+const has = (tag: string, name: string) => new RegExp(`\\s${name}(?=[\\s=>/])`, "i").test(tag.replace(/"[^"]*"|'[^']*'/g, '""'));
+
+/// The shape of a review page, or null when the page is not one.
+export function reviewOf(source: string): ReviewShape | null {
+  if (!REVIEW_PAGE.test(source)) return null;
+  const body = source.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
+  const sections = [...body.matchAll(TAG("section"))].map((match) => ({ tag: match[0], at: match.index!, end: match.index! + match[0].length }));
+  const now = sections.find((section) => has(section.tag, "data-today"));
+  const starts = sections.filter((section) => has(section.tag, "data-part"));
+  const marks = (now ? (attribute(now.tag, "marks") ?? "").split("|").filter((item) => item.trim()).length : 0) + (body.match(/\sdata-mark\s*=/gi)?.length ?? 0);
+  const parts = starts.map((start, index): ReviewPart => {
+    const inside = body.slice(start.end, starts[index + 1]?.at ?? body.length);
+    const options = [...inside.matchAll(TAG("[a-z][a-z0-9-]*"))].map((match) => attribute(match[0], "data-option")).filter((name): name is string => !!name);
+    const pick = [...inside.matchAll(TAG("d-compare"))].map((match) => attribute(match[0], "recommended")).find((name) => !!name) ?? "";
+    const others = options.filter((name) => !/^today\b/i.test(name));
+    return { name: attribute(start.tag, "data-part") ?? "", why: attribute(start.tag, "why") ?? "", options: others,
+      today: options.length > others.length, recommended: !!pick && others.some((name) => name.startsWith(pick)) };
+  });
+  return { today: !!now, marks, parts };
+}
+
+/// What stops a review page from being one, as a refusal with its hint; null when it holds.
+export function reviewProblem(source: string): string | null {
+  const review = reviewOf(source);
+  if (!review) return null;
+  const SHAPE = 'Hint: <d-review><section data-today marks="selector | selector">the screen as it is</section><section data-part="Name" why="what is wrong, in one line"><d-compare recommended="B"><section data-option="Today">…</section><section data-option="A">…</section><section data-option="B">…</section></d-compare></section></d-review>';
+  if (!review.today) return `[review] A review starts with the screen as it is today, and this one has none. ${SHAPE}`;
+  if (!review.parts.length) return `[review] This review names no part that needs work. ${SHAPE}`;
+  if (review.parts.length > MAX_REVIEW_PARTS) return `[too_many_parts] This review has ${review.parts.length} parts; at most ${MAX_REVIEW_PARTS}. Hint: keep the ${MAX_REVIEW_PARTS} that most need work, most important first, and name the rest in the chat`;
+  if (review.marks < review.parts.length) return `[review] ${review.marks ? `Only ${review.marks} of the ${review.parts.length} parts are` : "No part is"} marked on the screen as it is. Hint: marks="selector | selector" on the data-today section, one selector per part in order (or data-mark="1" on the piece itself), so each part is outlined where it sits`;
+  for (const part of review.parts) {
+    const name = `"${part.name || "A part"}"`;
+    if (!part.why) return `[review] ${name} does not say why it needs work. Hint: why="one line on what is wrong, from what you saw" on its section`;
+    if (!part.today) return `[review] ${name} has no "Today". Hint: its first option is <section data-option="Today"> with that piece exactly as it is now, so each option differs from it by the change alone`;
+    if (part.options.length < REVIEW_OPTIONS[0]) return `[review] ${name} offers ${part.options.length === 1 ? "one option" : "no options"} beside Today. Hint: two or three genuinely different options for each part`;
+    if (part.options.length > REVIEW_OPTIONS[1]) return `[too_many_options] ${name} has ${part.options.length} options beside Today; at most ${REVIEW_OPTIONS[1]}. Hint: keep the best ${REVIEW_OPTIONS[1]}`;
+    if (!part.recommended) return `[no_recommendation] ${name} has no pick. Hint: recommended="<the option's name>" on its <d-compare>, and say why in the chat`;
+  }
+  return null;
+}

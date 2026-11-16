@@ -7,9 +7,10 @@ const page = (id: string, value: number | null): PageResult => ({ id, prompt: `a
   score: value, checks: value === null ? null : checks(designed, 0), design: value === null ? null : designed, issues: [], shots: [], seconds: 30, rounds: 3, outputTokens: 4000, calls: [], error: null });
 
 describe("Foundry quality ruler", () => {
-  test("twelve whole-page asks and three small ones, with unique ids", () => {
-    expect(QUALITY_CASES).toHaveLength(15);
-    expect(new Set(QUALITY_CASES.map((item) => item.id)).size).toBe(15);
+  test("twelve whole-page asks, three small ones and two reviews, with unique ids", () => {
+    expect(QUALITY_CASES).toHaveLength(17);
+    expect(new Set(QUALITY_CASES.map((item) => item.id)).size).toBe(17);
+    expect(QUALITY_CASES.filter((item) => item.fit?.review).map((item) => item.id)).toEqual(["review-settings", "review-sidebar"]);
     expect(QUALITY_CASES.slice(0, 12).some((item) => item.id.startsWith("small-"))).toBe(false);
     expect(QUALITY_CASES.filter((item) => item.id.startsWith("small-")).every((item) => item.fit?.surface?.includes("part"))).toBe(true);
   });
@@ -49,6 +50,24 @@ describe("Foundry quality ruler", () => {
     const source = `<div role="status">File saved <button>Undo</button></div>`;
     expect(fitOf(toast, { source, surface: "part" }).score).toBe(1);
     expect(fitOf(toast, { source, surface: "browser" }).misses).toEqual(["asked for part, saved as browser"]);
+  });
+  test("as asked: an open design question is owed two or three options and a pick", () => {
+    const ask = QUALITY_CASES.find((item) => item.id === "small-pin")!.fit!;
+    const options = (names: string[], pick = "") => `<d-compare${pick ? ` recommended="${pick}"` : ""}>${names.map((name) => `<section data-option="${name}"><button>pin</button></section>`).join("")}</d-compare>`;
+    expect(fitOf(ask, { source: options(["On hover", "Always", "On the right"], "On hover"), surface: "part" }).misses).toEqual([]);
+    expect(fitOf(ask, { source: `<button>pin</button>`, surface: "part" }).misses).toEqual(["no options, two or three with a pick are owed"]);
+    expect(fitOf(ask, { source: options(["On hover", "Always"]), surface: "part" }).misses).toEqual(["options with no pick"]);
+  });
+  test("as asked: a review is one sheet with the screen today and parts that each hold Today, options and a pick", () => {
+    const ask = QUALITY_CASES.find((item) => item.id === "review-settings")!.fit!;
+    const part = (name: string, options: string[]) => `<section data-part="${name}" why="What is wrong."><d-compare recommended="${options[1]}">${options.map((option) => `<section data-option="${option}">x</section>`).join("")}</d-compare></section>`;
+    const sheet = (parts: string[]) => `<d-review><section data-today marks=".a | .b | .c | .d">screen</section>${parts.join("")}</d-review>`;
+    expect(fitOf(ask, { source: sheet([part("Rows", ["Today", "A", "B"]), part("Save", ["Today", "A", "B", "C"])]) })).toEqual({ score: 1, misses: [] });
+    // A whole redrawn page is not a review.
+    expect(fitOf(ask, { source: `<d-demesne page="Settings"></d-demesne>` }).score).toBe(0);
+    const four = fitOf(ask, { source: sheet(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"]))) });
+    expect(four.score).toBe(0.5);
+    expect(four.misses).toEqual(["This review has 4 parts; at most 3."]);
   });
   test("the report says how far the pages are what was asked, and names the misses", () => {
     const a = { ...page("a", 90), fit: { score: 0.5, misses: ["2 dialogs, at most 0 asked for"] } }, b = { ...page("b", null), fit: { score: 1, misses: [] } };

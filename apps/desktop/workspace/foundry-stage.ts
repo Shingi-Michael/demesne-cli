@@ -130,7 +130,7 @@ export function watchFoundryStages(root: HTMLElement): () => void {
     if (!stage) return;
     const state = live(stage);
     if (data.demesne === "size" && stage.dataset.grow !== undefined && typeof data.height === "number") {
-      const height = Math.max(120, Math.min(4000, Math.round(data.height))) + (Number(stage.dataset.bar) || 0);
+      const height = Math.max(120, Math.min(6000, Math.round(data.height))) + (Number(stage.dataset.bar) || 0);
       stage.dataset.oh = String(height);
       stage.querySelector<HTMLElement>(".fd-fit")?.style.setProperty("--oh", `${height}px`);
       return;

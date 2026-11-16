@@ -14,7 +14,7 @@
   var doc = document;
 
   var CSS = `
-:where(d-window,d-browser,d-phone,d-demesne,d-message,d-composer,d-card,d-row,d-toggle,d-seg,d-tabs,d-icon,d-avatar,d-chart,d-stat,d-compare,d-mark,d-sidebar){box-sizing:border-box}
+:where(d-window,d-browser,d-phone,d-demesne,d-message,d-composer,d-card,d-row,d-toggle,d-seg,d-tabs,d-icon,d-avatar,d-chart,d-stat,d-compare,d-mark,d-sidebar,d-review,d-crop){box-sizing:border-box}
 d-icon{display:inline-flex;width:var(--size,16px);height:var(--size,16px);flex:none;vertical-align:-.15em}
 d-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
 d-avatar{display:inline-grid;place-items:center;flex:none;width:var(--size,28px);height:var(--size,28px);border-radius:50%;font-size:calc(var(--size,28px)*.4);font-weight:600;color:#fff;letter-spacing:0}
@@ -95,6 +95,29 @@ d-compare.dp-stack{display:flex;flex-direction:column;align-items:stretch;gap:40
 d-compare.dp-stack>.dp-rec{outline:2px solid #f2b6c8;outline-offset:10px;border-radius:12px}
 d-compare.dp-switch>[hidden]{display:none}
 d-compare.dp-one{display:block}d-compare.dp-one>[hidden]{display:none}
+/* A review of something that exists (pass 223 A): the screen as it is with the parts that need work outlined, then each part at its own size. */
+d-review{display:flex;flex-direction:column;gap:var(--space-3);box-sizing:border-box;max-width:1120px;margin:0 auto;padding:var(--space-5) var(--space-4)}
+d-review>section{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
+/* The sheet is as tall as its parts, so the stage that grows with it can shrink again once the app's styles land. */
+body:has(>d-review){min-height:0}
+.dr-tile{position:relative;box-sizing:border-box;min-width:0;border-radius:12px;background:color-mix(in srgb,var(--ink) 7%,var(--paper));padding:var(--space-6) var(--space-4);display:grid;grid-template-columns:minmax(0,1fr);justify-items:safe center;align-content:start;overflow-x:auto}
+.dr-tile>*{max-width:100%}
+.dr-cap,.dr-why{margin:0;font-size:var(--text-sm);color:var(--muted);max-width:78ch}
+.dr-why{color:var(--secondary)}
+.dr-head{display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-4);font-size:var(--text-sm);font-weight:600}
+.dr-head d-mark,.dr-ring d-mark{width:18px;height:18px;font-size:11px}
+d-review d-compare{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:var(--space-3);align-items:stretch}
+d-review d-compare.dr-wide{grid-template-columns:minmax(0,1fr);gap:var(--space-4)}
+d-review d-compare>*{gap:var(--space-2)}
+d-review d-compare>*>.dr-tile{flex:1;padding:var(--space-4) var(--space-3)}
+d-review d-compare>.dp-rec>.dr-tile{box-shadow:0 0 0 2px #f2b6c8}
+d-review .dp-opt{flex-wrap:wrap;font-size:var(--text-xs);font-weight:500;color:var(--secondary)}
+d-review .dr-now>.dp-opt{color:var(--muted);font-weight:400}
+d-review .dp-opt em{padding:0 7px;border-radius:6px;background:color-mix(in srgb,#f2b6c8 24%,transparent);color:color-mix(in srgb,#d9648c 72%,var(--ink));font-size:11.5px;line-height:18px}
+.dr-ring{position:absolute;border-radius:8px;box-shadow:0 0 0 2px #e8799b;pointer-events:none;z-index:5}
+.dr-ring>d-mark{position:absolute;top:-10px;right:-10px}
+d-crop{display:block;position:relative;overflow:hidden;max-width:100%;border-radius:10px}
+.dp-crop{transform-origin:0 0}
 .dp-strip{position:sticky;top:0;z-index:20;display:flex;flex-direction:row;align-items:center;gap:4px;padding:6px;border-radius:12px;background:color-mix(in srgb,var(--paper) 90%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:inset 0 0 0 1px var(--hair);flex-wrap:wrap}
 .dp-strip>button{padding:4px 12px;border-radius:99px;background:transparent;color:var(--secondary);font-size:14px}
 .dp-strip>button.on{background:var(--tone-2);color:var(--ink)}
@@ -240,6 +263,8 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
   var ONE = /[?&]option=(\d+)(&|$)/.exec(location.search);
   define("d-compare", function (el) {
     var rec = el.getAttribute("recommended");
+    // Inside a review the options are small parts on one sheet: <d-review> draws them.
+    if (el.closest("d-review")) return;
     if (STACK && el.getAttribute("layout") !== "side") { stage(el, rec); return; }
     if (STACK) {
       el.classList.add("dp-stack");
@@ -293,6 +318,115 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     var start = rec ? names.findIndex(function (name) { return name.indexOf(rec) === 0; }) : 0;
     show(start < 0 ? 0 : start);
   }
+
+  /// A review of something that exists (pass 223 A), one sheet:
+  /// <section data-today marks="selector | selector"> is the screen as it
+  /// is, and the pieces the marks name (or that carry data-mark="1") are
+  /// outlined and numbered; each <section data-part="Name" why="…"> is one
+  /// part that needs work, at its own size: "Today" first, then the pick
+  /// (edged in pink), then the other options. The names, the numbers and
+  /// the outlines are drawn here, never by the page.
+  var afterLayout = function (watched, job) {
+    job();
+    if (window.ResizeObserver) { var seen = new ResizeObserver(function () { requestAnimationFrame(job); }); [].concat(watched).forEach(function (el) { if (el) seen.observe(el); }); }
+    window.addEventListener("load", job);
+    [300, 1200].forEach(function (ms) { setTimeout(job, ms); });
+  };
+  /// The room inside a box, without its padding.
+  var inner = function (el) { var style = getComputedStyle(el); return el.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0); };
+  define("d-review", function (el) {
+    var sections = Array.prototype.filter.call(el.children, function (child) { return child.tagName === "SECTION"; });
+    var parts = sections.filter(function (section) { return section.hasAttribute("data-part"); });
+    var today = sections.find(function (section) { return section.hasAttribute("data-today"); });
+    if (today) {
+      var tile = doc.createElement("div"); tile.className = "dr-tile"; adopt(today, tile); today.appendChild(tile);
+      var selectors = list(today.getAttribute("marks") || "");
+      var marked = function () {
+        var found = [];
+        selectors.forEach(function (selector, index) { try { var hit = tile.querySelector(selector); if (hit) found.push([index + 1, hit]); } catch (error) {} });
+        Array.prototype.forEach.call(tile.querySelectorAll("[data-mark]"), function (hit) { found.push([hit.getAttribute("data-mark"), hit]); });
+        return found;
+      };
+      var rings = [];
+      var ring = function () {
+        var found = marked(), box = tile.getBoundingClientRect();
+        while (rings.length > found.length) rings.pop().remove();
+        found.forEach(function (pair, index) {
+          var node = rings[index];
+          if (!node) { node = doc.createElement("div"); node.className = "dr-ring"; node.setAttribute("data-chrome", ""); node.innerHTML = "<d-mark></d-mark>"; tile.appendChild(node); rings.push(node); }
+          var at = pair[1].getBoundingClientRect();
+          node.firstChild.textContent = pair[0];
+          node.style.left = at.left - box.left - 3 + "px"; node.style.top = at.top - box.top - 3 + "px";
+          node.style.width = at.width + 6 + "px"; node.style.height = at.height + 6 + "px";
+          node.hidden = !at.width && !at.height;
+        });
+      };
+      afterLayout(tile, ring);
+      if (parts.length) {
+        var cap = doc.createElement("p"); cap.className = "dr-cap"; cap.setAttribute("data-chrome", "");
+        cap.textContent = "As it is today. Outlined: " + (parts.length > 1 ? "the " + parts.length + " parts that most need work, most important first." : "the part that most needs work.");
+        today.appendChild(cap);
+      }
+    }
+    parts.forEach(function (part, index) {
+      var head = doc.createElement("div"); head.className = "dr-head"; head.setAttribute("data-chrome", "");
+      head.innerHTML = "<d-mark>" + (index + 1) + "</d-mark><span>" + esc(part.getAttribute("data-part")) + "</span>";
+      var first = part.firstChild;
+      part.insertBefore(head, first);
+      if (part.getAttribute("why")) { var why = doc.createElement("p"); why.className = "dr-why"; why.setAttribute("data-chrome", ""); why.textContent = part.getAttribute("why"); part.insertBefore(why, first); }
+      Array.prototype.forEach.call(part.querySelectorAll("d-compare"), function (compare) {
+        var rec = compare.getAttribute("recommended");
+        var options = Array.prototype.filter.call(compare.children, function (option) { return option.getAttribute("data-option") || option.getAttribute("title"); });
+        var name = function (option) { return option.getAttribute("data-option") || option.getAttribute("title") || ""; };
+        var now = options.filter(function (option) { return /^\s*today\b/i.test(name(option)); });
+        var best = options.filter(function (option) { return rec && now.indexOf(option) < 0 && name(option).indexOf(rec) === 0; }).slice(0, 1);
+        var rest = options.filter(function (option) { return now.indexOf(option) < 0 && best.indexOf(option) < 0; });
+        now.concat(best, rest).forEach(function (option) {
+          var tile = doc.createElement("div"); tile.className = "dr-tile"; adopt(option, tile);
+          var line = doc.createElement("div"); line.className = "dp-opt"; line.setAttribute("data-chrome", "");
+          line.innerHTML = esc(name(option)) + (best[0] === option ? "<em>recommended</em>" : "") + (option.getAttribute("note") ? "<span>" + esc(option.getAttribute("note")) + "</span>" : "");
+          option.setAttribute("data-option", name(option)); option.removeAttribute("title");
+          option.classList.toggle("dr-now", now.indexOf(option) >= 0); option.classList.toggle("dp-rec", best[0] === option);
+          option.appendChild(line); option.appendChild(tile); compare.appendChild(option);
+        });
+        // Wide parts (a top bar, a whole row of the window) go one under another.
+        // Measured side by side each time, so an early measure (before a stylesheet lands) does not stick.
+        var wide = function () {
+          if (compare.getAttribute("layout") === "stack" || part.getAttribute("layout") === "stack") { compare.classList.add("dr-wide"); return; }
+          compare.classList.remove("dr-wide");
+          var over = options.some(function (option) {
+            var tile = option.lastChild, inside = tile.firstElementChild, crop = tile.querySelector("d-crop");
+            return crop ? crop.__needs > inner(tile) + 1 : !!inside && inside.scrollWidth > tile.clientWidth + 1;
+          });
+          compare.classList.toggle("dr-wide", over);
+        };
+        afterLayout(compare, wide);
+      });
+    });
+  });
+
+  /// One piece of something bigger, at its own size: <d-crop to="#desktop-toolbar">
+  /// lays its inside out at the full design width (width="1100") and shows
+  /// only the piece the selector names, with a little room around it (pad).
+  define("d-crop", function (el) {
+    var body = doc.createElement("div"); body.className = "dp-crop"; adopt(el, body); el.appendChild(body);
+    var width = Number(el.getAttribute("width")) || 1100, pad = el.hasAttribute("pad") ? Number(el.getAttribute("pad")) || 0 : 12, scale = 1;
+    body.style.width = width + "px";
+    var fit = function () {
+      var target = null;
+      try { target = el.getAttribute("to") ? body.querySelector(el.getAttribute("to")) : null; } catch (error) {}
+      var room = el.parentElement ? inner(el.parentElement) : 0;
+      var at = (target || body).getBoundingClientRect(), box = body.getBoundingClientRect();
+      var w = at.width / scale, h = at.height / scale, x = (at.left - box.left) / scale, y = (at.top - box.top) / scale;
+      if (!w || !h) return;
+      var gap = target ? pad : 0, cw = w + gap * 2, ch = h + gap * 2;
+      el.__needs = cw;
+      scale = room && cw > room ? Math.max(0.2, room / cw) : 1;
+      el.style.width = Math.round(cw * scale) + "px"; el.style.height = Math.round(ch * scale) + "px";
+      body.style.transform = "scale(" + scale + ") translate(" + (gap - x) + "px," + (gap - y) + "px)";
+    };
+    afterLayout([body, el.parentElement], fit);
+  });
 
   define("d-stat", function (el) {
     var delta = el.getAttribute("delta") || "";

@@ -28,6 +28,30 @@ A mockup of something that exists (your app, your site, Demesne itself) is drawn
 
 What counts as looking is kept per chat (`apps/daemon/src/foundry-seen.ts`); the check is `checkStart` in `apps/daemon/src/foundry.ts`.
 
+## It reviews what you have, and mocks the parts that matter
+
+Ask Foundry to look at something that exists and show what needs work ("look at my settings page and show me what most needs a redesign", "what in the sidebar needs work?"), for your app, a website or a picture you attach. It reviews before it draws:
+
+1. It looks at the real thing first, as above.
+2. It goes through the screen in the order it critiques its own pages (first impression, usability, hierarchy, consistency, accessibility), rates each problem, and keeps **at most three parts**, most important first.
+3. It saves **one mockup**, a review sheet. On top is your screen as it is today, with each part outlined in pink and numbered. Under it is each part alone, at its own size, with one line on what is wrong: **Today**, then Foundry's pick (edged in pink), then one or two other options. Nothing else on the screen is redrawn.
+4. The chat answer names the parts in order, the pick for each and why. You answer there ("1 and 3 as picked, try 2 again").
+
+When you name the piece yourself ("the top bar feels busy"), it skips the ranking and mocks that piece the same way.
+
+Options are the rule everywhere: unless you ask for one exact thing ("make this button blue"), a design question gets two or three different directions and a pick.
+
+How it is built:
+
+- The sheet is a kit part, `<d-review>` (`apps/desktop/foundry-kit/parts.js`). The model writes the screen (`<section data-today marks="selector | selector">`) and the parts (`<section data-part="Top bar" why="…">` holding a `<d-compare recommended="…">`). Foundry draws the outlines, the numbers, the names and the pick, so the model writes no headings or captions.
+- `<d-crop to="#desktop-toolbar">` shows one piece of something bigger at its own size: its inside is laid out at full width and everything but the piece is cut away. A part of Demesne is the real window, cropped, with one change. Wide pieces stack; small ones sit side by side.
+- A save is held to that shape (`reviewProblem` in `packages/protocol/src/foundry-stage.ts`): a screen as it is today, every part marked on it, one to three parts, each with a why, a Today, two or three options and a pick. A review is always looked at first, is saved as one growing sheet, and is not asked for a demo.
+- Foundry's own look does not judge a review sheet as a poster, and ignores what a crop cuts away.
+- `xvfb-run -a bun scripts/check-foundry-review.ts` checks the sheet in the real app; `apps/desktop/test/foundry-review.dom.test.ts` checks the kit part in a browser (`DEMESNE_DOM_TESTS=1`).
+- Until pass 223 Foundry's instructions called changes to the project's own interface "code work", which steered it away from mocking your app. Showing how it could look is now Foundry's job; building it is code work.
+
+Read about it: [how to conduct a heuristic evaluation](https://www.nngroup.com/articles/how-to-conduct-a-heuristic-evaluation/) (the method), [severity ratings for usability problems](https://www.nngroup.com/articles/how-to-rate-the-severity-of-usability-problems/) (how the three parts are chosen), [parallel and iterative design](https://www.nngroup.com/articles/parallel-and-iterative-design/) (why several options beat polishing one).
+
 ## Rules
 
 - Blue stays the accent. Pink only marks where you are.
@@ -105,7 +129,7 @@ Not every page is a poster, so not every number judges every page:
 
 After a look, the model tries the path the ask is about once with `foundry_try`. Controls off that path are drawn, not built, and may stay still: the model is told never to add a dialog, a form, a screen or data to make one work. (Until pass 222 it was told to click every control and make each dead one do something, which is how "a little dashboard" came back with two dialogs and saved data.)
 
-The quality eval (`scripts/eval-foundry-quality.ts`) has twelve whole-page asks and three small ones (`small-pin`, `small-toast`, `small-toggle`). Beside the look score it prints **As asked**: for the asks that fix something, the share of those points the page keeps (the surface the ask names, how many versions it asked for, and no more dialogs, forms, controls or bytes than the ask needs), with each miss in words.
+The quality eval (`scripts/eval-foundry-quality.ts`) has twelve whole-page asks, three small ones (`small-pin`, `small-toast`, `small-toggle`) and two reviews. Beside the look score it prints **As asked**: for the asks that fix something, the share of those points the page keeps (the surface the ask names, how many versions it asked for, and no more dialogs, forms, controls or bytes than the ask needs), with each miss in words. Open design questions are owed two or three options and a pick, and two review asks (`review-settings`, `review-sidebar`) are owed a review sheet that holds.
 
 When the look finds a fault or a number off target, the fix has to say what it is fixing first. `foundry_edit` takes a `critique`: the rules the page breaks, by number, and what will change. A fix without one is turned back, and a whole new source through `foundry_save` is pointed to `foundry_edit`. A number can stay off target on purpose, with the reason in the critique. The critique is the model's own working: it is not kept and never shown to you. One fix per ask, as before.
 

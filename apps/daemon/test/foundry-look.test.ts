@@ -11,7 +11,8 @@ import { designReport, LOOKS_PER_TURN, lookCommand, lookReport, type FoundryLook
 const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new" };
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64").toString("base64");
-const result = (issues: string[] = []): LookResult => ({ pages: [{ width: 1280, height: 900, issues, png: PNG }, { width: 390, height: 2000, issues: [], png: PNG }], errors: [] });
+/// One look, at the desktop's width: a mockup is not looked at at phone width any more.
+const result = (issues: string[] = [], width = 1280): LookResult => ({ pages: [{ width, height: 900, issues, png: PNG }], errors: [] });
 const context = (turnId: string) => ({ workspaceRoot: "/tmp", signal: new AbortController().signal, turnId });
 
 test("the look's command is the app this daemon was bundled in, or the one named", () => {
@@ -28,32 +29,34 @@ test("the look's command is the app this daemon was bundled in, or the one named
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("the report names each width's problems and says what to do next", () => {
+test("the report names the look's problems and says what to do next", () => {
   const found = lookReport(result(["Text spills out of its box: button \"Today\""]), false);
   expect(found.look["desktop 1280px"]).toEqual(["Text spills out of its box: button \"Today\""]);
-  expect(found.look["phone 390px"]).toBe("no layout problems found");
+  expect(found.look["phone 390px"]).toBeUndefined();
   expect(String(found.look.next)).toContain("one foundry_edit");
-  expect(found.images.map((image) => image.filename)).toEqual(["foundry-look-1280.png", "foundry-look-390.png"]);
+  expect(found.images.map((image) => image.filename)).toEqual(["foundry-look-1280.png"]);
+  // A phone screen is looked at at its own width, and named so.
+  expect(lookReport(result([], 390), false).look["phone 390px"]).toBe("no layout problems found");
   expect(String(lookReport(result(), false).look.next)).toContain("without saving again");
   expect(String(lookReport(result(["x"]), true).look.next)).toContain("last look");
 });
 
 test("a saved HTML page comes back with its look, twice per turn at most; SVG goes without", async () => {
   const store = new DemesneStore(":memory:");
-  const seen: string[] = [];
-  const look: FoundryLook = async (page) => { seen.push(page.source); return result(seen.length === 1 ? ["Scrolls sideways by 120px at 390px wide"] : []); };
+  const seen: string[] = [], phones: unknown[] = [];
+  const look: FoundryLook = async (page) => { seen.push(page.source); phones.push(page.phone); return result(seen.length === 1 ? ["Scrolls sideways by 120px at 1280px wide"] : []); };
   try {
     const looks = new Map<string, number>();
     const save = foundrySaveTool(store, look, looks), edit = foundryEditTool(store, look, looks);
     const first = await save.executeWithArtifacts!({ kind: "html", title: "Garden plan", description: "A test page.", why: W, source: "<main>plan</main>" }, context("t1")) as StructuredToolResult;
     const saved = JSON.parse(first.text);
     expect(saved.version).toBe(1);
-    expect(saved.look["desktop 1280px"]).toEqual(["Scrolls sideways by 120px at 390px wide"]);
-    expect(first.images).toHaveLength(2);
+    expect(saved.look["desktop 1280px"]).toEqual(["Scrolls sideways by 120px at 1280px wide"]);
+    expect(first.images).toHaveLength(1);
     // A fix after a look that found problems says what it fixes first, by rule (step 3).
     await expect(edit.executeWithArtifacts!({ id: saved.id, base_version: 1, edits: [{ find: "plan", replace: "plan!" }] }, context("t1"))).rejects.toThrow("Critique before you fix");
     await expect(save.executeWithArtifacts!({ id: saved.id, base_version: 1, source: "<main>plan!</main>" }, context("t1"))).rejects.toThrow("fix it with foundry_edit");
-    const fixed = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, why: W, critique: "Rule 11: it scrolls sideways at phone width; I will let the row wrap.", edits: [{ find: "plan", replace: "plan!" }] }, context("t1")) as StructuredToolResult;
+    const fixed = await edit.executeWithArtifacts!({ id: saved.id, base_version: 1, why: W, critique: "Rule 11: it scrolls sideways; I will let the row wrap.", edits: [{ find: "plan", replace: "plan!" }] }, context("t1")) as StructuredToolResult;
     expect(seen.at(-1)).toBe("<main>plan!</main>");
     expect(String(JSON.parse(fixed.text).look.next)).toContain("last look");
     // Its own fixes stay in version 1 (pass 197 A: one ask, one version).
@@ -68,6 +71,10 @@ test("a saved HTML page comes back with its look, twice per turn at most; SVG go
     const svg = await save.executeWithArtifacts!({ kind: "svg", title: "Mark", description: "A test page.", recommended: true, why: W, source: "<svg viewBox=\"0 0 1 1\"/>" }, context("t1"));
     expect(typeof svg).toBe("string");
     expect(seen).toHaveLength(3);
+    // Only a phone screen is looked at at a phone's width.
+    expect(phones).toEqual([undefined, undefined, undefined]);
+    await save.executeWithArtifacts!({ kind: "html", title: "Run tracker", description: "A test page.", recommended: true, why: W, surface: { frame: "phone" }, source: "<main>run</main>" }, context("t3"));
+    expect(phones.at(-1)).toBe(true);
   } finally { store.close(); }
 });
 
@@ -90,7 +97,7 @@ test("a model that sees gets the look's pictures in its next round, even without
   let round = 0, pictures = 0, said = "";
   const finished = Promise.withResolvers<void>();
   const app = createDaemonApp({ databasePath: join(root, "state.sqlite"), heartbeat: { enabled: false },
-    foundryLook: async () => ({ pages: [{ width: 1280, height: 800, issues: ["Text cut off in h1"], png }, { width: 390, height: 900, issues: [], png }], errors: [] }),
+    foundryLook: async () => ({ pages: [{ width: 1280, height: 800, issues: ["Text cut off in h1"], png }], errors: [] }),
     processor: { providerId: "test", modelId: "look-test", vision: true, contextCapacity: 32768, maxOutputTokens: 1024, async listModels() { return []; },
       async *stream(messages) {
         if (++round === 1) { yield { type: "tool_call_delta" as const, index: 0, idDelta: "save", nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ kind: "html", title: "Garden plan", description: "A test page.", why: W, source: "<h1>Garden</h1>" }) }; return; }
@@ -104,7 +111,7 @@ test("a model that sees gets the look's pictures in its next round, even without
     await post(`/v1/sessions/${session.id}/turns`, { content: "Mock up a garden plan" });
     await finished.promise;
     expect(said).toContain("Text cut off in h1");
-    expect(pictures).toBe(2);
+    expect(pictures).toBe(1);
   } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -118,8 +125,8 @@ test("the model sees its page's design numbers against targets, by the guide's r
   ]);
   expect(ok).toHaveLength(3);
   expect(designReport(undefined)).toEqual({ off: [], ok: [] });
-  // Only the desktop picture's numbers count; numbers off target make it a page to critique and fix.
-  const looked: LookResult = { pages: [{ width: 1280, height: 900, issues: [], png: PNG, design }, { width: 390, height: 900, issues: [], png: PNG, design: { ...design, sizes: 4 } }], errors: [] };
+  // Numbers off target make it a page to critique and fix.
+  const looked: LookResult = { pages: [{ width: 1280, height: 900, issues: [], png: PNG, design }], errors: [] };
   const report = lookReport(looked, false);
   expect(report.found).toBe(true);
   expect((report.look.design as { off_target: string[] }).off_target).toHaveLength(3);

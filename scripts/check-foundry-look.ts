@@ -16,8 +16,14 @@ const page = `<link rel="stylesheet" href="foundry://kit/base.css">
 const started = Date.now();
 const look = await electronLook(command)({ kind: "html", title: "Garden plan", source: page }, new AbortController().signal);
 assert(look, "the app rendered the page");
-const [desktop, phone] = look.pages;
-assert.equal(desktop?.width, 1280); assert.equal(phone?.width, 390);
+// A mockup is looked at once, at the desktop's width; only a phone screen is looked at at a phone's.
+assert.equal(look.pages.length, 1, "one look, at the desktop's width");
+const [desktop] = look.pages;
+assert.equal(desktop?.width, 1280);
+const asPhone = await electronLook(command)({ kind: "html", title: "Garden plan", source: page, phone: true }, new AbortController().signal);
+assert(asPhone && asPhone.pages.length === 1, "a phone screen is looked at once too");
+const [phone] = asPhone.pages;
+assert.equal(phone?.width, 390);
 const all = (issues: string[]) => issues.join("\n");
 assert.match(all(phone!.issues), /Scrolls sideways by \d+px at 390px wide; too wide: div\.wide/);
 assert.doesNotMatch(all(desktop!.issues), /Scrolls sideways/);
@@ -27,7 +33,7 @@ for (const issues of [desktop!.issues, phone!.issues]) {
   assert.match(all(issues), /Hard to read \(1\.\d:1 contrast, needs 4\.5:1\): p\.faint/);
   assert.match(all(issues), /p "Tomatoes" overlaps p "Basil"/);
 }
-// On a phone only, a small thing to tap is named (WCAG 2.5.5).
+// On a phone screen only, a small thing to tap is named (WCAG 2.5.5).
 assert.match(all(phone!.issues), /Too small to tap \(\d+×\d+px, needs 44×44\): a\.chip/);
 assert.doesNotMatch(all(desktop!.issues), /Too small to tap/);
 assert.doesNotMatch(all(phone!.issues), /the notes/, "a link inside a sentence is exempt");
@@ -48,7 +54,7 @@ const numbers = designReport(design);
 assert.equal(numbers.off.length + numbers.ok.length, 6, "every number has a target");
 assert(lookReport(look, false).look.next, "the look says what to do next");
 console.log("design numbers off target:", numbers.off);
-// The parts draw a real frame: a Demesne mock and a phone render with no faults, and paint the screen.
+// The parts draw a real frame: a Demesne mock and a phone frame render with no faults, and paint the screen.
 const parts = `<html data-theme="dark"><link rel="stylesheet" href="foundry://kit/base.css"><main class="container" style="max-width:1180px"><h1>Calmer settings</h1>
 <d-demesne page="Customize" tabs="Settings"><h2>General</h2><div><d-row title="Keep this computer awake" note="While a chat or Drive runs"><d-toggle on></d-toggle></d-row>
 <d-row title="Open on"><d-seg options="Home|Last chat"></d-seg></d-row></div><d-card slot="cards" title="What changed" icon="sparkles">Three pages fold into one.</d-card></d-demesne>
@@ -70,5 +76,5 @@ for (const [kind, source] of Object.entries(READY)) {
   if (process.env.FOUNDRY_LOOK_SHOTS) for (const shot of ready.pages) await Bun.write(join(process.env.FOUNDRY_LOOK_SHOTS, `${kind}-${shot.width}.png`), Buffer.from(shot.png, "base64"));
   console.log(kind, JSON.stringify(ready.pages.map(({ width, design }) => ({ width, design }))));
 }
-for (const shot of look.pages) assert(Buffer.from(shot.png, "base64").subarray(1, 4).toString() === "PNG", "a picture of each width");
+for (const shot of [...look.pages, ...asPhone.pages]) assert(Buffer.from(shot.png, "base64").subarray(1, 4).toString() === "PNG", "a picture of each look");
 console.log(`Foundry look passed in ${Date.now() - started} ms:`, JSON.stringify(look.pages.map(({ width, issues }) => ({ width, issues }))));

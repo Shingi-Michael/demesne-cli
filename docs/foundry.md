@@ -109,7 +109,7 @@ On the Foundry page the why sits under the description as three quiet lines, one
 
 ## A critic before you see it
 
-After a page is saved, Foundry renders it off screen at 1280 and 390 pixels wide and the model gets the pictures back ([foundry-look.ts](../apps/daemon/src/foundry-look.ts)). Besides layout faults, the look now carries the page's **design numbers** against targets, each tied to the design guide rule it checks:
+After a page is saved, Foundry renders it off screen once, at 1280 pixels wide (a phone screen, surface `phone`, at 390 instead), and the model gets the picture back ([foundry-look.ts](../apps/daemon/src/foundry-look.ts)). Besides layout faults, the look now carries the page's **design numbers** against targets, each tied to the design guide rule it checks:
 
 | Number | Target | Rule |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ When the look finds a fault or a number off target, the fix has to say what it i
 
 The critique runs in a fixed order, so nothing is skipped: first impression (what the eye lands on in two seconds), usability, hierarchy, consistency with the guide and the numbers, then accessibility. Each problem is marked critical, moderate or minor, the fix goes to the first two, and one thing that works is named so the fix doesn't undo it.
 
-The look also holds pages to the accessibility standard (WCAG 2.1 AA): text needs 4.5:1 contrast against what is behind it, or 3:1 from 24px up (18.66px when bold), and at phone width anything to tap must be at least 44 by 44 pixels. A link inside a sentence, a tick box with its label, a switched-off control and a desktop app drawn inside a frame are exempt. The kit's own muted text, status colours and phone-width buttons were adjusted to meet the same numbers.
+The look also holds pages to the accessibility standard (WCAG 2.1 AA): text needs 4.5:1 contrast against what is behind it, or 3:1 from 24px up (18.66px when bold), and on a phone screen anything to tap must be at least 44 by 44 pixels. A link inside a sentence, a tick box with its label, a switched-off control and a desktop app drawn inside a frame are exempt. The kit's own muted text, status colours and phone-width buttons were adjusted to meet the same numbers.
 
 The order of the critique, the states rule and the wording rules come from the checklists in Anthropic's design plugin for Claude ([knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins)).
 

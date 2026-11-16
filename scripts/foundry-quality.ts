@@ -3,7 +3,7 @@
  *
  * A page's score is the mean of six checks, each 0 to 1:
  *   faults   nothing broken: no sideways scroll, clipped, spilling, faint or
- *            overlapping text, console errors (both widths)
+ *            overlapping text, console errors
  *   sizes    a type scale, not a pile of sizes: 3 to 6 sizes
  *   lead     one thing leads: the biggest text at least 2.8x the body
  *   rhythm   spacing from a few steps: the six most used spacings cover
@@ -117,7 +117,7 @@ export const CHECK_WORDS: Record<Check, string> = {
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ramp = (value: number, zero: number, full: number) => clamp((value - zero) / (full - zero));
 
-/// Each check 0..1 from the desktop page's numbers and the faults found at every width.
+/// Each check 0..1 from the page's numbers and the faults found, at the one width it is drawn for.
 /// What a page is decides which checks judge it. app: a mockup of the app
 /// itself, which no headline leads and whose surfaces are the app's own.
 /// part: a small thing at its own size (a button, a row, a card), which is

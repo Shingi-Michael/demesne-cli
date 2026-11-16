@@ -51,7 +51,8 @@ const render = electronLook(lookCommand);
 /// Render one page and turn it into a result's numbers and pictures.
 async function measure(id: string, kind: string, title: string, source: string, surface?: string | null): Promise<Pick<PageResult, "score" | "checks" | "design" | "issues" | "shots">> {
   writeFileSync(join(out, "pages", `${id}.${kind === "svg" ? "svg" : "html"}`), source);
-  const look: LookResult | null = await render({ kind, source, title }, AbortSignal.timeout(60_000)).catch(() => null);
+  // Looked at once, at the size it is drawn for, as the app does after a save.
+  const look: LookResult | null = await render({ kind, source, title, ...(surface === "phone" ? { phone: true } : {}) }, AbortSignal.timeout(60_000)).catch(() => null);
   if (!look?.pages.length) return { score: null, checks: null, design: null, issues: ["The app could not render the page"], shots: [] };
   const shots = look.pages.map((page) => {
     const file = `shots/${id}-${page.width}.png`;

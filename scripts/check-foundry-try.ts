@@ -55,5 +55,5 @@ tried.pictures.forEach((picture, index) => writeFileSync(join(output, `foundry-t
 console.log("PASS: foundry_try runs real steps and catches a dead button, a covered button and a missing one.");
 
 const looked = await electronLook(command)(page, new AbortController().signal);
-assert(looked && looked.pages.length === 2, "the ordinary look still renders both widths");
+assert(looked && looked.pages.length === 1, "the ordinary look still renders the page, once");
 console.log("PASS: the look still works beside it.");

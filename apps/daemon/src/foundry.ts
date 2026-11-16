@@ -33,7 +33,7 @@ Frames (the idea goes inside):
 - <d-browser url="shop.example/orders" width="1100" height="520">…</d-browser> a browser.
 - <d-phone time="9:41">…</d-phone> a phone, 390 wide; its inside scrolls.
 Demesne itself, drawn with the app's own markup and stylesheet, so it starts out identical to the app and your change is the only difference:
-- <d-demesne tabs="Settings|Fix sidebar" chats="Tidy the sidebar|Drive picks" chat="Tidy the sidebar" project="demesne-cli" branch="main" page="Scheduled|Foundry" theme="dark|light" model="GPT-6.1" drive="3 ideas" height="620">main content</d-demesne>. Children with slot="cards" join the app's own card in the right column: <d-card slot="cards" icon="file" title="2 files changed" note="+8 −3"><d-row title="live.ts" note="+2"></d-row></d-card> (cards="none" leaves the column out). Designed at 1100 wide; narrower, it lays out as the app does at that width. Its tabs, sidebar items and chats are buttons: clicking one lights it and shows the child with data-view of the same name (<div data-view="Settings">…</div>), and the open tab takes a clicked chat's name.
+- <d-demesne tabs="Settings|Fix sidebar" chats="Tidy the sidebar|Drive picks" chat="Tidy the sidebar" project="demesne-cli" branch="main" page="Scheduled|Foundry" theme="dark|light" model="GPT-6.1" drive="3 ideas" height="620">main content</d-demesne>. Children with slot="cards" join the app's own card in the right column: <d-card slot="cards" icon="file" title="2 files changed" note="+8 −3"><d-row title="live.ts" note="+2"></d-row></d-card> (cards="none" leaves the column out). Designed at 1100 wide. It is a desktop window: in a narrower page it is drawn smaller. Write no phone-width rules (@media) for it or for what is inside it. Its tabs, sidebar items and chats are buttons: clicking one lights it and shows the child with data-view of the same name (<div data-view="Settings">…</div>), and the open tab takes a clicked chat's name.
 - Change it by its real names; your CSS always wins over the app's: #desktop-sidebar, .sidebar-nav > button, .sidebar-new, .sidebar-search, .sidebar-project, .project-face, .sidebar-session (.selected), .sidebar-release, .sidebar-foot, #desktop-toolbar, .bar-tab (.on), #drive-pill, #app (the panel), #conversation, .turn .request, .answer .markdown, .turn-receipt, #composer .composer-box, .composer-bar, #cards .card. Colours and sizes are the app's tokens: var(--t1) to var(--t4) text, --acc, --ok, --bad, --hair, --tone, --tone2, --surface, --r-sm --r --r-lg. To add or move a piece, do it in a script after load: document.querySelector("d-app .sidebar-nav").append(node).
 - Inside the window the kit does not apply. A plain button (.primary, .danger), input, h1 to h3 and .muted take Demesne's tokens; style anything else from the tokens above.
 Places: any elements marked data-view="Name" are places (siblings; the first shows); anything with data-go="Name" goes there. Give every tab and chat you name a view, so nothing you click is dead.
@@ -620,7 +620,7 @@ const judgedAs = (source: string, surface: unknown): Judged =>
   APP_WINDOW.test(source) || REVIEW_PAGE.test(source) ? "app" : (surface as { frame?: unknown } | undefined)?.frame === "part" ? "part" : "page";
 
 /// After a page is saved: render it, and hand the model the faults
-/// found and a picture at each width. Twice per artifact per turn at most.
+/// found and a picture. Twice per artifact per turn at most.
 async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<string, number>, text: string, context: { turnId?: string; signal: AbortSignal }): Promise<string | StructuredToolResult> {
   let saved: Record<string, unknown>;
   try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return text; }
@@ -629,7 +629,8 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (seen >= LOOKS_PER_TURN) return text;
   const artifact = store.getFoundryArtifact(saved.id);
   if (!artifact) return text;
-  const result = await look({ kind: artifact.kind, source: artifact.source, title: artifact.title }, context.signal).catch(() => null);
+  const phone = (saved.surface as { frame?: unknown } | undefined)?.frame === "phone";
+  const result = await look({ kind: artifact.kind, source: artifact.source, title: artifact.title, ...(phone ? { phone } : {}) }, context.signal).catch(() => null);
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
@@ -654,7 +655,7 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       name: "foundry_try",
       description: "Use a Foundry page the way a person would, to check that it works: run up to 12 steps on its latest version (or one you name) in a hidden window, with real clicks and typing. "
         + "After each step you hear what visibly changed, or that nothing did, or that the control is covered, disabled or not found; then the page's tree (every heading and control: name, place, size, state) and a picture. "
-        + "Use it after making or changing a page that has controls: run the path the ask is about (switch the tab, add the item), at phone width too when layout matters. "
+        + "Use it after making or changing a page that has controls: run the path the ask is about (switch the tab, add the item). "
         + "Steps: {click: name}, {type: text, into?: name}, {key: Enter|Tab|Escape|Backspace|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight}, {scroll: px}, {hover: name}, {wait: ms}. "
         + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). Pages that remember start empty here. "
         + "demo: true runs the version's saved demo instead of steps.",
@@ -663,7 +664,6 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
         properties: {
           id: { type: "string" },
           version: { type: "integer", minimum: 1 },
-          width: { type: "string", enum: ["desktop", "phone"], description: "desktop is 1280px (default), phone is 390px." },
           steps: { type: "array", minItems: 1, maxItems: TRY_STEPS, items: { type: "object" } },
           demo: { type: "boolean", description: "Run the saved demo instead of steps." },
         },
@@ -692,7 +692,9 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       if (seen >= TRIES_PER_TURN) throw new Error(`[limit] This page was tried ${TRIES_PER_TURN} times this turn; answer with what you found`);
       tries.set(key, seen + 1);
       if (tries.size > 200) tries.delete(tries.keys().next().value!);
-      const result = await tryer({ kind: found.kind, source: found.source, title: found.title }, { width: args.width === "phone" ? 390 : 1280, steps }, context.signal);
+      // Tried at the size it is drawn for: a phone screen at a phone's width, everything else at the desktop's.
+      const phone = found.versions.find((item) => item.version === found.version)?.stage?.surface?.frame === "phone";
+      const result = await tryer({ kind: found.kind, source: found.source, title: found.title }, { width: phone ? 390 : 1280, steps }, context.signal);
       if (!result) throw new Error("[unavailable] The page could not be tried just now");
       if (!result.steps.length && result.errors.length) throw new Error(`[unavailable] ${result.errors.join("; ")}`);
       const report = tryReport(result);

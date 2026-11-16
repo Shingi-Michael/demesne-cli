@@ -28,8 +28,9 @@ test("foundry_try runs checked steps on the page and reports each one, the tree 
       tree: ['heading "Groceries"  0,0 390×32'], errors: [], pictures: [{ after: "click “Share”", png: PNG }] };
   });
   try {
-    const page = store.saveFoundryArtifact({ title: "Groceries", kind: "html", source: "<h1>Groceries</h1>" });
-    const result = await run({ id: page.id, width: "phone", steps: [{ click: "Add" }, { click: "Share" }, { key: "enter" }] }) as { text: string; images: { filename: string }[] };
+    // A phone screen is tried at a phone's width; there is no width to choose.
+    const page = store.saveFoundryArtifact({ title: "Groceries", kind: "html", source: "<h1>Groceries</h1>", stage: { surface: { frame: "phone" } } });
+    const result = await run({ id: page.id, steps: [{ click: "Add" }, { click: "Share" }, { key: "enter" }] }) as { text: string; images: { filename: string }[] };
     expect(plans[0]).toEqual({ page: "Groceries", width: 390, steps: [{ click: "Add" }, { click: "Share" }, { key: "Enter" }] });
     const said = JSON.parse(result.text);
     expect(said.steps).toEqual(['✓ click “Add”: button "Add" → new text “Milk”', '✕ click “Share”: button "Share" is covered by nav "Tab bar", so a person can\'t reach it']);

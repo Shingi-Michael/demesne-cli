@@ -512,11 +512,6 @@ function context() {
   };
 }
 let sidebarSignature = "";
-/// "2h", "yesterday", "Oct 3": the quiet time beside a settled session.
-const shortAge = (date: string) => {
-  const ms = Date.now() - Date.parse(date);
-  return ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : ms < 86_400_000 ? `${Math.floor(ms / 3_600_000)}h` : ms < 172_800_000 ? "yesterday" : ms < 7 * 86_400_000 ? `${Math.floor(ms / 86_400_000)}d` : new Date(date).toLocaleDateString([], { month: "short", day: "numeric" });
-};
 /// The full time, for a row's tooltip.
 const fullTime = (date: string) => new Date(date).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 /// When each chat was last looked at (its updatedAt then): a chat that has
@@ -609,7 +604,6 @@ let unfoldingGroup = "";
 const deletedSessions = new Set<string>();
 const ICON_BRANCH = '<svg class="ico sidebar-branch" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
 const ICON_ARCHIVE = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>';
-const ICON_BELL = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>';
 /// The row whose Bring it back words are unfolded under it.
 let backOpenFor: string | null = null;
 const ICON_PR = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8"/><path d="M18 16V9a3 3 0 0 0-3-3h-3"/><path d="m14 4-2 2 2 2"/></svg>';
@@ -869,13 +863,14 @@ function renderSidebar() {
   const matches = (item: typeof sessions[number]) => !query || titleOf(item).toLowerCase().includes(query) || Boolean(item.workspace?.toLowerCase().includes(query));
   const sorted = (items: typeof sessions) => sidebarView.sort === "name" ? [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))) : items;
   const whereWords = (item: typeof sessions[number]) => { const project = projectFor(item); return project ? projectLabel(project) : "Just a chat"; };
-  // One line per chat: a mark for its state, its title, and on the right its
-  // time (or its project, when the list is by date or state). Pointing at it
-  // shows Pin and Archive there instead. The tooltip and the accessible name
-  // say in words what the mark shows.
+  // One line per chat: a mark for its state and its title. A quiet chat ends
+  // there; one with something to say ends in its word, and a list by date or
+  // state names the project. Its time and branch are on the card you get by
+  // resting on it. Pointing at it shows Pin and Archive. The tooltip and the
+  // accessible name say in words what the mark shows.
   const row = (item: typeof sessions[number], right: string, nested: boolean) => {
     const id = item.id, title = titleOf(item), tone = tones.get(id) ?? "", selected = id === current?.id && !pageOpen;
-    const about = STATE_WORDS[tone] ?? "", branch = branches.get(id);
+    const about = STATE_WORDS[tone] ?? "";
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
     const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
@@ -885,14 +880,13 @@ function renderSidebar() {
     const back = backOf(item) === "back" && !selected;
     const say = back ? "back now" : selected && tone !== "working" && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
     const side = say || (pr || (id === current?.id && !inSession()) ? "" : right);
-    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${branch ? ICON_BRANCH : ""}${side ? `<span class="sidebar-session-age${say ? ` sidebar-say-state ${back ? "warn" : tone}` : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}`)
+    const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${side ? `<span class="sidebar-session-age${say ? ` sidebar-say-state ${back ? "warn" : tone}` : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}${side ? " has-side" : ""}`)
       .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
     // archives with Delete on the row, so they stay out of the tab order.
     const pin = btn("pin-session", ICON_PIN, { id, pinned: !item.pinned }, `sidebar-pin${item.pinned ? " on" : ""}`).replace("<button ", `<button title="${item.pinned ? "Unpin" : "Pin"}" aria-label="${h(`${item.pinned ? "Unpin" : "Pin"} ${title}`)}" tabindex="-1" `);
     const archive = tone === "working" ? "" : btn("delete-session", ICON_ARCHIVE, { id }, "sidebar-delete").replace("<button ", `<button title="Archive" aria-label="Archive ${h(title)}" tabindex="-1" `);
-    // Bring it back later: the bell unfolds a few times under the row.
-    const bell = btn("back-open", ICON_BELL, { id }, `sidebar-bell${backOpenFor === id ? " on" : ""}`).replace("<button ", `<button title="Bring it back later" aria-label="${h(`Bring ${title} back later`)}" aria-expanded="${backOpenFor === id}" tabindex="-1" `);
+    // Bring it back later is in the right-click menu: a few times unfold under the row.
     const backLine = backOpenFor === id ? `<div class="sidebar-back-line" role="group" aria-label="Bring it back"><span class="sidebar-back-label">Bring it back</span>${backChoices(new Date(), pr?.state === "open" ? pr.number : undefined).map((choice) => btn("bring-back", h(choice.label), { id, at: choice.at }, "sidebar-back-opt")).join("")}</div>` : "";
     // Its pull request sits where the time would: #N, a blue dot for news
     // since you looked, purple once merged. The number unfolds the news.
@@ -911,7 +905,7 @@ function renderSidebar() {
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
     if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${bell}${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   // The agents: a letter tile, the name, and how it is (a dot
@@ -951,7 +945,7 @@ function renderSidebar() {
     const mine = state!.threads.list.filter((fix) => fix.from === id && fix.status !== "discarded");
     return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-open", `${threadRing(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id }, `sidebar-thread${state!.threads.open === fix.id && !state!.threads.closed ? " on" : ""}`)).join("")}</div>` : "";
   };
-  const groupRows = (key: string, items: typeof sessions, right: (item: typeof sessions[number]) => string, nested: (item: typeof sessions[number]) => boolean = () => false) => {
+  const groupRows = (key: string, items: typeof sessions, nested: (item: typeof sessions[number]) => boolean = () => false, right: (item: typeof sessions[number]) => string = () => "") => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
     const rows = items.slice(0, limit).map((item) => row(item, right(item), nested(item)) + threadLines(item.id));
     if (items.length > limit) rows.push(btn("project-more", `Show ${items.length - limit} more`, { key }, "sidebar-more"));
@@ -991,7 +985,7 @@ function renderSidebar() {
   const pinnedList = document.getElementById("sidebar-pinned");
   if (pinnedList) {
     pinnedList.hidden = !pinnedChats.length;
-    pinnedList.innerHTML = pinnedChats.length ? group("pinned", "Pinned", groupRows("pinned", pinnedChats, (item) => shortAge(item.updatedAt)), 0) : "";
+    pinnedList.innerHTML = pinnedChats.length ? group("pinned", "Pinned", groupRows("pinned", pinnedChats), 0) : "";
   }
   const rest = listed.filter((item) => !item.pinned);
   const groups: string[] = [];
@@ -1007,7 +1001,7 @@ function renderSidebar() {
       for (const child of found.filter(nested)) matching.splice(matching.findIndex(parent => parent.id === parentOf.get(child.id)) + 1, 0, child);
       if (query && !projectMatches && !matching.length) continue;
       const key = `p:${path}`, expanded = isOpen(key), active = path === projectWorkspace;
-      const rows = groupRows(key, matching, (item) => shortAge(item.updatedAt), nested);
+      const rows = groupRows(key, matching, nested);
       if (active && !query) rows.push(reviewLine());
       // The whole line is the fold, its folder shut or open with it; + starts
       // a chat in the project.
@@ -1039,7 +1033,7 @@ function renderSidebar() {
     }
     // Chats with no project follow, under Just a chat.
     const plainChats = sorted(rest.filter((item) => !item.workspace && matches(item)));
-    if (plainChats.length) plainGroup = group("plain", "Just a chat", groupRows("plain", plainChats, (item) => shortAge(item.updatedAt)), plainChats.length);
+    if (plainChats.length) plainGroup = group("plain", "Just a chat", groupRows("plain", plainChats), plainChats.length);
   } else {
     // By date or by state, every chat in one list, each naming its project.
     // The open project's branches to review lead it.
@@ -1053,7 +1047,7 @@ function renderSidebar() {
     for (const [label, items] of buckets) {
       if (!items.length) continue;
       const key = `${sidebarView.group === "date" ? "d" : "s"}:${label}`;
-      groups.push(group(key, label, groupRows(key, items, whereWords), items.length));
+      groups.push(group(key, label, groupRows(key, items, undefined, whereWords), items.length));
     }
   }
   list.innerHTML = groups.length || plainGroup || pinnedChats.length ? groups.join("") : `<p class="sidebar-empty">${query ? "No matching conversations or projects" : "No chats yet"}</p>`;
@@ -1127,7 +1121,7 @@ function renderRowMenu() {
   } else if (rowMenu.kind === "chat") {
     const chat = state.sessions.find((one) => one.id === (rowMenu as { id: string }).id);
     const working = chat?.status === "running" || chat?.status === "queued";
-    menu.innerHTML = item("Open", "open") + item("Rename", "rename") + item(chat?.pinned ? "Unpin" : "Pin", "pin") + line
+    menu.innerHTML = item("Open", "open") + item("Rename", "rename") + item(chat?.pinned ? "Unpin" : "Pin", "pin") + item("Bring it back later", "back") + line
       + (working ? '<p class="row-menu-note">It is working. Stop it to archive or delete it.</p>'
         : item("Archive", "archive") + (rowMenuSure ? item("Delete forever?", "delete", "", "danger sure") + '<p class="row-menu-note">The chat and its history are gone for good.</p>' : item("Delete…", "delete", "", "danger")));
   } else {
@@ -1189,6 +1183,7 @@ async function rowMenuAction(what: string): Promise<unknown> {
     if (what === "open") return goChat(id);
     if (what === "rename") { renaming = id; sidebarSignature = ""; renderSidebar(); return; }
     if (what === "pin") return dispatch("pin-session", { id, pinned: !chat?.pinned });
+    if (what === "back") return dispatch("back-open", { id });
     if (what === "archive") return dispatch("delete-session", { id });
     if (what === "delete") {
       deletedSessions.add(id); renderSidebar();

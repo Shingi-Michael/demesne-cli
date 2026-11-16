@@ -760,12 +760,15 @@ try {
   await page.keyboard.press("Control+1");
   await until(async () => (await current())?.includes(sessionId), "Ctrl+1 goes back to the first tab");
   await textIncludes(completed);
-  // Bring it back later: the bell beside Pin and Archive unfolds a few times;
+  // Bring it back later: right-click the chat, and a few times unfold under it;
   // the chat leaves the list until then, and comes back in its project saying "back now".
   const asideRow = page.locator(`#sidebar-projects .sidebar-item:not(:has([data-args*='${sessionId}']))`).first();
   const asideId = JSON.parse(await asideRow.locator(".sidebar-session").getAttribute("data-args") ?? "{}").id as string;
   await asideRow.hover();
-  await asideRow.locator(".sidebar-bell").click();
+  assert.deepEqual(await asideRow.locator(".sidebar-row-actions button").evaluateAll((all) => all.map((one) => one.className.split(" ")[0])), ["sidebar-pin", "sidebar-delete"], "pointing at a chat shows Pin and Archive, nothing else");
+  assert.equal(await asideRow.locator(".sidebar-session-age").count(), 0, "a quiet chat is only its title: no time on the row");
+  await asideRow.locator(".sidebar-session").click({ button: "right" });
+  await page.locator("#row-menu .row-menu-item", { hasText: "Bring it back later" }).click();
   await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).waitFor();
   await capture("02-bring-back");
   await page.locator(".sidebar-back-line .sidebar-back-opt", { hasText: "in an hour" }).click();

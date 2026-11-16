@@ -2691,45 +2691,67 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
   .desktop :is(#briefing, #drive-pill) .bf-ring.work .fl { animation: bf-ring-breathe 2.4s ease-in-out infinite; }
 }
 @keyframes bf-ring-breathe { 50% { stroke: color-mix(in srgb, var(--acc) 60%, white); } }
-/* The plan checklist (pass 172): a ribbon at the top of the turn while it
-   runs, segments filling in green, the step it's on, and Checklist n/N ▾ for
-   a plain list of the steps. A finished turn folds it into a small pill. */
+/* The plan checklist (pass 226 A): one soft glass ribbon at the top of the
+   turn while it runs. It holds the name of the step it is on, which step
+   that is, and a fine line under them that fills in green a step at a time.
+   A click unfolds a plain list of the steps inside it. A finished turn
+   shrinks it into a small pill. Silver is "now", green is "done". */
 /* Its left edge is the answer's text (past the d. mark), so the ribbon and
    its list line up with the composer box below. */
-.desktop .plan-ribbon { position: sticky; top: 0; z-index: 3; display: flex; flex-direction: column; gap: 6px; padding: 6px 0 4px; margin-left: 32px; }
-.desktop .pr-bar { display: flex; align-items: center; gap: 12px; min-height: 40px; box-sizing: border-box; padding: 6px 6px 6px 12px; border: 1px solid var(--line2, var(--hair2)); border-radius: 12px; background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4); box-shadow: 0 8px 24px -14px rgb(0 0 0 / 0.45); }
-.desktop .pr-segs { display: flex; gap: 4px; flex: none; align-items: center; }
-.desktop .pr-segs i { position: relative; width: 24px; height: 6px; border-radius: 3px; background: var(--hair2); overflow: hidden; transition: background-color 400ms var(--ease), width 400ms var(--ease); }
-.desktop .pr-segs i.d { background: var(--ok); }
-.desktop .pr-segs i.n { width: 34px; background: color-mix(in srgb, var(--acc) 28%, transparent); }
-.desktop .pr-segs i.n::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--acc), transparent); animation: pr-slide 1.4s linear infinite; animation-delay: var(--pr-phase, 0ms); }
-/* (The phase follows the clock, so the light carries on across redraws.) */
-@keyframes pr-slide { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
-.desktop .pr-cur { min-width: 0; flex: 1; font-size: 12.5px; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.desktop .pr-ck { all: unset; flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 9px; border-radius: 8px; font-size: 12px; color: var(--t2); box-shadow: inset 0 0 0 1px var(--hair2); cursor: pointer; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
-.desktop .pr-ck:hover, .desktop .plan-ribbon.open .pr-ck { background: var(--tone2); color: var(--t1); }
-.desktop .pr-ck:focus-visible, .desktop .pr-pill:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-.desktop .pr-ck svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.desktop .pr-ct { color: var(--t3); font-variant-numeric: tabular-nums; }
-.desktop .pr-ar { font-size: 10px; display: inline-block; transition: transform 200ms var(--ease); }
-.desktop .plan-ribbon.open .pr-ck .pr-ar { transform: rotate(180deg); }
-.desktop .pr-list { max-height: calc(8 * 29px + 12px); overflow-y: auto; box-sizing: border-box; padding: 6px; border: 1px solid var(--line2, var(--hair2)); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 36px -18px rgb(0 0 0 / 0.5); scrollbar-width: thin; }
-.desktop .pr-row { display: flex; align-items: center; gap: 10px; min-height: 29px; box-sizing: border-box; padding: 5px 6px; font-size: 12.5px; color: var(--t3); }
+.desktop .plan-ribbon { position: sticky; top: 0; z-index: 3; padding: 6px 0 4px; margin-left: 32px; }
+.desktop .pr-card { box-sizing: border-box; max-width: 100%; border-radius: 13px; overflow: hidden; background: color-mix(in srgb, var(--surface2) 78%, transparent); backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3); box-shadow: inset 0 0 0 1px var(--hair), 0 12px 28px -18px rgb(0 0 0 / 0.5); transition: background-color 160ms var(--ease), border-radius 520ms var(--ease); }
+.desktop .pr-card:hover { background: color-mix(in srgb, var(--surface3) 84%, transparent); }
+.desktop .pr-bar { all: unset; box-sizing: border-box; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; width: 100%; padding: 7px 14px 10px; cursor: pointer; }
+.desktop .pr-bar:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; border-radius: 13px; }
+/* The name sits in a window one line tall, so it can roll when the step changes. */
+.desktop .pr-cur { grid-column: 2; position: relative; min-width: 0; height: 20px; overflow: hidden; }
+.desktop .pr-name, .desktop .pr-was { display: block; font-size: 13px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--t1); }
+.desktop .pr-was { position: absolute; inset: 0; color: var(--t2); opacity: 0; pointer-events: none; }
+.desktop .plan-ribbon:not(.ended) .pr-name { --pr-dim: color-mix(in srgb, var(--t1) 70%, transparent); background: linear-gradient(100deg, var(--pr-dim) 0%, var(--pr-dim) 42%, var(--t1) 50%, var(--pr-dim) 58%, var(--pr-dim) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.desktop .pr-ct { grid-column: 3; margin-left: 11px; font-size: 12px; color: var(--t3); white-space: nowrap; font-variant-numeric: tabular-nums; transition: color 160ms var(--ease); }
+.desktop .pr-card:hover .pr-ct { color: var(--t2); }
+/* The fine line: one part per step, green where done, a light on the one it
+   is on. A part fills from its left when its step is done. */
+.desktop .pr-segs { grid-column: 1 / -1; display: flex; gap: 4px; margin-top: 6px; }
+.desktop .pr-segs i { position: relative; flex: 1; height: 3px; border-radius: 2px; overflow: hidden; --pr-rest: var(--tone2); background: linear-gradient(var(--ok), var(--ok)) left / 0% 100% no-repeat, var(--pr-rest); transition: background-size 620ms var(--ease); }
+.desktop .pr-segs i.d { background-size: 100% 100%, auto; }
+.desktop .pr-segs i.n { --pr-rest: var(--hair2); }
+.desktop .pr-segs b { display: none; }
+.desktop .pr-segs i.n b { display: block; position: absolute; inset: 0 auto 0 0; width: 45%; background: linear-gradient(90deg, transparent, var(--t1), transparent); }
+@keyframes pr-slide { from { transform: translateX(-110%); } to { transform: translateX(330%); } }
+/* The list folds open inside the ribbon. Its space is on the rows, never on
+   the list, so a shut list has no height at all. */
+.desktop .pr-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 340ms var(--ease); }
+.desktop .plan-ribbon.open .pr-fold { grid-template-rows: 1fr; }
+.desktop .pr-list { display: flex; flex-direction: column; min-height: 0; max-height: calc(8 * 27px + 9px); overflow: hidden auto; box-sizing: border-box; padding: 0 14px; scrollbar-width: thin; }
+.desktop .pr-row { flex: none; display: flex; align-items: center; gap: 10px; min-height: 27px; box-sizing: border-box; font-size: 12.5px; color: var(--t3); }
+.desktop .pr-row:last-child { margin-bottom: 9px; }
+.desktop .pr-lab { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 300ms var(--ease); }
 .desktop .pr-row.d .pr-lab { color: var(--t2); }
 .desktop .pr-row.n .pr-lab { color: var(--t1); }
-.desktop .pr-bx { width: 15px; height: 15px; flex: none; border-radius: 4px; display: grid; place-items: center; box-sizing: border-box; box-shadow: inset 0 0 0 1.5px var(--hair2); font-size: 10px; line-height: 1; color: var(--ink, #132018); }
-.desktop .pr-row.d .pr-bx { background: var(--ok); box-shadow: none; color: rgb(var(--ink-base, 19 32 24)); }
-.desktop .pr-row.n .pr-bx { box-shadow: inset 0 0 0 1.5px var(--acc); }
-.desktop .pr-row.n .pr-bx::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--acc); animation: pr-pulse 2.4s ease-in-out infinite; }
-@keyframes pr-pulse { 50% { opacity: 0.25; } }
+.desktop .pr-bx { width: 14px; height: 14px; flex: none; border-radius: 4.5px; display: grid; place-items: center; box-sizing: border-box; box-shadow: inset 0 0 0 1.5px var(--hair2); transition: background-color 300ms var(--ease), box-shadow 300ms var(--ease); }
+.desktop .pr-row.d .pr-bx { background: var(--ok); box-shadow: none; }
+.desktop .pr-row.d .pr-bx::after, .desktop .pr-ok::after { content: ""; width: 10px; height: 10px; background: rgb(var(--ink-base, 19 32 24)); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2.3 5.3 4.2 7.1 7.7 3.1' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2.3 5.3 4.2 7.1 7.7 3.1' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.desktop .pr-row.n .pr-bx { box-shadow: inset 0 0 0 1.5px var(--t2); }
+.desktop .pr-row.n .pr-bx::after { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--t1); }
+/* Ended: the same ribbon, shrunk to a pill that still opens the list. A shut
+   list adds nothing to the pill's width; an open one widens it to fit. */
 .desktop .plan-ribbon.ended { position: static; padding: 0; }
-.desktop .pr-pill { all: unset; align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 8px; border-radius: 99px; font-size: 12.5px; color: var(--t2); background: var(--ok-soft, var(--tone)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 25%, transparent); cursor: pointer; }
-.desktop .pr-pill b { font-weight: 500; color: var(--t1); }
-.desktop .pr-ok { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--ok); color: rgb(var(--ink-base, 19 32 24)); font-size: 10px; }
-.desktop .pr-pill .pr-ar { color: var(--t3); font-size: 11.5px; }
-.desktop .pr-pill:hover .pr-ar { color: var(--t1); }
-@media (max-width: 560px) { .desktop .pr-lt { display: none; } .desktop .pr-segs i { width: 12px; } .desktop .pr-segs i.n { width: 18px; } }
-@media (prefers-reduced-motion: reduce) { .desktop .pr-segs i.n::after, .desktop .pr-row.n .pr-bx::after { animation: none; } }
+.desktop .plan-ribbon.ended .pr-card { width: fit-content; border-radius: 17px; box-shadow: inset 0 0 0 1px var(--hair); }
+.desktop .plan-ribbon.ended .pr-bar { padding: 7px 13px; }
+.desktop .plan-ribbon.ended.all .pr-bar { padding-left: 9px; }
+.desktop .plan-ribbon.ended :is(.pr-segs, .pr-ct) { display: none; }
+.desktop .plan-ribbon.ended .pr-name { font-size: 12.5px; }
+.desktop .pr-ok { grid-column: 1; display: none; place-items: center; width: 16px; height: 16px; margin-right: 8px; border-radius: 50%; background: var(--ok); }
+.desktop .plan-ribbon.ended.all .pr-ok { display: grid; }
+.desktop .plan-ribbon.ended:not(.open) .pr-fold { width: 0; min-width: 100%; }
+.desktop .plan-ribbon.ended .pr-list { box-shadow: inset 0 1px 0 var(--hair); }
+.desktop .plan-ribbon.ended .pr-row:first-child { margin-top: 6px; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop .plan-ribbon:not(.ended) .pr-name { animation: shine 3s ease-in-out infinite alternate; }
+  .desktop .pr-segs i.n b { animation: pr-slide 1.9s ease-in-out infinite; }
+}
+@media (prefers-reduced-motion: reduce) { .desktop :is(.pr-card, .pr-fold, .pr-lab, .pr-bx, .pr-segs i) { transition: none; } }
 /* Wait and watch (pass 174): a wait_for step shimmers while it waits, with a
    thin line running under it; a wait that ended badly shows its last lines. */
 .desktop .tool-row.wait-row.running { position: relative; overflow: hidden; }

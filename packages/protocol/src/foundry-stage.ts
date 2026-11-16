@@ -205,6 +205,9 @@ export function reviewProblem(source: string): string | null {
   const review = reviewOf(source);
   if (!review) return null;
   const SHAPE = 'Hint: <d-review><section data-today marks="selector | selector">the screen as it is</section><section data-part="Name" why="what is wrong, in one line"><d-compare recommended="B"><section data-option="Today">…</section><section data-option="A">…</section><section data-option="B">…</section></d-compare></section></d-review>';
+  // Real models built the whole sheet in a script three times in five (pass 223 runs): say that, not "has none".
+  const scripted = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].some((match) => /<section\b[^>]*\bdata-(today|part)\b/i.test(match[1]!) || REVIEW_PAGE.test(match[1]!));
+  if (scripted && (!review.today || !review.parts.length)) return `[review] This review is built by a script, so its parts cannot be read. Hint: write <d-review> and every <section> as plain markup in the page, in the shape below; a script may still fill or change what is inside a section. ${SHAPE.replace(/^Hint: /, "")}`;
   if (!review.today) return `[review] A review starts with the screen as it is today, and this one has none. ${SHAPE}`;
   if (!review.parts.length) return `[review] This review names no part that needs work. ${SHAPE}`;
   if (review.parts.length > MAX_REVIEW_PARTS) return `[too_many_parts] This review has ${review.parts.length} parts; at most ${MAX_REVIEW_PARTS}. Hint: keep the ${MAX_REVIEW_PARTS} that most need work, most important first, and name the rest in the chat`;

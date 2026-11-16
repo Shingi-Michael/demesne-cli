@@ -614,6 +614,23 @@ describe("a review of something that exists (pass 223 A)", () => {
       expect(saved.message).toContain("name the parts in order, your pick for each and why");
       // Its drawings have buttons, and a review still needs no demo.
       expect(saved.message).not.toContain("no demo");
+      expect(saved.message).not.toContain("shows one part");
+    } finally { store.close(); }
+  });
+
+  test("a review of one part is asked once whether a second piece needs work as much", async () => {
+    // A real model kept one part in both reviews of the pass 223 run; the ask is for the parts that matter.
+    const store = new DemesneStore(":memory:");
+    try {
+      const one = review([part("Save", ["Today", "Saves as you switch", "A bar that follows you"])]);
+      const turn = make(store);
+      const saved = JSON.parse(await foundrySaveTool(store).execute(input(one), turn));
+      expect(saved.message).toContain("This review shows one part. Unless the ask named that piece, add the next one or two");
+      expect(saved.message).toContain("name the parts in order");
+      // Said once: an edit that keeps one part is the model's answer, not a reason to ask again.
+      const edited = JSON.parse(await foundryEditTool(store).execute({ id: saved.id, base_version: 1, edits: [{ find: "Saves as you switch", replace: "Saves when you switch", all: true }], note: "wording" }, turn));
+      expect(edited.message).toContain("name the parts in order");
+      expect(edited.message).not.toContain("shows one part");
     } finally { store.close(); }
   });
 

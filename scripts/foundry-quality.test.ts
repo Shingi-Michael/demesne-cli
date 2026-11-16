@@ -21,7 +21,10 @@ describe("Foundry quality ruler", () => {
     expect(checks({ ...pin, sizes: 12 }, 0, "part").sizes).toBe(0);
     // The old flag still means an app window.
     expect(checks(pin, 0, true).lead).toBe(1);
-    expect(checks(pin, 0, true).sizes).toBe(0.5);
+    // A mockup of the app is as quiet as the app: one size and two colours are its own look.
+    expect(checks(pin, 0, true).sizes).toBe(1);
+    expect(checks(pin, 0, "app").colours).toBe(1);
+    expect(checks(pin, 0).colours).toBe(0.4);
   });
   test("what a page holds is counted from its markup, not its scripts", () => {
     const held = holds(`<style>button{}</style><d-compare><section data-option="Today"></section><section data-option="Quiet"></section><section data-option='Bare'></section></d-compare>`

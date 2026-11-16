@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import type { StructuredToolResult } from "./artifacts.ts";
-import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 
@@ -47,7 +47,7 @@ Anywhere:
 - <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: on the Foundry page each option gets its own stage, named on the line above it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
 A review of something that exists ("look at this and show me what needs work"), one page:
-- <d-review><section data-today marks="#desktop-toolbar | .sidebar-nav">the screen as it is</section><section data-part="Top bar" why="Three tabs, the Drive pill and the menu compete in one row."><d-compare recommended="Fewer"><section data-option="Today">…</section><section data-option="Fewer things">…</section><section data-option="Two rows">…</section></d-compare></section>…</d-review>. marks: one selector per part, in order (or data-mark="1" on the piece); Foundry outlines and numbers them, names each part and option, and puts your pick beside Today. At most three parts; each has Today and two or three options. Write no headings, numbers or captions yourself. Its why needs only starts_from: each part's own why says the rest.
+- <d-review><section data-today marks="#desktop-toolbar | .sidebar-nav">the screen as it is</section><section data-part="Top bar" why="Three tabs, the Drive pill and the menu compete in one row."><d-compare recommended="Fewer"><section data-option="Today">…</section><section data-option="Fewer things">…</section><section data-option="Two rows">…</section></d-compare></section>…</d-review>. marks: one selector per part, in order (or data-mark="1" on the piece); Foundry outlines and numbers them, names each part and option, and puts your pick beside Today. Two or three parts (one only when nothing else comes close), each the smallest piece that holds the problem, with Today and two or three options that show that piece alone (<d-crop> cuts it out of a window). why is one plain line on what is wrong. Write no headings, numbers or captions yourself. Its why needs only starts_from: each part's own why says the rest.
 - <d-crop to="#desktop-toolbar" width="1100">…a whole window or screen…</d-crop> shows only the piece the selector names, at its own size: inside a part, draw the screen once per option and crop each to the piece, so every option is the real piece with one change.
 The parts are the frame; the idea inside is yours to design.`;
 
@@ -261,6 +261,9 @@ const reviewStage = (stage: FoundryStage | null, source: string): FoundryStage |
   REVIEW_PAGE.test(source) ? { ...(stage ?? {}), surface: { frame: "page" } } : stage;
 /// What a saved review is told: its answer is the parts and the picks.
 const REVIEW_ANSWER = "In your answer, name the parts in order, your pick for each and why, in a few lines; the person answers there.";
+/// A real model kept one part per review (pass 223 run); the ask is for the parts that matter. Said once, on the first save.
+const ONE_PART = "This review shows one part. Unless the ask named that piece, add the next one or two that need work nearly as much with foundry_edit before you answer; if nothing else comes close, say so in your answer.";
+const reviewSaid = (source: string, first: boolean) => `${first && reviewOf(source)?.parts.length === 1 ? ` ${ONE_PART}` : ""} ${REVIEW_ANSWER}`;
 
 /// A page that draws a button only a demo needs (Replay, Play demo, Next
 /// step) is sent back once per ask: the demo belongs to Foundry. A second
@@ -435,7 +438,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? ` ${REVIEW_ANSWER}` : why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? reviewSaid(input.source, true) : why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -536,7 +539,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? ` ${REVIEW_ANSWER}` : why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? reviewSaid(source, false) : why ? ` ${WHY_ANSWER}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);

@@ -124,8 +124,9 @@ export const DESIGN_TARGETS: readonly { key: string; rule: number; ok: (value: n
 /// surfaces are the app's own, which the numbers leave out. Those two
 /// targets do not judge it. Nor do they judge a part (surface part: a button,
 /// a row, a toast at its own size): told that nothing leads and the screen is
-/// mostly blank, a model grows the small thing into a page. A part may also
-/// hold one text size and two colours.
+/// mostly blank, a model grows the small thing into a page. Both may also
+/// hold one text size and two colours: the app's own look is quiet, and told
+/// to add colours a model paints a mockup of it.
 export const APP_WINDOW = /<d-demesne\b/i, NOT_FOR_APP_WINDOWS = ["lead", "surface"], SMALL_IS_FINE = ["sizes", "colours"];
 export type Judged = "page" | "app" | "part";
 export function designReport(design: Record<string, number> | undefined, judged: Judged | boolean = "page"): { off: string[]; ok: string[] } {
@@ -136,7 +137,7 @@ export function designReport(design: Record<string, number> | undefined, judged:
     if (as !== "page" && NOT_FOR_APP_WINDOWS.includes(target.key)) continue;
     const value = design[target.key];
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
-    if (as === "part" && SMALL_IS_FINE.includes(target.key) && value < 3) continue;
+    if (as !== "page" && SMALL_IS_FINE.includes(target.key) && value < 3) continue;
     (target.ok(value) ? ok : off).push(`rule ${target.rule}: ${target.say(value)}`);
   }
   return { off, ok };

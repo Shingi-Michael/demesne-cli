@@ -52,8 +52,9 @@ export const DEMESNE_LOOK = "Something that exists (the person's app, site or sc
 /// work, the model reviews before it draws and mocks only the parts that
 /// matter, each with options and a pick.
 export const REVIEW_HOW = "Asked to look at something that exists and show what needs work (or to redesign it with no piece named): review before you draw. "
-  + "Go through the real screen as you critique your own pages, rate each problem, and keep at most three parts, most important first. "
-  + "Save one <d-review> page (foundry_read id \"kit:parts\"): the screen as it is today with those parts marked, then each part alone at its own size, as \"Today\" beside two or three options and your pick, with one line on what is wrong, from what you saw. "
+  + "Critique the real screen as you do your own pages, rate each problem, and keep the two or three parts that most need work, most important first (one only if nothing else comes close). "
+  + "A part is the smallest piece that holds the problem (a bar, a card, a row), never the whole page. "
+  + "Save one <d-review> page (foundry_read id \"kit:parts\"): the screen today with those pieces marked, then each piece alone at its own size, as \"Today\" beside two or three options and your pick, with one plain line on what is wrong. "
   + "Redraw nothing else. A named piece skips the ranking.";
 
 export interface DesignGuide {

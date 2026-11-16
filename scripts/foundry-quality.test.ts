@@ -21,7 +21,10 @@ describe("Foundry quality ruler", () => {
     expect(checks({ ...pin, sizes: 12 }, 0, "part").sizes).toBe(0);
     // The old flag still means an app window.
     expect(checks(pin, 0, true).lead).toBe(1);
-    expect(checks(pin, 0, true).sizes).toBe(0.5);
+    // A mockup of the app is as quiet as the app: one size and two colours are its own look.
+    expect(checks(pin, 0, true).sizes).toBe(1);
+    expect(checks(pin, 0, "app").colours).toBe(1);
+    expect(checks(pin, 0).colours).toBe(0.4);
   });
   test("what a page holds is counted from its markup, not its scripts", () => {
     const held = holds(`<style>button{}</style><d-compare><section data-option="Today"></section><section data-option="Quiet"></section><section data-option='Bare'></section></d-compare>`
@@ -63,6 +66,10 @@ describe("Foundry quality ruler", () => {
     const part = (name: string, options: string[]) => `<section data-part="${name}" why="What is wrong."><d-compare recommended="${options[1]}">${options.map((option) => `<section data-option="${option}">x</section>`).join("")}</d-compare></section>`;
     const sheet = (parts: string[]) => `<d-review><section data-today marks=".a | .b | .c | .d">screen</section>${parts.join("")}</d-review>`;
     expect(fitOf(ask, { source: sheet([part("Rows", ["Today", "A", "B"]), part("Save", ["Today", "A", "B", "C"])]) })).toEqual({ score: 1, misses: [] });
+    // An open question answered with a review offers its options part by part: two parts of two are not "four options" (pass 223 run).
+    const open = QUALITY_CASES.find((item) => item.id === "demesne-empty")!.fit!;
+    expect(fitOf(open, { source: sheet([part("Rows", ["Today", "A", "B"]), part("Save", ["Today", "A", "B"])]) })).toEqual({ score: 1, misses: [] });
+    expect(fitOf(open, { source: sheet([part("Rows", ["Today", "A"])]) }).score).toBe(0);
     // A whole redrawn page is not a review.
     expect(fitOf(ask, { source: `<d-demesne page="Settings"></d-demesne>` }).score).toBe(0);
     const four = fitOf(ask, { source: sheet(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"]))) });

@@ -93,7 +93,9 @@ export function fitOf(fit: Fit, page: { source: string; surface?: string | null 
     const most = fit[key];
     if (most !== undefined) point(held[key] <= most, `${held[key]} ${key}, at most ${most} asked for`);
   }
-  if (fit.offers) point(held.options >= 2 && held.options <= 3 && held.picked, held.options < 2 ? `${held.options === 1 ? "one direction" : "no options"}, two or three with a pick are owed` : !held.picked ? "options with no pick" : `${held.options} options, at most three`);
+  // A review sheet offers its options part by part (two parts of two options are not "four options").
+  if (fit.offers && REVIEW_PAGE.test(page.source)) { const problem = reviewProblem(page.source); point(!problem, problem ? problem.split(" Hint:")[0]!.replace(/^\[[a-z_]+\]\s*/, "") : ""); }
+  else if (fit.offers) point(held.options >= 2 && held.options <= 3 && held.picked, held.options < 2 ? `${held.options === 1 ? "one direction" : "no options"}, two or three with a pick are owed` : !held.picked ? "options with no pick" : `${held.options} options, at most three`);
   if (fit.review) {
     const problem = reviewProblem(page.source);
     point(REVIEW_PAGE.test(page.source), "not a review sheet (no <d-review>)");
@@ -119,17 +121,18 @@ const ramp = (value: number, zero: number, full: number) => clamp((value - zero)
 /// What a page is decides which checks judge it. app: a mockup of the app
 /// itself, which no headline leads and whose surfaces are the app's own.
 /// part: a small thing at its own size (a button, a row, a card), which is
-/// not a poster either and may hold one text size and two colours.
+/// not a poster either. Both may hold one text size and two colours: the
+/// app's own look is quiet, and a mockup of it is not marked down for that.
 export type Judged = "page" | "app" | "part";
 export function checks(design: DesignNumbers, faults: number, judged: Judged | boolean = "page"): Record<Check, number> {
-  const as: Judged = judged === true ? "app" : judged === false ? "page" : judged, appWindow = as !== "page", part = as === "part";
+  const as: Judged = judged === true ? "app" : judged === false ? "page" : judged, appWindow = as !== "page";
   return {
     faults: clamp(1 - faults / 6),
-    sizes: design.sizes <= 2 ? (part ? 1 : 0.5) : design.sizes <= 6 ? 1 : ramp(design.sizes, 12, 6),
+    sizes: design.sizes <= 2 ? (appWindow ? 1 : 0.5) : design.sizes <= 6 ? 1 : ramp(design.sizes, 12, 6),
     lead: appWindow ? 1 : ramp(design.lead, 1.4, 2.8),
     rhythm: ramp(design.rhythm, 0.6, 0.9),
     aligned: ramp(design.aligned, 0.4, 0.85),
-    colours: design.colours <= 2 ? (part ? 1 : 0.4) : design.colours <= 8 ? 1 : ramp(design.colours, 18, 8),
+    colours: design.colours <= 2 ? (appWindow ? 1 : 0.4) : design.colours <= 8 ? 1 : ramp(design.colours, 18, 8),
     surface: appWindow ? 1 : ramp(design.surface ?? 0, 0.05, 0.35),
   };
 }

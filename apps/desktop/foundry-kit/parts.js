@@ -44,7 +44,7 @@ d-chart{display:block;width:100%;color:var(--accent)}d-chart svg{display:block;w
 d-chart text{fill:var(--muted);font:11px var(--font)}
 /* Demesne's own look */
 d-app>d-body{display:block}
-d-demesne>d-app{display:block;position:relative;max-width:none;height:var(--height,620px);min-height:0;margin:0;overflow:hidden;border-radius:12px;container:app/size;contain:layout paint style;box-shadow:0 0 0 1px rgba(128,128,128,.22),0 24px 60px -20px rgba(0,0,0,.45);text-align:left}
+d-demesne>d-app{display:block;position:relative;max-width:none;height:var(--height,620px);min-height:0;margin:0 auto;overflow:hidden;border-radius:12px;container:app/size;contain:layout paint style;box-shadow:0 0 0 1px rgba(128,128,128,.22),0 24px 60px -20px rgba(0,0,0,.45);text-align:left}
 /* The app's window is glass over the desktop; here a still backdrop stands in for what is behind it. */
 d-demesne>d-app.glass{background:linear-gradient(180deg,#5b5c60,#4f5054)}
 d-demesne[theme=light]>d-app.glass{background:linear-gradient(180deg,#e9e9eb,#dfdfe2)}
@@ -117,7 +117,7 @@ d-review .dp-opt em{padding:0 7px;border-radius:6px;background:color-mix(in srgb
 .dr-ring{position:absolute;border-radius:8px;box-shadow:0 0 0 2px #e8799b;pointer-events:none;z-index:5}
 .dr-ring>d-mark{position:absolute;top:-10px;right:-10px}
 d-crop{display:block;position:relative;overflow:hidden;max-width:100%;border-radius:10px}
-.dp-crop{transform-origin:0 0}
+.dp-crop{position:absolute;top:0;left:0;transform-origin:0 0}
 .dp-strip{position:sticky;top:0;z-index:20;display:flex;flex-direction:row;align-items:center;gap:4px;padding:6px;border-radius:12px;background:color-mix(in srgb,var(--paper) 90%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:inset 0 0 0 1px var(--hair);flex-wrap:wrap}
 .dp-strip>button{padding:4px 12px;border-radius:99px;background:transparent;color:var(--secondary);font-size:14px}
 .dp-strip>button.on{background:var(--tone-2);color:var(--ink)}
@@ -415,14 +415,18 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     var fit = function () {
       var target = null;
       try { target = el.getAttribute("to") ? body.querySelector(el.getAttribute("to")) : null; } catch (error) {}
-      var room = el.parentElement ? inner(el.parentElement) : 0;
       var at = (target || body).getBoundingClientRect(), box = body.getBoundingClientRect();
       var w = at.width / scale, h = at.height / scale, x = (at.left - box.left) / scale, y = (at.top - box.top) / scale;
       if (!w || !h) return;
       var gap = target ? pad : 0, cw = w + gap * 2, ch = h + gap * 2;
       el.__needs = cw;
-      scale = room && cw > room ? Math.max(0.2, room / cw) : 1;
-      el.style.width = Math.round(cw * scale) + "px"; el.style.height = Math.round(ch * scale) + "px";
+      // The piece never holds its box open: it takes the room there is (a
+      // percentage, so a grid or a flex row can still shrink) up to its own size.
+      el.style.width = "100%"; el.style.maxWidth = Math.ceil(cw) + "px";
+      var room = el.clientWidth;
+      if (room < 2) { el.style.width = Math.ceil(cw) + "px"; room = cw; }
+      scale = cw > room + 1 ? Math.max(0.2, room / cw) : 1;
+      el.style.maxWidth = Math.round(cw * scale) + "px"; el.style.height = Math.round(ch * scale) + "px";
       body.style.transform = "scale(" + scale + ") translate(" + (gap - x) + "px," + (gap - y) + "px)";
     };
     afterLayout([body, el.parentElement], fit);
@@ -638,7 +642,8 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     Array.prototype.forEach.call(cards.querySelectorAll("d-row"), sideRow);
     Array.prototype.forEach.call(main.querySelectorAll("d-message"), function (message) { message.__drawn = true; turn(app, message); });
     var composer = main.querySelector("d-composer"); if (composer) compose(app, el, composer);
-    fitWidth(el, app, Number(el.getAttribute("width")) || 1100, 640);
+    // The real window is never narrower than 900px. In less room it keeps that and scrolls inside its frame: squeezed to 640, a page drawn for the app clipped and overlapped (pass 223 runs).
+    fitWidth(el, app, Number(el.getAttribute("width")) || 1100, 900);
     // Going somewhere: the tab, sidebar item or chat of that name lights up,
     // and the view of that name shows. Clicking a sidebar item or chat with no
     // tab of its name renames the open tab, as Demesne does.

@@ -93,7 +93,8 @@ const READS = new Set(["list_files", "read_file", "read_files", "search_files", 
   // What a chat reaches for on the way to a page: finding a tool, a read-only helper, its checklist, a picture, trying its own page.
   "tool_search", "subagent", "agents", "update_plan", "view_image", "foundry_try"]);
 // Generous, like a real chat: a model that reads first still gets to make its page.
-const MAX_ROUNDS = 20;
+// A review of the project reads its source first: the pass 223 run cut three asks off at 20.
+const MAX_ROUNDS = 32;
 interface Watch { rounds: number; calls: string[]; outputTokens: number; error: string | null }
 let current: Watch = { rounds: 0, calls: [], outputTokens: 0, error: null };
 

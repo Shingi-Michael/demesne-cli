@@ -151,6 +151,9 @@ test("a part is not judged as a poster: nothing has to lead, fill the screen or 
   expect(designReport(pin, "part").off).toEqual([]);
   // Too much is still too much on a part.
   expect(designReport({ ...pin, sizes: 9, colours: 12 }, "part").off.length).toBe(2);
+  // A mockup of the app is quiet like the app: told to add colours, a model paints it (pass 223 run).
+  expect(designReport(pin, "app").off.some((line) => /colour|size/i.test(line))).toBe(false);
+  expect(designReport({ ...pin, sizes: 9, colours: 12 }, "app").off.length).toBe(2);
 });
 
 test("a page saved on a part surface gets the part's look; the same page as a page is told to grow", async () => {

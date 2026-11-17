@@ -116,3 +116,27 @@ test("a version quotes the ask that made it, and says which merged pull request 
   // Older versions saved before asks were kept show no line.
   expect(html.match(/class="fd-ask"/g)?.length).toBe(3);
 });
+
+test("the newest version of a page can take notes, and a version made from notes shows what changed (pass 233 A)", () => {
+  const html = foundryPage({
+    list: [artifact("a1", "Coffee pricing"), artifact("b2", "Brief", "markdown"), artifact("c3", "Badge", "svg")],
+    versions: [
+      { artifactId: "a1", version: 2, createdAt: today, sessionId: "s1", note: "Blue" },
+      { artifactId: "a1", version: 1, createdAt: earlier, sessionId: "s1", note: "" },
+      { artifactId: "b2", version: 2, createdAt: today, sessionId: null, note: "" },
+      { artifactId: "c3", version: 2, createdAt: today, sessionId: null, note: "" },
+    ],
+    error: "", chatTitle: () => null, changed: new Set([shelfKey("a1", 2)]),
+  });
+  const section = (key: string) => html.slice(html.indexOf(`data-fd="${key}"`)).split("</section>")[0]!;
+  // The line that says notes wait is there, empty and hidden, only under the newest version of a page with parts.
+  expect(section(shelfKey("a1", 2))).toContain('<p class="fd-notes" aria-live="polite" hidden></p>');
+  expect(section(shelfKey("a1", 1))).not.toContain("fd-notes");
+  expect(section(shelfKey("b2", 2))).not.toContain("fd-notes");
+  expect(section(shelfKey("c3", 2))).not.toContain("fd-notes");
+  // At rest nothing new shows: no button, no field.
+  expect(section(shelfKey("a1", 2))).not.toMatch(/fn-|<input|<form/);
+  // The version the notes made outlines what changed, once.
+  expect(section(shelfKey("a1", 2))).toMatch(/v=2&amp;stack=1&amp;at=\d+&amp;first=1"/);
+  expect(section(shelfKey("a1", 1))).not.toContain("first=1");
+});

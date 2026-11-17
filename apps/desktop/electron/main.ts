@@ -241,7 +241,8 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
       if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
       // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
-      if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}`);
+      // note.js (pass 233 A) tells the Foundry page which part is under the pointer, for notes pinned to a part.
+      if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}\n;${kitFile("note.js").toString("utf8")}`);
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });
@@ -393,6 +394,19 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (cancel) { await Promise.all(frames.map(frame => frame.executeJavaScript(POINT_CANCEL).catch(() => null))); return null; }
       if (typeof name !== "string" || !frames[0]) throw new Error("The preview is not showing");
       return frames[0].executeJavaScript(POINT_SCRIPT, true);
+    }
+    // A note on a mockup (pass 233 A) carries a picture of its part: that
+    // piece of the window as it shows now, as a PNG. The place is in the
+    // page's own pixels.
+    if (method === "desktop-crop") {
+      const { x, y, width, height } = args as Record<string, unknown>;
+      if (![x, y, width, height].every(n => typeof n === "number" && Number.isFinite(n))) throw new Error("Invalid place");
+      const k = contents.getZoomFactor(), [wide, high] = window?.getContentSize() ?? [0, 0];
+      const left = Math.max(0, Math.floor((x as number) * k)), top = Math.max(0, Math.floor((y as number) * k));
+      const right = Math.min(wide, Math.ceil(((x as number) + (width as number)) * k)), bottom = Math.min(high, Math.ceil(((y as number) + (height as number)) * k));
+      if (right - left < 4 || bottom - top < 4) return null;
+      const image = await contents.capturePage({ x: left, y: top, width: right - left, height: bottom - top });
+      return image.isEmpty() ? null : { data: image.toPNG().toString("base64") };
     }
     // Settings › General: keeps the Mac from sleeping while a chat or Drive
     // works. The display may still sleep.

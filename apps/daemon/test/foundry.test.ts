@@ -517,6 +517,10 @@ test("a mockup you can trace: its ask, a name that says what it is, what it was 
     // The ask that made it is kept with the version, on one line.
     expect(store.getFoundryArtifact(plans.id)!.versions[0]!.ask).toBe("Make the middle plan the obvious choice, and drop the table");
     expect(store.listFoundryVersions()[0]!.ask).toBe("Make the middle plan the obvious choice, and drop the table");
+    // Notes on parts (pass 233 A): the ask is what the person said, without the detail folded under it for the model.
+    const noted = ask("On “Ledger invoices”:\n1 · Save button: Make it green\n\n```parts\nNotes on one part of the Foundry mockup \"Ledger invoices\" (id x, v1).\n1. Save button: Make it green\n   selector `button`\n   <button>Save</button>\n```");
+    const green = JSON.parse(await save.execute({ title: "A green save button", kind: "html", description: "Green.", why: W, source: "<p>green</p>" }, noted));
+    expect(store.getFoundryArtifact(green.id)!.versions[0]!.ask).toBe("On “Ledger invoices”: 1 · Save button: Make it green");
     // Read in an ask, then made: based on what was read, without being told.
     const second = ask("Now show me the pricing on a phone");
     await read.execute({ id: plans.id }, second);

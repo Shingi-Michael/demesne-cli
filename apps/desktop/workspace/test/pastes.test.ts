@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { foldsUp, pasteLabel, splitPastes, withPastes } from "../pastes.ts";
+import { fenced, foldsUp, partsLabel, pasteLabel, splitPastes, withPastes } from "../pastes.ts";
 
 const log = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
 
@@ -39,5 +39,17 @@ describe("big pastes fold up", () => {
     expect(splitPastes("hello")).toEqual([{ kind: "text", text: "hello" }]);
     const code = "see\n\n```ts\nconst a = 1;\n```";
     expect(splitPastes(code)).toEqual([{ kind: "text", text: code }]);
+  });
+
+  test("the marked parts of a mockup fold the same way, under their own name (pass 233 A)", () => {
+    const detail = "Notes on parts of the Foundry mockup \"Pin a chat\" (id a1, v2).\n1. Save button: green\n   selector `button`\n   <button>Save</button>\n2. Tabs: fewer\n   selector `nav`\n   <nav></nav>";
+    const sent = `On “Pin a chat”:\n1 · Save button: green\n2 · Tabs: fewer\n\n${fenced(detail, "parts")}`;
+    expect(splitPastes(sent)).toEqual([{ kind: "text", text: "On “Pin a chat”:\n1 · Save button: green\n2 · Tabs: fewer" }, { kind: "parts", text: detail }]);
+    expect(partsLabel(detail)).toBe("Marked parts · 2");
+    expect(partsLabel("Notes on one part.\n1. Save button: green")).toBe("Marked part · 1");
+    // Markup that holds a fence gets a longer one.
+    const fence = "1. Code: fix\n   selector `pre`\n   <pre>```</pre>";
+    expect(fenced(fence, "parts").startsWith("````parts\n")).toBe(true);
+    expect(splitPastes(fenced(fence, "parts"))).toEqual([{ kind: "parts", text: fence }]);
   });
 });

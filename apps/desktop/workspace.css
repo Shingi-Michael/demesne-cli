@@ -1882,6 +1882,36 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-opt b { color: var(--t1); font-weight: 500; font-size: 13px; }
 .fd-doc { max-width: 760px; padding: 28px 32px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair); color: var(--t1); }
 .fd-here .fd-stage, .fd-here .fd-doc { box-shadow: 0 0 0 2px var(--blossom); }
+/* Pass 233 A: notes on a mockup. Nothing shows until the pointer rests on a
+   part: then a thin outline and a small tag. The tag opens a one-line note,
+   kept notes are numbered pins, and one quiet line under the mockup sends
+   them together. All of it is the page's, drawn over the frame, never in it. */
+.fd-item { position: relative; }
+.fn-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.fn-layer [hidden] { display: none !important; }
+.fn-out { position: absolute; box-sizing: border-box; border: 1.5px solid var(--blossom, #f2b6c8); border-radius: 7px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .28); transition: left 90ms var(--ease), top 90ms var(--ease), width 90ms var(--ease), height 90ms var(--ease); }
+.fn-tag { all: unset; position: absolute; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; max-width: 280px; height: 22px; padding: 0 9px 0 7px; border-radius: 7px; background: #1c1c1f; color: #f4f4f5; font-size: 12px; line-height: 22px; white-space: nowrap; box-shadow: 0 0 0 1px rgba(255, 255, 255, .12), 0 6px 16px -6px rgba(0, 0, 0, .5); cursor: pointer; pointer-events: auto; }
+.fn-tag::after { content: ""; position: absolute; inset: -4px -6px -7px; }
+.fn-tag span { overflow: hidden; text-overflow: ellipsis; }
+.fn-tag svg { flex: none; width: 12px; height: 12px; fill: none; stroke: var(--blossom, #f2b6c8); stroke-width: 1.2; stroke-linejoin: round; }
+.fn-tag:hover, .fn-tag:focus-visible { background: #2a2a2e; }
+.fn-pin { all: unset; position: absolute; box-sizing: border-box; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px 10px 10px 3px; background: var(--blossom, #f2b6c8); color: #2a1119; font-size: 11px; font-weight: 600; line-height: 19px; text-align: center; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .3), 0 4px 10px -4px rgba(0, 0, 0, .5); cursor: pointer; pointer-events: auto; }
+.fn-pin:hover, .fn-pin:focus-visible { filter: brightness(1.08); }
+.fn-shot .fn-pin, .fn-shot .fn-tag { visibility: hidden; }
+.fn-box { position: absolute; box-sizing: border-box; display: grid; gap: 7px; padding: 10px 12px 9px; border-radius: 12px; background: var(--surface, #232326); box-shadow: 0 0 0 1px var(--hair2, var(--hair)), 0 16px 40px -14px rgba(0, 0, 0, .6); pointer-events: auto; }
+.fn-box label { overflow: hidden; color: var(--t3); font-size: 11.5px; line-height: 15px; white-space: nowrap; text-overflow: ellipsis; }
+.fn-box input { all: unset; box-sizing: border-box; width: 100%; height: 24px; color: var(--t1); font-size: 13.5px; line-height: 24px; caret-color: var(--blossom); }
+.fn-box input::placeholder { color: var(--t3); }
+.fn-keys { display: flex; gap: 12px; color: var(--t3); font-size: 11px; line-height: 15px; }
+.fn-keys span:last-child { margin-left: auto; }
+.fn-keys kbd, .fd-notes kbd { font: inherit; color: var(--t2); }
+.fd-notes { display: flex; align-items: center; gap: 9px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
+.fd-notes[hidden] { display: none; }
+.fd-notes-send { all: unset; padding: 0 7px; margin: 0 -7px; border-radius: 6px; color: var(--blossom, #e48aa6); cursor: pointer; }
+.fd-notes-send:hover, .fd-notes-send:focus-visible { background: color-mix(in srgb, var(--blossom, #f2b6c8) 12%, transparent); }
+.fd-notes-work { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--blossom) 30%, transparent); border-top-color: var(--blossom); animation: rl-spin .8s linear infinite; }
+.fd-notes .fd-quiet { color: var(--t3); }
+@media (prefers-reduced-motion: reduce) { .fn-out { transition: none; } .fd-notes-work { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .fd-stage { transition: none; } }
 .fd-h { margin-bottom: 18px; }
 .fd-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 20px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair) inset; color: var(--t3); font-size: 13px; text-align: center; }

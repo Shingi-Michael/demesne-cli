@@ -35,6 +35,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryOrder, foundryPage, shelfKey } from "./foundry-page.ts";
+import { newNoteStore, notesMessage as foundryNotesMessage, watchFoundryNotes } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
@@ -45,7 +46,7 @@ import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
 import { researchRowHTML } from "./research-row.ts";
 import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
-import { foldsUp, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
+import { foldsUp, partsLabel, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
 import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
 import { chatRoutines, routinesCardHTML, routineTarget, ROUTINE_TOOL, ROUTINE_VERBS, ROUTINES_CARD } from "./routine-card.ts";
@@ -2801,9 +2802,12 @@ function rebuildWhenIdle() {
 function requestText(content: string) {
   const { text, refs } = splitMockupRefs(content);
   return splitPastes(text).map((part) => part.kind === "text" ? linkMockups(h(part.text), refs)
+    // The parts of a mockup that notes were pinned to (pass 233 A) fold like a paste: the words stay, the markup is one chip.
+    : part.kind === "parts" ? `<details class="paste-chip parts-chip"><summary title="What the model gets: each part's place and markup">${PARTS_ICON}${h(partsLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`
     : `<details class="paste-chip"><summary title="${h(part.text.split("\n").slice(0, 6).join("\n"))}">${PASTE_ICON}${h(pasteLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`).join("");
 }
 const PASTE_ICON = '<span class="pc-ic" aria-hidden="true">TXT</span>';
+const PARTS_ICON = '<span class="pc-ic" aria-hidden="true">⌖</span>';
 /// The Foundry steps that make or change a page.
 const FOUNDRY_WORK = new Set(["foundry_save", "foundry_edit", "foundry_read", "foundry_try"]);
 function runHTML(run: WorkspaceRun, index: number) {
@@ -3913,6 +3917,13 @@ let foundryFocus: { id: string; version?: number; quiet?: boolean } | null = nul
 /// Documents on the long page, rendered once they scroll near ("id:version").
 const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
 const foundryUi = { error: "" };
+/// Notes pinned to parts of a mockup (pass 233 A): waiting on the page until sent together.
+const foundryNotes = newNoteStore();
+let foundryNotesWatch: { stop(): void; paint(): void } | null = null;
+/// Notes that were sent, by mockup: the version they were made on, and whether their turn was seen running.
+const foundryAsked = new Map<string, { key: string; version: number; ran: boolean; checked: boolean }>();
+/// Versions that came back from notes: each outlines what changed while the page stays open.
+const foundryChanged = new Set<string>();
 let archivedChats: ChatsPageChat[] | null = null;
 let routinesHere: Routine[] | null = null;
 const routineUi = { error: "", draft: "" };
@@ -4131,6 +4142,8 @@ function openPage(kind: "" | PageKind) {
   if (kind === "foundry") {
     if (was !== "foundry") {
       foundryUi.error = "";
+      // What changed was shown the last time the page was open.
+      foundryChanged.clear();
       // Back to the mockup you were on, unless a link asked for another.
       if (!foundryFocus && foundryPlace) foundryFocus = { id: foundryPlace, quiet: true };
     }
@@ -4164,6 +4177,8 @@ async function loadFoundry() {
     foundryVersions = shelf.versions ?? shelf.artifacts.map((item) => ({ artifactId: item.id, version: item.version, createdAt: item.updatedAt, sessionId: item.sessionId, note: "" }));
     foundryNames = shelf.artifacts.map(({ id, title, version, description, kind }) => ({ id, title, version, description: description ?? "", kind }));
     foundryUi.error = "";
+    foundryNotesBack();
+    foundryNotesCarry();
   } catch (error) {
     foundryList = foundryList ?? [];
     foundryVersions = foundryVersions ?? [];
@@ -4171,6 +4186,96 @@ async function loadFoundry() {
   }
   renderPage();
   showFoundryFocus();
+}
+/// A mockup's notes came back as a new version (pass 233 A): it is on top,
+/// with what changed outlined, and the page goes to it.
+function foundryNotesBack() {
+  for (const [id, asked] of foundryAsked) {
+    const now = foundryList?.find((item) => item.id === id);
+    if (!now || now.version <= asked.version) continue;
+    foundryAsked.delete(id);
+    foundryNotes.working.delete(asked.key);
+    foundryChanged.add(shelfKey(id, now.version));
+    if (pageOpen === "foundry") foundryFocus = { id };
+  }
+}
+/// Notes are pinned to a mockup's newest version. When a newer one arrives
+/// (from other notes, or from the chat), the notes still waiting move to it.
+function foundryNotesCarry() {
+  const newest = (key: string) => { const at = key.lastIndexOf(":"), now = foundryList?.find((item) => item.id === key.slice(0, at)); return now ? shelfKey(now.id, now.version) : null; };
+  for (const [key, notes] of [...foundryNotes.waiting]) {
+    const to = newest(key);
+    if (to === key) continue;
+    foundryNotes.waiting.delete(key);
+    if (to) foundryNotes.waiting.set(to, [...(foundryNotes.waiting.get(to) ?? []), ...notes]);
+  }
+  for (const key of [...foundryNotes.said.keys()]) if (newest(key) !== key) foundryNotes.said.delete(key);
+  const draft = foundryNotes.draft, to = draft && newest(draft.key);
+  if (draft && to !== draft.key) foundryNotes.draft = to ? { ...draft, key: to } : null;
+}
+/// While notes are with the model: when its turn has ended and no new
+/// version came, the line under the mockup says so instead of working on.
+function foundryNotesTick() {
+  if (!foundryAsked.size || !state) return;
+  // Sent, and nothing of it still waits behind another turn.
+  const running = Boolean(state.activeTurnId || state.busy || state.queue.trim());
+  for (const [id, asked] of foundryAsked) {
+    if (running || !asked.ran) continue;
+    // One more read of the shelf, in case the save and the turn's end crossed.
+    if (!asked.checked) { asked.checked = true; void loadFoundry(); continue; }
+    foundryAsked.delete(id);
+    foundryNotes.working.delete(asked.key);
+    foundryNotes.said.set(asked.key, "No new version came back. The chat has the answer.");
+    foundryNotesWatch?.paint();
+  }
+}
+/// A piece of the window as it shows now: the picture a note carries of its part.
+const cropWindow = (rect: { x: number; y: number; width: number; height: number }) => api<{ data: string } | null>("desktop-crop", rect).then((shot) => shot?.data ?? null, () => null);
+/// Send a mockup's waiting notes as one message to the chat that made it,
+/// so one new version holds every correction. The page stays on Foundry.
+async function sendFoundryNotes(key: string) {
+  const notes = foundryNotes.waiting.get(key), at = key.lastIndexOf(":"), id = key.slice(0, at), version = Number(key.slice(at + 1));
+  const mockup = foundryList?.find((item) => item.id === id);
+  if (!notes?.length || !mockup || !state) return;
+  const made = foundryVersions?.find((item) => item.artifactId === id && item.version === version)?.sessionId ?? null;
+  const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+  foundryNotes.waiting.delete(key);
+  foundryNotes.said.delete(key);
+  foundryNotes.working.set(key, (foundryNotes.working.get(key) ?? 0) + notes.length);
+  foundryAsked.set(id, { key, version, ran: false, checked: false });
+  foundryNotesWatch?.paint();
+  const pictures: string[] = [];
+  try {
+    // Its own chat, when that chat is in this project; it opens under the page. Otherwise the chat that is open.
+    const chat = made && made !== state.session?.id ? state.sessions.find((item) => item.id === made && (item.workspace ?? "") === (here ?? "") && !deletedSessions.has(item.id)) : null;
+    if (chat) {
+      await api("select-session", { id: chat.id });
+      for (let tries = 0; tries < 40 && state?.session?.id !== chat.id; tries++) await new Promise((done) => setTimeout(done, 50));
+    }
+    if (!state?.session) throw new Error("Open a chat first: the notes go to it.");
+    // Each part's picture goes with the message, as far as a message can carry pictures.
+    // A note sent the moment it was written may still be having its picture taken.
+    await Promise.race([Promise.all(notes.map((note) => note.picturing)), new Promise((done) => setTimeout(done, 1500))]);
+    const pictured: number[] = [], had = state.attachments.length;
+    for (const [index, note] of notes.entries()) {
+      if (!note.picture || had + pictured.length >= 10) continue;
+      const sent = await api<{ id: string } | undefined>("attach", { name: `note-${index + 1}.png`, mimeType: "image/png", data: note.picture }).catch(() => undefined);
+      if (sent?.id) { pictured.push(index); pictures.push(sent.id); attachmentPreviews.set(sent.id, `data:image/png;base64,${note.picture}`); }
+    }
+    // Queued behind a turn that is still running, never steered into it.
+    await api("submit", { text: foundryNotesMessage({ id, title: mockup.title, version }, notes, pictured), wait: true });
+    const sent = foundryAsked.get(id);
+    if (sent?.key === key) sent.ran = true;
+  } catch (error) {
+    // Not sent: the notes go back on their parts, and their pictures leave the chat's box.
+    foundryAsked.delete(id);
+    for (const picture of pictures) void api("detach", { id: picture }).catch(() => {});
+    const left = (foundryNotes.working.get(key) ?? 0) - notes.length;
+    if (left > 0) foundryNotes.working.set(key, left); else foundryNotes.working.delete(key);
+    foundryNotes.waiting.set(key, [...notes, ...(foundryNotes.waiting.get(key) ?? [])]);
+    foundryNotes.said.set(key, errorWords(error));
+  }
+  foundryNotesWatch?.paint();
 }
 /// A chat link opens Foundry's long page at that mockup (its newest version
 /// unless the link names one).
@@ -4330,7 +4435,8 @@ function renderPage() {
   } else if (pageOpen === "foundry") {
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
-    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
+    foundryNotesTick();
+    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
       builtIn: (id) => { const pr = pullRequests.get(id); return pr?.state === "merged" ? { number: pr.number, createdAt: pr.createdAt } : null; } });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
@@ -4353,10 +4459,12 @@ function renderPage() {
   const field = !googleFocus && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
     ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
   foundryStagesStop?.(); foundryStagesStop = null;
+  // A note being typed is put by for the redraw, and follows its mockup to a newer version.
+  if (foundryNotesWatch) { foundryNotesWatch.stop(); foundryNotesWatch = null; foundryNotesCarry(); }
   root.innerHTML = html;
   root.dataset.html = html;
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); }
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.googleProvider!;

@@ -391,7 +391,9 @@ export class DemesneStore {
   private askOf(turnId: string | null | undefined): string {
     if (!turnId) return "";
     const row = this.database.query("SELECT content FROM turns WHERE id = ?").get(turnId) as { content: string } | null;
-    const text = row?.content.replace(/\s+/g, " ").trim() ?? "";
+    // What the app folded under the message (pasted text, the marked parts of a mockup) is not what the person said.
+    const said = row?.content.replace(/(^|\n)```(?:paste|parts)\n[\s\S]*$/, "") ?? "";
+    const text = (said.trim() ? said : row?.content ?? "").replace(/\s+/g, " ").trim();
     return text.length > 600 ? `${text.slice(0, 599).trimEnd()}…` : text;
   }
 

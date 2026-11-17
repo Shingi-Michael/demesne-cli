@@ -86,6 +86,9 @@ export function watchFoundryStages(root: HTMLElement): () => void {
   };
   const leave = (event: Event) => {
     const stage = event.currentTarget as HTMLElement, state = live(stage);
+    // Onto a note's tag, or while a note is typed (foundry-notes.ts): still with the mockup.
+    const onto = (event as PointerEvent).relatedTarget;
+    if ((onto instanceof Element && onto.closest(".fn-layer")) || stage.closest(".fd-item")?.classList.contains("fn-noting")) return;
     state.inside = false;
     clearTimeout(state.timer);
     state.timer = window.setTimeout(() => play(stage), STEADY);

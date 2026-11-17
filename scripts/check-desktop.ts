@@ -55,6 +55,10 @@ let threadNoteRound = 0;
 // hold the one inference slot the orchestrator needs to answer) until the
 // check releases it.
 let threadsRound = 0;
+// Threads proposed first: two more jobs that wait for Start. The credits
+// thread's first try stops, so its line offers Try again.
+const proposePrompt = "Desktop smoke: propose two threads";
+let proposeRound = 0, creditsTries = 0;
 const threadGateFile = join(tmpdir(), `demesne-thread-gate-${process.pid}`);
 const releaseThread = () => writeFileSync(threadGateFile, "go");
 // A stand-in Heartbeat daemon: Claude Code works in this project on this
@@ -110,13 +114,21 @@ const f = await fixture({
       return;
     }
     if (typeof user === "string" && user.startsWith("Thread report: ")) {
-      yield { type: "text_delta", delta: user.includes("still working: 0") ? "Ready, and it stayed inside its files." : "One thread is ready." };
+      yield { type: "text_delta", delta: user.includes("status: failed") ? "One thread stopped." : user.includes("still working: 0") ? "Ready, and it stayed inside its files." : "One thread is ready." };
       yield { type: "finish", reason: "stop" };
       return;
     }
     // A thread's chat opens on its brief; a note from the orchestrator may come after it.
     const opened = messages.find(message => message.role === "user")?.content;
     if (typeof opened === "string" && opened.startsWith("You're one of the threads")) {
+      const index = opened.includes("Write the index"), credits = opened.includes("Write the credits");
+      if (index || credits) {
+        if (credits && creditsTries++ === 0) throw new Error("The stand-in model dropped the connection.");
+        if (messages.at(-1)?.role === "tool") { yield { type: "text_delta", delta: index ? "Wrote threads-d.md with the index." : "Wrote threads-e.md with the credits." }; yield { type: "finish", reason: "stop" }; return; }
+        yield { type: "tool_call_delta", index: 0, idDelta: `thread-${index ? "d" : "e"}-${creditsTries}`, nameDelta: "write_file", argumentsDelta: JSON.stringify(index ? { path: "threads-d.md", content: "# Index\n" } : { path: "threads-e.md", content: "# Credits\n" }) };
+        yield { type: "finish", reason: "tool_calls" };
+        return;
+      }
       const second = opened.includes("Write the greeting"), third = opened.includes("Write the farewell");
       const toolResults = messages.filter(message => message.role === "tool").length;
       // The farewell thread asks before it writes: its question comes to the chat that started it.
@@ -143,6 +155,19 @@ const f = await fixture({
         yield { type: "finish", reason: "tool_calls" };
       } else {
         yield { type: "text_delta", delta: "Told the greeting thread." };
+        yield { type: "finish", reason: "stop" };
+      }
+      return;
+    }
+    if (user === proposePrompt) {
+      if (proposeRound++ === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "propose", nameDelta: "start_threads", argumentsDelta: JSON.stringify({ propose: true, threads: [
+          { title: "Write the index", brief: "Add threads-d.md with an Index heading.", files: ["threads-d.md"] },
+          { title: "Write the credits", brief: "Add threads-e.md with a Credits heading.", files: ["threads-e.md"] },
+        ] }) };
+        yield { type: "finish", reason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", delta: "Two more jobs, one thread each. Nothing has started yet." };
         yield { type: "finish", reason: "stop" };
       }
       return;
@@ -1936,6 +1961,42 @@ try {
   await page.locator("#conversation .tr-brief button").click();
   await until(() => begun.isVisible(), "and its brief leads back");
   await closeThreadTab();
+  // Threads proposed first: the split shows before anything runs. The ribbon
+  // opens on its own, each line ends in Start, and nothing has a branch yet.
+  const branchList = () => Bun.spawnSync(["git", "branch", "--list", "thread/*"], { cwd: f.workspace }).stdout.toString();
+  await type(proposePrompt);
+  await textIncludes("Nothing has started yet.");
+  await until(() => threadLines.count().then(count => count === 2), "the ribbon opens on its own for threads that wait for Start", 20_000);
+  assert.equal(await ribbon.locator(".pr-name").innerText(), "Two threads proposed");
+  assert.equal(await ribbon.locator(".pr-ct").innerText(), "not started");
+  assert.deepEqual(await threadLines.locator(".tr-next").allInnerTexts(), ["Start", "Start"], "each proposed line ends in Start");
+  assert.match((await threadLines.first().locator(".tr-words").innerText()).trim(), /^Only touches threads-d\.md$/);
+  assert.match((await ribbon.locator(".tr-foot").innerText()).replace(/\s+/g, " "), /^Each gets its own branch · no file is shared Start all 2$/);
+  assert.equal(await begun.last().locator(".tr-word").innerText(), "Proposed", "the reply's line says they are only proposed");
+  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Change the split in your own words…");
+  assert(!/write-the-(index|credits)/.test(branchList()), "a proposed thread has no branch yet");
+  await capture("17-threads-proposed");
+  // Start one: it runs like any thread, and the other still waits.
+  await threadLines.filter({ hasText: "Write the index" }).locator(".tr-next").click();
+  await until(() => ribbon.locator(".pr-name").innerText().then(text => text === "One thread ready to merge"), "a started thread runs and comes back", 30_000);
+  assert.equal(await ribbon.locator(".pr-ct").innerText(), "1 proposed");
+  assert(/write-the-index/.test(branchList()) && !/write-the-credits/.test(branchList()), "only the started thread has a branch");
+  // Start the other: its first try stops. The bar names it, and its line ends in Try again.
+  await threadLines.filter({ hasText: "Write the credits" }).locator(".tr-next").click();
+  await until(() => ribbon.locator(".pr-name").innerText().then(text => text === "Write the credits stopped"), "the bar names the thread that stopped", 30_000);
+  const stopped = threadLines.filter({ hasText: "Write the credits" });
+  assert.equal(await stopped.locator(".tr-next").innerText(), "Try again");
+  await stopped.locator(".tr-row").click();
+  await until(() => stopped.locator(".tr-go").isVisible(), "a stopped line opens to why it stopped, with Try again");
+  assert.match(await stopped.locator(".tr-say").innerText(), /The coding turn failed/);
+  assert.match(await stopped.locator(".tr-note").innerText(), /Your branch is untouched/);
+  assert.equal(await page.locator("textarea").getAttribute("placeholder"), "Continue the conversation…", "nothing waits for Start any more");
+  await capture("17-threads-stopped");
+  await stopped.locator(".tr-go").click();
+  await until(() => ribbon.locator(".pr-name").innerText().then(text => text === "Two threads ready to merge"), "tried again, it finishes in its own chat and worktree", 30_000);
+  await ribbon.locator(".tr-foot .tr-go").click();
+  await until(() => ribbon.isHidden(), "both merge and leave the ribbon", 30_000);
+  assert(existsSync(join(f.workspace, "threads-d.md")) && existsSync(join(f.workspace, "threads-e.md")), "the proposed threads' work reached the checkout once started and merged");
   // Right-click a chat in the sidebar (pass 136 A): Demesne's own menu, and
   // Delete asks once, in place, before the chat is gone for good.
   const chatRows = page.locator("#sidebar-projects .sidebar-item:not(:has([aria-current='page']))");
@@ -1969,7 +2030,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "one threads ribbon per chat, sorted by what needs you", "a thread's question answered from the chat that started it", "a thread's line opening to its steps, files and diffs", "deleting a thread from its line", "a thread's own chat as a normal tab", "right-click a chat or project"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "one threads ribbon per chat, sorted by what needs you", "a thread's question answered from the chat that started it", "a thread's line opening to its steps, files and diffs", "deleting a thread from its line", "threads proposed first, started one by one", "Try again for a thread that stopped", "a thread's own chat as a normal tab", "right-click a chat or project"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

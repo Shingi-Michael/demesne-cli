@@ -13,7 +13,7 @@ export const START_THREADS_TOOL = "start_threads";
 
 const definition: ProviderToolDefinition = {
   name: START_THREADS_TOOL,
-  description: `Split work into threads that run side by side, each a chat of its own in its own git worktree and branch. Use when the person asks for threads or parallel work, or for a change made of independent jobs that touch different files. Give each thread a short title, a brief (what to do and what done looks like) and the files or folders it may change; no two threads may claim the same file. When a job needs another's work first, set its after to that thread's title: it starts on that thread's branch once that one is back and checked (it may then touch the same files), and merges after it. At most ${MAX_THREADS}. You don't wait for them: each is checked (its files, its checks) and reports back to this chat when done, and you check its work against the brief. Only works inside a project. You can't merge them; the person merges each one from the thread list.`,
+  description: `Split work into threads that run side by side, each a chat of its own in its own git worktree and branch. Use when the person asks for threads or parallel work, or for a change made of independent jobs that touch different files. Give each thread a short title, a brief (what to do and what done looks like) and the files or folders it may change; no two threads may claim the same file. When a job needs another's work first, set its after to that thread's title: it starts on that thread's branch once that one is back and checked (it may then touch the same files), and merges after it. At most ${MAX_THREADS}. You don't wait for them: each is checked (its files, its checks) and reports back to this chat when done, and you check its work against the brief. Set propose to true when the person asks to see the split before anything runs, or when you hand out four or more threads at once: the threads are then only listed for the person, who starts each one (or all) with Start, and nothing runs until then. Proposing again replaces this chat's proposals that nobody started, so use that to change a proposed split. When the person tells you in words to go ahead, call it without propose with the same titles: those proposals then start. Only works inside a project. You can't merge them; the person merges each one from the thread list.`,
   inputSchema: {
     type: "object",
     properties: {
@@ -31,6 +31,7 @@ const definition: ProviderToolDefinition = {
           additionalProperties: false,
         },
       },
+      propose: { type: "boolean", description: "True to only show the split to the person: each thread waits for their Start, and nothing runs until then" },
     },
     required: ["threads"],
     additionalProperties: false,
@@ -41,7 +42,11 @@ export interface ThreadsHost {
   /// Why threads can't start from this chat (Home, a worktree, an untrusted folder), or null.
   refuse(workspaceRoot: string, sessionId: string): string | null;
   /// `job.after` is the id of a thread started before it in the same call.
-  start(workspaceRoot: string, from: string, job: { title: string } & DriveThread): Promise<DriveFix>;
+  /// With `propose`, the thread is only listed for the person to start.
+  start(workspaceRoot: string, from: string, job: { title: string } & DriveThread, propose?: boolean): Promise<DriveFix>;
+  /// Takes away the chat's proposals nobody started: all of them before a
+  /// new proposed split, or only those of these names when they start for real.
+  replaceProposed?(from: string, titles?: string[]): number;
 }
 
 const norm = (path: string) => path.trim().replace(/^\.\//, "").replace(/\/+$/, "");
@@ -92,6 +97,10 @@ export function startThreadsTool(host: ThreadsHost): AgentTool {
       if (!context.sessionId) throw new Error("Threads start from a chat");
       const refused = host.refuse(context.workspaceRoot, context.sessionId);
       if (refused) throw new Error(refused);
+      const propose = (input as { propose?: unknown } | null)?.propose === true;
+      // A new proposed split stands in for the proposals nobody started; a
+      // real start takes the place of the proposals it names.
+      const replaced = host.replaceProposed?.(context.sessionId, propose ? undefined : jobs.map((job) => job.title)) ?? 0;
       const started: DriveFix[] = [];
       const failed: string[] = [];
       const ids = new Map<string, string>();
@@ -99,11 +108,17 @@ export function startThreadsTool(host: ThreadsHost): AgentTool {
         const after = job.after ? ids.get(job.after.toLowerCase()) : undefined;
         if (job.after && !after) { failed.push(`${job.title}: "${job.after}", which it waits for, didn't start`); continue; }
         try {
-          const fix = await host.start(context.workspaceRoot, context.sessionId, { title: job.title, brief: job.brief, files: job.files, ...(after ? { after } : {}) });
+          const fix = await host.start(context.workspaceRoot, context.sessionId, { title: job.title, brief: job.brief, files: job.files, ...(after ? { after } : {}) }, propose);
           started.push(fix); ids.set(job.title.toLowerCase(), fix.id);
         } catch (error) { failed.push(`${job.title}: ${error instanceof Error ? error.message : String(error)}`); }
       }
       if (!started.length) throw new Error(`No thread started. ${failed.join(" ")}`);
+      if (propose) return [
+        `Proposed ${started.length} thread${started.length === 1 ? "" : "s"}${replaced ? `, in place of ${replaced} proposed before` : ""}. Nothing has started:`,
+        ...started.map((fix) => `- ${fix.title} (only touches ${fix.thread?.files.join(", ")})`),
+        ...(failed.length ? ["Couldn't propose:", ...failed.map((line) => `- ${line}`)] : []),
+        "The person sees them at the top of this chat and starts each one, or all, with Start. Say in a sentence that nothing has started yet, and stop. If they ask for a different split, call start_threads again with propose (it replaces these); if they tell you in words to go ahead, call it again without propose and with the same titles.",
+      ].join("\n");
       return [
         `Started ${started.length} thread${started.length === 1 ? "" : "s"}, each in its own worktree:`,
         ...started.map((fix) => `- ${fix.title} on ${fix.branch}${fix.status === "failed" ? ` (failed: ${fix.error})` : fix.thread?.after ? ` (starts after "${started.find((item) => item.id === fix.thread!.after)?.title ?? "the one it waits for"}")` : ""}`),

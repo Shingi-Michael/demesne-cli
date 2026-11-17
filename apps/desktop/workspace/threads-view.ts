@@ -7,7 +7,8 @@ import type { ThreadReport } from "../../../packages/protocol/src/thread-report.
 /// live, sorted by what needs you, each line ending in its one next step. A
 /// line opens in place to the thread's last steps, or to what it changed
 /// with Merge right there. A merged thread leaves the ribbon; the reply that
-/// started it keeps one quiet line as the record.
+/// started it keeps one quiet line as the record. Threads can be proposed
+/// first: their lines end in Start and nothing runs until you press it.
 
 export interface ThreadsView {
   list: DriveFix[];
@@ -38,11 +39,13 @@ const button = (action: string, label: string, data: Record<string, unknown>, cl
 const CHECK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
 const chevron = (className: string) => `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`;
 
-export type ThreadState = "work" | "you" | "ready" | "failed" | "merged" | "waits";
+export type ThreadState = "work" | "you" | "ready" | "failed" | "merged" | "waits" | "prop";
 export function threadState(fix: DriveFix): ThreadState {
   if (fix.status === "applied") return "merged";
   if (fix.status === "ready") return "ready";
   if (fix.status === "failed" || fix.status === "discarded") return "failed";
+  // Proposed: shown first, and nothing runs until you start it.
+  if (fix.status === "starting" && fix.thread?.proposed) return "prop";
   // Built on another thread: no chat yet until that one is back and checked.
   if (fix.status === "starting" && fix.thread?.after && !fix.sessionId) return "waits";
   return fix.waiting ? "you" : "work";
@@ -52,6 +55,7 @@ export function threadState(fix: DriveFix): ThreadState {
 /// full until it is back.
 export function threadProgress(fix: DriveFix): number {
   const state = threadState(fix);
+  if (state === "prop") return 0;
   if (state === "waits") return 0.04;
   if (state !== "work" && state !== "you") return 1;
   const steps = fix.activity?.steps ?? 0;
@@ -94,6 +98,7 @@ export function threadDoing(last: string | null | undefined): string {
 export function threadLine(fix: DriveFix, list: DriveFix[] = []): string {
   const state = threadState(fix);
   if (state === "you") return `<span class="amber">Asks you</span>`;
+  if (state === "prop") return esc(fix.thread?.files.length ? `Only touches ${fix.thread.files.join(", ")}` : "Not started");
   if (state === "waits") return esc(`After ${list.find((item) => item.id === fix.thread?.after)?.title ?? "the thread it's built on"}`);
   if (state === "work") return fix.review?.sentBack ? `<span class="sent">Sent back</span>${fix.review.note ? ` · ${esc(fix.review.note)}` : ""}`
     : fix.status === "starting" && !fix.activity?.last ? "Starting" : esc(threadDoing(fix.activity?.last));
@@ -112,10 +117,10 @@ function threadTip(fix: DriveFix): string {
 }
 
 /// The threads the ribbon holds: every one that isn't merged, with what
-/// needs you first (asks you, stopped), then ready, then working. Among
-/// equals the order they started in stays, so a line only moves when its
-/// thread's state does.
-const RANK: Record<ThreadState, number> = { you: 0, failed: 1, ready: 2, work: 3, waits: 4, merged: 5 };
+/// needs you first (asks you, stopped), then ready, then working and
+/// proposed. Among equals the order they started in stays, so a line only
+/// moves when its thread's state does.
+const RANK: Record<ThreadState, number> = { you: 0, failed: 1, ready: 2, work: 3, prop: 3, waits: 4, merged: 5 };
 export function liveThreads(list: DriveFix[]): DriveFix[] {
   return list.map((fix, at) => ({ fix, at })).filter(({ fix }) => fix.status !== "applied" && fix.status !== "discarded")
     .sort((a, b) => RANK[threadState(a.fix)] - RANK[threadState(b.fix)] || a.at - b.at).map(({ fix }) => fix);
@@ -128,22 +133,25 @@ const threads = (count: number) => `${NUMBER[count] ?? count} thread${count === 
 /// whatever each is on. A single thread that needs you is named.
 export function threadsBar(list: DriveFix[]): { name: string; count: string; tone: "asks" | "still" | "" } {
   const live = liveThreads(list), by = (state: ThreadState) => live.filter((fix) => threadState(fix) === state).length;
-  const you = by("you"), failed = by("failed"), ready = by("ready"), work = by("work") + by("waits"), need = you + failed;
+  const you = by("you"), failed = by("failed"), ready = by("ready"), work = by("work") + by("waits"), proposed = by("prop"), need = you + failed;
+  // Proposed and nothing else: nothing has started.
+  if (proposed === live.length) return { name: `${threads(proposed)} proposed`, count: "not started", tone: "still" };
   const name = need === 1 ? `${live[0]!.title} ${you ? "asks you" : "stopped"}` : need ? `${threads(need)} need you` : work ? `${threads(work)} working` : `${threads(ready)} ready to merge`;
-  const count = [need && work ? `${work} working` : "", (need || work) && ready ? `${ready} ready` : ""].filter(Boolean).join(" · ");
+  const count = [need && work ? `${work} working` : "", (need || work) && ready ? `${ready} ready` : "", proposed ? `${proposed} proposed` : ""].filter(Boolean).join(" · ");
   return { name, count, tone: need ? "asks" : work ? "" : "still" };
 }
 
-/// The one next step a line ends in: Answer, Merge, or Open for a thread that stopped.
+/// The one next step a line ends in: Start, Answer, Merge, or Try again for a thread that stopped.
 function threadNext(view: ThreadsView, fix: DriveFix): string {
   const state = threadState(fix);
   if (state === "ready") return button("thread-merge", view.busy === fix.id ? "Merging…" : "Merge", { id: fix.id }, "tr-next ready", Boolean(view.busy));
   if (state === "you") return button("thread-answer", "Answer", { id: fix.id }, "tr-next you");
-  if (state === "failed" && fix.sessionId) return button("select-session", "Open", { id: fix.sessionId }, "tr-next failed");
+  if (state === "prop") return button("thread-start", view.busy === fix.id ? "Starting…" : "Start", { id: fix.id }, "tr-next prop", Boolean(view.busy));
+  if (state === "failed") return button("thread-retry", view.busy === fix.id ? "Trying…" : "Try again", { id: fix.id }, "tr-next failed", Boolean(view.busy));
   return "";
 }
 
-const SEGMENT: Record<ThreadState, string> = { work: "n", you: "y", failed: "r", ready: "d", waits: "p", merged: "d" };
+const SEGMENT: Record<ThreadState, string> = { work: "n", you: "y", failed: "r", ready: "d", waits: "p", prop: "p", merged: "d" };
 const minutes = (fix: DriveFix) => fix.startedAt ? `${Math.max(1, Math.round((Date.now() - Date.parse(fix.startedAt)) / 60_000))}m` : "";
 
 /// How a ready thread was checked, in a few words.
@@ -164,14 +172,17 @@ function changedFile(file: DriveFixChange, open: boolean): string {
 function threadPeekHTML(view: ThreadsView, look: ThreadsLook, fix: DriveFix): string {
   const state = threadState(fix), peek = look.peek?.of === fix.id ? look.peek : null;
   const chat = fix.sessionId ? button("select-session", "Open its chat", { id: fix.sessionId }, "tr-link") : "";
-  // A thread with work on its branch asks once more before it is deleted.
+  // A thread with work on its branch asks once more before it is deleted; a proposal has nothing to lose.
   const armed = look.armed === fix.id;
-  const remove = button(armed ? "thread-delete" : "thread-delete-arm", armed ? "Delete it and its branch" : "Delete", { id: fix.id }, `tr-link${armed ? " armed" : ""}`, Boolean(view.busy));
+  const remove = state === "prop" ? button("thread-delete", "Delete", { id: fix.id }, "tr-link", Boolean(view.busy))
+    : button(armed ? "thread-delete" : "thread-delete-arm", armed ? "Delete it and its branch" : "Delete", { id: fix.id }, `tr-link${armed ? " armed" : ""}`, Boolean(view.busy));
   const note = (words: string, end = "") => `<div class="tr-note"><span>${words}</span><span class="sp"></span>${remove}${chat}${end}</div>`;
   const say = (text: string | null | undefined, className = "") => text?.trim() ? `<p class="tr-say${className}">${esc(text.trim())}</p>` : "";
   const steps = peek?.steps ? `<div class="steps">${peek.steps}</div>` : "";
+  const built = fix.thread?.after ? view.list.find((item) => item.id === fix.thread?.after)?.title : "";
+  if (state === "prop") return `<div class="tr-peek">${say(fix.thread?.brief)}${note(`${esc(fix.branch)} · ${built ? `starts after ${esc(built)}` : "from your branch"}`, button("thread-start", view.busy === fix.id ? "Starting…" : "Start", { id: fix.id }, "tr-go", Boolean(view.busy)))}</div>`;
   if (state === "waits") return `<div class="tr-peek">${say(fix.thread?.brief)}${note(`Starts once ${esc(view.list.find((item) => item.id === fix.thread?.after)?.title ?? "the thread it's built on")} is back`)}</div>`;
-  if (state === "failed") return `<div class="tr-peek">${say(fix.error ?? "It stopped before it finished.")}${steps}${note("Nothing on your branch was touched")}</div>`;
+  if (state === "failed") return `<div class="tr-peek">${say(peek?.say || fix.error || "It stopped before it finished.")}${steps}${note("Your branch is untouched", button("thread-retry", view.busy === fix.id ? "Trying…" : "Try again", { id: fix.id }, "tr-go", Boolean(view.busy)))}</div>`;
   if (state === "you") return `<div class="tr-peek">${say(peek?.say || fix.thread?.brief)}${steps}${note(look.asking === fix.id ? "Its question is waiting at the end of this chat" : "It waits for your go-ahead in its chat")}</div>`;
   if (state === "work") return `<div class="tr-peek">${say(peek?.say || fix.thread?.brief)}${steps}${note(esc(fix.branch))}</div>`;
   const changes = view.changes?.id === fix.id ? view.changes : null;
@@ -199,7 +210,11 @@ export function threadsRibbonHTML(view: ThreadsView, look: ThreadsLook): string 
   const ready = live.filter((fix) => threadState(fix) === "ready");
   const total = ready.reduce((sum, fix) => ({ additions: sum.additions + (fix.diff?.additions ?? 0), deletions: sum.deletions + (fix.diff?.deletions ?? 0), files: sum.files + (fix.diff?.files ?? 0) }), { additions: 0, deletions: 0, files: 0 });
   const checked = ready.every((fix) => fix.review?.checked || (fix.checks?.length && fix.checks.every((check) => check.passed)));
-  const foot = ready.length > 1 && ready.length === live.length
+  // Start all, while more than one proposed thread waits for Start.
+  const proposed = live.filter((fix) => threadState(fix) === "prop");
+  const foot = proposed.length > 1
+    ? `<div class="tr-foot"><span>Each gets its own branch${proposed.some((fix) => fix.thread?.after) ? "" : " · no file is shared"}</span><span class="sp"></span>${button("threads-start", view.busy === "start" ? "Starting…" : `Start all ${proposed.length}`, {}, "tr-go", Boolean(view.busy))}</div>`
+    : ready.length > 1 && ready.length === live.length
     ? `<div class="tr-foot"><span>${counts(total.additions, total.deletions)} in ${total.files} file${total.files === 1 ? "" : "s"}${checked ? " · each one checked" : ""}</span><span class="sp"></span>${button("threads-merge", view.busy === "merge" ? "Merging…" : `Merge all ${ready.length}`, {}, "tr-go", Boolean(view.busy))}</div>` : "";
   const open = !look.folded;
   return `<div class="plan-ribbon tr${open ? " open" : ""}${bar.tone ? ` ${bar.tone}` : ""}"><div class="pr-card"><button type="button" class="pr-bar" data-action="threads-fold" aria-expanded="${open}" aria-label="Threads: ${esc(bar.name)}"><span class="pr-ok"></span><span class="pr-cur"><span class="pr-name">${esc(bar.name)}</span></span><span class="pr-ct">${esc(bar.count)}</span><span class="pr-segs">${segments}</span></button><div class="pr-fold"${open ? "" : " inert"}><div><div class="pr-list" role="group" aria-label="Threads">${rows}${foot}</div></div></div></div></div>`;
@@ -214,6 +229,7 @@ function begun(list: DriveFix[], title: string, at: number): DriveFix | null {
 
 /// What resting on a started thread's name says: how it stands, and what a click does.
 function begunTip(fix: DriveFix): string {
+  if (threadState(fix) === "prop") return `${fix.title}\nProposed, not started · show it in the threads bar`;
   if (fix.status !== "applied") return `${fix.title}\n${fix.branch} · show it in the threads bar`;
   return [fix.title, fix.mergedElsewhere === "github" ? "Its pull request was merged on GitHub. Pull to bring it into this checkout." : fix.mergedElsewhere ? "Merged outside Demesne: your branch already holds its work." : "Merged onto your branch", "Open its chat"].join("\n");
 }
@@ -226,7 +242,8 @@ export function threadsBegunHTML(view: ThreadsView, titles: string[], at = 0): s
   if (!found.length) return "";
   // A deleted thread keeps its name here, and no ring.
   const known = found.flatMap(({ fix }) => fix ? [fix] : []), merged = known.length > 0 && known.every((fix) => fix.status === "applied");
-  return `<span class="tr-word">${merged ? "Merged" : "Started"}</span>${found.map(({ title, fix }) => !fix ? `<span class="tr-gone">${esc(title)}</span>`
+  const proposed = known.length > 0 && known.every((fix) => threadState(fix) === "prop");
+  return `<span class="tr-word">${merged ? "Merged" : proposed ? "Proposed" : "Started"}</span>${found.map(({ title, fix }) => !fix ? `<span class="tr-gone">${esc(title)}</span>`
     : button("thread-jump", `${ring(fix)}<span>${esc(fix.title)}</span>`, { id: fix.id, chat: fix.sessionId }, "").replace("<button ", `<button title="${esc(begunTip(fix))}" `)).join("")}`;
 }
 

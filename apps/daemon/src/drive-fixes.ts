@@ -180,7 +180,8 @@ export class DriveFixes {
     // A fix that was working when the daemon stopped can't resume. A mission
     // can: its planner lives in the client and resumes paused.
     let changed = false;
-    for (const fix of this.fixes) if (fix.status === "starting" || (fix.status === "running" && !fix.mission)) {
+    // A proposed thread never started, so it has nothing to lose.
+    for (const fix of this.fixes) if ((fix.status === "starting" && !fix.thread?.proposed) || (fix.status === "running" && !fix.mission)) {
       Object.assign(fix, { status: "failed", finishedAt: new Date().toISOString(), error: "The daemon restarted while this fix was running." });
       changed = true;
     }
@@ -274,9 +275,10 @@ export class DriveFixes {
   /// A thread: one job of an orchestrator chat's split, in its own worktree
   /// and branch, side by side with the others. It reports back to the chat
   /// that started it, and only the person merges it (Apply).
-  async startThread(workspace: string, from: string, job: { title: string } & DriveThread): Promise<DriveFix> {
-    const open = this.fixes.filter((fix) => fix.workspace === workspace && fix.thread && fix.sessionId && (fix.status === "starting" || fix.status === "running"));
-    if (open.length >= MAX_THREADS) throw new Error(`${MAX_THREADS} threads are already working in this project; wait for one to finish.`);
+  /// With `propose` it is only listed for the person: nothing runs until
+  /// they start it (act "start").
+  async startThread(workspace: string, from: string, job: { title: string } & DriveThread, propose = false): Promise<DriveFix> {
+    if (!propose) this.roomForThread(workspace);
     const top = await this.git(["git", "rev-parse", "--show-toplevel"], workspace);
     if (!top.ok) throw new Error("Threads only work inside a project with a git repository.");
     const base = await this.git(["git", "rev-parse", "HEAD"], workspace);
@@ -287,12 +289,78 @@ export class DriveFixes {
     const title = firstLine(job.title).slice(0, 120) || "Thread";
     const branch = `thread/${slugOf(title, "job")}-${id.slice(0, 4)}`;
     const path = join(this.worktreeRoot, `${basename(top.out)}-${id}`);
-    const thread: DriveThread = { brief: job.brief.trim().slice(0, 4000), files: job.files.map((file) => file.trim()).filter(Boolean).slice(0, 40), ...(after ? { after: after.id } : {}) };
+    const thread: DriveThread = { brief: job.brief.trim().slice(0, 4000), files: job.files.map((file) => file.trim()).filter(Boolean).slice(0, 40), ...(after ? { after: after.id } : {}), ...(propose ? { proposed: true } : {}) };
     const fix: DriveFix = { id, workspace, title, signals: [], from, thread, branch, path, base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null };
     this.fixes.push(fix); this.save();
     // One that waits starts once the thread it waits for is back and checked.
-    if (after && after.status !== "ready") return fix;
+    if (propose || (after && after.status !== "ready")) return fix;
     await this.launchThread(fix, top.out);
+    return fix;
+  }
+
+  private roomForThread(workspace: string) {
+    const open = this.fixes.filter((fix) => fix.workspace === workspace && fix.thread && fix.sessionId && (fix.status === "starting" || fix.status === "running"));
+    if (open.length >= MAX_THREADS) throw new Error(`${MAX_THREADS} threads are already working in this project; wait for one to finish.`);
+  }
+
+  /// A new split replaces the chat's proposals nobody started: they hold no
+  /// worktree, branch or chat, so they simply go. With `titles`, only the
+  /// proposals of those names go (they are being started for real).
+  dropProposed(from: string, titles?: string[]): number {
+    const named = titles?.map((title) => title.toLowerCase());
+    const gone = this.fixes.filter((fix) => fix.thread?.proposed && fix.from === from && fix.status === "starting" && (!named || named.includes(fix.title.toLowerCase())));
+    if (!gone.length) return 0;
+    this.fixes = this.fixes.filter((fix) => !gone.includes(fix));
+    this.save();
+    return gone.length;
+  }
+
+  /// The person starts a proposed thread. One built on another that is still
+  /// working waits for it, like any thread started that way.
+  private async startProposed(fix: DriveFix): Promise<DriveFix> {
+    this.roomForThread(fix.workspace);
+    const thread = fix.thread!;
+    const after = thread.after ? this.get(thread.after) : null;
+    if (thread.after && (!after || after.status === "failed" || after.status === "discarded" || after.status === "pr"))
+      throw new Error(`"${after?.title ?? "The thread it waits for"}", which it is built on, didn't finish.`);
+    if (after?.thread?.proposed) throw new Error(`Start "${after.title}" first: this thread is built on it.`);
+    // Built on a thread that is already merged: it starts from your branch, which holds that work.
+    if (after?.status === "applied") delete thread.after;
+    const base = await this.git(["git", "rev-parse", "HEAD"], fix.workspace);
+    if (!base.ok) throw new Error("This repository has no commits yet.");
+    delete thread.proposed;
+    Object.assign(fix, { base: base.out, startedAt: new Date().toISOString() });
+    this.save();
+    if (thread.after && after!.status !== "ready") return fix;
+    await this.launchThread(fix);
+    return fix;
+  }
+
+  /// The person sends a stopped thread back to work. One that got as far as
+  /// its own chat picks up there, in the worktree it left; one that never
+  /// started is started again from your branch as it is now.
+  private async retryThread(fix: DriveFix): Promise<DriveFix> {
+    this.roomForThread(fix.workspace);
+    const why = fix.error;
+    if (fix.sessionId && existsSync(fix.path)) {
+      const next = this.host.startTurn(fix.sessionId, `Your last turn stopped before the job was done${why ? ` (${why})` : ""}. Look at where your work stands, pick it up from there and finish the job. End with two or three plain sentences: what you changed and how you checked it.`);
+      delete fix.error;
+      Object.assign(fix, { turnId: next.turnId, status: "running", finishedAt: null });
+      this.save();
+      this.watchThread(fix, next.done);
+      return fix;
+    }
+    const thread = fix.thread!;
+    const after = thread.after ? this.get(thread.after) : null;
+    if (thread.after && after?.status === "applied") delete thread.after;
+    else if (thread.after && (!after || !ACTIVE.has(after.status) || after.status === "failed")) throw new Error(`Try "${after?.title ?? "the thread it is built on"}" again first: this thread is built on it.`);
+    const base = await this.git(["git", "rev-parse", "HEAD"], fix.workspace);
+    if (!base.ok) throw new Error("This repository has no commits yet.");
+    delete fix.error;
+    Object.assign(fix, { base: base.out, sessionId: null, turnId: null, status: "starting", startedAt: new Date().toISOString(), finishedAt: null });
+    this.save();
+    if (thread.after && after!.status !== "ready") return fix;
+    await this.launchThread(fix);
     return fix;
   }
 
@@ -365,7 +433,7 @@ export class DriveFixes {
   /// Threads waiting on this one start once it's back and checked, and fail
   /// with it when it didn't make it.
   private thenWaiting(fix: DriveFix) {
-    for (const next of this.fixes.filter((item) => item.thread?.after === fix.id && item.status === "starting" && !item.sessionId)) {
+    for (const next of this.fixes.filter((item) => item.thread?.after === fix.id && item.status === "starting" && !item.sessionId && !item.thread.proposed)) {
       if (fix.status === "ready") void this.launchThread(next);
       else if (fix.status !== "running") { this.fail(next, new Error(`"${fix.title}", which it waited for, didn't finish.`)); this.reportThread(next); }
     }
@@ -388,8 +456,8 @@ export class DriveFixes {
   /// A finished thread tells its orchestrator how it went.
   private reportThread(fix: DriveFix) {
     if (!fix.thread || !fix.from || !fix.sessionId || (fix.status !== "ready" && fix.status !== "failed")) return;
-    const others = this.fixes.filter((item) => item.thread && item.from === fix.from && item.workspace === fix.workspace && item.id !== fix.id && (item.status === "starting" || item.status === "running")).length;
-    const waiting = this.fixes.filter((item) => item.thread?.after && item.from === fix.from && item.status === "starting" && !item.sessionId).length;
+    const others = this.fixes.filter((item) => item.thread && item.from === fix.from && item.workspace === fix.workspace && item.id !== fix.id && !item.thread.proposed && (item.status === "starting" || item.status === "running")).length;
+    const waiting = this.fixes.filter((item) => item.thread?.after && !item.thread.proposed && item.from === fix.from && item.status === "starting" && !item.sessionId).length;
     this.host.report?.(fix.from, formatThreadReport({ title: fix.title, fix: fix.id, chat: fix.sessionId, branch: fix.branch, status: fix.status, working: others + waiting,
       ...(fix.diff ? { diff: fix.diff } : {}), ...(fix.checks?.length ? { checks: fix.checks } : {}),
       ...(fix.review ? { review: { sentBack: fix.review.sentBack, checked: fix.review.checked === true, ...(fix.review.note ? { note: fix.review.note } : {}), last: fix.review.sentBack >= MAX_SEND_BACKS } } : {}),
@@ -568,6 +636,14 @@ export class DriveFixes {
       return fix;
     }
     if (!fix || !ACTIVE.has(fix.status)) throw new Error("That fix is no longer open.");
+    if (action === "start") {
+      if (!fix.thread?.proposed || fix.status !== "starting") throw new Error("That thread has already started.");
+      return this.startProposed(fix);
+    }
+    if (action === "retry") {
+      if (!fix.thread || fix.status !== "failed") throw new Error("Only a thread that stopped can be tried again.");
+      return this.retryThread(fix);
+    }
     const before = fix.status;
     if (action === "discard") {
       if (fix.status === "running" && fix.turnId) { this.host.cancel(fix.turnId); await this.done.get(id); }

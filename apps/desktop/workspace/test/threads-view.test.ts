@@ -80,7 +80,7 @@ test("pass 232: each line ends in its one next step", () => {
   const next = (id: string) => /class="tr-next[^"]*" data-action="([\w-]+)"[^>]*>([^<]+)</.exec(html.slice(html.indexOf(`data-thread="${id}"`), html.indexOf("</div></div>", html.indexOf(`data-thread="${id}"`))))?.slice(1);
   expect(next("asks")).toEqual(["thread-answer", "Answer"]);
   expect(next("ready")).toEqual(["thread-merge", "Merge"]);
-  expect(next("stopped")).toEqual(["select-session", "Open"]);
+  expect(next("stopped")).toEqual(["thread-retry", "Try again"]);
   expect(next("work")).toBeUndefined();
   expect(html).toContain('<span class="tr-words">Working</span><span class="tr-end">1m</span>');
   expect(html.match(/class="tr-end"/g)).toHaveLength(1);
@@ -159,4 +159,65 @@ test("pass 232: a thread's own chat opens on one quiet line, with the way back",
 test("what a merge just did sits above the composer, and nothing else", () => {
   expect(threadsMessageHTML(view([fix("a")]))).toBe("");
   expect(threadsMessageHTML(view([], { message: { text: "Merged Thread a onto your branch.", tone: "ok" } }))).toContain('<p class="th-msg ok"><span>Merged Thread a onto your branch.</span>');
+});
+
+const proposed = (id: string, more: Partial<DriveFix> = {}) => fix(id, { status: "starting", sessionId: null, turnId: null, thread: { brief: `Do ${id}.`, files: [`src/${id}.ts`], proposed: true }, ...more });
+
+test("threads proposed first: each line ends in Start, and nothing says they run", () => {
+  const list = [proposed("a"), proposed("b"), proposed("c")];
+  expect(threadState(list[0]!)).toBe("prop");
+  expect(threadProgress(list[0]!)).toBe(0);
+  expect(threadLine(list[0]!)).toBe("Only touches src/a.ts");
+  expect(threadsBar(list)).toEqual({ name: "Three threads proposed", count: "not started", tone: "still" });
+  const html = threadsRibbonHTML(view(list), look());
+  expect(html.match(/class="tr-next prop" data-action="thread-start"[^>]*>Start</g)).toHaveLength(3);
+  expect(html).toContain('<i class="p"><b></b></i><i class="p"><b></b></i><i class="p"><b></b></i>');
+  expect(html).toContain("th-ring prop");
+  expect(html).toContain('<span>Each gets its own branch · no file is shared</span><span class="sp"></span><button type="button" class="tr-go" data-action="threads-start" data-args="{}">Start all 3</button>');
+  expect(html).not.toMatch(/working|Starting|Merge/);
+  // One built on another may share its files, so the foot doesn't say otherwise.
+  const chained = threadsRibbonHTML(view([proposed("a"), proposed("b", { thread: { brief: "Then b.", files: ["src/a.ts"], after: "a", proposed: true } })]), look());
+  expect(chained).toContain("<span>Each gets its own branch</span>");
+  // One proposal left: its own Start is enough.
+  expect(threadsRibbonHTML(view([proposed("a")]), look())).not.toContain("tr-foot");
+  expect(threadsRibbonHTML(view(list, { busy: "start" }), look())).toContain("Starting…");
+});
+
+test("a proposed line opens to its brief, its branch and Start; Delete needs no second ask", () => {
+  const list = [proposed("a", { title: "Add CSV export" }), proposed("b", { thread: { brief: "Then b.", files: ["src/b.ts"], after: "a", proposed: true } })];
+  const html = threadsRibbonHTML(view(list, { open: "a" }), look());
+  expect(html).toContain('<p class="tr-say">Do a.</p>');
+  expect(html).toContain("<span>thread/a · from your branch</span>");
+  expect(html).toContain('class="tr-link" data-action="thread-delete" data-args="{&quot;id&quot;:&quot;a&quot;}">Delete</button>');
+  expect(html).not.toContain("thread-delete-arm");
+  expect(html).not.toContain("Open its chat");
+  expect(html).toContain('class="tr-go" data-action="thread-start" data-args="{&quot;id&quot;:&quot;a&quot;}">Start</button>');
+  expect(threadsRibbonHTML(view(list, { open: "b" }), look())).toContain("<span>thread/b · starts after Add CSV export</span>");
+});
+
+test("proposed threads beside started ones: counted on the bar, sorted with the working, and the record says Proposed", () => {
+  const list = [fix("a"), proposed("b"), ready("c"), fix("d", { waiting: true })];
+  expect(liveThreads(list).map((item) => item.id)).toEqual(["d", "c", "a", "b"]);
+  expect(threadsBar([fix("a"), proposed("b"), ready("c")])).toEqual({ name: "One thread working", count: "1 ready · 1 proposed", tone: "" });
+  expect(threadsBar([ready("c"), proposed("b")])).toEqual({ name: "One thread ready to merge", count: "1 proposed", tone: "still" });
+  // Merge all waits until every live thread is ready; a proposal is live.
+  expect(threadsRibbonHTML(view([ready("a"), ready("c"), proposed("b")]), look())).not.toContain("threads-merge");
+  const all = threadsBegunHTML(view([proposed("a", { title: "Add CSV export" }), proposed("b", { title: "Fix the header" })]), ["Add CSV export", "Fix the header"]);
+  expect(all).toStartWith('<span class="tr-word">Proposed</span>');
+  expect(all).toContain("Proposed, not started");
+  expect(threadsBegunHTML(view([fix("a", { title: "Add CSV export" }), proposed("b", { title: "Fix the header" })]), ["Add CSV export", "Fix the header"])).toStartWith('<span class="tr-word">Started</span>');
+});
+
+test("Try again: a stopped thread's line and its open line both offer it", () => {
+  const stopped = fix("a", { status: "failed", error: "The coding turn failed." });
+  const html = threadsRibbonHTML(view([stopped], { open: "a" }), look());
+  expect(html).toContain('class="tr-next failed" data-action="thread-retry"');
+  expect(html).toContain('<p class="tr-say">The coding turn failed.</p>');
+  expect(html).toContain("<span>Your branch is untouched</span>");
+  // Its own last words say more than the error, when it got that far.
+  expect(threadsRibbonHTML(view([stopped], { open: "a" }), look({ peek: { of: "a", say: "bun migrate isn't a script here.", steps: "" } }))).toContain('<p class="tr-say">bun migrate isn&#39;t a script here.</p>');
+  expect(html).toContain('class="tr-go" data-action="thread-retry" data-args="{&quot;id&quot;:&quot;a&quot;}">Try again</button>');
+  // One that never got a chat can still be tried again.
+  expect(threadsRibbonHTML(view([fix("b", { status: "failed", sessionId: null })]), look())).toContain('data-action="thread-retry"');
+  expect(threadsRibbonHTML(view([stopped], { busy: "a" }), look())).toContain("Trying…");
 });

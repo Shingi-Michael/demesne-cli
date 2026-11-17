@@ -2141,9 +2141,8 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .tr-next:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; border-radius: 6px; }
 .tr-next:disabled { opacity: .6; cursor: default; }
 .tr-next.you { color: var(--warn); }
-.tr-next.failed { color: var(--t2); }
 /* An open ready line has Merge in what it shows; the word at its end steps aside. */
-.tr-item.open.ready .tr-next { display: none; }
+.tr-item.open.ready .tr-next, .tr-item.open.prop .tr-next, .tr-item.open.failed .tr-next { display: none; }
 
 /* What an open line shows, hung on the fine rule the steps use: its last
    words and steps, or what it changed. */
@@ -2212,7 +2211,8 @@ div.tr-file, .tr-file:disabled { cursor: default; }
 /* The ring fills from the top, and a working one turns about its own centre. */
 .th-ring .fg { stroke: var(--acc); stroke-linecap: round; transform-origin: 9px 9px; transform: rotate(-90deg); transition: stroke-dashoffset 400ms ease-out; }
 .th-ring.you .fg { stroke: var(--warn); } .th-ring.ready .fg { stroke: var(--ok); } .th-ring.failed .fg { stroke: var(--bad); }
-.th-ring.waits .bg { stroke-dasharray: 2.6 3.2; stroke: var(--t4); }
+.th-ring.waits .bg, .th-ring.prop .bg { stroke-dasharray: 2.6 3.2; stroke: var(--t4); }
+.th-ring.prop .fg { display: none; }
 .th-ring.ok { stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 @media (prefers-reduced-motion: no-preference) { .th-ring.work .fg { animation: th-turn 2.4s linear infinite; } }
 @keyframes th-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }

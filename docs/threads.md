@@ -27,8 +27,8 @@ The composer's mode word has a fifth mode in project chats: **Orchestrate**. In 
 The ribbon has the checklist ribbon's shape: one bar, folded until you click it.
 
 - **The bar** counts across every live thread: "Three threads working", "Fix the jumping header asks you · 1 working · 1 ready", "Two threads need you", "Three threads ready to merge". Under the words is one fine segment per thread: moving silver while it works, amber when it asks you, red when it stopped, green when it is ready.
-- **Opened**, it shows one line per thread over the chat (the chat does not move). What needs you is on top: a thread that asks you, then one that stopped, then ready ones, then working ones. Among equals the order they started in stays, so a line only moves when its thread's state changes.
-- **Each line** has a ring that fills as the thread works, its name, what it is doing in plain words ("Editing csv.ts", "Asks you", "Ready · +42 −6"), its minutes while it works, and at most one next step: **Answer** for a thread that asks, **Merge** for a ready one, **Open** for one that stopped. Resting on a line says what it leaves out: the files it may touch, whether the orchestrator checked it, and how its checks went.
+- **Opened**, it shows one line per thread over the chat (the chat does not move). What needs you is on top: a thread that asks you, then one that stopped, then ready ones, then working and proposed ones. Among equals the order they started in stays, so a line only moves when its thread's state changes.
+- **Each line** has a ring that fills as the thread works, its name, what it is doing in plain words ("Editing csv.ts", "Asks you", "Ready · +42 −6"), its minutes while it works, and at most one next step: **Start** for a proposed thread, **Answer** for one that asks, **Merge** for a ready one, **Try again** for one that stopped. Resting on a line says what it leaves out: the files it may touch, whether the orchestrator checked it, and how its checks went.
 - **A line opens in place.** A working thread shows its last words and its last three steps, drawn as any chat draws a step, and its branch. A ready thread shows its summary, the files it changed with their counts (a file unfolds to its diff), how it was checked ("Stayed in its files · bun test passed"), and Merge. Every open line also has "Open its chat" and Delete; Delete asks once more, then stops the thread and removes its worktree and branch.
 - **Merge all N** shows under the lines only when every live thread is ready. Each line keeps its own Merge.
 - **A thread leaves the ribbon when it is merged** (or deleted). With no live thread there is no ribbon. The line under the reply stays: its ring turns into a tick and the word becomes "Merged". Clicking a name there opens that thread's line while it is live, or its chat once it is merged.
@@ -38,6 +38,20 @@ The ribbon has the checklist ribbon's shape: one bar, folded until you click it.
 **A thread's full chat is a chat like any other.** "Open its chat", or its row under the orchestrator in the sidebar, opens it as a normal tab with the thread's ring on it: the same composer, model chip and context as every chat. Its first line says whose thread it is (click the name to go back), its brief and the files it may touch. There is no split view, no thread side and no second row of tabs.
 
 **Merged somewhere else.** If you merge a ready thread's branch yourself (a merge, a cherry-pick or a squash onto your branch), or its pull request is merged on GitHub, demesne notices within a few seconds: the thread leaves the ribbon, its name under the reply turns to a tick (resting on it says where it was merged), and its worktree and branch are cleaned up. Your checkout is looked at every few seconds while the threads are in view; GitHub is asked at most once a minute, and only for a thread whose branch was pushed. A thread with words since it finished that aren't committed is left alone.
+
+## Threads proposed first
+
+The orchestrator can show a split before anything runs: `start_threads` takes `propose: true`. It does so when you ask to see the split first, or when it hands out four or more threads at once.
+
+- A proposed thread holds nothing yet: no worktree, no branch, no chat. It is kept across a daemon restart.
+- The ribbon opens on its own, and says "Three threads proposed · not started". Each line has a dashed ring, the files it would touch, and **Start**. Opened, a line shows its brief, the branch it would get, Start and Delete (no second ask: there is nothing to lose). **Start all N** shows under the lines while more than one waits.
+- The reply's record line says "Proposed" until one starts. The composer reads "Change the split in your own words…": the orchestrator proposes again, and the new split replaces the proposals nobody started. Started threads stay.
+- If you tell the orchestrator in words to go ahead, it calls `start_threads` without `propose` and with the same titles, and those proposals become the running threads.
+- A proposed thread built on another (`after`) starts after it: start that one first.
+
+## Try again
+
+A thread that stopped (its turn failed or was stopped, or the daemon restarted under it) keeps its worktree, branch and chat. Its line ends in **Try again**, and its open line says why it stopped and that your branch is untouched. Try again gives it a new turn in its own chat: it is told its last turn stopped and why, picks up from where its work stands, and is checked and reports like the first time. A thread that never got as far as a chat is started again from your branch as it is now.
 
 ## Threads that wait for another
 
@@ -49,6 +63,7 @@ Words you send a thread after it finished are committed with it when you merge.
 
 - Daemon: `apps/daemon/src/threads.ts` (the `start_threads` and `message_thread` tools, claim checks), `DriveFixes.startThread` in `apps/daemon/src/drive-fixes.ts` (worktrees, the thread prompt, reports), `GET /v1/threads?from=<chat>`. Threads are worktree jobs like Drive's, kept out of Drive's own lists.
 - Report format: `packages/protocol/src/thread-report.ts`.
+- Start and Try again: `POST /v1/drive/fixes/<id>/start` and `/retry` (`DriveFixes.startProposed`, `retryThread`); `DriveThread.proposed` marks a thread that waits for Start.
 - What a thread changed: `GET /v1/drive/fixes/<id>/changes` (`DriveFixes.changes`, `parseChanges`): each file's path, counts and hunks, at most 40 files and 400 lines a file.
 - Window: `apps/desktop/workspace/thread-watch.ts` (the chat's threads; follows the open line's chat and the chat of a thread that asks), `threads-view.ts` (the ribbon, its lines, the record line, rings), `renderThreads` in `live.ts`, `#threads-ribbon` in `index.html`.
-- Checks: `apps/daemon/test/threads.test.ts`, `apps/daemon/test/threads-checked.test.ts`, `apps/desktop/workspace/test/threads-view.test.ts`, and the threads scenario in `scripts/check-desktop.ts` (capture `17-threads-*`).
+- Checks: `apps/daemon/test/threads.test.ts`, `apps/daemon/test/threads-checked.test.ts`, `apps/daemon/test/threads-proposed.test.ts`, `apps/desktop/workspace/test/threads-view.test.ts`, and the threads scenario in `scripts/check-desktop.ts` (capture `17-threads-*`).

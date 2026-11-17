@@ -4711,6 +4711,7 @@ function composerFrame(width: number) {
     inSession(),
     state.connection,
     state.busy,
+    threadsProposedHere(),
     state.approvals.length,
     state.questions.map((q) => [q.id, q.status, q.answers?.length]),
     state.session?.autoApprove,
@@ -4777,6 +4778,7 @@ function composerFrame(width: number) {
       ? openQuestion()!.questions[openQuestion()!.answers?.length ?? 0]?.suggestions?.length ? "Answer in your own words, or pick one above…" : "Type your answer…"
       : state.activeTurnId
       ? "Steer it while it works…"
+      : threadsProposedHere() ? "Change the split in your own words…"
       : suggestion ? `${suggestion}   Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
     : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…");
   editor.disabled =
@@ -6804,6 +6806,8 @@ async function dispatch(
     const live = fix && fix.status !== "applied" && state!.session?.id === state!.threads.from && !pageOpen;
     if (chat && (args.go === "chat" || !live)) { await dispatch("select-session", { id: chat }); return; }
     if (!fix) return;
+    // A thread with no chat yet (proposed, or waiting on another) shows on its line, in the chat that started it.
+    if (fix.from && state!.session?.id !== fix.from) await dispatch("select-session", { id: fix.from });
     threadsFolded = false; threadFileOpen = null;
     renderThreads();
     return act(() => api("thread-open", { id }));
@@ -7339,6 +7343,11 @@ let renderedPalette: Snapshot["palette"] | null = null,
 /// this window knows: whether the ribbon is folded (it is, until you open
 /// it), which file's diff is unfolded, and a Delete pressed once.
 let threadsFolded = true, threadsFoldedFor: string | null = null, threadFileOpen: string | null = null;
+/// The proposed threads this chat's ribbon has already opened itself for.
+const threadsProposedSeen = new Set<string>();
+const threadsProposed = () => state?.threads.list.filter((fix) => fix.status === "starting" && fix.thread?.proposed) ?? [];
+/// Whether this chat holds threads that wait for Start.
+const threadsProposedHere = () => Boolean(state && state.session?.id === state.threads.from && threadsProposed().length);
 let threadDeleteArmed: string | null = null, threadDeleteTimer: ReturnType<typeof setTimeout> | null = null;
 /// Runs `draw` as if the open thread's chat were the chat you're in, so
 /// its steps draw with the same code as any chat's.
@@ -7372,7 +7381,9 @@ function renderThreads() {
   const foot = el("threads-foot"), footHTML = mine ? threadsMessageHTML(view) : "";
   if (foot.dataset.html !== footHTML) { foot.innerHTML = footHTML; foot.dataset.html = footHTML; foot.hidden = !footHTML; }
   // Each chat's ribbon starts as its one bar.
-  if (threadsFoldedFor !== view.from) { threadsFoldedFor = view.from; threadsFolded = true; threadFileOpen = null; }
+  if (threadsFoldedFor !== view.from) { threadsFoldedFor = view.from; threadsFolded = true; threadFileOpen = null; threadsProposedSeen.clear(); }
+  // It opens on its own only for threads that are proposed and wait for Start.
+  if (mine) for (const fix of threadsProposed()) if (!threadsProposedSeen.has(fix.id)) { threadsProposedSeen.add(fix.id); threadsFolded = false; }
   const html = mine ? threadsRibbonHTML(view, { folded: threadsFolded, file: threadFileOpen, armed: threadDeleteArmed, peek: threadsFolded ? null : threadPeek(), asking: state.questions.find((question) => question.thread)?.thread?.id ?? null }) : "";
   const host = el("threads-ribbon");
   if (host.dataset.html !== html) { drawThreadsRibbon(host, html); host.dataset.html = html; }

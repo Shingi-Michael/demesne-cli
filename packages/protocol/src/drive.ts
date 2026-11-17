@@ -149,7 +149,9 @@ export interface DriveFix {
 }
 /// `after`: the id of the thread this one waits for. It starts on that
 /// thread's branch once that one is back and checked, and merges after it.
-export interface DriveThread { brief: string; files: string[]; after?: string }
+/// `proposed`: shown to the person first; nothing runs (no worktree, no chat)
+/// until they start it.
+export interface DriveThread { brief: string; files: string[]; after?: string; proposed?: boolean }
 /// What a proposal run carries; the estimate and confidence let its outcome
 /// calibrate later rankings.
 export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "why"> & Partial<Pick<DriveProposal, "minutes" | "confidence" | "check">>;
@@ -163,7 +165,8 @@ export interface DriveFixesResponse { fixes: DriveFix[] }
 /// longer than what is sent.
 export interface DriveFixChange { path: string; additions: number; deletions: number; patch: string; cut?: boolean }
 export interface DriveFixChangesResponse { files: DriveFixChange[]; more: number }
-export type DriveFixAction = "apply" | "pr" | "discard";
+/// `start` runs a proposed thread; `retry` sends a stopped thread back to work.
+export type DriveFixAction = "apply" | "pr" | "discard" | "start" | "retry";
 /// Away mode: Next proposals queued to run one after another, each in its own
 /// worktree, while you're away. What finishes waits as an inbox of branches.
 export interface DriveAwayItem {

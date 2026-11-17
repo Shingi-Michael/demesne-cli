@@ -204,10 +204,33 @@ export class ThreadWatch {
     if (!fix) return;
     await this.act(id, async () => {
       await this.options.client().driveFixAction(fix.id, "discard");
-      this.state.message = { text: fix.status === "applied" ? `Deleted ${fix.title}. Its merge stays on your branch.` : `Deleted ${fix.title}: its worktree and branch are gone.`, tone: "ok" };
+      this.state.message = { text: fix.status === "applied" ? `Deleted ${fix.title}. Its merge stays on your branch.` : fix.thread?.proposed ? `Deleted ${fix.title}. It had not started.` : `Deleted ${fix.title}: its worktree and branch are gone.`, tone: "ok" };
       this.state.list = this.state.list.filter((item) => item.id !== id);
       if (this.state.open === id) this.state.open = null;
     });
+  }
+
+  /// Starts a proposed thread: its worktree, branch and chat are made now.
+  async startThread(id: string) {
+    const fix = this.fix(id);
+    if (!fix?.thread?.proposed) throw new Error("That thread has already started.");
+    await this.act(id, async () => { await this.options.client().driveFixAction(fix.id, "start"); });
+  }
+
+  /// Start all: every proposed thread in the order it was listed, so one
+  /// built on another starts after it.
+  async startAll() {
+    const proposed = this.state.list.filter((fix) => fix.thread?.proposed && fix.status === "starting");
+    if (!proposed.length) throw new Error("No thread waits for Start.");
+    await this.act("start", async () => { for (const fix of proposed) await this.options.client().driveFixAction(fix.id, "start"); });
+  }
+
+  /// Try again: a stopped thread goes back to work, in its own chat and
+  /// worktree where it got that far.
+  async retryThread(id: string) {
+    const fix = this.fix(id);
+    if (fix?.status !== "failed") throw new Error("Only a thread that stopped can be tried again.");
+    await this.act(id, async () => { await this.options.client().driveFixAction(fix.id, "retry"); });
   }
 
   /// Merge all: each ready thread onto your branch, oldest first, stopping
@@ -242,6 +265,9 @@ export class ThreadWatch {
     if (method === "thread-close") return this.close();
     if (method === "thread-delete") return this.deleteThread(String(args.id ?? ""));
     if (method === "thread-merge") return this.mergeOne(String(args.id ?? ""));
+    if (method === "thread-start") return this.startThread(String(args.id ?? ""));
+    if (method === "threads-start") return this.startAll();
+    if (method === "thread-retry") return this.retryThread(String(args.id ?? ""));
     if (method === "threads-merge") return this.mergeAll();
     if (method === "threads-message-close") { this.state.message = null; return this.options.publish(); }
     throw new Error(`Unknown action ${method}`);

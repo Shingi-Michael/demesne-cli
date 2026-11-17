@@ -728,7 +728,8 @@ export function createDaemonApp(options: {
     refuse: (root, sessionId) => inDriveWorktree(root) || root.split(/[\\/]/).includes(".demesne-worktrees") ? "A thread can't start threads of its own."
       : sessionId === assistantChat.existing() ? "Threads only work inside a project."
       : !workspaceTrust.isTrusted(root) ? "Threads only work inside a project you trust." : null,
-    start: (root, from, job) => driveFixes.startThread(root, from, job),
+    start: (root, from, job, propose) => driveFixes.startThread(root, from, job, propose),
+    replaceProposed: (from, titles) => driveFixes.dropProposed(from, titles),
   }));
   const activeDriveDecisions = new Set<Promise<unknown>>();
   const requestDrainWaiters = new Set<() => void>();
@@ -972,7 +973,7 @@ export function createDaemonApp(options: {
   /// Runs `start` once the chat has no turn queued or running.
   function whenIdle(sessionId: string, start: () => void): void {
     const busy = () => store.getSession(sessionId)?.turns.some((turn) => turn.status === "queued" || turn.status === "running") ?? false;
-    if (!store.getSession(sessionId) || closing) return;
+    if (closing || !store.getSession(sessionId)) return;
     if (!busy()) return start();
     const unsubscribe = hub.subscribe(sessionId, () => {
       if (busy()) return;
@@ -1306,7 +1307,7 @@ export function createDaemonApp(options: {
         try { return json(await driveFixes.changes(path[3]!)); }
         catch (error) { return apiError("not_found", error instanceof Error ? error.message : "Unknown job", 404); }
       }
-      if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && ["apply", "pr", "discard"].includes(path[4]!)) {
+      if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && ["apply", "pr", "discard", "start", "retry"].includes(path[4]!)) {
         try { return json({ fix: await driveFixes.act(path[3]!, path[4] as DriveFixAction) }); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not finish the fix", 409); }
       }

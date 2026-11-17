@@ -1,22 +1,20 @@
 import type { DemesneClient } from "@demesne/client";
-import type { DriveFix, EventEnvelope, SessionStateResponse } from "@demesne/protocol";
+import type { DriveFix, DriveFixChange, EventEnvelope, SessionStateResponse } from "@demesne/protocol";
 import { replaySession } from "@demesne/workbench/history.ts";
 import { WorkspaceSession } from "./session-model.ts";
 
-/// Threads, seen from the window: the orchestrator chat you're in lists the
-/// threads it started, and the one you pick runs live in the right half
-/// beside it, as a chat of its own you can talk to. Picking is the only
-/// thing that moves the right half: a thread that needs you turns amber on
-/// the list but never pulls the right half over to itself.
+/// Threads, seen from the window (pass 232): the orchestrator chat you're
+/// in holds one ribbon of the threads it started, whatever each is on. A
+/// line you open is followed live so it can show the thread's last steps,
+/// or what it changed once it is back. A thread that asks you something is
+/// followed too, so its question can come to the chat you are in.
 
 export interface ThreadsState {
   /// The orchestrator chat these belong to.
   from: string | null;
   list: DriveFix[];
-  /// The thread shown in the right half, by its job id.
+  /// The thread whose line is open in the ribbon, by its job id.
   open: string | null;
-  /// You closed the right half; picking a thread opens it again.
-  closed: boolean;
   /// "merge" while Merge all works through the list, or a thread's id.
   busy: string | null;
   message: { text: string; tone: "ok" | "error" } | null;
@@ -28,11 +26,38 @@ const OPEN = new Set(["starting", "running", "ready", "failed"]);
 /// else takes its Merge away within a few seconds.
 const FAST = 2500, READY = 6000, SLOW = 20_000;
 
-export class ThreadWatch {
-  state: ThreadsState = { from: null, list: [], open: null, closed: false, busy: null, message: null };
-  /// The open thread's chat, followed live.
+/// One thread's chat, followed live.
+class Follow {
   chat: WorkspaceSession | null = null;
-  private follow: AbortController | null = null;
+  private readonly controller = new AbortController();
+  constructor(readonly sessionId: string, private readonly client: DemesneClient, private readonly changed: () => void, private readonly settled: () => void) { void this.run(); }
+  private async run() {
+    const client = this.client, signal = this.controller.signal;
+    let state: SessionStateResponse;
+    try { state = await client.getSessionState(this.sessionId); } catch { return; }
+    const events = await replaySession(state, (id, after, abort) => client.streamEvents(id, after, abort), (id, after, through, abort) => client.replayPage(id, after, through, abort)).catch(() => []);
+    if (signal.aborted) return;
+    const chat = (this.chat = new WorkspaceSession(state, events));
+    this.changed();
+    try {
+      for await (const event of client.streamEvents(this.sessionId, chat.cursor, signal)) {
+        if (signal.aborted) break;
+        if (!chat.apply(event as EventEnvelope)) continue;
+        this.changed();
+        if (/^turn\.(completed|failed|cancelled|interrupted)$/.test(event.type)) this.settled();
+      }
+    } catch { /* the stream ended; opening the line again reconnects */ }
+  }
+  stop() { this.controller.abort(); }
+}
+
+export class ThreadWatch {
+  state: ThreadsState = { from: null, list: [], open: null, busy: null, message: null };
+  /// The followed threads' chats, by chat id: the open line's, and the first thread that waits on you.
+  private readonly follows = new Map<string, Follow>();
+  /// What the open line's thread changed, once it is back.
+  private changes: { id: string; at: string | null; files: DriveFixChange[]; more: number } | null = null;
+  private changesFor = "";
   private timer: ReturnType<typeof setTimeout> | null = null;
   private unsupported = false;
 
@@ -46,8 +71,10 @@ export class ThreadWatch {
   /// The chat you're in changed: show its threads, if it has any.
   async select(sessionId: string | null) {
     if (sessionId === this.state.from) return;
+    // Stepping into one of these threads' own chats keeps its orchestrator's threads at hand.
+    if (sessionId && this.state.list.some((fix) => fix.sessionId === sessionId)) return;
     this.stopFollowing();
-    this.state = { from: sessionId, list: [], open: null, closed: false, busy: null, message: null };
+    this.state = { from: sessionId, list: [], open: null, busy: null, message: null };
     this.options.publish();
     await this.refresh();
   }
@@ -66,9 +93,9 @@ export class ThreadWatch {
       // An older daemon has no threads.
       if (/404|not found/i.test(error instanceof Error ? error.message : String(error))) { this.unsupported = true; return; }
     }
-    // The first time threads appear, the right half opens on the first one.
-    if (!this.state.open && !this.state.closed && this.state.list.length) await this.show(this.state.list[0]!.id);
-    else if (this.state.open && !this.state.list.some((fix) => fix.id === this.state.open)) { this.stopFollowing(); this.state.open = null; this.options.publish(); }
+    // A line stays open only while its thread is live: a merged thread leaves the ribbon.
+    if (this.state.open && !this.state.list.some((fix) => fix.id === this.state.open && fix.status !== "applied")) { this.state.open = null; this.options.publish(); }
+    this.retarget();
     if (this.state.list.length || this.state.from === from)
       this.timer = setTimeout(() => void this.refresh(), this.state.list.some((fix) => ACTIVE.has(fix.status)) ? FAST : this.state.list.some((fix) => fix.status === "ready") ? READY : SLOW);
   }
@@ -76,47 +103,52 @@ export class ThreadWatch {
   /// A thread's job, by its job id.
   fix(id: unknown) { return this.state.list.find((fix) => fix.id === id) ?? null; }
 
-  /// Puts a thread in the right half and follows its chat.
+  /// Opens a thread's line and follows its chat.
   async show(id: string) {
     const fix = this.fix(id);
     if (!fix) throw new Error("That thread is no longer open.");
-    this.state.open = id; this.state.closed = false;
+    this.state.open = id;
     this.options.publish();
-    if (fix.sessionId && this.chat?.session.id !== fix.sessionId) await this.followChat(fix.sessionId);
+    this.retarget();
   }
 
-  close() {
-    this.state.closed = true; this.state.open = null;
-    this.stopFollowing();
+  async close() {
+    this.state.open = null;
     this.options.publish();
+    this.retarget();
   }
 
-  private async followChat(sessionId: string) {
-    this.stopFollowing();
-    const controller = (this.follow = new AbortController());
-    const client = this.options.client();
-    let state: SessionStateResponse;
-    try { state = await client.getSessionState(sessionId); } catch { return; }
-    const events = await replaySession(state, (id, after, signal) => client.streamEvents(id, after, signal), (id, after, through, signal) => client.replayPage(id, after, through, signal)).catch(() => []);
-    if (controller.signal.aborted) return;
-    const chat = (this.chat = new WorkspaceSession(state, events));
-    this.options.publish();
-    void (async () => {
-      try {
-        for await (const event of client.streamEvents(sessionId, chat.cursor, controller.signal)) {
-          if (controller.signal.aborted) break;
-          if (!chat.apply(event as EventEnvelope)) continue;
-          this.options.publish();
-          if (/^turn\.(completed|failed|cancelled|interrupted)$/.test(event.type)) void this.refresh();
-        }
-      } catch { /* the stream ended; picking the thread again reconnects */ }
-    })();
+  /// The first thread that waits on you: its question comes to the chat that started it.
+  private asker() { return this.state.list.find((fix) => fix.waiting && fix.sessionId && ACTIVE.has(fix.status)) ?? null; }
+
+  /// Follows the chats the ribbon needs, and no others.
+  private retarget() {
+    const wanted = new Set([this.state.open ? this.fix(this.state.open)?.sessionId : null, this.asker()?.sessionId].filter((id): id is string => Boolean(id)));
+    let changed = false;
+    for (const [id, follow] of this.follows) if (!wanted.has(id)) { follow.stop(); this.follows.delete(id); changed = true; }
+    for (const id of wanted) if (!this.follows.has(id)) this.follows.set(id, new Follow(id, this.options.client(), () => { if (this.follows.has(id)) this.options.publish(); }, () => void this.refresh()));
+    if (changed) this.options.publish();
+    void this.loadChanges();
+  }
+
+  /// What the open line's thread changed, read once it is back and again if it comes back anew.
+  private async loadChanges() {
+    const fix = this.state.open ? this.fix(this.state.open) : null;
+    if (!fix || fix.status !== "ready") { if (this.changes) { this.changes = null; this.changesFor = ""; } return; }
+    const key = `${fix.id}:${fix.finishedAt}`;
+    if (this.changesFor === key) return;
+    this.changesFor = key;
+    try {
+      const { files, more } = await this.options.client().driveFixChanges(fix.id);
+      if (this.changesFor !== key) return;
+      this.changes = { id: fix.id, at: fix.finishedAt, files, more };
+      this.options.publish();
+    } catch { if (this.changesFor === key) this.changesFor = ""; }
   }
 
   private stopFollowing() {
-    this.follow?.abort();
-    this.follow = null;
-    this.chat = null;
+    for (const follow of this.follows.values()) follow.stop();
+    this.follows.clear();
   }
 
   stop() {
@@ -125,63 +157,33 @@ export class ThreadWatch {
     this.stopFollowing();
   }
 
+  /// The followed chats, each with the thread it belongs to.
+  chats() {
+    return [...this.follows.values()].flatMap((follow) => {
+      const fix = this.state.list.find((item) => item.sessionId === follow.sessionId);
+      return follow.chat && fix ? [{ fix, chat: follow.chat }] : [];
+    });
+  }
+
   view() {
-    const chat = this.chat, fix = this.state.open ? this.fix(this.state.open) : null;
+    const fix = this.state.open ? this.fix(this.state.open) : null, chat = fix?.sessionId ? this.follows.get(fix.sessionId)?.chat : null;
     return {
       ...this.state,
-      chat: chat && fix?.sessionId === chat.session.id ? {
+      changes: this.changes && this.changes.id === this.state.open ? { id: this.changes.id, files: this.changes.files, more: this.changes.more } : null,
+      /// The open line's chat, for its last words and steps.
+      chat: chat && fix ? {
         id: chat.session.id,
+        /// The thread this chat belongs to, by its job id.
+        of: fix.id,
         title: chat.session.title,
         runs: chat.runs(),
         approvals: [...chat.approvals.values()],
         questions: [...chat.questions.values()],
         activeTurnId: chat.active?.id ?? null,
         model: chat.session.preferredModel ?? null,
-        reasoning: chat.session.preferredReasoning ?? null,
         provider: chat.provider ?? null,
       } : null,
     };
-  }
-
-  /// Words for the open thread: they steer it while it works, else start its next turn.
-  async send(text: string) {
-    const fix = this.state.open ? this.fix(this.state.open) : null, chat = this.chat;
-    const content = text.trim();
-    if (!fix?.sessionId || !chat || !content) throw new Error("Pick a thread first.");
-    const client = this.options.client();
-    if (chat.active) {
-      try { await client.steer(fix.sessionId, { id: crypto.randomUUID(), text: content }); return; }
-      catch { /* it ended first: send it as the next message */ }
-    }
-    const { turn } = await client.submitTurn(fix.sessionId, { content, permissionMode: "allow" });
-    chat.ensureTurn(turn);
-    this.options.publish();
-  }
-
-  /// Stop: the open thread's running turn ends where it is, like Stop in a chat.
-  async cancel() {
-    const fix = this.state.open ? this.fix(this.state.open) : null, turn = this.chat?.active;
-    if (!fix?.sessionId || !turn) return;
-    await this.options.client().cancelTurn(turn.id);
-  }
-
-  async approve(id: string, decision: "allow_once" | "deny") {
-    const chat = this.chat;
-    if (!chat?.approvals.has(id)) throw new Error("This permission is no longer pending.");
-    await this.options.client().resolvePermission(id, decision);
-    chat.approvals.delete(id);
-    this.options.publish();
-  }
-
-  /// The open thread's model and effort, for its next turn; the chat on the
-  /// left keeps its own.
-  async setModel(model: string, reasoning: string | null) {
-    const chat = this.chat;
-    if (!chat || !model) throw new Error("Pick a thread first.");
-    const { session } = await this.options.client().updateSession(chat.session.id, { preferredModel: model, preferredReasoning: reasoning });
-    chat.session.preferredModel = session.preferredModel;
-    chat.session.preferredReasoning = session.preferredReasoning;
-    this.options.publish();
   }
 
   /// Merges one ready thread onto your branch.
@@ -196,30 +198,16 @@ export class ThreadWatch {
   }
 
   /// Deletes a thread: a working one stops, its worktree and branch go; a
-  /// merged one only leaves the list. The right half moves to the next one.
+  /// merged one only leaves the list.
   async deleteThread(id: string) {
     const fix = this.fix(id);
     if (!fix) return;
     await this.act(id, async () => {
       await this.options.client().driveFixAction(fix.id, "discard");
       this.state.message = { text: fix.status === "applied" ? `Deleted ${fix.title}. Its merge stays on your branch.` : `Deleted ${fix.title}: its worktree and branch are gone.`, tone: "ok" };
-      if (this.state.open === id) {
-        const rest = this.state.list.filter((item) => item.id !== id);
-        const at = this.state.list.findIndex((item) => item.id === id);
-        const next = rest[Math.min(at, rest.length - 1)];
-        this.stopFollowing();
-        this.state.list = rest;
-        this.state.open = null;
-        if (next) await this.show(next.id);
-        else this.state.closed = true;
-      }
+      this.state.list = this.state.list.filter((item) => item.id !== id);
+      if (this.state.open === id) this.state.open = null;
     });
-  }
-
-  async stopThread(id: string) {
-    const fix = this.fix(id);
-    if (!fix) return;
-    await this.act(id, () => this.options.client().driveFixAction(fix.id, "discard").then(() => { this.state.message = { text: `Discarded ${fix.title}: its worktree and branch are gone.`, tone: "ok" }; }));
   }
 
   /// Merge all: each ready thread onto your branch, oldest first, stopping
@@ -252,13 +240,8 @@ export class ThreadWatch {
   async handle(method: string, args: Record<string, unknown>) {
     if (method === "thread-open") return this.show(String(args.id ?? ""));
     if (method === "thread-close") return this.close();
-    if (method === "thread-cancel") return this.cancel();
-    if (method === "thread-send") return this.send(String(args.text ?? ""));
-    if (method === "thread-approve") return this.approve(String(args.id ?? ""), args.decision === "deny" ? "deny" : "allow_once");
-    if (method === "thread-stop") return this.stopThread(String(args.id ?? ""));
     if (method === "thread-delete") return this.deleteThread(String(args.id ?? ""));
     if (method === "thread-merge") return this.mergeOne(String(args.id ?? ""));
-    if (method === "thread-model") return this.setModel(String(args.id ?? ""), typeof args.reasoning === "string" ? args.reasoning : null);
     if (method === "threads-merge") return this.mergeAll();
     if (method === "threads-message-close") { this.state.message = null; return this.options.publish(); }
     throw new Error(`Unknown action ${method}`);

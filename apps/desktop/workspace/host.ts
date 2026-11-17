@@ -232,7 +232,20 @@ export class WorkspaceHost {
     closed: (fix) => void this.leaveMission(fix),
     copy: (text) => this.copy(text),
   });
-  /// The threads the chat you're in started, and the one in the right half.
+  /// Open questions from this chat's threads, each carrying its thread's
+  /// name. Only the chat that started the thread shows them.
+  private threadQuestions() {
+    const from = this.threads.state.from;
+    if (!from || this.current?.session.id !== from) return [];
+    return this.threads.chats().flatMap(({ fix, chat }) => [...chat.questions.values()].map((question) => ({ ...question, thread: { id: fix.id, title: fix.title } })));
+  }
+  /// The chat a question belongs to: the one you're in, or the thread whose
+  /// question came to it.
+  private questionHome(id: string) {
+    if (this.current!.questions.has(id)) return this.current!;
+    return this.threads.chats().find(({ chat }) => chat.questions.has(id))?.chat ?? this.current!;
+  }
+  /// The threads the chat you're in started, and the one whose line is open.
   readonly threads = new ThreadWatch({
     client: () => this.client,
     publish: () => this.publish(),
@@ -428,7 +441,8 @@ export class WorkspaceHost {
       rewinds: this.current?.rewinds ?? [],
       versions: this.current?.versions ?? [],
       approvals: [...(this.current?.approvals.values() ?? [])],
-      questions: [...(this.current?.questions.values() ?? [])],
+      // A thread's question comes to the chat that started it (pass 232), under the thread's name.
+      questions: [...(this.current?.questions.values() ?? []), ...this.threadQuestions()],
       answered: Object.fromEntries(this.current?.answered ?? []),
       activeTurnId: this.active?.id ?? null,
       busy: this.busy,
@@ -2175,12 +2189,12 @@ export class WorkspaceHost {
     }
     if (method === "question-action") {
       if (!this.current) throw new Error("Choose a session first");
-      const id=string(args.id,"question id",200), selected=this.current!;
+      const id=string(args.id,"question id",200), selected=this.questionHome(id);
       const pending=selected.questions.get(id);
       if (!pending) throw new Error("This question is no longer pending");
       if (pending.revision === undefined) throw new Error("Restart the updated daemon to answer questions in the composer");
       const result=await this.client.questionAction(id,parseQuestionActionRequest(args.action));
-      if (this.current === selected) {
+      if (this.current === selected || this.threads.chats().some(({ chat }) => chat === selected)) {
         const latest=selected.questions.get(id);
         if (latest && result.question.revision >= (latest.revision ?? 0)) {
           if (["answered","cancelled"].includes(result.question.status)) selected.questions.delete(id);
@@ -2192,15 +2206,17 @@ export class WorkspaceHost {
     }
     if (method === "answer") {
       const id = string(args.id, "question id", 200);
-      if (!this.current!.questions.has(id))
+      const home = this.questionHome(id);
+      if (!home.questions.has(id))
         throw new Error("This question is no longer pending.");
       const body = parseAnswerQuestionsRequest({ answers: args.answers });
       await this.client.request(`/v1/questions/${encodeURIComponent(id)}`, {
         method: "POST",
         body: JSON.stringify(body),
       });
-      this.current!.questions.delete(id);
+      home.questions.delete(id);
       this.publish();
+      if (home !== this.current) void this.threads.refresh();
       return;
     }
     if (method === "rename") {

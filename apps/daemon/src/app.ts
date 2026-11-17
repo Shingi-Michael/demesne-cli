@@ -542,6 +542,7 @@ export function createDaemonApp(options: {
       sessionContext: (sessionId: string) => [driveInChat(sessionId), heartbeat?.context(sessionId)].filter(Boolean).join("\n") || null,
       assistantChat: (sessionId: string) => sessionId === assistantChat.existing(),
       hiddenTools: (sessionId: string) => driveFixes.isThread(sessionId) ? THREAD_HIDDEN_TOOLS : null,
+      mayAsk: (sessionId: string) => driveFixes.isThread(sessionId),
       lateAnswers: (sessionId: string, turnId: string, texts: string[]) => void answerTurn(sessionId, turnId, texts.join("\n"), undefined),
       ...(heartbeat ? { agentsIn: (workspaceRoot: string) => heartbeat.agentsIn(workspaceRoot) } : {}),
       ...options.agent,
@@ -1300,6 +1301,10 @@ export function createDaemonApp(options: {
         const body = parseDriveFixFinishRequest(await readJson(request));
         try { return json({ fix: await driveFixes.finishMission(path[3]!, body.summary, body.receipt, body.headline) }); }
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not finish the mission", 409); }
+      }
+      if (request.method === "GET" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && path[4] === "changes") {
+        try { return json(await driveFixes.changes(path[3]!)); }
+        catch (error) { return apiError("not_found", error instanceof Error ? error.message : "Unknown job", 404); }
       }
       if (request.method === "POST" && path.length === 5 && path[0] === "v1" && path[1] === "drive" && path[2] === "fixes" && ["apply", "pr", "discard"].includes(path[4]!)) {
         try { return json({ fix: await driveFixes.act(path[3]!, path[4] as DriveFixAction) }); }

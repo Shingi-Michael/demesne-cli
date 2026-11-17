@@ -45,8 +45,9 @@ const stretchPrompt = "Desktop smoke: a stretch of steps";
 let releaseStretch!: () => void, stretchRound = 0;
 const stretchGate = new Promise<void>(resolve => { releaseStretch = resolve; });
 let overlapRound = 0;
-// Threads (pass 126): the chat splits a job into two threads, one held
-// until the window has shown it working beside the chat.
+// Threads (pass 232): the chat starts three threads, each on its own job.
+// One is held until the window has shown it working, one asks a question
+// first, one comes straight back.
 const threadsPrompt = "Desktop smoke: split this into threads";
 const threadNotePrompt = "Desktop smoke: tell the greeting thread to be warmer";
 let threadNoteRound = 0;
@@ -109,15 +110,21 @@ const f = await fixture({
       return;
     }
     if (typeof user === "string" && user.startsWith("Thread report: ")) {
-      yield { type: "text_delta", delta: user.includes("still working: 0") ? "Both threads are back and stayed inside their files. Merge notes first, then the greeting." : "One thread is back." };
+      yield { type: "text_delta", delta: user.includes("still working: 0") ? "Ready, and it stayed inside its files." : "One thread is ready." };
       yield { type: "finish", reason: "stop" };
       return;
     }
     // A thread's chat opens on its brief; a note from the orchestrator may come after it.
     const opened = messages.find(message => message.role === "user")?.content;
     if (typeof opened === "string" && opened.startsWith("You're one of the threads")) {
-      const second = opened.includes("Write the greeting");
+      const second = opened.includes("Write the greeting"), third = opened.includes("Write the farewell");
       const toolResults = messages.filter(message => message.role === "tool").length;
+      // The farewell thread asks before it writes: its question comes to the chat that started it.
+      if (third && toolResults === 0) {
+        yield { type: "tool_call_delta", index: 0, idDelta: "thread-c-ask", nameDelta: "ask_user", argumentsDelta: JSON.stringify({ questions: [{ question: "Should the farewell be formal?", reason: "The brief doesn't say.", suggestions: ["Keep it friendly", "Make it formal"] }] }) };
+        yield { type: "finish", reason: "tool_calls" };
+        return;
+      }
       if (second && toolResults === 0) {
         yield { type: "reasoning_delta", delta: "The greeting belongs in its own file, threads-b.md." };
         yield { type: "text_delta", delta: "Waiting on the gate before writing the greeting." };
@@ -125,8 +132,8 @@ const f = await fixture({
         yield { type: "finish", reason: "tool_calls" };
         return;
       }
-      if (toolResults >= (second ? 2 : 1)) { yield { type: "text_delta", delta: second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
-      yield { type: "tool_call_delta", index: 0, idDelta: `thread-${second ? "b" : "a"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify(second ? { path: "threads-b.md", content: "# Hello\n" } : { path: "threads-a.md", content: "# Notes\n" }) };
+      if (toolResults >= (second || third ? 2 : 1)) { yield { type: "text_delta", delta: third ? "Wrote threads-c.md with the farewell." : second ? "Wrote threads-b.md with the greeting." : "Wrote threads-a.md with the notes." }; yield { type: "finish", reason: "stop" }; return; }
+      yield { type: "tool_call_delta", index: 0, idDelta: `thread-${third ? "c" : second ? "b" : "a"}`, nameDelta: "write_file", argumentsDelta: JSON.stringify(third ? { path: "threads-c.md", content: "# Bye\n" } : second ? { path: "threads-b.md", content: "# Hello\n" } : { path: "threads-a.md", content: "# Notes\n" }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
     }
@@ -145,10 +152,11 @@ const f = await fixture({
         yield { type: "tool_call_delta", index: 0, idDelta: "split", nameDelta: "start_threads", argumentsDelta: JSON.stringify({ threads: [
           { title: "Write the notes", brief: "Add threads-a.md with a Notes heading.", files: ["threads-a.md"] },
           { title: "Write the greeting", brief: "Add threads-b.md with a Hello heading.", files: ["threads-b.md"] },
+          { title: "Write the farewell", brief: "Add threads-c.md with a Bye heading.", files: ["threads-c.md"] },
         ] }) };
         yield { type: "finish", reason: "tool_calls" };
       } else {
-        yield { type: "text_delta", delta: "Two threads are on it, each in its own branch." };
+        yield { type: "text_delta", delta: "Three threads are on it, each in its own branch." };
         yield { type: "finish", reason: "stop" };
       }
       return;
@@ -1803,111 +1811,131 @@ try {
   await textIncludes("Version checked.");
   await until(() => evaluate<boolean>("return !document.querySelector('#send-label .stop-word');"), "the fifth runs without asking");
   assert.equal(await page.locator("#approval .approval-row").count(), 0, "it no longer asks");
-  // Threads (pass 126): the chat splits the job, the thread runs live in
-  // the right half, the list is the switcher, and only Merge reaches main.
+  // Threads (pass 232): the chat starts three threads on three different
+  // jobs. One ribbon at the top of the chat holds every live thread, sorted
+  // by what needs you; a line opens in place; a thread's question comes to
+  // this chat; its full chat is a tab like any other; only Merge reaches main.
   await type(threadsPrompt);
-  await textIncludes("Two threads are on it");
-  const threadRows = page.locator("#conversation .th-row");
-  await until(() => threadRows.count().then(count => count === 2), "the chat lists its two threads", 20_000);
-  await until(() => page.locator("#thread-pane").isVisible(), "the first thread opens in the right half");
-  assert(await page.locator("#app").evaluate(element => element.classList.contains("threads-on")), "the window splits");
-  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "the right half shows the first thread");
-  await until(() => page.locator("#thread-pane .th-brief").isVisible(), "the thread opens on its brief, not its prompt");
-  await threadRows.nth(1).click();
-  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "picking a row switches the right half");
-  assert(await page.locator("#thread-tabs .tp-tab").count() === 2, "the top bar has a tab per thread");
-  // The thread tabs live in the top bar over the thread side (pass 131 A):
-  // they start at the split line, and the thread side has no tab row.
-  assert.equal(await page.locator("#thread-pane .tp-tabs").count(), 0, "the thread side keeps no tab row of its own");
-  const [tabsLeft, paneLeft] = await Promise.all([page.locator("#thread-tabs").boundingBox(), page.locator("#thread-pane").boundingBox()]);
-  assert(Math.abs(tabsLeft!.x - paneLeft!.x) <= 2, `the thread tabs start at the split line: ${tabsLeft!.x} vs ${paneLeft!.x}`);
-  await page.locator("#thread-tabs .tp-tab").first().click();
-  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the notes"), "a tab switches the right half");
-  await page.keyboard.press("Control+]");
-  await until(() => page.locator("#thread-tabs .tp-tab.on .tp-tab-open span").innerText().then(text => text === "Write the greeting"), "Ctrl+] steps to the next thread");
-  await until(() => page.locator("#threads-foot .th-status").innerText().then(text => text.includes("working")).catch(() => false), "the line above the composer says one is working");
-  // The right half is a chat like the left: the same composer, with the
-  // thread's own model chip, and no head bar.
-  assert(await page.locator("#thread-pane #tp-composer .composer-box textarea").isVisible(), "the thread's composer is the chat's composer");
-  // No head bar over the thread (pass 130 A): the tab names it, the panel
-  // icon at the end of the tabs puts it away.
-  assert.equal(await page.locator("#thread-pane .tp-head").count(), 0, "the thread side has no head bar");
-  assert(await page.locator("#thread-tabs .tp-hide").isVisible(), "the tabs end with the close icon");
-  assert.match(await page.locator("#thread-tabs .tp-tab.on .tp-tab-open").getAttribute("title") ?? "", /thread\/write-the-greeting.*· working/s, "resting on the tab says its branch and state");
-  await until(() => page.locator("#tp-model").innerText().then(text => text.trim().length > 0), "the thread's composer names its model");
-  await page.locator("#tp-model").click();
-  await until(() => page.locator("#thread-pane #overlay").isVisible(), "the thread's model chip opens the picker in the right half");
-  await page.keyboard.press("Escape");
-  await until(() => page.locator("#overlay").isHidden(), "Escape closes the thread's picker");
-  assert(await page.locator("#main > #overlay").count() === 1, "the picker goes back to the chat on the left");
-  // Picking a model in the thread's picker switches that thread, even while it works.
-  const chatModelBefore = await page.locator("#composer-model").innerText();
-  await page.locator("#tp-model").click();
-  await until(() => page.locator("#thread-pane #overlay").isVisible(), "the thread's picker opens again");
-  await page.locator(`#thread-pane #overlay .mp-row`).filter({ hasText: /small/i }).first().click();
-  await until(() => page.locator("#tp-model").innerText().then(text => /small/i.test(text)), "picking a model switches the thread's model", 10_000);
-  assert.equal(await page.locator("#composer-model").innerText(), chatModelBefore, "the chat on the left keeps its own model");
-  // A thread shows its own words (never its thinking), its working line, and its
-  // own context, like any chat.
-  await until(() => page.locator("#thread-pane .tp-turns").innerText().then(text => text.includes("Waiting on the gate before writing the greeting.")), "the thread shows its own words");
-  assert.equal(await page.locator("#thread-pane .thinking").count(), 0, "a thread shows no thinking either");
-  await until(() => page.locator("#thread-pane .working-line").isVisible(), "the thread has a working line");
-  // While it works, the empty composer's send is Stop, as in any chat; typing turns it back to send.
-  await until(() => page.locator('#tp-composer.stopping .send[aria-label="Stop this thread"] .send-stop').isVisible(), "a working thread's send is Stop");
-  await page.locator("#tp-composer textarea").fill("also say hi");
-  await page.locator("#tp-composer textarea").dispatchEvent("input");
-  assert(!(await page.locator("#tp-composer").evaluate((form) => form.classList.contains("stopping"))), "words in the composer make it send again");
-  await page.locator("#tp-composer textarea").fill("");
-  await page.locator("#tp-composer textarea").dispatchEvent("input");
-  await until(() => page.locator("#tp-context").isVisible(), "the thread's composer shows its context");
-  assert.match(await page.locator("#tp-context").getAttribute("title") ?? "", /of this thread's context used/);
-  await page.locator("#tp-context").click();
-  await until(() => page.locator("#tp-context-card").isVisible(), "its ring opens the thread's context card");
+  await textIncludes("Three threads are on it");
+  const ribbon = page.locator("#threads-ribbon"), threadLines = ribbon.locator(".tr-item");
+  await until(() => ribbon.isVisible(), "the chat's threads ribbon shows", 20_000);
+  assert.equal(await page.locator("#thread-pane, #thread-tabs").count(), 0, "there is no split, no thread side and no thread tabs");
+  assert(!(await page.locator("#app").evaluate(element => element.classList.contains("threads-on"))), "the window never splits");
+  assert(!(await ribbon.locator(".plan-ribbon").evaluate(element => element.classList.contains("open"))), "the ribbon starts as its one bar");
+  // Under the reply that started them: one quiet line of what it started.
+  const begun = page.locator("#conversation .tr-begun");
+  await until(() => begun.locator("button").count().then(count => count === 3), "the reply keeps one line of the threads it started");
+  assert.match((await begun.innerText()).replace(/\s+/g, " "), /^Started Write the notes Write the greeting Write the farewell$/);
+  await capture("17-threads-started");
+  // The farewell thread asks: the bar names it, and its question comes to this chat under its name.
+  await until(() => ribbon.locator(".pr-name").innerText().then(text => text === "Write the farewell asks you"), "the bar names the thread that asks", 30_000);
+  await until(() => ribbon.locator(".pr-ct").innerText().then(text => text === "1 working · 1 ready"), "and counts the others, whatever each is on", 30_000);
+  assert(await ribbon.locator(".plan-ribbon").evaluate(element => element.classList.contains("asks")), "the bar turns amber");
+  const threadAsk = page.locator("#stage .ask-card", { hasText: "Should the farewell be formal?" });
+  await until(() => threadAsk.isVisible(), "the thread's question comes to the chat that started it", 30_000);
+  assert.equal((await threadAsk.locator(".ask-from").innerText()).trim(), "Write the farewell asks");
+  await ribbon.locator(".pr-bar").click();
+  await until(() => threadLines.count().then(count => count === 3), "the bar opens to one line per live thread");
+  assert.deepEqual(await ribbon.locator(".tr-name").allInnerTexts(), ["Write the farewell", "Write the notes", "Write the greeting"], "what needs you is on top, then ready, then working");
+  assert.deepEqual(await ribbon.locator(".pr-segs i").evaluateAll(nodes => nodes.map(node => node.className)), ["y", "d", "n"], "one segment per thread");
+  assert.equal(await ribbon.locator(".tr-item.you .tr-next").innerText(), "Answer");
+  assert.equal(await ribbon.locator(".tr-item.ready .tr-next").innerText(), "Merge");
+  assert.equal(await ribbon.locator(".tr-item.work .tr-next").count(), 0, "a working thread's line ends in its minutes, not a button");
+  assert.match(await ribbon.locator(".tr-item.work .tr-end").innerText(), /^\d+m$/);
+  await capture("17-threads-asks");
+  await ribbon.locator(".tr-item.you .tr-next").click();
+  await until(() => threadAsk.evaluate(element => element.classList.contains("nudge")), "Answer points at the question");
+  await threadAsk.locator(".ask-choice").first().click();
+  await until(() => ribbon.locator(".pr-name").innerText().then(text => text === "One thread working"), "answered from this chat, the thread goes on and comes back", 30_000);
+  await until(() => ribbon.locator(".pr-ct").innerText().then(text => text === "2 ready"), "two are ready", 30_000);
+  await until(() => page.locator("#stage .ask-card", { hasText: "Should the farewell be formal?" }).count().then(count => count === 0), "its question is gone");
+  // A working thread's line opens in place: its last words and its last steps.
+  await ribbon.locator(".tr-item.work .tr-row").click();
+  await until(() => ribbon.locator(".tr-item.work .tr-say").innerText().then(text => text.includes("Waiting on the gate before writing the greeting.")).catch(() => false), "an open line shows the thread's last words", 20_000);
+  await until(() => ribbon.locator(".tr-item.work .tr-peek .tool-row").count().then(count => count >= 1), "and its last steps");
+  assert.equal(await ribbon.locator(".thinking").count(), 0, "never its thinking");
+  assert.match(await ribbon.locator(".tr-item.work .tr-note").innerText(), /thread\/write-the-greeting/);
   await capture("17-threads-working");
-  await page.locator("#tp-context").click();
-  await until(() => page.locator("#tp-context-card").isHidden(), "and closes it");
+  // A ready thread's line opens to what it changed, with Merge right there.
+  await ribbon.locator(".tr-item.ready .tr-row", { hasText: "Write the notes" }).click();
+  const notes = ribbon.locator(".tr-item.open");
+  await until(() => notes.locator("button.tr-file").count().then(count => count === 1), "a ready line opens to the files it changed", 20_000);
+  assert.match((await notes.locator(".tr-file").innerText()).replace(/\s+/g, " "), /^threads-a\.md \+1 −0$/);
+  assert.equal(await notes.locator(".tr-say").innerText(), "Wrote threads-a.md with the notes.");
+  await notes.locator("button.tr-file").click();
+  await until(() => notes.locator(".tr-diff .a").innerText().then(text => text === "+# Notes").catch(() => false), "a file unfolds to its diff");
+  assert(await notes.locator(".tr-go").isVisible(), "Merge is in the open line");
+  assert.equal(await notes.locator(".tr-next").isVisible(), false, "so the word at the line's end steps aside");
+  await capture("17-threads-review");
+  // Delete lives in the open line and asks once more; the thread leaves the ribbon.
+  await ribbon.locator(".tr-row", { hasText: "Write the farewell" }).click();
+  await ribbon.locator(".tr-item.open .tr-link", { hasText: "Delete" }).click();
+  await until(() => ribbon.locator(".tr-item.open .tr-link.armed").innerText().then(text => text === "Delete it and its branch"), "Delete asks once more");
+  await ribbon.locator(".tr-item.open .tr-link.armed").click();
+  await until(() => threadLines.count().then(count => count === 2), "a deleted thread leaves the ribbon", 20_000);
+  await until(() => begun.locator(".tr-gone").innerText().then(text => text === "Write the farewell").catch(() => false), "the reply's line keeps its name");
+  // A thread's full chat is a chat like any other: a tab with its ring, and one quiet line that says whose thread it is.
+  const tabsBefore = await page.locator("#workspace-tabs .bar-tab").count();
+  const closeThreadTab = async () => {
+    const tab = page.locator("#workspace-tabs .bar-tab:has(.tab-ring)").first();
+    await tab.hover();
+    await tab.locator(".bar-tab-close").click();
+    await until(() => page.locator("#workspace-tabs .bar-tab").count().then(count => count === tabsBefore), "the thread's tab closes like any tab");
+  };
+  await ribbon.locator(".tr-row", { hasText: "Write the greeting" }).click();
+  await ribbon.locator(".tr-item.open .tr-link", { hasText: "Open its chat" }).click();
+  const brief = page.locator("#conversation .tr-brief");
+  await until(() => brief.isVisible(), "the thread's chat opens on its brief, not its prompt", 20_000);
+  assert.match((await brief.innerText()).replace(/\s+/g, " "), /^A thread of .+ · Add threads-b\.md with a Hello heading\. · Only touches threads-b\.md$/);
+  await until(() => ribbon.isHidden(), "a thread's own chat has no ribbon");
+  await until(() => page.locator("#workspace-tabs .bar-tab.on .tab-ring").count().then(count => count === 1), "its tab carries its ring");
+  assert.equal(await page.locator("#workspace-tabs .bar-tab").count(), tabsBefore + 1, "it is one more tab in the one row of tabs");
+  await textIncludes("Waiting on the gate before writing the greeting.");
+  assert(await page.locator("#composer textarea").isVisible(), "with the chat's own composer");
+  await capture("17-threads-chat");
+  await brief.locator("button").click();
+  await until(() => ribbon.isVisible(), "the brief's link is the way back");
+  assert.equal(await threadLines.count(), 2, "and the ribbon is as you left it");
+  await closeThreadTab();
   // The orchestrator's note to a thread is short and says what it is for:
   // the thread's chat shows it as the orchestrator's, never as "you".
-  const orchestratorBox = page.locator('textarea[aria-label="Message"]');
-  await orchestratorBox.fill(threadNotePrompt); await orchestratorBox.press("Enter");
+  await type(threadNotePrompt);
   await textIncludes("Told the greeting thread.");
   releaseThread();
-  const note = page.locator("#thread-pane .tool-row.steer.note");
+  await ribbon.locator(".tr-item.open .tr-link", { hasText: "Open its chat" }).click();
+  const note = page.locator("#conversation .tool-row.steer.note");
   await until(() => note.isVisible(), "the thread's chat shows the orchestrator's note", 30_000);
   assert.match(await note.innerText(), /Orchestrator\s*The person wants a warmer hello/i);
-  assert.equal(await page.locator("#thread-pane .tn-text").innerText(), "Keep the Hello heading, and add one friendly line under it.");
+  assert.equal(await page.locator("#conversation .tn-text").innerText(), "Keep the Hello heading, and add one friendly line under it.");
   await capture("17-threads-note");
-  const merge = page.locator("#threads-foot .th-merge button");
-  await until(() => merge.isVisible(), "both back: the Merge bar", 30_000);
-  assert.equal(await merge.innerText(), "Merge both");
-  await textIncludes("Both threads are back");
+  await page.locator("#conversation .tr-brief button").click();
+  await until(() => ribbon.isVisible(), "back in the chat that started it");
+  await closeThreadTab();
+  // Every live thread is ready: Merge all, and still Merge on each line.
+  await until(() => ribbon.locator(".pr-name").innerText().then(text => text === "Two threads ready to merge"), "the bar says both are ready", 30_000);
+  await textIncludes("Ready, and it stayed inside its files.");
+  const mergeAll = ribbon.locator(".tr-foot .tr-go");
+  await until(() => mergeAll.isVisible(), "Merge all shows once every live thread is ready");
+  assert.equal(await mergeAll.innerText(), "Merge all 2");
+  assert.match((await ribbon.locator(".tr-foot").innerText()).replace(/\s+/g, " "), /^\+2 −0 in 2 files Merge all 2$/);
+  assert(await ribbon.locator(".plan-ribbon").evaluate(element => element.classList.contains("still")), "nothing moves in the bar once nothing works");
   assert(!existsSync(join(f.workspace, "threads-a.md")), "nothing reaches the checkout before Merge");
-  await until(() => page.locator("#thread-pane #tp-composer .tp-merge").isVisible(), "a ready thread's Merge sits in its composer");
   await capture("17-threads-ready");
-  await merge.click();
+  await mergeAll.click();
   await until(() => page.locator("#threads-foot .th-msg").innerText().then(text => text.includes("Merged all 2")).catch(() => false), "Merge says what it did", 30_000);
   assert(existsSync(join(f.workspace, "threads-a.md")) && existsSync(join(f.workspace, "threads-b.md")), "both threads reached the checkout");
-  // A tab's × only closes the tab; the next tab takes over, and opening the
-  // thread from the chat's list brings its tab back.
-  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 2), "both merged threads keep their tabs");
-  await page.locator("#thread-tabs .tp-tab").first().hover();
-  await page.locator("#thread-tabs .tp-tab-x").first().click();
-  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 1), "× closes the tab");
-  assert.equal(await page.locator("#conversation .th-row").count(), 2, "closing a tab deletes nothing");
-  await page.locator("#conversation .th-row").first().click();
-  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 2), "opening the thread brings its tab back");
-  // Delete lives on the thread's row in the chat: a merged thread goes at once.
-  await page.locator("#conversation .th-item").first().hover();
-  await page.locator("#conversation .th-del").first().click();
-  await until(() => page.locator("#conversation .th-row").count().then(count => count === 1), "the row's × deletes the thread", 20_000);
-  await until(() => page.locator("#thread-tabs .tp-tab").count().then(count => count === 1), "and its tab goes with it");
-  await page.locator("#thread-tabs .tp-tab-open").first().click();
-  await page.keyboard.press("Escape");
-  await until(() => page.locator("#thread-pane").isHidden(), "Esc in the thread side puts it away");
-  await page.locator("#conversation .th-row").first().click();
-  await until(() => page.locator("#thread-pane").isVisible(), "picking the thread opens it again");
-  await page.locator("#thread-tabs .tp-hide").click();
-  await until(() => page.locator("#thread-pane").isHidden(), "the panel icon closes the thread side");
+  assert(!existsSync(join(f.workspace, "threads-c.md")), "the deleted thread's work never did");
+  // Merged threads leave the ribbon; the reply's line stays as the record.
+  await until(() => ribbon.isHidden(), "no live thread, no ribbon", 20_000);
+  await until(() => begun.innerText().then(text => text.startsWith("Merged")), "the reply's line says they are merged");
+  assert.equal(await begun.locator(".th-ring.ok").count(), 2, "each merged thread's ring is a tick");
+  await capture("17-threads-merged");
+  await begun.locator("button").first().click();
+  await until(() => page.locator("#conversation .tr-brief").isVisible(), "a merged thread's name opens its chat", 20_000);
+  await textIncludes("Wrote threads-a.md with the notes.");
+  await page.locator("#conversation .tr-brief button").click();
+  await until(() => begun.isVisible(), "and its brief leads back");
+  await closeThreadTab();
   // Right-click a chat in the sidebar (pass 136 A): Demesne's own menu, and
   // Delete asks once, in place, before the chat is gone for good.
   const chatRows = page.locator("#sidebar-projects .sidebar-item:not(:has([aria-current='page']))");
@@ -1941,7 +1969,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "a thread's own thinking, words and context", "deleting a thread from its tab", "closing the thread side from its tabs", "thread tabs on the top bar", "right-click a chat or project"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "one threads ribbon per chat, sorted by what needs you", "a thread's question answered from the chat that started it", "a thread's line opening to its steps, files and diffs", "deleting a thread from its line", "a thread's own chat as a normal tab", "right-click a chat or project"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

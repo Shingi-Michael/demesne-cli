@@ -158,6 +158,11 @@ export type DriveFixProposal = Pick<DriveProposal, "id" | "kind" | "title" | "wh
 export interface DriveFixRequest { workspace: string; signals: DriveSignal[]; proposal?: DriveFixProposal; mission?: string; from?: string }
 export interface DriveFixFinishRequest { summary?: string; receipt?: string; headline?: string }
 export interface DriveFixesResponse { fixes: DriveFix[] }
+/// What a job changed on its branch, file by file, for looking it over
+/// before it is merged. `patch` is the file's hunks; `cut` says it was
+/// longer than what is sent.
+export interface DriveFixChange { path: string; additions: number; deletions: number; patch: string; cut?: boolean }
+export interface DriveFixChangesResponse { files: DriveFixChange[]; more: number }
 export type DriveFixAction = "apply" | "pr" | "discard";
 /// Away mode: Next proposals queued to run one after another, each in its own
 /// worktree, while you're away. What finishes waits as an inbox of branches.

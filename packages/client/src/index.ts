@@ -153,6 +153,10 @@ export class DemesneClient {
   async startDriveFix(request: import("@demesne/protocol").DriveFixRequest): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
     return this.request("/v1/drive/fixes", { method: "POST", body: JSON.stringify(request) });
   }
+  /// What a worktree job changed, file by file, to read before it is merged.
+  async driveFixChanges(id: string, signal?: AbortSignal): Promise<import("@demesne/protocol").DriveFixChangesResponse> {
+    return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/changes`, { signal });
+  }
   async driveFixAction(id: string, action: import("@demesne/protocol").DriveFixAction): Promise<{ fix: import("@demesne/protocol").DriveFix }> {
     return this.request(`/v1/drive/fixes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
   }

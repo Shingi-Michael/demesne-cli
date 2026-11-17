@@ -523,32 +523,32 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* Composer: one quiet box holding what you type, with a faint send mark in
    its right corner; the mention, approval, model and context controls sit
    under it as plain words, not chips. */
-.desktop :is(#composer, #tp-composer) { position: static; display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
-.desktop :is(#composer, #tp-composer):focus-within { box-shadow: none; }
-.desktop :is(#composer, #tp-composer) .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 11px 50px 11px 16px; border: 1px solid var(--line2); border-radius: 12px; background: var(--surface); box-shadow: 0 5px 24px #00000012; }
-.desktop :is(#composer, #tp-composer) .composer-box:focus-within { border-color: color-mix(in srgb, var(--acc) 50%, var(--line2)); }
-.desktop :is(#composer, #tp-composer).queued .composer-box { border-color: var(--composerQueuedBorder); }
-.desktop :is(#composer, #tp-composer).restored .composer-box { border-color: var(--composerRestoredBorder); }
-.desktop :is(#composer, #tp-composer).stop-armed .composer-box { border-color: var(--composerStoppedBorder); }
-.desktop :is(#composer, #tp-composer) textarea { min-height: 22px; padding-right: 0; font-size: 14px; line-height: 22px; }
+.desktop #composer { position: static; display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.desktop #composer:focus-within { box-shadow: none; }
+.desktop #composer .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 11px 50px 11px 16px; border: 1px solid var(--line2); border-radius: 12px; background: var(--surface); box-shadow: 0 5px 24px #00000012; }
+.desktop #composer .composer-box:focus-within { border-color: color-mix(in srgb, var(--acc) 50%, var(--line2)); }
+.desktop #composer.queued .composer-box { border-color: var(--composerQueuedBorder); }
+.desktop #composer.restored .composer-box { border-color: var(--composerRestoredBorder); }
+.desktop #composer.stop-armed .composer-box { border-color: var(--composerStoppedBorder); }
+.desktop #composer textarea { min-height: 22px; padding-right: 0; font-size: 14px; line-height: 22px; }
 .desktop .live-app.start #composer textarea { min-height: 44px; }
-.desktop :is(#composer, #tp-composer) .send { position: absolute; right: 9px; bottom: 7px; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: transparent; color: var(--t4); box-shadow: none; }
-.desktop :is(#composer, #tp-composer) .send:hover:not(:disabled) { background: var(--surface2); color: var(--t1); }
-.desktop :is(#composer, #tp-composer).has-draft .send { background: var(--dusk); color: var(--on-dusk); }
-.desktop :is(#composer, #tp-composer).has-draft .send:hover:not(:disabled) { background: var(--dusk); color: var(--on-dusk); filter: brightness(1.06); }
-.desktop :is(#composer, #tp-composer) .send .ico { width: 17px; height: 17px; stroke-width: 2; }
-.desktop :is(#composer, #tp-composer) .send > kbd, .desktop :is(#composer, #tp-composer) .send #send-label, .desktop :is(#composer, #tp-composer) .send #tokens, .desktop :is(#composer, #tp-composer) .send .send-stop { display: none; }
-.desktop :is(#composer, #tp-composer) .send .send-arrow { display: block; }
-.desktop :is(#composer, #tp-composer).stopping .send { color: var(--t2); }
-.desktop :is(#composer, #tp-composer).stopping .send .send-arrow { display: none; }
-.desktop :is(#composer, #tp-composer).stopping .send .send-stop { display: block; width: 14px; height: 14px; fill: currentColor; stroke: none; }
-.desktop :is(#composer, #tp-composer) .composer-bar { position: static; display: flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 0 10px; }
-.desktop :is(#composer, #tp-composer) .composer-bar .sp { flex: 1; }
-.desktop :is(#composer, #tp-composer) .composer-bar .cb, .desktop :is(#composer, #tp-composer) .composer-bar .cb-box { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; color: var(--t3); }
-.desktop :is(#composer, #tp-composer) .composer-bar .cb:hover { background: var(--surface2); color: var(--t1); }
-.desktop :is(#composer, #tp-composer) .composer-bar .cb .ico { width: 15px; height: 15px; }
-.desktop :is(#composer, #tp-composer) .composer-effort { margin-left: 4px; color: var(--t4); }
-.desktop :is(#composer, #tp-composer) .composer-bar .hints { margin-left: 6px; }
+.desktop #composer .send { position: absolute; right: 9px; bottom: 7px; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: transparent; color: var(--t4); box-shadow: none; }
+.desktop #composer .send:hover:not(:disabled) { background: var(--surface2); color: var(--t1); }
+.desktop #composer.has-draft .send { background: var(--dusk); color: var(--on-dusk); }
+.desktop #composer.has-draft .send:hover:not(:disabled) { background: var(--dusk); color: var(--on-dusk); filter: brightness(1.06); }
+.desktop #composer .send .ico { width: 17px; height: 17px; stroke-width: 2; }
+.desktop #composer .send > kbd, .desktop #composer .send #send-label, .desktop #composer .send #tokens, .desktop #composer .send .send-stop { display: none; }
+.desktop #composer .send .send-arrow { display: block; }
+.desktop #composer.stopping .send { color: var(--t2); }
+.desktop #composer.stopping .send .send-arrow { display: none; }
+.desktop #composer.stopping .send .send-stop { display: block; width: 14px; height: 14px; fill: currentColor; stroke: none; }
+.desktop #composer .composer-bar { position: static; display: flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 0 10px; }
+.desktop #composer .composer-bar .sp { flex: 1; }
+.desktop #composer .composer-bar .cb, .desktop #composer .composer-bar .cb-box { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; color: var(--t3); }
+.desktop #composer .composer-bar .cb:hover { background: var(--surface2); color: var(--t1); }
+.desktop #composer .composer-bar .cb .ico { width: 15px; height: 15px; }
+.desktop #composer .composer-effort { margin-left: 4px; color: var(--t4); }
+.desktop #composer .composer-bar .hints { margin-left: 6px; }
 .desktop .live-app:not(.start) #composer .composer-bar .hints { display: none; }
 
 /* Branch chip with changes: a button that asks for a commit and a PR. */
@@ -558,18 +558,18 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop #composer .composer-bar #composer-context:is(:hover, .on) { background: var(--tone2); color: var(--t1); }
 .desktop #composer .composer-bar #composer-context .cw-dot { color: var(--t4); white-space: pre; }
 .desktop #composer .composer-bar #composer-context .cw-plan.warn { color: var(--warn); }
-.desktop :is(#context-card, #tp-context-card) { position: absolute; right: 6px; bottom: calc(100% + 6px); z-index: 20; width: 248px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12.5px; color: var(--t2); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--t4); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line2); margin-bottom: 10px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar i { display: block; height: 100%; min-width: 2px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-legend { display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 8px; align-items: center; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-legend u { width: 7px; height: 7px; border-radius: 2px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-legend em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-a { background: var(--acc, #7eaef0); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-b { background: #a58cf0; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-c { background: var(--t4); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-free { background: var(--line2); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-compact { margin-top: 10px; padding: 0; font-size: 12px; color: var(--acc); }
+.desktop #context-card { position: absolute; right: 6px; bottom: calc(100% + 6px); z-index: 20; width: 248px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12.5px; color: var(--t2); }
+.desktop :is(#context-card, #cards .ctx-card) .context-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--t4); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.desktop :is(#context-card, #cards .ctx-card) .context-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line2); margin-bottom: 10px; }
+.desktop :is(#context-card, #cards .ctx-card) .context-bar i { display: block; height: 100%; min-width: 2px; }
+.desktop :is(#context-card, #cards .ctx-card) .context-legend { display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 8px; align-items: center; }
+.desktop :is(#context-card, #cards .ctx-card) .context-legend u { width: 7px; height: 7px; border-radius: 2px; }
+.desktop :is(#context-card, #cards .ctx-card) .context-legend em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
+.desktop :is(#context-card, #cards .ctx-card) .tone-a { background: var(--acc, #7eaef0); }
+.desktop :is(#context-card, #cards .ctx-card) .tone-b { background: #a58cf0; }
+.desktop :is(#context-card, #cards .ctx-card) .tone-c { background: var(--t4); }
+.desktop :is(#context-card, #cards .ctx-card) .tone-free { background: var(--line2); }
+.desktop :is(#context-card, #cards .ctx-card) .context-compact { margin-top: 10px; padding: 0; font-size: 12px; color: var(--acc); }
 
 /* Polish: one surface system and motion. Surfaces are tones over the
    background and hairlines, not solid outlines; three radii (6, 10, 14);
@@ -597,15 +597,15 @@ body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone
 .desktop .approval-row button { border-radius: var(--r-sm); }
 .desktop .approval-row button kbd { background: transparent; }
 /* Composer: a tone with a hairline ring, a soft ring when focused. */
-.desktop :is(#composer, #tp-composer) .composer-box { border: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
-.desktop :is(#composer, #tp-composer) .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair)), var(--shadow-2); }
-.desktop :is(#composer, #tp-composer).queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder), var(--shadow-2); }
-.desktop :is(#composer, #tp-composer).restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder), var(--shadow-2); }
-.desktop :is(#composer, #tp-composer).stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder), var(--shadow-2); }
-.desktop :is(#composer, #tp-composer) .send, .desktop :is(#composer, #tp-composer) .composer-bar .cb, .desktop :is(#composer, #tp-composer) .composer-bar .cb-box { border-radius: var(--r-sm); }
-.desktop :is(#composer, #tp-composer) .composer-bar .cb-box { border: 0; }
-.desktop :is(#context-card, #tp-context-card) { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar { background: var(--tone2); }
+.desktop #composer .composer-box { border: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
+.desktop #composer .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair)), var(--shadow-2); }
+.desktop #composer.queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder), var(--shadow-2); }
+.desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder), var(--shadow-2); }
+.desktop #composer.stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder), var(--shadow-2); }
+.desktop #composer .send, .desktop #composer .composer-bar .cb, .desktop #composer .composer-bar .cb-box { border-radius: var(--r-sm); }
+.desktop #composer .composer-bar .cb-box { border: 0; }
+.desktop #context-card { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
+.desktop :is(#context-card, #cards .ctx-card) .context-bar { background: var(--tone2); }
 /* Sheets, popovers and menus: no outline, a hairline ring and one shadow. */
 .desktop .popover, .desktop .modal, .desktop #overlay.sheet, .desktop #overlay.anchored, .desktop #overlay.dropped { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
 .desktop .settings-toggle { border: 0; }
@@ -623,18 +623,18 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes desktop-appear { from { opacity: 0; transform: translateY(4px); } }
 @keyframes desktop-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop #overlay:not([hidden]), .desktop :is(#context-card, #tp-context-card):not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
+  .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
   .desktop #approval:not([hidden]), .desktop .away-fold, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
   .desktop .step-fold.steady { animation: none; }
   .desktop #conversation > .turn, .desktop .compaction-card { animation: desktop-appear 220ms var(--ease); }
   .desktop #hero { animation: desktop-fade 260ms var(--ease); }
   #desktop-shell { transition: grid-template-columns 200ms var(--ease); }
   .desktop button, .sidebar-session, .sidebar-nav button, .sidebar-settings, .menu-row, .tool-row, .desktop .composer-bar .cb, .desktop .settings-segments button, .desktop .settings-toggle, .st-nav, .st-link, .st-word, .st-choice { transition: background-color 140ms var(--ease), color 140ms var(--ease), box-shadow 140ms var(--ease), opacity 140ms var(--ease); }
-  .desktop :is(#composer, #tp-composer) .composer-box, .sidebar-search, .desktop .filter-wrap input { transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
+  .desktop #composer .composer-box, .sidebar-search, .desktop .filter-wrap input { transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
   .desktop .settings-toggle i { transition: left 160ms var(--ease), background-color 160ms var(--ease); }
   .desktop .ring { transition: --usage 300ms var(--ease); }
-  .desktop :is(#composer, #tp-composer) .send { transition: color 140ms var(--ease), background-color 140ms var(--ease), transform 140ms var(--ease); }
-  .desktop :is(#composer, #tp-composer).has-draft .send:hover:not(:disabled) { transform: translateX(1px); }
+  .desktop #composer .send { transition: color 140ms var(--ease), background-color 140ms var(--ease), transform 140ms var(--ease); }
+  .desktop #composer.has-draft .send:hover:not(:disabled) { transform: translateX(1px); }
 }
 /* Review in the turn: "N files changed" unfolds the turn's diffs under the
    answer. Click a line to leave a note; notes ride with the next message. */
@@ -1591,8 +1591,8 @@ body.desktop :is(pre, .diff, .rv-diff, .step-fold, .pv-view) { scrollbar-width: 
 .desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder); }
 .desktop #composer.stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder); }
 .desktop .request { border-radius: 12px; }
-.desktop .pill, .desktop .chip, .desktop .approval-actions button, .desktop .question-card :is(input, button), .desktop .setup-list, .desktop .auth-card, .desktop #overlay.sheet, .desktop :is(#context-card, #tp-context-card), .desktop .settings-segments, .desktop .settings-toggle { border-color: transparent; box-shadow: inset 0 0 0 1px var(--hair); }
-.desktop :is(#context-card, #tp-context-card) { box-shadow: inset 0 0 0 1px var(--hair), var(--shadow-2); border-radius: 12px; }
+.desktop .pill, .desktop .chip, .desktop .approval-actions button, .desktop .question-card :is(input, button), .desktop .setup-list, .desktop .auth-card, .desktop #overlay.sheet, .desktop #context-card, .desktop .settings-segments, .desktop .settings-toggle { border-color: transparent; box-shadow: inset 0 0 0 1px var(--hair); }
+.desktop #context-card { box-shadow: inset 0 0 0 1px var(--hair), var(--shadow-2); border-radius: 12px; }
 .desktop #overlay.sheet { border-radius: 12px; box-shadow: inset 0 0 0 1px var(--hair), var(--shadow-3); }
 .desktop #cards .card { border-radius: 12px; }
 /* The Mac: no title bar. The traffic lights sit on the glass at the top of
@@ -2017,24 +2017,24 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop #overlay.sheet { max-height: min(560px, calc(100% - 120px)); }
 
 /* Context and your plan (pass 112 A, 177 C): the context word opens one card, the chat's context explained on top, the plan's windows below. */
-.desktop :is(#context-card, #tp-context-card) { width: 320px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-head { font-size: 13px; color: var(--t1); font-weight: 600; margin-bottom: 6px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-head span + span { font-weight: 400; color: var(--t3); font-size: 12px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-say { margin: 0 0 10px; line-height: 18px; color: var(--t2); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-say b { font-weight: 500; color: var(--t1); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-bar { gap: 1px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-i { background: var(--blossom, #f2b6c8); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .tone-o { background: var(--ok); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-divider { height: 1px; background: var(--hair); margin: 12px -14px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window { margin-top: 8px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window .context-bar { height: 5px; margin: 4px 0 0; }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window .context-bar i { background: var(--acc); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window.warn .context-bar i { background: var(--warn); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .plan-window.warn em { color: var(--warn); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 11px; padding-top: 9px; box-shadow: 0 -1px 0 var(--hair); font-size: 12px; color: var(--t3); }
-.desktop :is(#context-card, #tp-context-card, #cards .ctx-card) .context-foot .context-compact { margin: 0; }
+.desktop #context-card { width: 320px; }
+.desktop :is(#context-card, #cards .ctx-card) .context-head { font-size: 13px; color: var(--t1); font-weight: 600; margin-bottom: 6px; }
+.desktop :is(#context-card, #cards .ctx-card) .context-head span + span { font-weight: 400; color: var(--t3); font-size: 12px; }
+.desktop :is(#context-card, #cards .ctx-card) .context-say { margin: 0 0 10px; line-height: 18px; color: var(--t2); }
+.desktop :is(#context-card, #cards .ctx-card) .context-say b { font-weight: 500; color: var(--t1); }
+.desktop :is(#context-card, #cards .ctx-card) .context-bar { gap: 1px; }
+.desktop :is(#context-card, #cards .ctx-card) .tone-i { background: var(--blossom, #f2b6c8); }
+.desktop :is(#context-card, #cards .ctx-card) .tone-o { background: var(--ok); }
+.desktop :is(#context-card, #cards .ctx-card) .plan-window em { font-style: normal; color: var(--t3); font-variant-numeric: tabular-nums; }
+.desktop :is(#context-card, #cards .ctx-card) .context-divider { height: 1px; background: var(--hair); margin: 12px -14px; }
+.desktop :is(#context-card, #cards .ctx-card) .plan-window { margin-top: 8px; }
+.desktop :is(#context-card, #cards .ctx-card) .plan-window > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.desktop :is(#context-card, #cards .ctx-card) .plan-window .context-bar { height: 5px; margin: 4px 0 0; }
+.desktop :is(#context-card, #cards .ctx-card) .plan-window .context-bar i { background: var(--acc); }
+.desktop :is(#context-card, #cards .ctx-card) .plan-window.warn .context-bar i { background: var(--warn); }
+.desktop :is(#context-card, #cards .ctx-card) .plan-window.warn em { color: var(--warn); }
+.desktop :is(#context-card, #cards .ctx-card) .context-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 11px; padding-top: 9px; box-shadow: 0 -1px 0 var(--hair); font-size: 12px; color: var(--t3); }
+.desktop :is(#context-card, #cards .ctx-card) .context-foot .context-compact { margin: 0; }
 /* Compaction from notes (pass 114): the Keep list and the turns strip, pink for notes, blue for whole turns. */
 /* Changed, not running yet (pass 115): under the last turn that changed Demesne's own source. */
 .desktop .live-build { display: flex; align-items: center; gap: 8px; margin: 10px 0 0 34px; padding: 6px 8px 6px 10px; border-radius: 9px; background: var(--tone, rgba(255,255,255,.035)); box-shadow: inset 0 0 0 1px var(--hair, rgba(255,255,255,.07)); font-size: 12.5px; color: var(--t3); }
@@ -2093,106 +2093,133 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .file-edit .fe-status { flex: 1 1 170px; min-width: 0; color: var(--t3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .file-edit .fe-replay { border-color: var(--hair); color: var(--t2); margin-left: auto; }
 
-/* Threads (pass 126): the orchestrator chat and the thread you picked, in
-   even halves. The cards column and Foundry's pane yield to the thread. */
-#thread-pane { display: none; }
-.desktop .live-app.threads-on:not(.paging) #thread-pane:not([hidden]) { position: relative; display: flex; flex-direction: column; flex: none; width: 50%; min-width: 0; border-left: 1px solid var(--hair); background: var(--surface); }
-.desktop .live-app.threads-on:not(.paging) #cards { display: none !important; }
-/* The thread tabs sit in the top bar over the thread side (pass 131 A):
-   placeThreadTabs() sizes the strip so it starts at the split line, where
-   a hairline continues the divider below. */
-#thread-tabs { flex: none; display: flex; align-items: center; gap: 4px; height: 100%; min-width: 0; margin-left: auto; padding-left: 10px; border-left: 1px solid var(--hair); box-sizing: border-box; }
-#thread-tabs[hidden] { display: none; }
-#desktop-toolbar.thread-split header { margin-left: 0; }
-.tp-tabs { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.tp-tabs::-webkit-scrollbar { display: none; }
-.tp-tab { position: relative; display: flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 240px; border-radius: 8px; color: var(--t3); font-size: 12.5px; white-space: nowrap; }
-.tp-tab-open { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 5px 4px 5px 10px; color: inherit; font-size: inherit; }
-.tp-tab-open span { overflow: hidden; text-overflow: ellipsis; }
-.tp-tab-x { display: grid; place-items: center; flex: none; width: 20px; height: 20px; margin-right: 4px; border-radius: 6px; color: var(--t4); opacity: 0; }
-.tp-tab-x .ico { width: 12px; height: 12px; }
-.tp-tab:hover .tp-tab-x, .tp-tab.on .tp-tab-x, .tp-tab-x:focus-visible { opacity: 1; }
-.tp-tab-x:hover { background: var(--surface3); color: var(--t1); }
+/* Threads (pass 232): one ribbon at the top of the chat that started them.
+   It is the checklist's ribbon (.plan-ribbon): a bar that says how every
+   live thread stands, one fine segment each; opened, one line per thread
+   over the chat, sorted by what needs you. There is no split and no pane. */
+#threads-ribbon[hidden] { display: none; }
+/* The stage's padding is not part of what a sticky bar sticks to, so the bar is pulled up over it. */
+.desktop #threads-ribbon { position: sticky; top: -28px; z-index: 4; box-sizing: border-box; height: 58px; max-width: 780px; margin: -28px auto 2px; }
+@media (max-width: 1150px) { .desktop #threads-ribbon { top: -22px; margin-top: -22px; } }
+/* What scrolls behind the ribbon fades out under it, so the open list never fights with the chat. */
+.desktop #threads-ribbon .plan-ribbon.tr::before { content: ""; position: absolute; inset: -6px -32px -16px -64px; z-index: -1; pointer-events: none; background: linear-gradient(var(--ink) calc(100% - 20px), transparent); }
+.desktop #threads-ribbon .plan-ribbon.tr { position: absolute; left: 32px; right: 0; top: 6px; margin: 0; padding: 0; }
+.desktop .live-app.has-threads #conversation .plan-ribbon:not(.ended) { top: 30px; }
+@media (max-width: 1150px) { .desktop .live-app.has-threads #conversation .plan-ribbon:not(.ended) { top: 36px; } }
+.desktop .tr .pr-card { background: color-mix(in srgb, var(--surface2) 94%, var(--ink)); }
+.desktop .tr .pr-card:hover { background: color-mix(in srgb, var(--surface3) 96%, var(--ink)); }
+.desktop .tr.open .pr-card { background: color-mix(in srgb, var(--surface2) 98%, var(--ink)); box-shadow: inset 0 0 0 1px var(--hair), 0 26px 50px -22px rgb(0 0 0 / 0.8); }
+.desktop .tr .pr-bar { padding: 8px 14px 10px; }
+.desktop .tr:is(.still, .asks) .pr-name { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--t1); animation: none; }
+.desktop .tr.asks .pr-name { color: var(--warn); }
+.desktop .tr .pr-segs i.y { background: var(--warn); }
+.desktop .tr .pr-segs i.r { background: var(--bad); }
+.desktop .tr .pr-segs i.p { background: var(--tone2); }
+.desktop .tr .pr-list { max-height: calc(100vh - 262px); overflow: hidden auto; padding: 0 6px 6px; box-shadow: inset 0 1px 0 var(--hair); }
+.desktop .tr .pr-fold > div { min-height: 0; overflow: hidden; }
 
-.tp-tab:hover { background: var(--tone); color: var(--t1); }
-.tp-tab.on { background: var(--tone2); color: var(--t1); }
-.tp-tab .th-ring { width: 14px; height: 14px; flex: none; }
-.tp-merge-host:empty { display: none; }
-.tp-hide { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 7px; color: var(--t3); }
-.tp-hide:hover { background: var(--tone2); color: var(--t1); }
-.tp-hide .ico { width: 16px; height: 16px; }
-.tp-merge { margin-right: 4px; padding: 2px 11px; border-radius: 7px; background: var(--dusk); color: var(--on-dusk); font-size: 12.5px; font-weight: 500; }
-.tp-merge:disabled { opacity: .6; }
-.tp-conv { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 14px; }
-.tp-conv::-webkit-scrollbar { display: none; }
-.tp-conv .turn { display: flex; flex-direction: column; gap: 10px; }
-/* The thread's chat is for reading and steering: its turns' own Undo,
-   Rewind and Ask again belong to that chat, not this half. */
-#thread-pane :is(.receipt-actions, .ask-actions, .step-rewind, .live-line) { display: none !important; }
-#thread-pane .receipt-files { pointer-events: none; }
-#thread-pane .receipt-files .ico { display: none; }
-.tp-empty { color: var(--t3); font-size: 12.5px; margin: auto; }
-.tp-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 32px 22px; }
-.tp-foot { position: relative; }
-.desktop #tp-context-card { right: 32px; bottom: calc(100% - 6px); }
-#tp-context .ring { width: 12px; height: 12px; border-radius: 50%; }
-#tp-context .tp-context-pct { font-variant-numeric: tabular-nums; }
-#tp-context.on .ring { outline: 2px solid var(--line2); outline-offset: 3px; }
-.tp-ask { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--r); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 24%, transparent); color: var(--t1); font-size: 13px; }
-.tp-ask .from { color: var(--warn); font-size: 12px; }
-.tp-acts { display: flex; gap: 8px; }
-.tp-acts button { padding: 4px 12px; border-radius: 8px; background: var(--tone2); color: var(--t1); font-size: 12.5px; }
-.tp-acts button.primary { background: var(--warn); color: #1d1404; font-weight: 500; }
-/* The thread's composer is the chat's (the #composer rules above). */
-.th-brief { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--tone); color: var(--t2); font-size: 12.5px; line-height: 19px; }
-.th-brief .k { color: var(--t4); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
-.th-claims { color: var(--t3); font-size: 12px; }
-.th-claims code { font-size: 11.5px; }
+/* One line per thread: ring, name, plain words, its minutes, and the one next step. */
+.tr-item { flex: none; display: flex; flex-direction: column; }
+.tr-item:first-child { margin-top: 6px; }
+.tr-head { display: flex; align-items: center; }
+.tr-row { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; align-items: center; gap: 11px; height: 32px; padding: 0 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: background 150ms var(--ease); }
+.tr-row:hover, .tr-item.open .tr-row { background: var(--tone); }
+.tr-row:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.tr-row .th-ring { width: 15px; height: 15px; flex: none; }
+.tr-name { flex: 0 1 auto; min-width: 72px; overflow: hidden; text-overflow: ellipsis; color: var(--t1); font-size: 13.5px; }
+.tr-words { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+:is(.tr-words, .tr-peek, .tr-foot) .plus { color: var(--ok); } :is(.tr-words, .tr-peek, .tr-foot) .minus { color: var(--bad); }
+.tr-words .amber { color: var(--warn); }
+:is(.tr-words, .tr-peek) .red { color: var(--bad); }
+.tr-words .sent { color: var(--blossom); }
+.tr-end { flex: none; color: var(--t4); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tr-chev { flex: none; width: 12px; height: 12px; fill: none; stroke: var(--t4); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 150ms, transform 220ms var(--ease); }
+.tr-row:hover .tr-chev, .tr-item.open .tr-chev { opacity: 1; }
+.tr-item.open .tr-chev { transform: rotate(90deg); }
+.tr-next { all: unset; flex: none; height: 24px; padding: 0 10px 0 6px; color: var(--acc); font-size: 12.5px; cursor: pointer; }
+.tr-next:hover { text-decoration: underline; }
+.tr-next:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; border-radius: 6px; }
+.tr-next:disabled { opacity: .6; cursor: default; }
+.tr-next.you { color: var(--warn); }
+.tr-next.failed { color: var(--t2); }
+/* An open ready line has Merge in what it shows; the word at its end steps aside. */
+.tr-item.open.ready .tr-next { display: none; }
 
-/* The threads in the orchestrator's chat, where it started them. */
-.thread-list:empty { display: none; }
-.thread-list { display: flex; flex-direction: column; margin: 2px 0; }
-.th-list { display: flex; flex-direction: column; margin-left: 24px; }
-/* One thread, one line (pass 216 A): ring, name, plain words, and at the end its minutes or Merge. */
-.th-item { position: relative; }
-.th-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 8px; border-radius: 8px; text-align: left; white-space: nowrap; transition: background 150ms ease-out; }
-.th-row:hover { background: var(--tone); }
-.th-row.on { background: var(--tone2); }
-.th-row .th-ring { width: 15px; height: 15px; flex: none; }
-.th-name { flex: 0 1 auto; min-width: 72px; overflow: hidden; color: var(--t1); font-size: 13.5px; text-overflow: ellipsis; }
-.th-line { flex: 1 1 0; min-width: 0; overflow: hidden; color: var(--t3); font-size: 12.5px; text-overflow: ellipsis; }
-.th-end { flex: none; color: var(--t4); font-size: 12px; }
-.th-line .add { color: var(--ok); } .th-line .del { color: var(--bad); }
-.th-line .amber, .th-status .amber { color: var(--warn); }
-.th-line .danger { color: var(--bad); }
-.th-line .sent { color: var(--blossom); }
-.th-item.merged .th-name { color: var(--t3); }
-.th-item.merged .th-ring.ok { stroke: var(--t4); }
-.th-item.ready .th-row { padding-right: 62px; }
-.th-merge-one { position: absolute; right: 8px; top: 4px; height: 22px; padding: 0 4px; color: var(--acc); font-size: 12.5px; }
-.th-merge-one:hover { text-decoration: underline; }
-.th-merge-one:disabled { opacity: .6; }
-.th-del { position: absolute; right: 6px; top: 4px; display: grid; place-items: center; height: 22px; min-width: 22px; border-radius: 6px; color: var(--t4); background: var(--surface); opacity: 0; }
-.th-del .ico { width: 12px; height: 12px; }
-.th-item:hover .th-del, .th-del:focus-visible, .th-del.armed { opacity: 1; }
-.th-del:hover { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--surface)); }
-.th-del.armed { padding: 0 8px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, var(--surface)); font-size: 11.5px; font-weight: 600; }
-.th-item.ready .th-del { right: 62px; }
+/* What an open line shows, hung on the fine rule the steps use: its last
+   words and steps, or what it changed. */
+.tr-peek { margin: 2px 8px 10px 15px; padding: 2px 0 2px 19px; border-left: 1px solid var(--hair2); display: flex; flex-direction: column; gap: 6px; }
+.tr-say { margin: 0; color: var(--t2); font-size: 13px; line-height: 20px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tr-peek .steps { margin: 0; padding: 0; border: 0; pointer-events: none; }
+.tr-peek .steps::before { display: none; }
+.tr-peek .tool-row { padding-left: 0; }
+.tr-file { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; width: 100%; height: 26px; cursor: pointer; color: var(--t2); font: 12px "JetBrains Mono", monospace; border-radius: 6px; }
+button.tr-file:hover { color: var(--t1); }
+button.tr-file:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+div.tr-file, .tr-file:disabled { cursor: default; }
+.tr-file .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-file .chev { flex: none; width: 11px; height: 11px; fill: none; stroke: var(--t4); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 200ms var(--ease); }
+.tr-file[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.tr-file .counts { flex: none; margin-left: auto; font: 12px Inter, sans-serif; font-variant-numeric: tabular-nums; }
+.tr-diff { margin: 2px 0 6px; padding: 7px 0; border-radius: 8px; background: rgb(0 0 0 / 0.24); font: 12px/19px "JetBrains Mono", monospace; max-height: 260px; overflow: auto; scrollbar-width: thin; }
+.tr-diff div { padding: 0 12px; white-space: pre; color: var(--t3); min-width: max-content; }
+.tr-diff .a { background: color-mix(in srgb, var(--ok) 11%, transparent); color: color-mix(in srgb, var(--ok) 45%, var(--t1)); }
+.tr-diff .d { background: color-mix(in srgb, var(--bad) 11%, transparent); color: color-mix(in srgb, var(--bad) 45%, var(--t1)); }
+.tr-diff .h { color: var(--t4); }
+.tr-more { color: var(--t4); font-size: 12px; }
+.tr-note { display: flex; align-items: center; gap: 14px; margin-top: 2px; color: var(--t4); font-size: 12px; }
+.tr-note > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-note .sp, .tr-foot .sp { flex: 1; }
+.tr-link { all: unset; cursor: pointer; color: var(--t3); font-size: 12px; white-space: nowrap; }
+.tr-link:hover { color: var(--t1); }
+.tr-link:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
+.tr-link.armed { color: var(--bad); }
+.tr-link:disabled { opacity: .6; cursor: default; }
+.tr-go { all: unset; cursor: pointer; height: 26px; padding: 0 13px; border-radius: 8px; background: var(--acc); color: #0b1220; font-size: 12.5px; font-weight: 500; line-height: 26px; white-space: nowrap; }
+.tr-go:hover { filter: brightness(1.08); }
+.tr-go:focus-visible { outline: 2px solid var(--t1); outline-offset: 2px; }
+.tr-go:disabled { opacity: .6; cursor: default; }
+/* Under the lines, only once every live thread is ready. */
+.tr-foot { flex: none; display: flex; align-items: center; gap: 12px; margin: 4px 8px; padding: 9px 0 3px; border-top: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Under the reply that started threads: one quiet line of what it started. */
+.tr-begun:empty { display: none; }
+.tr-begun { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 4px 0 2px 32px; color: var(--t4); font-size: 12.5px; }
+.tr-begun button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; color: var(--t3); }
+.tr-begun button:hover { color: var(--t1); }
+.tr-begun button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
+.tr-begun .th-ring { width: 13px; height: 13px; }
+
+/* A question from a thread comes to the chat that started it, and says who asks. */
+.ask-from { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; color: var(--t3); font-size: 12px; }
+.ask-from .th-ring { width: 13px; height: 13px; }
+.ask-from b { color: var(--t2); font-weight: 500; }
+@keyframes ask-nudge { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 35%, transparent); } }
+@media (prefers-reduced-motion: no-preference) { .ask-card.nudge { animation: ask-nudge 700ms var(--ease); border-radius: 12px; } }
+
+/* A thread's own chat is a chat like any other: a tab with its ring, and
+   one quiet line at its top that says whose thread it is. */
+.tab-ring { display: inline-flex; flex: none; margin-right: 1px; }
+.tab-ring .th-ring { width: 13px; height: 13px; }
+.tr-brief { align-self: stretch; margin: 0 0 8px; padding-bottom: 14px; border-bottom: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; line-height: 20px; }
+.tr-brief b { color: var(--t2); font-weight: 500; }
+.tr-brief code { padding: 1px 6px; border-radius: 5px; background: var(--tone2); color: var(--t2); font: 11.5px "JetBrains Mono", monospace; }
+.tr-brief button { all: unset; cursor: pointer; color: var(--t2); }
+.tr-brief button:hover { color: var(--t1); text-decoration: underline; }
+.tr-brief button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
+
 .th-ring { width: 18px; height: 18px; fill: none; stroke-width: 2.2; }
 .th-ring .bg { stroke: var(--hair2); }
-.th-ring .fg { stroke: var(--acc); stroke-linecap: round; transition: stroke-dashoffset 400ms ease-out; }
+/* The ring fills from the top, and a working one turns about its own centre. */
+.th-ring .fg { stroke: var(--acc); stroke-linecap: round; transform-origin: 9px 9px; transform: rotate(-90deg); transition: stroke-dashoffset 400ms ease-out; }
 .th-ring.you .fg { stroke: var(--warn); } .th-ring.ready .fg { stroke: var(--ok); } .th-ring.failed .fg { stroke: var(--bad); }
+.th-ring.waits .bg { stroke-dasharray: 2.6 3.2; stroke: var(--t4); }
 .th-ring.ok { stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 @media (prefers-reduced-motion: no-preference) { .th-ring.work .fg { animation: th-turn 2.4s linear infinite; } }
-@keyframes th-turn { to { transform: rotate(270deg); } }
+@keyframes th-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+@media (prefers-reduced-motion: reduce) { .tr-row, .tr-chev, .tr-file .chev { transition: none; } }
 
-/* Above the orchestrator's composer: one line, or the bar with Merge. */
+/* Above the composer: what a merge or a delete just did. */
 #threads-foot:not([hidden]) { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.th-status { padding: 0 6px; color: var(--t3); font-size: 12px; }
-.th-merge { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: 12px; background: color-mix(in srgb, var(--acc) 12%, transparent); color: var(--t3); font-size: 12.5px; }
-.th-merge b { color: var(--t1); font-weight: 500; }
-.th-merge button { margin-left: auto; padding: 4px 14px; border-radius: 8px; background: var(--acc); color: #0b1220; font-weight: 500; font-size: 12.5px; white-space: nowrap; }
-.th-merge button:disabled { opacity: .6; }
 .th-msg { display: flex; align-items: center; gap: 8px; padding: 0 6px; color: var(--t3); font-size: 12px; }
 .th-msg.error { color: var(--bad); }
 .th-msg .th-x { margin-left: auto; color: var(--t4); }
@@ -2205,7 +2232,6 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .tr-mark { color: var(--ok); display: inline-flex; } .tr-mark .ico { width: 14px; height: 14px; }
 .thread-report.failed .tr-mark { color: var(--bad); }
 .thread-report .request-meta { margin-left: auto; }
-.tp-turns { display: flex; flex-direction: column; gap: 14px; }
 
 /* Drive lives at the foot of the sidebar, above you and Settings (pass 132 C):
    the composer has nothing above it. The line wraps to the sidebar's width and
@@ -2214,7 +2240,6 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 #bar-drive { position: relative; flex: none; margin-left: auto; display: none; align-items: center; }
 #bar-drive:has(> #drive-pill:not([hidden])) { display: flex; }
 #bar-drive:has(> #drive-pill:not([hidden])) + header { margin-left: 0 !important; }
-#desktop-toolbar.thread-split #bar-drive { margin-left: 0; }
 #drive-pill { display: flex; align-items: center; gap: 7px; height: 28px; max-width: 220px; padding: 0 12px 0 8px; border: 0; border-radius: 99px; background: none; box-shadow: inset 0 0 0 1px var(--hair, var(--tone2)); color: var(--t2); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; }
 #drive-pill[hidden] { display: none; }
 #drive-pill:hover, #drive-pill[aria-expanded="true"] { background: var(--surface2); color: var(--t1); }

@@ -78,17 +78,3 @@ export class ComposerHeight {
     return true;
   }
 }
-
-/// Draft/version/revision changes are not conversation changes. Keep this
-/// projection explicit so new host bookkeeping cannot invalidate the turns.
-export function threadConversationKey<T extends {
-  id: string;
-  runs: readonly unknown[];
-  activeTurnId: string | null;
-  approvals: readonly unknown[];
-  questions: readonly unknown[];
-  model?: string | null;
-  provider?: unknown;
-}>(chat: T | null, context: readonly unknown[]): string {
-  return JSON.stringify([chat && [chat.id, chat.runs, chat.activeTurnId, chat.approvals, chat.questions, chat.model, chat.provider], context]);
-}

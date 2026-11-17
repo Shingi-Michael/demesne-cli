@@ -45,6 +45,8 @@ export interface WorkspaceQuestion extends Partial<Omit<QuestionState,"id" | "tu
   turnId: string;
   toolCallId: string;
   questions: UserQuestion[];
+  /// Set when one of this chat's threads asked it (pass 232): the thread's job id and name.
+  thread?: { id: string; title: string };
 }
 export interface WorkspaceRun {
   id: string;

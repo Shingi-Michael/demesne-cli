@@ -115,6 +115,9 @@ interface AgentEngineOptions extends AgentConfig {
   assistantChat?: (sessionId: string) => boolean;
   /// Tools a chat never sees (a thread: Heartbeat and starting threads).
   hiddenTools?: (sessionId: string) => ReadonlySet<string> | null;
+  /// Chats that may ask the person (`ask_user`) on turns nobody typed: a
+  /// thread's, whose question goes to the chat that started it (pass 232).
+  mayAsk?: (sessionId: string) => boolean;
   /// The clock for the assistant's message stamps (tests set it).
   now?: () => Date;
   /// true sends only the everyday tools whole and lets the model load the
@@ -284,8 +287,9 @@ export class AgentEngine {
     const currentUser = this.store.appendModelMessage(turnId, userMessage);
     const currentMessages: ProviderMessage[] = [userMessage];
     // `ask_user` needs someone to answer: only in a chat you're in (ask).
-    // Drive, mail and other Auto turns decide for themselves.
-    const canAsk = Boolean(this.options.questions) && turn.permissionMode === "ask";
+    // Drive, mail and other Auto turns decide for themselves. A thread may
+    // ask: its question reaches you in the chat that started it.
+    const canAsk = Boolean(this.options.questions) && (turn.permissionMode === "ask" || this.options.mayAsk?.(turn.sessionId) === true);
     // A chat with no project works in your home folder (plainRoot): it can
     // change files and run commands there, like a chat in a project.
     const root = session.workspace?.root ?? (!themefy && !assistant ? this.options.plainRoot : undefined);
@@ -1277,7 +1281,10 @@ export class AgentEngine {
     // A commit or a merge: git before it, for the tree drawn under its step.
     const repo = call.name === "run_command" ? await this.repoBefore(workspaceRoot, input) : null;
     try {
-      const questions = permissionMode === "ask" ? this.options.questions : undefined;
+      // A thread's own turns aren't typed by anyone, so its question waits
+      // for the answer (ask) instead of being left open in its chat (post).
+      const threadAsks = permissionMode !== "ask" && this.options.mayAsk?.(sessionId) === true;
+      const questions = permissionMode === "ask" || threadAsks ? this.options.questions : undefined;
       const output = await (tool.executeWithArtifacts ?? tool.execute)(input, { workspaceRoot, signal, sessionId, turnId,
         commands:this.options.commands?.reporter(sessionId,turnId,toolCallId,workspaceRoot),
         ...(questions ? { ask: async (asked: UserQuestion[], mode?: import("@demesne/protocol").QuestionMode) => {
@@ -1287,7 +1294,7 @@ export class AgentEngine {
           const answers = await waiting;
           this.store.resolveQuestions(questionId, toolCallId, answers);
           return answers;
-        }, post: (asked: UserQuestion[]) => { this.store.requestQuestions(toolCallId, asked, "clarification", true, true); } } : {}) });
+        }, ...(threadAsks ? {} : { post: (asked: UserQuestion[]) => { this.store.requestQuestions(toolCallId, asked, "clarification", true, true); } }) } : {}) });
       let result = typeof output === "string" ? output : output.text;
       if (typeof output !== "string") {
         for (const [index, image] of output.images.entries()) {

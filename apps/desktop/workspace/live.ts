@@ -8,14 +8,14 @@ import { compactedConversation } from "./compacted-conversation.ts";
 import { SidebarProjectOrder } from "./sidebar-project-order.ts";
 import { projectTone } from "./project-tone.ts";
 import { markdown, MarkdownView } from "./markdown.ts";
-import { ChatDOM, ComposerHeight, isWindowsDesktopChat, threadConversationKey } from "./windows-chat-redraw.ts";
+import { ChatDOM, ComposerHeight, isWindowsDesktopChat } from "./windows-chat-redraw.ts";
 import { splitNextPrompt } from "../../../packages/protocol/src/next-prompt.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
-import { ring as threadRing, threadBriefHTML, threadMergeHTML, threadListHTML, threadReportHTML, threadsFootHTML, threadTabsHTML } from "./threads-view.ts";
+import { ring as threadRing, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
@@ -336,12 +336,8 @@ const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", 
 const tools = (run: WorkspaceRun) =>
   run.entries.filter((entry): entry is ToolEntry => entry.type === "tool");
 let state: Snapshot | null = null;
-/// Whose model the picker sets: the chat's, or the open thread's (its chip
-/// in the right half opens the same picker there).
-let modelFor: "chat" | "thread" = "chat";
-const pickerModelId = () => modelFor === "thread" ? state!.threads.chat?.model || state!.model.id : state!.model.id;
-/// A model picked in the picker, for whichever it is setting.
-const pickModel = (args: Record<string, unknown>) => modelFor === "thread" ? api("thread-model", args) : api("model", args);
+const pickerModelId = () => state!.model.id;
+const pickModel = (args: Record<string, unknown>) => api("model", args);
 let overlay: OverlayName | null = null,
   overlayQuery = "",
   overlayIndex = 0,
@@ -812,7 +808,9 @@ function renderSidebar() {
   // A chat Drive runs on its own branch (a worktree) joins the list with a
   // branch mark; its branch is in the tooltip.
   const branches = new Map([state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId)).map((job) => [job.sessionId!, job.branch] as const));
-  const sessions = state.sessions.filter(item => !deletedSessions.has(item.id));
+  // A live thread's chat has its row under its orchestrator, with its ring: not a second row among the chats.
+  const threadChats = new Set(state.threads.list.flatMap((fix) => fix.sessionId && fix.status !== "applied" && fix.status !== "discarded" ? [fix.sessionId] : []));
+  const sessions = state.sessions.filter(item => !deletedSessions.has(item.id) && !threadChats.has(item.id));
   const prs = sessions.filter((item) => item.prUrl).map((item) => `${item.id}=${item.prUrl}`).join(",");
   if (prs !== prKey) { prKey = prs; void refreshPullRequests(); }
   const projectWorkspace = list.dataset.workspace || state.workspace;
@@ -841,7 +839,7 @@ function renderSidebar() {
   // The open chat's time moves with every streamed word; its row says it by
   // the minute, so that's all the list redraws for.
   const openId = state.session?.id;
-  const signature = JSON.stringify([[...parentOf], sessions.map((item) => item.id === openId ? { ...item, updatedAt: item.updatedAt?.slice(0, 16) } : item), projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()], state.threads.list.map((fix) => [fix.id, fix.from, fix.title, fix.status, fix.waiting, fix.review, fix.activity?.steps]), state.threads.open, state.threads.closed]);
+  const signature = JSON.stringify([[...parentOf], sessions.map((item) => item.id === openId ? { ...item, updatedAt: item.updatedAt?.slice(0, 16) } : item), projectPaths, sidebarView, foldedGroups, viewOpenAt, agents, housed, [...agentsShown], [...expandedProjectChats], [...deletedSessions], state.session?.id, state.session?.title, state.connection, archivedCount, state.activeTurnId, query, waiting, review.map((job) => [job.id, job.status, job.title, job.diff]), pinned && [pinned.status, pinned.mission, driveProgress(pinned)], run.fix?.status, run.away?.status, word, ideas, state.session?.workspace?.gitBranch, inSession(), [...branches], renaming, backOpenFor, prOpenFor, [...pullRequests].map(([id, pr]) => [id, pr.state, pr.activityAt, pr.number, prSeenAt(id, pr)]), pageOpen, plainNow, Math.floor(Date.now() / 60_000), newSince(socialsView, todaySeen()), todayDot.size, socialsView?.reel?.id, reelSeen(), [...helpingAgents()], state.threads.list.map((fix) => [fix.id, fix.from, fix.title, fix.status, fix.waiting, fix.review, fix.activity?.steps, fix.sessionId])]);
   if (signature === sidebarSignature) return;
   sidebarSignature = signature;
   const current = state.session;
@@ -940,10 +938,11 @@ function renderSidebar() {
     return `<div class="sidebar-housed${agentsOpen ? " open" : ""}" role="group" aria-label="Agents"><div class="sidebar-label sidebar-housed-label"><span>Agents</span>${todayLink}</div>${head}<div class="sidebar-agents-rows"${agentsOpen ? "" : " hidden"}>${rows}</div></div>`;
   };
   // An orchestrator's threads hang under its row (pass 211 A), each with its
-  // ring; one opens on the right, beside its orchestrator.
+  // ring; a row opens that thread's own chat, a chat like any other (pass
+  // 232). A merged thread leaves the sidebar as it leaves the ribbon.
   const threadLines = (id: string) => {
-    const mine = state!.threads.list.filter((fix) => fix.from === id && fix.status !== "discarded");
-    return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-open", `${threadRing(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id }, `sidebar-thread${state!.threads.open === fix.id && !state!.threads.closed ? " on" : ""}`)).join("")}</div>` : "";
+    const mine = state!.threads.list.filter((fix) => fix.from === id && fix.status !== "discarded" && fix.status !== "applied");
+    return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-jump", `${threadRing(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id, chat: fix.sessionId, go: "chat" }, `sidebar-thread${fix.sessionId && fix.sessionId === state!.session?.id && !pageOpen ? " on" : ""}`)).join("")}</div>` : "";
   };
   const groupRows = (key: string, items: typeof sessions, nested: (item: typeof sessions[number]) => boolean = () => false, right: (item: typeof sessions[number]) => string = () => "") => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
@@ -2064,7 +2063,9 @@ function renderTabs() {
   const tones = shown.map((id) => chatTone(byId.get(id)!));
   // The open chat's own time moves with every streamed word; its tab has no
   // glance to key by it, so it doesn't redraw the strip.
-  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, tabs.pinned, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words]);
+  // A thread's own chat is a tab like any other; its ring says how the thread stands (pass 232).
+  const threadOf = (id: string) => state!.threads.list.find((fix) => fix.sessionId === id);
+  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, tabs.pinned, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words, shown.map((id) => { const fix = threadOf(id); return fix ? threadRing(fix) : ""; })]);
   if (signature === tabsSignature) return;
   renderRailChats(shown.map((id, index) => ({ item: byId.get(id)!, tone: tones[index]!, on: chatOpen && id === current!.id })));
   tabsSignature = signature;
@@ -2073,7 +2074,7 @@ function renderTabs() {
     const [action, args] = chatTarget(id);
     const tip = on && rimNow ? `${title} · ${rimNow.words}` : about ? `${title}, ${about}` : title;
     const project = item.workspace ? item.workspace.split(/[\\/]/).filter(Boolean).pop() ?? "Just a chat" : "Just a chat";
-    const pinned = tabs.isPinned(id);
+    const pinned = tabs.isPinned(id), thread = threadOf(id);
     // Pointing at a tab adds its project and state on a second line.
     const sub = [project, STATE_SAYS[tone]].filter(Boolean).join(" · ");
     const words = pinned
@@ -2081,7 +2082,7 @@ function renderTabs() {
       : `<span class="bar-tab-words"><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span><span class="bar-tab-sub" aria-hidden="true">${h(sub)}</span></span>`;
     // The close slot is always kept, so a name never moves when × shows.
     const close = pinned ? "" : btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `);
-    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}"><span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>${words}</button>${close}</div>`;
+    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-ring" aria-hidden="true">${threadRing(thread)}</span>` : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
@@ -2854,7 +2855,7 @@ function runHTML(run: WorkspaceRun, index: number) {
     if (fold && (entry.type === "reasoning" || entry.type === "tool")) {
       // Folded steps keep their trees: a commit or merge stays drawn.
       if (entry.type === "tool" && entry.repo && entry.state === "done") { flush(); body += repoSlot(entry); }
-      if (entry.type === "tool" && entry.name === "start_threads" && entry.state === "done") { flush(); body += THREADS_SLOT; }
+      if (entry.type === "tool" && entry.name === "start_threads" && entry.state === "done") { flush(); body += threadsSlot(entry); }
       if (entry.type === "tool" && entry.handoff) { flush(); body += handoffCard(entry.handoff); }
       // Who this turn asked stays in sight, with how many have answered.
       if (entry.type === "tool" && firstSend(run, entry)) { flush(); body += `<div class="steps">${askStep(run)}</div>`; }
@@ -2881,7 +2882,7 @@ function runHTML(run: WorkspaceRun, index: number) {
         continue;
       }
       for (const part of stretches(group)) {
-        if (part.kind === "one" && part.tool.name === "start_threads" && part.tool.state === "done") { flush(); body += THREADS_SLOT; continue; }
+        if (part.kind === "one" && part.tool.name === "start_threads" && part.tool.state === "done") { flush(); body += threadsSlot(part.tool); continue; }
         if (part.kind === "one") { steps += toolRow(run, part.tool); continue; }
         const words = stretchWords(part.tools, (tool) => totals(run, tool as ToolEntry)), first = part.tools[0]!, stretchKey = `${run.id}:${first.id}`;
         const meta = words.changed ? counts(words) : `<span class="success">✓</span> ${duration(words.durationMs)}`;
@@ -3042,10 +3043,13 @@ const ICON_MAIL = '<svg class="ico mail-mark" viewBox="0 0 24 24" aria-hidden="t
 /// its bubble takes the accent surface and opens with who sent it and what
 /// kind of message it is, so a scroll never mistakes it for your words. It
 /// has no edit or retry: the words are the sender's.
-/// Threads (pass 126). Where a chat started threads, its list sits in the
-/// conversation (filled in by renderThreads, so it stays live without
-/// repainting the turn); a thread reporting back is one quiet line.
-const THREADS_SLOT = '<div class="thread-list" data-threads></div>';
+/// Threads (pass 232). Under the reply that started threads sits one quiet
+/// line of what it started (filled in by renderThreads, so its rings stay
+/// live without repainting the turn); a thread reporting back is one quiet line.
+function threadsSlot(tool: ToolEntry) {
+  const titles = (Array.isArray(tool.input.threads) ? tool.input.threads : []).map((item) => String((item as { title?: unknown } | null)?.title ?? "").trim()).filter(Boolean);
+  return `<div class="tr-begun" data-threads data-titles="${h(JSON.stringify(titles))}" data-at="${Number(tool.startedAt) || 0}"></div>`;
+}
 function threadReport(run: WorkspaceRun): string | null {
   const report = parseThreadReport(run.content);
   return report ? threadReportHTML(report, clock(run.createdAt).slice(0, 5)) : null;
@@ -3062,7 +3066,7 @@ function threadAsked(run: WorkspaceRun): string | null {
   if (!run.content.startsWith("You're one of the threads an orchestrator chat split")) return null;
   const branch = /on branch (\S+),/.exec(run.content)?.[1];
   const fix = state?.threads.list.find((item) => item.branch === branch) ?? null;
-  return threadBriefHTML(fix, run.content);
+  return threadBriefHTML(fix, run.content, fix?.from ? { id: fix.from, title: chatTitle(fix.from) } : null);
 }
 function mailRequest(run: WorkspaceRun): string | null {
   const mail = parseMailTurn(run.content);
@@ -5013,7 +5017,9 @@ function questionCard(question: WorkspaceQuestion): string {
       index > 0 ? btn("question-control", "Back", { id, action: "back" }, "ask-link ask-prev") : "",
       !choices.length && !interview ? btn("question-skip", "Let it decide", { id }, "ask-link") : "",
       question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean);
-  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}">${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<div class="ask-q"><i aria-hidden="true"></i><p class="ask-text">${words}</p>${total > 1 ? `<span class="ask-n">${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${rows}${foot.length ? `<div class="ask-foot">${foot.join("")}</div>` : ""}</div>`;
+  const asker = question.thread && state?.threads.list.find((fix) => fix.id === question.thread!.id);
+  const from = question.thread ? `<div class="ask-from">${asker ? threadRing(asker) : ""}<span><b>${h(question.thread.title)}</b> asks</span></div>` : "";
+  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}">${from}${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<div class="ask-q"><i aria-hidden="true"></i><p class="ask-text">${words}</p>${total > 1 ? `<span class="ask-n">${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${rows}${foot.length ? `<div class="ask-foot">${foot.join("")}</div>` : ""}</div>`;
 }
 function renderQuestion() {
   if (!state) return;
@@ -5027,7 +5033,7 @@ function renderQuestion() {
   for (const question of state.questions) {
     // The signature is what the card draws. Drafts come back on the question
     // in its stored shape; neither may redraw it under every keystroke.
-    const signature = JSON.stringify([question.status, question.questions, question.answers, [...(questionPicks.get(question.id) ?? [])]]);
+    const signature = JSON.stringify([question.status, question.questions, question.answers, [...(questionPicks.get(question.id) ?? [])], question.thread?.title]);
     let card = questionCards.get(question.id);
     const isNew = !card;
     if (!card) { const node = document.createElement("div"); node.className = "ask-slot-card"; card = { node, signature: "" }; questionCards.set(question.id, card); }
@@ -5255,7 +5261,6 @@ function renderBriefing() {
   pillNode.hidden = node.hidden;
   pillNode.innerHTML = node.hidden ? "" : pill || `${mark("hollow")}${pillWord("Drive")}`;
   easeRing(pillNode, pillFrom);
-  placeThreadTabs();
   // A sheet just asked for (/drive starting a mission) waits a moment for Drive to have something to say.
   if (node.hidden && Date.now() - driveSheetAt > 15_000) driveSheetOpen = false;
   const sheetOpen = !node.hidden && (driveSheetOpen || Boolean(fold));
@@ -5373,8 +5378,7 @@ function driveProgress(drive: NonNullable<Snapshot["drive"]>) {
   const tasks = driveTaskList(drive), done = tasks.filter((task) => task.mark === "✓").length, time = activeMinutes(drive);
   return [tasks.length > 1 ? `step ${Math.min(done + 1, tasks.length)} of ${tasks.length}` : "", time].filter(Boolean).join(" · ");
 }
-async function openOverlay(name: OverlayName, query = "", forThread = false) {
-  modelFor = name === "models" && forThread ? "thread" : "chat";
+async function openOverlay(name: OverlayName, query = "") {
   overlay = name;
   overlayQuery = query;
   overlayIndex = 0;
@@ -5420,7 +5424,7 @@ function tokensShort(value: number) {
 /// the picker falls back to the sheet.
 function placeOverlay() {
   const box = el("overlay"),
-    chip = document.getElementById(modelFor === "thread" ? "tp-model" : "composer-model"),
+    chip = document.getElementById("composer-model"),
     more = document.querySelector<HTMLElement>(".header-more"),
     anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null,
     below = overlay === "session" && more && more.offsetParent ? more.getBoundingClientRect() : null;
@@ -5679,10 +5683,6 @@ function renderOverlay() {
   if (!state) return;
   // Keep the dragged element and its geometry stable through host updates.
   if (thinkingDrag && overlay === "models") return;
-  // The picker opens in whichever half its chip is in.
-  if (overlay !== "models") modelFor = "chat";
-  const home = modelFor === "thread" && document.getElementById("tp-model")?.offsetParent ? el("thread-pane") : el("main");
-  if (el("overlay").parentElement !== home) home.append(el("overlay"));
   el("overlay").hidden = !overlay;
   el("overlay").dataset.screen = overlay ?? "";
   el("overlay").setAttribute("role", "dialog");
@@ -5694,7 +5694,7 @@ function renderOverlay() {
     hasFocus = focused === document.activeElement,
     selection = focused?.selectionStart;
   const signature = overlay === "models"
-    ? JSON.stringify([overlay, overlayQuery, pickerModelId(), modelFor, models, modelsMore, modelsLoading])
+    ? JSON.stringify([overlay, overlayQuery, pickerModelId(), models, modelsMore, modelsLoading])
     : JSON.stringify([
     overlay,
     overlayQuery,
@@ -6788,29 +6788,41 @@ async function dispatch(
   if (action === "where-move") return toggleWhere(whereOpen === "move" ? null : "move");
   if (["next-refresh", "next-run", "next-plan", "next-snooze", "next-never", "drive-auto", "drive-control"].includes(action)) return driveAction(action, args);
   if (action.startsWith("breakage-")) return act(() => api(action, args));
-  if (action === "thread-models") return openOverlay("models", "", true);
-  if (action === "thread-context") { threadContextOpen = !threadContextOpen; threadPaneSignature = ""; return renderThreads(); }
+  if (action === "threads-fold") { threadsFolded = !threadsFolded; return renderThreads(); }
+  if (action === "thread-file") { const path = String(args.path ?? ""); threadFileOpen = threadFileOpen === path ? null : path; return renderThreads(); }
   if (action === "thread-delete-arm") {
     threadDeleteArmed = String(args.id ?? "");
     if (threadDeleteTimer) clearTimeout(threadDeleteTimer);
-    threadDeleteTimer = setTimeout(() => { threadDeleteArmed = null; threadPaneSignature = ""; renderThreads(); }, 4000);
-    threadPaneSignature = "";
+    threadDeleteTimer = setTimeout(() => { threadDeleteArmed = null; renderThreads(); }, 4000);
     return renderThreads();
   }
   if (action === "thread-delete") { threadDeleteArmed = null; if (threadDeleteTimer) clearTimeout(threadDeleteTimer); }
-  // A thread tab's × only closes its tab; the next open tab takes over, or
-  // the thread side goes once none is left. Opening the thread brings it back.
-  if (action === "thread-tab-close") {
-    const id = String(args.id ?? ""), view = state!.threads;
-    closedThreadTabs.add(id);
-    const left = view.list.filter((fix) => !closedThreadTabs.has(fix.id));
+  // A thread's name, under the reply that started it or in the sidebar: its
+  // line in the ribbon while it is live, its own chat once it is merged.
+  if (action === "thread-jump") {
+    const id = String(args.id ?? ""), fix = state!.threads.list.find((item) => item.id === id), chat = fix?.sessionId ?? (typeof args.chat === "string" ? args.chat : "");
+    const live = fix && fix.status !== "applied" && state!.session?.id === state!.threads.from && !pageOpen;
+    if (chat && (args.go === "chat" || !live)) { await dispatch("select-session", { id: chat }); return; }
+    if (!fix) return;
+    threadsFolded = false; threadFileOpen = null;
     renderThreads();
-    if (view.open !== id) return;
-    const at = view.list.findIndex((fix) => fix.id === id);
-    const next = left.find((fix) => view.list.indexOf(fix) > at) ?? left.at(-1);
-    return act(() => next ? api("thread-open", { id: next.id }) : api("thread-close", {}));
+    return act(() => api("thread-open", { id }));
   }
-  if (action === "thread-open") closedThreadTabs.delete(String(args.id ?? ""));
+  // Answer: the thread's question is at the end of this chat; an approval waits in its own chat.
+  if (action === "thread-answer") {
+    const id = String(args.id ?? ""), question = state!.questions.find((item) => item.thread?.id === id), card = question && questionCards.get(question.id)?.node;
+    if (card?.isConnected) {
+      card.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+      const root = card.firstElementChild;
+      root?.classList.remove("nudge"); void (root as HTMLElement | null)?.offsetWidth; root?.classList.add("nudge");
+      el("composer").querySelector("textarea")?.focus();
+      return;
+    }
+    const chat = state!.threads.list.find((item) => item.id === id)?.sessionId;
+    if (chat) await dispatch("select-session", { id: chat });
+    return;
+  }
+  if (action === "thread-open" || action === "thread-close") threadFileOpen = null;
   if (action.startsWith("thread-") || action.startsWith("threads-")) return act(() => api(action, args));
   if (action === "google-ai-open") {
     overlay = null; renderOverlay();
@@ -7138,12 +7150,8 @@ async function dispatch(
       return;
     }
     if (row) {
-      // Closing the picker hands it back to the chat, so remember whose it was:
-      // a thread's model row sets the thread, never the chat on the left.
-      const forThread = row.action === "model" && modelFor === "thread";
       overlay = null;
       renderOverlay();
-      if (forThread) { await api("thread-model", row.data); return; }
       return dispatch(row.action, row.data);
     }
   }
@@ -7203,12 +7211,6 @@ async function dispatch(
     });
     notice("Copied");
     return;
-  }
-  if (action === "model" && modelFor === "thread") {
-    overlay = null;
-    const pick = pickModel(args);
-    renderOverlay();
-    return pick;
   }
   if (
     action === "mode" ||
@@ -7332,21 +7334,14 @@ systemAppearance.addEventListener("change",()=>{if(window.demesne.mode!=="deskto
 document.addEventListener("demesne:system-appearance",()=>{if(state?.theme==="system"){applyPalette(state);renderFoot();}});
 let renderedPalette: Snapshot["palette"] | null = null,
   bannerSignature = "";
-/// Threads (pass 126): the orchestrator chat on the left, the thread you
-/// picked running live on the right with a composer of its own. The list in
-/// the chat is the only switcher; nothing moves the right half but you.
-let foldedForThreads = false, threadPaneSignature = "", threadPaneFor = "", threadTurnsSignature = "";
-/// The tab whose × was pressed once: pressing it again deletes the thread.
+/// Threads (pass 232): one ribbon at the top of the chat that started them,
+/// holding every thread that is still live, whatever each is on. What only
+/// this window knows: whether the ribbon is folded (it is, until you open
+/// it), which file's diff is unfolded, and a Delete pressed once.
+let threadsFolded = true, threadsFoldedFor: string | null = null, threadFileOpen: string | null = null;
 let threadDeleteArmed: string | null = null, threadDeleteTimer: ReturnType<typeof setTimeout> | null = null;
-/// Thread tabs you closed, for the orchestrator chat they belong to.
-const closedThreadTabs = new Set<string>();
-let closedThreadTabsFrom: string | null = null;
-/// The thread's context card, opened from the ring in its composer.
-let threadContextOpen = false;
-/// The open thread's working line, kept out of the pane's repaints.
-let threadWorking: WorkingLine | null = null;
 /// Runs `draw` as if the open thread's chat were the chat you're in, so
-/// its turns, working line and context use the same code as any chat's.
+/// its steps draw with the same code as any chat's.
 function asThread<T>(draw: () => T): T | null {
   const chat = state?.threads.chat;
   if (!state || !chat) return null;
@@ -7356,174 +7351,63 @@ function asThread<T>(draw: () => T): T | null {
   state = { ...saved, runs: chat.runs, approvals: chat.approvals, questions: chat.questions, activeTurnId: chat.activeTurnId, provider: chat.provider, model, rewinds: [], versions: [], steers: [], queue: "", answered: {} } as Snapshot;
   try { return draw(); } finally { state = saved; }
 }
-/// The thread's model chip: its own model, or the one it inherited.
-function threadModelWords() {
-  const chat = state!.threads.chat, id = chat?.model || state!.model.id, reasoning = chat?.model ? chat.reasoning : chat?.reasoning ?? state!.reasoning;
-  const name = id ? modelWords({ id, displayName: models.find((model) => model.id === id)?.displayName ?? (id === state!.model.id ? state!.model.displayName : undefined) }) : "";
-  return `${h(name) || "Choose a model"}${reasoning ? `<span class="composer-effort">${h(reasoning[0]!.toUpperCase() + reasoning.slice(1))}</span>` : ""}`;
+/// The open line's thread, as it last spoke: its newest words in plain
+/// text, and its last three steps drawn as any chat draws a step.
+function threadPeek(): ThreadsLook["peek"] {
+  const chat = state?.threads.chat, open = state?.threads.open;
+  if (!chat || !open || chat.of !== open) return null;
+  return asThread(() => {
+    const run = chat.runs.at(-1);
+    if (!run) return null;
+    const said = run.entries.findLast((entry) => entry.type === "assistant" && Boolean(entry.raw.trim()));
+    const words = said?.type === "assistant" ? splitNextPrompt(said.raw).text.replace(/```[\s\S]*?```/g, " ").replace(/[*_`#>]+/g, "").replace(/\s+/g, " ").trim() : "";
+    const steps = run.entries.filter((entry): entry is ToolEntry => entry.type === "tool").slice(-3).map((tool) => toolRow(run, tool)).join("");
+    return { of: open, say: words.length > 260 ? `${words.slice(0, 259).trimEnd()}…` : words, steps };
+  });
 }
 function renderThreads() {
   if (!state) return;
-  const view = state.threads;
-  const fix = view.open && !view.closed ? view.list.find((item) => item.id === view.open) ?? null : null;
-  const split = Boolean(fix) && !pageOpen && inSession(state);
-  el("app").classList.toggle("threads-on", split);
+  const view = state.threads, mine = inSession(state) && !pageOpen && state.session?.id === view.from;
   fillThreadLists();
-  const foot = el("threads-foot"), footHTML = inSession(state) ? threadsFootHTML(view) : "";
+  const foot = el("threads-foot"), footHTML = mine ? threadsMessageHTML(view) : "";
   if (foot.dataset.html !== footHTML) { foot.innerHTML = footHTML; foot.dataset.html = footHTML; foot.hidden = !footHTML; }
-  // Both halves get room: the sidebar folds to its rail while the split is
-  // up, and comes back after if it was the split that folded it.
-  const shell = document.getElementById("desktop-shell"), toggle = document.getElementById("desktop-toggle-sidebar");
-  if (split && !foldedForThreads && shell && toggle && !shell.classList.contains("sidebar-collapsed")) { foldedForThreads = true; toggle.click(); }
-  else if (!split && foldedForThreads) { foldedForThreads = false; if (shell?.classList.contains("sidebar-collapsed")) toggle?.click(); }
-  renderThreadPane(split ? fix : null);
-  renderThreadTabs(split);
+  // Each chat's ribbon starts as its one bar.
+  if (threadsFoldedFor !== view.from) { threadsFoldedFor = view.from; threadsFolded = true; threadFileOpen = null; }
+  const html = mine ? threadsRibbonHTML(view, { folded: threadsFolded, file: threadFileOpen, armed: threadDeleteArmed, peek: threadsFolded ? null : threadPeek(), asking: state.questions.find((question) => question.thread)?.thread?.id ?? null }) : "";
+  const host = el("threads-ribbon");
+  if (host.dataset.html !== html) { drawThreadsRibbon(host, html); host.dataset.html = html; }
+  host.hidden = !html;
+  el("app").classList.toggle("has-threads", Boolean(html));
 }
-/// The thread tabs live in the window's top bar (pass 131 A), over the
-/// thread side only: they start at the split line, and go with the split.
-function renderThreadTabs(split: boolean) {
-  const host = el("thread-tabs"), view = state!.threads;
-  if (closedThreadTabsFrom !== view.from) { closedThreadTabsFrom = view.from; closedThreadTabs.clear(); }
-  el("desktop-toolbar").classList.toggle("thread-split", split);
-  host.hidden = !split;
-  if (!split) { host.dataset.html = ""; return; }
-  const html = threadTabsHTML(view, closedThreadTabs);
-  if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
-  placeThreadTabs();
+/// Redraws the ribbon in place: the card stays (so it folds and unfolds
+/// smoothly), and only the lines that changed are replaced.
+function drawThreadsRibbon(host: HTMLElement, html: string) {
+  const old = host.firstElementChild;
+  if (!old || !html) { host.innerHTML = html; return; }
+  const fresh = document.createElement("div");
+  fresh.innerHTML = html;
+  const next = fresh.firstElementChild!;
+  old.className = next.className;
+  const oldBar = old.querySelector(".pr-bar")!, bar = next.querySelector(".pr-bar")!;
+  for (const name of ["aria-expanded", "aria-label"]) oldBar.setAttribute(name, bar.getAttribute(name) ?? "");
+  for (const part of [".pr-name", ".pr-ct", ".pr-segs"]) { const from = oldBar.querySelector(part)!, to = bar.querySelector(part)!; if (from.innerHTML !== to.innerHTML) from.innerHTML = to.innerHTML; }
+  old.querySelector(".pr-fold")!.toggleAttribute("inert", next.querySelector(".pr-fold")!.hasAttribute("inert"));
+  const oldList = old.querySelector<HTMLElement>(".pr-list")!, list = next.querySelector<HTMLElement>(".pr-list")!;
+  const key = (node: Element) => (node as HTMLElement).dataset.thread ?? node.className;
+  const before = [...oldList.children], after = [...list.children];
+  if (before.length !== after.length || before.some((node, index) => key(node) !== key(after[index]!))) { const top = oldList.scrollTop; oldList.innerHTML = list.innerHTML; oldList.scrollTop = top; return; }
+  before.forEach((node, index) => { if (node.outerHTML !== after[index]!.outerHTML) node.replaceWith(after[index]!); });
 }
-/// Sizes the top bar's thread tabs so they begin exactly over the thread
-/// side's left edge, whatever the window's width.
-function placeThreadTabs() {
-  const host = document.getElementById("thread-tabs"), pane = document.getElementById("thread-pane"), bar = document.getElementById("desktop-toolbar"), header = document.getElementById("header");
-  if (!host || !pane || !bar || host.hidden || pane.hidden) return;
-  const barBox = bar.getBoundingClientRect(), paneLeft = pane.getBoundingClientRect().left;
-  const right = parseFloat(getComputedStyle(bar).paddingRight) || 0, gap = parseFloat(getComputedStyle(bar).columnGap) || 0;
-  const drive = document.getElementById("bar-drive");
-  const tail = (header && header.offsetParent ? header.getBoundingClientRect().width + gap : 0) + (drive && drive.offsetParent ? drive.getBoundingClientRect().width + gap : 0);
-  host.style.width = `${Math.max(120, barBox.right - right - tail - paneLeft)}px`;
-}
-window.addEventListener("resize", () => placeThreadTabs());
-new ResizeObserver(() => placeThreadTabs()).observe(document.getElementById("thread-pane")!);
 function fillThreadLists() {
   if (!state) return;
-  const list = threadListHTML(state.threads, threadDeleteArmed);
-  for (const slot of document.querySelectorAll<HTMLElement>("#conversation [data-threads]"))
-    if (slot.dataset.html !== list) { slot.innerHTML = list; slot.dataset.html = list; }
-}
-function renderThreadPane(fix: Snapshot["threads"]["list"][number] | null) {
-  const host = el("thread-pane");
-  composerDOM.property(host, "hidden", !fix);
-  if (!fix || !state) { if (threadPaneFor) { host.innerHTML = ""; threadPaneSignature = threadPaneFor = threadTurnsSignature = ""; } return; }
-  if (threadPaneFor !== fix.id) {
-    threadPaneFor = fix.id; threadPaneSignature = threadTurnsSignature = "";
-    threadWorking ??= new WorkingLine(spinner);
-    threadContextOpen = false;
-    host.innerHTML = `<div class="tp-conv"><div class="tp-turns"></div></div><div class="tp-foot"><div id="tp-context-card" hidden></div><div class="tp-asks"></div><form class="composer" id="tp-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Message this thread…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg><svg class="ico send-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><div class="composer-bar"><span class="sp"></span><span class="tp-merge-host"></span><button type="button" id="tp-model" class="cb" data-action="thread-models" title="Change this thread's model"></button><button type="button" id="tp-context" class="cb" data-action="thread-context" aria-expanded="false" hidden></button></div></form></div>`;
-    host.querySelector(".tp-conv")!.append(threadWorking.element);
+  const mine = state.session?.id === state.threads.from;
+  for (const slot of document.querySelectorAll<HTMLElement>("#conversation [data-threads]")) {
+    let titles: string[] = [];
+    try { titles = JSON.parse(slot.dataset.titles ?? "[]"); } catch { /* an empty line */ }
+    const html = mine ? threadsBegunHTML(state.threads, titles, Number(slot.dataset.at) || 0) : "";
+    if (slot.dataset.html !== html) { slot.innerHTML = html; slot.dataset.html = html; }
   }
-  const chat = state.threads.chat;
-  const signature = JSON.stringify([fix, chat, state.threads.busy, state.threads.list.map((item) => [item.id, item.status]), threadDeleteArmed, threadContextOpen, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
-  if (signature === threadPaneSignature) return;
-  threadPaneSignature = signature;
-  // While it works, an empty composer's send is Stop, as in any chat; words steer it instead.
-  const form = host.querySelector<HTMLFormElement>("#tp-composer")!, working = Boolean(chat?.activeTurnId);
-  form.classList.toggle("working", working);
-  form.classList.toggle("stopping", working && !form.classList.contains("has-draft"));
-  form.querySelector(".send")!.setAttribute("aria-label", form.classList.contains("stopping") ? "Stop this thread" : "Send to this thread");
-  const merge = host.querySelector<HTMLElement>(".tp-merge-host")!, mergeHTML = threadMergeHTML(state.threads, fix);
-  if (merge.innerHTML !== mergeHTML) merge.innerHTML = mergeHTML;
-  const chip = host.querySelector<HTMLElement>("#tp-model")!, chipHTML = threadModelWords();
-  if (chip.innerHTML !== chipHTML) chip.innerHTML = chipHTML;
-  const conv = host.querySelector<HTMLElement>(".tp-conv")!, turns = host.querySelector<HTMLElement>(".tp-turns")!;
-  const atEnd = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 40;
-  // The thread's turns draw with the same code as any chat's, its thinking
-  // and words included, and its working line says what it is doing now.
-  const turnsSignature = windowsDesktopChat ? threadConversationKey(chat, [fix, state.threads.list.map((item) => [item.id, item.status]), threadDeleteArmed, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]) : "";
-  const redrawTurns = !windowsDesktopChat || turnsSignature !== threadTurnsSignature;
-  if (redrawTurns) {
-    turns.innerHTML = asThread(() => chat!.runs.map((run, index) => `<article class="turn">${runHTML(run, index)}</article>`).join("")) ?? `<p class="tp-empty">Opening the thread…</p>`;
-    threadTurnsSignature = turnsSignature;
-  }
-  const last = chat?.runs.at(-1);
-  if (last) asThread(() => workingLine(threadWorking!, last));
-  else threadWorking!.update(null);
-  renderThreadContext(host);
-  if (redrawTurns) {
-    for (const slot of turns.querySelectorAll<HTMLElement>("[data-answer][data-entry]")) {
-      const entry = chat?.runs.find((run) => run.id === slot.dataset.answer)?.entries.find((item) => item.id === Number(slot.dataset.entry));
-      if (entry?.type === "assistant") slot.innerHTML = markdown(splitNextPrompt(entry.raw).text);
-    }
-  }
-  if (redrawTurns && atEnd) conv.scrollTop = conv.scrollHeight;
-  // What the thread waits on: an approval answers here; a question opens its chat.
-  const asks = [
-    ...(chat?.approvals ?? []).map((approval) => `<div class="tp-ask"><span class="from">Before it goes on</span><span>${h(approval.summary || approval.name)}</span><span class="tp-acts">${btn("thread-approve", "Allow once", { id: approval.id }, "primary")}${btn("thread-approve", "Deny", { id: approval.id, decision: "deny" })}</span></div>`),
-    ...(chat?.questions ?? []).filter((question) => question.open !== false).slice(0, 1).map((question) => `<div class="tp-ask"><span class="from">It asks you</span><span>${h(question.questions[0]?.question ?? "A question")}</span><span class="tp-acts">${btn("select-session", "Answer in its chat", { id: chat!.id }, "primary")}</span></div>`),
-  ].join("");
-  const askHost = host.querySelector<HTMLElement>(".tp-asks")!;
-  if (askHost.innerHTML !== asks) askHost.innerHTML = asks;
 }
-/// The thread's context, like the chat's: a ring with the share used in
-/// its composer, and the same card of what fills it.
-function renderThreadContext(host: HTMLElement) {
-  const ring = host.querySelector<HTMLElement>("#tp-context")!, card = host.querySelector<HTMLElement>("#tp-context-card")!;
-  const c = asThread(() => context());
-  if (!c || c.percentage == null) { ring.hidden = true; card.hidden = true; return; }
-  ring.hidden = false;
-  const html = `<span class="ring" style="--usage:${Math.min(100, c.percentage)}%"></span><span class="tp-context-pct">${c.percentage}%</span>`;
-  if (ring.innerHTML !== html) ring.innerHTML = html;
-  ring.title = `${num(c.used)} of ${num(c.capacity)} · ${c.percentage}% of this thread's context used`;
-  ring.setAttribute("aria-expanded", String(threadContextOpen));
-  ring.classList.toggle("on", threadContextOpen);
-  card.hidden = !threadContextOpen;
-  if (!threadContextOpen) return;
-  const inner = asThread(() => contextHalf(c)) ?? "";
-  if (card.dataset.html !== inner) { card.innerHTML = inner; card.dataset.html = inner; }
-}
-function sendToThread(form: HTMLFormElement, stop = false) {
-  const input = form.querySelector("textarea")!, text = input.value.trim();
-  if (!text) { if (stop && form.classList.contains("working")) void api("thread-cancel", {}).catch((error) => notice(error instanceof Error ? error.message : String(error))); return; }
-  input.value = "";
-  form.classList.remove("has-draft");
-  void api("thread-send", { text }).catch((error) => { input.value = text; notice(error instanceof Error ? error.message : String(error)); });
-}
-// Esc in the thread side puts it away (its context card first). Esc in the
-// chat on the left keeps its own meanings (deny, stop).
-document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !state || el("thread-pane").hidden) return;
-  if (!(event.target as Element).closest?.("#thread-pane, #thread-tabs") || document.querySelector("#thread-pane #overlay")) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  if (threadContextOpen) { threadContextOpen = false; threadPaneSignature = ""; return renderThreads(); }
-  void act(() => api("thread-close", {}));
-});
-// ⌘[ and ⌘] step through the thread tabs while the split is up.
-document.addEventListener("keydown", (event) => {
-  if (!(event.metaKey || event.ctrlKey) || (event.key !== "[" && event.key !== "]") || !state || el("thread-pane").hidden) return;
-  const list = state.threads.list.filter((fix) => !closedThreadTabs.has(fix.id)), at = list.findIndex((fix) => fix.id === state!.threads.open);
-  if (list.length < 2 || at < 0) return;
-  event.preventDefault();
-  const next = list[(at + (event.key === "]" ? 1 : -1) + list.length) % list.length]!;
-  void act(() => api("thread-open", { id: next.id }));
-});
-document.addEventListener("submit", (event) => {
-  const form = (event.target as Element).closest<HTMLFormElement>("[data-thread-form]");
-  if (!form) return;
-  event.preventDefault();
-  sendToThread(form, Boolean((event as SubmitEvent).submitter));
-});
-document.addEventListener("input", (event) => {
-  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea"), form = input?.form;
-  if (!form) return;
-  form.classList.toggle("has-draft", Boolean(input!.value.trim()));
-  form.classList.toggle("stopping", form.classList.contains("working") && !form.classList.contains("has-draft"));
-});
-document.addEventListener("keydown", (event) => {
-  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea");
-  if (!input || event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-  event.preventDefault();
-  sendToThread(input.form!);
-});
 function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
   if (state?.session?.id !== next.session?.id) {

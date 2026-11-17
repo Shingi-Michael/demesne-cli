@@ -9,10 +9,10 @@ function section(start: string, end: string) {
   if (from < 0 || to <= from) throw new Error(`Missing renderer section: ${start}`);
   return source.slice(from, to);
 }
-// Exercise the real composer and thread-pane entry points. Only host data and
+// Exercise the real composer entry points. Only host data and
 // unrelated turn/control renderers are stand-ins; no native actions are run.
 const fixtureScript = new Bun.Transpiler({ loader: "ts" }).transformSync(`
-const {ChatDOM, ComposerHeight, isWindowsDesktopChat, threadConversationKey} = window.RedrawUI;
+const {ChatDOM, ComposerHeight, isWindowsDesktopChat} = window.RedrawUI;
 const windowsDesktopChat = isWindowsDesktopChat(window.boot.mode, window.boot.platform);
 const composerDOM = new ChatDOM(windowsDesktopChat), composerHeight = windowsDesktopChat ? new ComposerHeight() : null;
 const el = id => document.getElementById(id), editor = document.querySelector('textarea');
@@ -24,8 +24,7 @@ let state = {
   approvals:[], questions:[], files:[{path:'src/alpha.ts'},{path:'src/beta.ts'}],
   session:{id:'main',workspace:'C:/project',autoApprove:false,acceptEdits:false},
   workspace:'C:/project', planOnly:false, runs:[{id:'main-turn'}], model:{id:'model',contextWindow:1000},
-  attachments:[{id:'image',filename:'shot.png',width:40,height:30}],
-  threads:{busy:null,list:[{id:'fix',status:'running'}],chat:{id:'thread',provider:'provider',model:'model',draft:'',draftVersion:0,activeTurnId:null,approvals:[],questions:[],runs:[{id:'thread-turn',content:'Request',entries:[{id:1,type:'assistant',raw:'Answer'}]}]}}
+  attachments:[{id:'image',filename:'shot.png',width:40,height:30}]
 };
 const inSession = () => state.runs.length > 0, inAssistant = () => false, isPlain = () => !state.session?.workspace;
 const projectLabel = path => path.replace(/\\\\/g, '/').split('/').at(-1);
@@ -38,17 +37,6 @@ ${section('type Mode =', 'let pendingMode:')}
 const whereRow = () => '<button type="button">Current project</button>';
 ${section('function renderWhere()', 'function toggleWhere(')}
 ${section('function renderComposer()', '/// An approval is')}
-let threadPaneFor = '', threadPaneSignature = '', threadTurnsSignature = '', threadWorking = null, threadContextOpen = false, threadDeleteArmed = null;
-const stepsOpen = new Set(), stepOpen = new Set(), detailsOpen = new Set(), expanded = new Set(), models = [];
-class WorkingLine { element = document.createElement('div'); update() {} }
-const spinner = () => '', workingLine = () => {}, renderThreadContext = () => {};
-const threadMergeHTML = view => '<button>' + (view.busy ? 'Merging' : 'Merge') + '</button>';
-const threadModelWords = () => state.threads.chat?.model || 'Choose a model';
-const splitNextPrompt = raw => ({text:raw}), markdown = raw => '<p>' + h(raw) + '</p>';
-const runHTML = run => '<div class="request">' + h(run.content) + '</div><div class="response"><div class="markdown" data-answer="' + h(run.id) + '" data-entry="1"></div></div>';
-${section('function asThread<T>', '/// The thread\'s model chip:')}
-${section('function renderThreadPane(', '/// The thread\'s context, like')}
-const drawThread = () => renderThreadPane(state.threads.list[0]);
 editor.addEventListener('input', () => renderComposer());
 window.fixture = {
   render() { composerSignature = ''; renderComposer(); },
@@ -56,12 +44,10 @@ window.fixture = {
   patch(patch) { Object.assign(state,patch); composerSignature = ''; renderComposer(); },
   question(value) { question = value; state.questions = value ? [value] : []; composerSignature = ''; renderComposer(); },
   preview(url) { attachmentPreviews.set('image',url); composerSignature = ''; renderComposer(); },
-  thread(patch, busy = null) { Object.assign(state.threads.chat,patch); state.threads.busy = busy; drawThread(); },
-  fold() { stepOpen.add('thread-turn:tool'); drawThread(); },
   nodes: () => ({image:el('attach-row').querySelector('img'),attachment:el('attach-row').firstChild,mention:el('mention-chips').firstChild,where:el('composer-where').firstChild,mode:el('composer-mode').firstChild,queue:el('queue-label').firstChild,send:el('send-label').firstChild}),
   gate: windowsDesktopChat
 };
-renderComposer(); drawThread();
+renderComposer();
 `);
 
 // Opt-in real DOM/layout checks, using existing browsers only. These do not
@@ -76,8 +62,8 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Windows desktop chat red
     browser = await chromium.launch({ headless: true, channel: process.env.DEMESNE_BROWSER_CHANNEL || undefined });
   }, 20_000);
   const mount = async (mode: string | undefined, platform: string) => {
-    await page.setContent(`<!doctype html><body class="desktop"><div class="harness" style="width:540px"><div id="app" class="live-app"><div id="stage" style="height:100px;overflow:auto"><div style="height:1000px">Conversation</div></div><form id="composer" class="composer"><div class="composer-box"><div id="queue-label"></div><div id="attach-row"></div><div id="mention-chips"></div><textarea id="message" rows="1" aria-label="Message"></textarea><button type="button" class="send"><kbd>Enter</kbd><span id="send-label"></span><span id="tokens"></span></button></div><div class="composer-bar"><button type="button" id="composer-mode"></button><button type="button" id="composer-where"></button><span class="hints"><span id="hint-mention">@</span></span></div><div id="where-row"></div></form></div><div id="thread-pane" style="display:block;position:static;width:420px;height:260px"></div></div></body>`);
-    await page.addStyleTag({ content: styles + '\n#thread-pane .tp-conv{height:150px;overflow:auto}' });
+    await page.setContent(`<!doctype html><body class="desktop"><div class="harness" style="width:540px"><div id="app" class="live-app"><div id="stage" style="height:100px;overflow:auto"><div style="height:1000px">Conversation</div></div><form id="composer" class="composer"><div class="composer-box"><div id="queue-label"></div><div id="attach-row"></div><div id="mention-chips"></div><textarea id="message" rows="1" aria-label="Message"></textarea><button type="button" class="send"><kbd>Enter</kbd><span id="send-label"></span><span id="tokens"></span></button></div><div class="composer-bar"><button type="button" id="composer-mode"></button><button type="button" id="composer-where"></button><span class="hints"><span id="hint-mention">@</span></span></div><div id="where-row"></div></form></div></div></body>`);
+    await page.addStyleTag({ content: styles });
     await page.evaluate(async ({ source, mode, platform }) => {
       (window as any).boot = { mode, platform: { platform } };
       const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
@@ -165,30 +151,16 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Windows desktop chat red
     expect(await page.locator('#attach-row').isHidden()).toBe(false);
   });
 
-  test("unrelated thread drafts and footer state preserve turn identity and scroll; actual answer changes redraw", async () => {
-    const result = await page.evaluate(() => {
-      const f = (window as any).fixture, turns = document.querySelector('.tp-turns')!, article = turns.querySelector('article'), answer = turns.querySelector('p');
-      const conv = document.querySelector('.tp-conv')! as HTMLElement;
-      const spacer = document.createElement('div'); spacer.style.cssText = 'height:1000px;flex:none'; conv.append(spacer); conv.scrollTop = 100;
-      const observer = new MutationObserver(() => {}); observer.observe(turns,{subtree:true,childList:true,characterData:true,attributes:true});
-      f.thread({draft:'typing',draftVersion:1}); f.thread({draft:'typing more',draftVersion:2},'merge');
-      const same = article === turns.querySelector('article') && answer === turns.querySelector('p'), records = observer.takeRecords().length, top = conv.scrollTop;
-      f.thread({runs:[{id:'thread-turn',content:'Request',entries:[{id:1,type:'assistant',raw:'Answer grows'}]}]});
-      return {same,records,top,updated:turns.textContent?.includes('Answer grows'),replaced:article !== turns.querySelector('article')};
-    });
-    expect(result).toEqual({same:true,records:0,top:100,updated:true,replaced:true});
-  });
-
-  test("macOS, Linux and Windows browser-only renderers retain the legacy composer/thread path", async () => {
+  test("macOS, Linux and Windows browser-only renderers retain the legacy composer path", async () => {
     for (const boot of [{mode:'desktop',platform:'MacIntel'},{mode:'desktop',platform:'Linux x86_64'},{mode:undefined,platform:'Win32'}]) {
       // A fresh document avoids top-level lexical declarations from the fixture.
       await page.goto('about:blank'); await mount(boot.mode,boot.platform);
       const result = await page.evaluate(() => {
-        const f = (window as any).fixture, image = f.nodes().image, turn = document.querySelector('.tp-turns article');
-        f.draft('new draft'); f.thread({draft:'thread draft',draftVersion:1});
-        return {gate:f.gate,imageReplaced:image !== f.nodes().image,turnReplaced:turn !== document.querySelector('.tp-turns article')};
+        const f = (window as any).fixture, image = f.nodes().image;
+        f.draft('new draft');
+        return {gate:f.gate,imageReplaced:image !== f.nodes().image};
       });
-      expect(result).toEqual({gate:false,imageReplaced:true,turnReplaced:true});
+      expect(result).toEqual({gate:false,imageReplaced:true});
     }
   });
 });

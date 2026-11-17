@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as nodeModule from "node:module";
 import { Script } from "node:vm";
-import { ChatDOM, ComposerHeight, isWindowsDesktopChat, threadConversationKey } from "../windows-chat-redraw.ts";
+import { ChatDOM, ComposerHeight, isWindowsDesktopChat } from "../windows-chat-redraw.ts";
 
 test("changed renderer sources and the extracted browser fixture compile without app artifacts", () => {
   // Syntax/fixture checks only, not a substitute for tsc or browser execution.
@@ -26,7 +26,6 @@ test("changed renderer sources and the extracted browser fixture compile without
   });
   assert.doesNotThrow(() => new Script(script));
   assert.match(script, /function renderComposer\(/);
-  assert.match(script, /function renderThreadPane\(/);
 });
 
 test("the renderer fix requires both desktop mode and a Windows platform", () => {
@@ -120,16 +119,4 @@ test("offscreen measurement only writes a changed final height, never the live b
   Object.assign(editor, { clientWidth: 0, value: "hidden draft" });
   assert.equal(sizing.resize(editor), false);
   assert.equal(measurements, 5, "hidden editors wait for a nonzero width");
-});
-
-test("thread turns exclude draft bookkeeping but include rendered state and folds", () => {
-  const chat = { id: "thread", runs: [{ id: "turn", text: "hello" }], activeTurnId: null as string | null, approvals: [] as unknown[], questions: [] as unknown[], model: "model", provider: { model: "model" }, draft: "", draftVersion: 0, revision: 1 };
-  const key = threadConversationKey(chat, ["fix", []]);
-  assert.equal(threadConversationKey({ ...chat, draft: "typing", draftVersion: 2, revision: 2 }, ["fix", []]), key);
-  for (const patch of [
-    { id: "other" }, { runs: [{ id: "turn", text: "hello world" }] }, { activeTurnId: "turn" },
-    { approvals: [{ id: "approval" }] }, { questions: [{ id: "question" }] }, { model: "other" }, { provider: { model: "other" } },
-  ]) assert.notEqual(threadConversationKey({ ...chat, ...patch }, ["fix", []]), key);
-  assert.notEqual(threadConversationKey(chat, ["fix", ["open-step"]]), key);
-  assert.notEqual(threadConversationKey(null, ["fix", []]), key);
 });

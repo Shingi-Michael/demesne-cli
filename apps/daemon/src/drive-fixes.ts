@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { formatDriveReport, formatThreadReport, parseThreadNote, splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type DriveThread, type Turn } from "@demesne/protocol";
+import { formatDriveReport, formatThreadReport, parseThreadNote, splitNextPrompt, type CommandRecord, type DriveAway, type DriveAwayRequest, type DriveFix, type DriveFixAction, type DriveFixChange, type DriveFixChangesResponse, type DriveFixProposal, type DriveFixStatus, type DriveSignal, type DriveThread, type Turn } from "@demesne/protocol";
 
 /// Drive's unattended work, each piece in its own git worktree on its own
 /// branch: fixes for breakages, Next proposals you press Run on, and /drive
@@ -35,6 +35,29 @@ export interface FixHost {
 }
 
 type Run = (argv: string[], cwd: string, timeoutMs?: number) => Promise<{ ok: boolean; out: string; err: string }>;
+
+const CHANGES_FILES = 40, CHANGES_LINES = 400;
+/// Splits `git diff` output into files: each one's path, its counts, and
+/// its hunks without git's header lines.
+export function parseChanges(diff: string): DriveFixChange[] {
+  const files: DriveFixChange[] = [];
+  for (const block of diff.split(/^diff --git /m).slice(1)) {
+    const lines = block.split("\n");
+    const first = lines.findIndex((line) => line.startsWith("@@"));
+    const head = first < 0 ? lines : lines.slice(0, first);
+    const to = head.find((line) => line.startsWith("+++ "))?.slice(4), from = head.find((line) => line.startsWith("--- "))?.slice(4);
+    const named = to && to !== "/dev/null" ? to : from && from !== "/dev/null" ? from : "";
+    const path = named ? named.replace(/^[ab]\//, "").replace(/\t$/, "") : / b\/(.+)$/.exec(lines[0] ?? "")?.[1] ?? "";
+    if (!path) continue;
+    const hunks = first < 0 ? [] : lines.slice(first);
+    while (hunks.length && hunks.at(-1) === "") hunks.pop();
+    let additions = 0, deletions = 0;
+    for (const line of hunks) { if (line.startsWith("+")) additions++; else if (line.startsWith("-")) deletions++; }
+    const cut = hunks.length > CHANGES_LINES;
+    files.push({ path, additions, deletions, patch: (cut ? hunks.slice(0, CHANGES_LINES) : hunks).join("\n"), ...(cut ? { cut: true } : {}) });
+  }
+  return files;
+}
 
 async function run(argv: string[], cwd: string, timeoutMs = 60_000) {
   const child = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
@@ -92,6 +115,7 @@ Files you claim: ${fix.thread.files.join(", ") || "(none listed)"}. Other thread
 2. Make the change the job asks for, and nothing else: don't refactor or touch unrelated code.
 3. Run the checks that cover what you changed (tests, typecheck, lint) and confirm they pass.
 4. Don't install or upgrade dependencies (node_modules is shared with the user's checkout), and don't commit or push: demesne commits the result, and the person merges it from the orchestrator.
+5. Decide small things yourself and say what you chose. Only when the job turns on a choice that is the person's to make, ask once with ask_user (one short question, your recommended answer first) and wait; the person sees it in the orchestrator's chat.
 
 End with two or three plain sentences: what you changed and how you checked it.`;
 }
@@ -182,6 +206,18 @@ export class DriveFixes {
   /// Whether a chat is a thread's own chat.
   isThread(sessionId: string): boolean {
     return this.fixes.some((fix) => fix.thread && fix.sessionId === sessionId);
+  }
+
+  /// What a job changed on its branch against where it started, file by
+  /// file, so a thread can be read before it is merged. Long files and long
+  /// lists are cut; the counts stay whole.
+  async changes(id: string): Promise<DriveFixChangesResponse> {
+    const fix = this.fixes.find((item) => item.id === id);
+    if (!fix) throw new Error("Unknown job");
+    const diff = await this.git(["git", "diff", "--no-color", "--no-ext-diff", "-U3", `${fix.base}..${fix.branch}`], fix.workspace);
+    if (!diff.ok) return { files: [], more: 0 };
+    const files = parseChanges(diff.out);
+    return { files: files.slice(0, CHANGES_FILES), more: Math.max(0, files.length - CHANGES_FILES) };
   }
 
   threads(from: string): DriveFix[] {

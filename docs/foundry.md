@@ -91,6 +91,18 @@ A mockup used to carry controls that were not part of the design: Foundry's own 
 
 The player is `apps/desktop/foundry-kit/demo.js`, put in front of pages on the Foundry page with the try runtime (`foundry-try.ts`); the stages are `apps/desktop/workspace/foundry-stage.ts`. `xvfb-run -a bun scripts/check-foundry-demo.ts` checks it in the real app.
 
+## Notes on the parts
+
+A correction used to mean going back to the chat and describing where the thing was ("the second row, the button on the right"). Now you say it on the mockup itself, part by part (pass 233 A). At rest the Foundry page shows nothing new.
+
+- **Rest on a part.** When the pointer rests on a part of the newest version of a mockup, the part gets a thin pink outline and a small tag with its name ("Save button · Comment", "Overdue card · Comment"). A part is the smallest piece you would name: a control, a row, a card, a heading. A word or an icon belongs to the piece that holds it, and the frame around the mockup is never a part. The mockup's own clicks still work, and a playing demo still stops when you move in.
+- **A note, then a pin.** The tag opens a one-line note. Enter keeps it as a numbered pin on the part; Esc puts it away. A pin opens its note again, and clearing the words removes it. Notes wait on the mockup while you are elsewhere in the app (they are not kept when the app is closed).
+- **Sent together.** One quiet line under the mockup says how many notes wait: click it, or press ⌘↵ (Ctrl ↵ off the Mac), and they go as one message to the chat that made the mockup, so one new version holds every correction. ⌘↵ in an open note sends at once. You stay on Foundry; the chat opens under the page, and the message waits behind a turn that is still running.
+- **What the model gets.** The message reads as you wrote it, part by part ("1 · Save button: make it green"), and on a mockup with options each note says which option. Folded under it ("Marked parts · N" in the chat) are the mockup's id and version, each part's place in the markup and its few lines of markup, with the instruction to change only those parts in one `foundry_edit`. A picture of each part as you saw it rides along, cut from the window with nothing of Demesne's over it (up to ten pictures a message).
+- **What comes back.** While the model works the line says so. The new version arrives on top with the changed parts outlined for a few seconds, and its "You asked" line is your notes. If the model answered in words instead, the line says no new version came back.
+
+The mockup's frame only reports: `apps/desktop/foundry-kit/note.js` says which part is under the pointer and where the noted parts are, and draws nothing. The outline, tag, pins and note are the page's (`apps/desktop/workspace/foundry-notes.ts`), over the frame at real size. Pictures are `desktop-crop` in `apps/desktop/electron/main.ts`. `xvfb-run -a bun scripts/check-foundry-notes.ts` checks it in the real app.
+
 ## It remembers the course
 
 A page's source leaves the chat once its turn is over, so a later ask used to start from a title alone. Now reading a mockup (`foundry_read`) hands back its brief with the source: for each ask so far, what you asked, the direction taken, what leads, what was dropped and what it started from. The first ask and the newest five are kept. The model is told to answer the newest ask, keep every earlier decision you did not change, and never bring back what was dropped unless you ask. (`briefOf` in `apps/daemon/src/foundry.ts`.)
@@ -143,7 +155,7 @@ The order of the critique, the states rule and the wording rules come from the c
 
 Each version keeps the trail back to why it exists and forward to what came of it:
 
-- **The ask that made it.** The message you sent is kept with the version and quoted under the name ("You asked …"), cut to a line, in full on hover. It is a copy, so it stays after the chat is deleted.
+- **The ask that made it.** The message you sent is kept with the version and quoted under the name ("You asked …"), cut to a line, in full on hover. It is a copy, so it stays after the chat is deleted. What the app folded under the message (pasted text, the marked parts of a mockup) is left out.
 - **Based on.** When the model read another mockup in the same ask before making a new one, the new one is based on it, even if the model didn't say so. Naming `based_on` still wins.
 - **Built in #N.** When the chat that made a mockup opened a pull request that has merged, the newest version of each mockup it made before opening that pull request says "built in #N", a link to the pull request on GitHub.
 - **A name that says what it is.** `foundry_save` and `foundry_edit` turn back names like "Mockup", "Option B", "New design" or "v2", and names over six words. Options keep their letter in the version's note.

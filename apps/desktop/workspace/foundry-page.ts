@@ -28,8 +28,10 @@ export const frameURL = (id: string, version: number) => `foundry://artifact/${e
 /// and loads only when it scrolls near the screen.
 /// `at` is when the version last changed: Foundry's own fixes in the same
 /// ask change it in place (pass 197 A), so the frame loads the fixed page.
-const frame = (id: string, version: number, title: string, at: string) =>
-  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1&at=${Date.parse(at) || 0}`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
+/// `first` marks a version that just came back from notes (pass 233 A): its
+/// frame outlines what changed for a few seconds (electron/foundry-changed.ts).
+const frame = (id: string, version: number, title: string, at: string, first = false) =>
+  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1&at=${Date.parse(at) || 0}${first ? "&first=1" : ""}`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
 
 /// The bar a window or a browser surface draws above the page (pass 221 A).
 const CHROME: Partial<Record<string, number>> = { window: 30, browser: 38 };
@@ -40,8 +42,8 @@ const GROW_START = 480;
 /// only to fit), on its backdrop; and, when it has a demo or is a deck, the
 /// quiet line under it that the demo's words appear in. Without a surface it
 /// is the plain stage it always was.
-export function stageHTML(artifact: Pick<FoundryArtifact, "id" | "title" | "kind">, version: Pick<FoundryShelfVersion, "version" | "createdAt" | "stage">) {
-  const inner = frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt);
+export function stageHTML(artifact: Pick<FoundryArtifact, "id" | "title" | "kind">, version: Pick<FoundryShelfVersion, "version" | "createdAt" | "stage">, first = false) {
+  const inner = frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt, first);
   const demo = version.stage?.demo?.length ? version.stage.demo : null, deck = artifact.kind === "deck";
   const plays = `${demo ? ` data-demo="${h(JSON.stringify(demo))}"` : ""}${deck ? " data-deck" : ""}`;
   const line = demo || deck ? '<p class="fd-demo" aria-live="polite"></p>' : "";
@@ -64,7 +66,12 @@ export interface FoundryView {
   /// The merged pull request a chat opened, if any (pass 219 A): the mockups
   /// it made before opening it are what it built.
   builtIn?: (sessionId: string) => { number: number; createdAt: string } | null;
+  /// Versions that just came back from notes (pass 233 A), as shelf keys: each outlines what changed.
+  changed?: ReadonlySet<string>;
 }
+
+/// The kinds a note can be pinned to (pass 233 A): the ones drawn in a frame that says what is under the pointer.
+export const NOTE_KINDS = new Set<FoundryKind>(["html", "deck", "doc", "dashboard"]);
 
 /// Pass 219 A: which versions a chat's merged pull request built, as
 /// shelf keys: of each mockup the chat made, its newest version from before
@@ -123,8 +130,10 @@ export function foundryPage(view: FoundryView) {
     const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
     const body = artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
-      : stageHTML(artifact, version);
-    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${asked}${words}${because}${ver}${body}</section>`;
+      : stageHTML(artifact, version, view.changed?.has(key));
+    // Pass 233 A: notes are pinned to the newest version only (a correction makes the next one), and their quiet line sits under it.
+    const notes = artifact.version === version.version && NOTE_KINDS.has(artifact.kind) ? '<p class="fd-notes" aria-live="polite" hidden></p>' : "";
+    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${notes}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
 }

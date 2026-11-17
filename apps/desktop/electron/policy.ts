@@ -80,6 +80,8 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "remember.js": { path: "kit/remember.js", type: "application/javascript; charset=utf-8" },
   // Foundry plays a page's demo (pass 221 A): put in front of pages on the Foundry page, with the try runtime.
   "demo.js": { path: "kit/demo.js", type: "application/javascript; charset=utf-8" },
+  // Notes on a mockup (pass 233 A): put in front of pages on the Foundry page; it tells the page which part is under the pointer.
+  "note.js": { path: "kit/note.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
   ...Object.fromEntries([400, 500].map((weight) => [`fonts/jetbrains-mono-latin-${weight}-normal.woff2`, { path: `vendor/fonts/jetbrains-mono-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };

@@ -52,3 +52,18 @@ test("native capture preserves cancellation and permission errors", async () => 
   const denied = captureWindowTool({ list: async () => { throw new Error("Screen & System Audio Recording"); }, capture: async (window) => ({ ...window, png: new Uint8Array(), text: "" }) });
   await expect(denied.executeWithArtifacts!({ application: "Ghostty" }, context)).rejects.toThrow("Screen");
 });
+
+test("a capture says its size in points beside its pixels, so a review shows it at its own size (pass 240 A)", async () => {
+  const header = new Uint8Array(24);
+  header.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(header.buffer).setUint32(16, 2880); new DataView(header.buffer).setUint32(20, 1800);
+  const tool = captureWindowTool({ list: async () => [{ id: "9", app: "Demesne", title: "Chat", bounds: { x: 0, y: 0, width: 1440, height: 900 } }],
+    capture: async (window: ShotWindow) => ({ ...window, png: header, text: "" }) });
+  const output = await tool.executeWithArtifacts!({ application: "Demesne" }, context);
+  if (typeof output === "string") throw new Error("Missing image");
+  expect(output.images[0]!.viewport).toEqual({ width: 1440, height: 900, deviceScaleFactor: 2 });
+  // No bounds, no claim: the picture goes as it is.
+  const plain = await captureWindowTool(shooter([])).executeWithArtifacts!({ application: "Ghostty", title: "demesne" }, context);
+  if (typeof plain === "string") throw new Error("Missing image");
+  expect(plain.images[0]!.viewport).toBeUndefined();
+});

@@ -9,8 +9,8 @@
 /// and foundry_read brings it back when the agent needs it.
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
-import type { StructuredToolResult } from "./artifacts.ts";
-import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
+import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 
@@ -47,7 +47,8 @@ Anywhere:
 - <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: on the Foundry page each option gets its own stage, named on the line above it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
 A review of something that exists ("look at this and show me what needs work"), one page:
-- <d-review><section data-today marks="#desktop-toolbar | .sidebar-nav">the screen as it is</section><section data-part="Top bar" why="Three tabs, the Drive pill and the menu compete in one row."><d-compare recommended="Fewer"><section data-option="Today">…</section><section data-option="Fewer things">…</section><section data-option="Two rows">…</section></d-compare></section>…</d-review>. marks: one selector per part, in order (or data-mark="1" on the piece); Foundry outlines and numbers them, names each part and option, and puts your pick beside Today. Two or three parts (one only when nothing else comes close), each the smallest piece that holds the problem, with Today and two or three options that show that piece alone (<d-crop> cuts it out of a window). why is one plain line on what is wrong. Write <d-review> and every <section> as plain markup in the page, never from a script (a script may fill or change what is inside a section). Write no headings, numbers or captions yourself. Its why needs only starts_from: each part's own why says the rest.
+- <d-review><section data-today><d-shot src="IMAGE_ID" marks="12,40,1416,52 | 0,92,260,808"></d-shot></section><section data-part="Top bar" why="Three tabs, the Drive pill and the menu compete in one row."><d-compare recommended="Fewer"><section data-option="Today"><d-shot src="IMAGE_ID" box="12,40,1416,52"></d-shot></section><section data-option="Fewer things">…</section><section data-option="Two rows">…</section></d-compare></section>…</d-review>. A review starts from a real picture: capture_window (application "Demesne" for Demesne itself), the browser's picture, or a picture the person attached; IMAGE_ID is the image artifact id it gave. marks: one box per part, in order, x,y,w,h in the picture's own pixels (its size is in the capture's result); Foundry outlines and numbers them, names each part and option, and puts your pick beside Today. Each part's Today is that piece cut from the picture (<d-shot box>), shown at its own size; only the options are drawn. Two or three parts (one only when nothing else comes close), each the smallest piece that holds the problem, with Today and two or three options that show that piece alone (<d-crop> cuts it out of a drawn window). why is one plain line on what is wrong. Write <d-review> and every <section> as plain markup in the page, never from a script (a script may fill or change what is inside a section). Write no headings, numbers or captions yourself. Its why needs only starts_from: each part's own why says the rest.
+- <d-shot src="IMAGE_ID" box="x,y,w,h"> a real picture from this chat (a capture, the browser's picture, one the person attached), kept with the mockup; marks="x,y,w,h | …" boxes pieces of it, box shows one piece alone.
 - <d-crop to="#desktop-toolbar" width="1100">…a whole window or screen…</d-crop> shows only the piece the selector names, at its own size: inside a part, draw the screen once per option and crop each to the piece, so every option is the real piece with one change.
 The parts are the frame; the idea inside is yours to design.`;
 
@@ -134,6 +135,46 @@ export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[]
     }
     return message;
   });
+}
+
+/// Pass 240 A: every picture a page shows (<d-shot src>) is one this chat has,
+/// or one the mockup already keeps, and every box lies inside it. Returns the
+/// pictures, to keep with the mockup once it is saved.
+export function checkShots(store: DemesneStore, id: string | undefined, source: string, sessionId: string | undefined): ImageArtifact[] {
+  const uses = shotsOf(source);
+  if (!uses.length) return [];
+  const found = new Map<string, ImageArtifact>();
+  const pictures = () => {
+    if (!sessionId) return "";
+    let page; try { page = store.listImageArtifacts(sessionId, 0, 100); } catch { return ""; }
+    const recent = page.artifacts.slice(-6).reverse();
+    return recent.length ? `; this chat's pictures: ${recent.map((image) => `${image.id} (${image.filename}, ${image.width}×${image.height})`).join(", ")}` : "; this chat has no picture yet, so capture one first";
+  };
+  for (const use of uses) {
+    const image = found.get(use.src) ?? (use.src && sessionId ? store.getImageArtifact(sessionId, use.src) : null) ?? (use.src && id ? store.getFoundryShot(id, use.src) : null);
+    if (!image) throw new Error(`[review_shot] ${use.src ? `"${use.src}" is not a picture this chat has.` : "A <d-shot> names no picture."} Hint: src is the image artifact id a capture or an attached picture gave${pictures()}`);
+    found.set(use.src, image);
+    for (const text of use.box === null ? use.marks : [...use.marks, use.box]) {
+      const box = shotBox(text);
+      if (!box) throw new Error(`[review_shot] "${text}" is not a box. Hint: x,y,w,h in the picture's own pixels, from its top left corner`);
+      if (box.x < 0 || box.y < 0 || box.x + box.width > image.width + 2 || box.y + box.height > image.height + 2) throw new Error(`[review_shot] The box "${text}" falls outside the picture, which is ${image.width}×${image.height}. Hint: boxes are in the picture's own pixels, from its top left corner`);
+    }
+  }
+  return [...found.values()];
+}
+
+/// The pictures a page shows, as the off-screen look gets them: each one's bytes, size and scale.
+export interface LookShot { data: string; mimeType: string; width: number; height: number; scale: number }
+export async function lookShots(store: DemesneStore, id: string): Promise<Record<string, LookShot> | undefined> {
+  const kept = store.getFoundryArtifact(id)?.shots ?? [];
+  if (!kept.length) return undefined;
+  const shots: Record<string, LookShot> = {};
+  for (const shot of kept) {
+    const image = store.getFoundryShot(id, shot.id);
+    if (!image) continue;
+    try { shots[shot.id] = { data: (await readArtifact(store, image, false)).toString("base64"), mimeType: shot.mimeType, width: shot.width, height: shot.height, scale: shot.scale }; } catch {}
+  }
+  return Object.keys(shots).length ? shots : undefined;
 }
 
 /// At most three options in a page (pass 197 A): best of three, not eight.
@@ -428,6 +469,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const { stage: given, dropped } = stageWithPage(input);
       const stage = reviewStage(given, input.source);
       checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
+      const shots = checkShots(store, id, input.source, context.sessionId);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
@@ -437,6 +479,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
+      for (const shot of shots) store.keepFoundryShot(saved.id, shot);
       return JSON.stringify({ ...savedResult(saved),
         message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? reviewSaid(input.source, true) : why ? ` ${WHY_ANSWER}` : ""}` });
     },
@@ -530,6 +573,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const { stage: given, dropped } = stageWithPage(input);
       const stage = given?.surface ? reviewStage(given, source) : given;
       checkControls(current.kind, source);
+      const shots = checkShots(store, input.id, source, context.sessionId);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
@@ -538,6 +582,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
           description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
+      for (const shot of shots) store.keepFoundryShot(saved.id, shot);
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
         message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? reviewSaid(source, false) : why ? ` ${WHY_ANSWER}` : ""}` });
     },
@@ -630,7 +675,8 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   const artifact = store.getFoundryArtifact(saved.id);
   if (!artifact) return text;
   const phone = (saved.surface as { frame?: unknown } | undefined)?.frame === "phone";
-  const result = await look({ kind: artifact.kind, source: artifact.source, title: artifact.title, ...(phone ? { phone } : {}) }, context.signal).catch(() => null);
+  const shots = await lookShots(store, artifact.id);
+  const result = await look({ kind: artifact.kind, source: artifact.source, title: artifact.title, ...(phone ? { phone } : {}), ...(shots ? { shots } : {}) }, context.signal).catch(() => null);
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
@@ -694,7 +740,8 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       if (tries.size > 200) tries.delete(tries.keys().next().value!);
       // Tried at the size it is drawn for: a phone screen at a phone's width, everything else at the desktop's.
       const phone = found.versions.find((item) => item.version === found.version)?.stage?.surface?.frame === "phone";
-      const result = await tryer({ kind: found.kind, source: found.source, title: found.title }, { width: phone ? 390 : 1280, steps }, context.signal);
+      const shots = await lookShots(store, found.id);
+      const result = await tryer({ kind: found.kind, source: found.source, title: found.title, ...(shots ? { shots } : {}) }, { width: phone ? 390 : 1280, steps }, context.signal);
       if (!result) throw new Error("[unavailable] The page could not be tried just now");
       if (!result.steps.length && result.errors.length) throw new Error(`[unavailable] ${result.errors.join("; ")}`);
       const report = tryReport(result);

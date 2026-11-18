@@ -97,6 +97,22 @@ export function foundryPageCall(value: string): { what: "data" | "ask"; id: stri
     return /^[\w-]{1,200}$/.test(id) ? { what: url.hostname, id } : null;
   } catch { return null; }
 }
+/** Pass 240 A: a real picture a mockup shows, served from inside the app at
+ * foundry://shot/<artifact>/<picture>, or null when the address is not one. */
+export function foundryShotURL(value: string): { id: string; shot: string } | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "foundry:" || url.hostname !== "shot" || url.username || url.password || url.port || url.search) return null;
+    const [id, shot, ...rest] = url.pathname.slice(1).split("/").map(decodeURIComponent);
+    return !rest.length && id && shot && /^[\w-]{1,200}$/.test(id) && /^[\w-]{1,200}$/.test(shot) ? { id, shot } : null;
+  } catch { return null; }
+}
+/** The pictures a page shows (<d-shot src>), told to the kit before the page's
+ * own scripts run: where each one is, its pixels and its pixels per point. */
+export interface ShotPlace { url: string; width: number; height: number; scale: number }
+export function withShots(html: string, shots: Record<string, ShotPlace>) {
+  return Object.keys(shots).length ? withRemember(html, `window.__demesneShots=${JSON.stringify(shots).replace(/</g, "\\u003c")};`) : html;
+}
 /** A page uses the remember runtime when it calls one of its four functions. */
 export const usesRemember = (html: string) => /\bdemesne\s*\.\s*(?:save|load|ask|pick)\s*\(/.test(html);
 /** A page that uses it gets the runtime first, before its own scripts run. With
@@ -126,7 +142,7 @@ export const FOUNDRY_FONT_HOSTS = { styles: "https://fonts.googleapis.com", file
  * pinned libraries from the hosts above and Google Fonts, and nothing
  * else: no forms, no other origins. Its only fetch is to foundry:, for
  * what the page saves and asks (foundryPageCall). */
-export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob:; connect-src foundry:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
+export const FOUNDRY_CSP = `default-src 'none'; script-src 'unsafe-inline' foundry: ${FOUNDRY_SCRIPT_HOSTS.join(" ")}; style-src 'unsafe-inline' foundry: ${FOUNDRY_FONT_HOSTS.styles}; img-src data: blob: foundry:; connect-src foundry:; font-src data: foundry: ${FOUNDRY_FONT_HOSTS.files}; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors demesne:`;
 /** The page an artifact frame shows: HTML as written, SVG as an image (so it runs no script). */
 export function foundryDocument(kind: string, source: string, title: string) {
   const esc = (text: string) => text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);

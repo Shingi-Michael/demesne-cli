@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { demoControls, drawnSurface, parseDemo, parseStage, parseSurface, reviewOf, reviewProblem, stageFromText, stageText } from "../src/foundry-stage.ts";
+import { demoControls, drawnSurface, parseDemo, parseStage, parseSurface, reviewOf, reviewProblem, shotBox, shotsOf, stageFromText, stageText } from "../src/foundry-stage.ts";
 
 describe("A mockup's surface and demo (pass 221 A)", () => {
   test("a step written as an action and a selector is the same step", () => {
@@ -51,20 +51,22 @@ describe("A mockup's surface and demo (pass 221 A)", () => {
   });
 });
 
-describe("A review of something that exists (pass 223 A)", () => {
+describe("A review of something that exists (pass 223 A, from a real picture since pass 240 A)", () => {
+  const cut = '<d-shot src="shot-1" box="0,0,10,10"></d-shot>';
   const part = (name: string, options: string[], extra = 'why="One line on what is wrong."', pick = options[1] ?? "") =>
-    `<section data-part="${name}" ${extra}><d-compare${pick ? ` recommended="${pick}"` : ""}>${options.map((option) => `<section data-option="${option}"><div class="box">x</div></section>`).join("")}</d-compare></section>`;
-  const review = (parts: string[], today = '<section data-today marks=".list | .save | .del"><main>screen</main></section>') => `<d-review>${today}${parts.join("")}</d-review>`;
+    `<section data-part="${name}" ${extra}><d-compare${pick ? ` recommended="${pick}"` : ""}>${options.map((option) => `<section data-option="${option}">${option === "Today" ? cut : '<div class="box">x</div>'}</section>`).join("")}</d-compare></section>`;
+  const review = (parts: string[], today = '<section data-today><d-shot src="shot-1" marks="0,0,10,10 | 20,0,10,10 | 40,0,10,10"></d-shot></section>') => `<d-review>${today}${parts.join("")}</d-review>`;
   const good = review([part("Switches", ["Today", "Grouped", "Three levels", "Important first"]), part("Save", ["Today", "Saves as you switch", "A bar that follows you"])]);
 
   test("its shape is read from the markup: today, the marks, and each part's options and pick", () => {
     expect(reviewOf("<main>a page</main>")).toBeNull();
-    expect(reviewOf(good)).toEqual({ today: true, marks: 3, parts: [
-      { name: "Switches", why: "One line on what is wrong.", options: ["Grouped", "Three levels", "Important first"], today: true, recommended: true },
-      { name: "Save", why: "One line on what is wrong.", options: ["Saves as you switch", "A bar that follows you"], today: true, recommended: true }] });
-    // A mark can sit on the piece itself, and text inside scripts is not markup.
+    expect(reviewOf(good)).toEqual({ today: true, shot: true, marks: 3, parts: [
+      { name: "Switches", why: "One line on what is wrong.", options: ["Grouped", "Three levels", "Important first"], today: true, recommended: true, todayShot: true },
+      { name: "Save", why: "One line on what is wrong.", options: ["Saves as you switch", "A bar that follows you"], today: true, recommended: true, todayShot: true }] });
+    // Marks written as selectors or on the piece still count, and text inside scripts is not markup.
     const marked = review([part("Save", ["Today", "A", "B"])], '<section data-today><button data-mark="1">Save</button></section>') + `<script>"<section data-part='x'>"</script>`;
-    expect(reviewOf(marked)).toMatchObject({ today: true, marks: 1, parts: [{ name: "Save" }] });
+    expect(reviewOf(marked)).toMatchObject({ today: true, shot: false, marks: 1, parts: [{ name: "Save" }] });
+    expect(reviewOf(review([part("Save", ["Today", "A", "B"])], '<section data-today marks=".a | .b"><main>screen</main></section>'))!.marks).toBe(2);
     // A why with a > in it is still one attribute.
     expect(reviewOf(review([part("Save", ["Today", "A", "B"], 'why="Save is 640px > one screen below"')]))!.parts[0]!.why).toBe("Save is 640px > one screen below");
   });
@@ -81,8 +83,13 @@ describe("A review of something that exists (pass 223 A)", () => {
     expect(reviewProblem(`<d-review id="r"></d-review><script>r.innerHTML = '<section data-today marks=".a">x</section><section data-part="Save" why="w">y</section>';</script>`)).toContain("built by a script");
     // A script that only fills a section is fine: the sections themselves are in the page.
     expect(reviewProblem(good + `<script>document.querySelector("[data-today]").append("more");</script>`)).toBeNull();
-    expect(reviewProblem(review(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"])), '<section data-today marks="a|b|c|d"></section>'))).toContain("[too_many_parts]");
-    expect(reviewProblem(review([part("Save", ["Today", "A", "B"])], "<section data-today><main>screen</main></section>"))).toContain("No part is marked");
+    expect(reviewProblem(review(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"])), '<section data-today><d-shot src="s" marks="1,1,1,1|1,1,1,1|1,1,1,1|1,1,1,1"></d-shot></section>'))).toContain("[too_many_parts]");
+    expect(reviewProblem(review([part("Save", ["Today", "A", "B"])], '<section data-today><d-shot src="shot-1"></d-shot></section>'))).toContain("No part is marked");
+    // Pass 240 A: Today is a real picture, never a drawing, and so is each part's Today.
+    expect(reviewProblem(review([part("Save", ["Today", "A", "B"])], '<section data-today marks=".a"><main>screen</main></section>'))).toContain("[review_shot]");
+    expect(reviewProblem(review([part("Save", ["Today", "A", "B"])], '<section data-today marks=".a"><main>screen</main></section>'))).toContain("capture_window");
+    expect(reviewProblem(review([part("Save", ["Today", "A", "B"]).replace(cut, "<button>Save</button>")]))).toContain(`"Save"'s Today is drawn`);
+    expect(reviewProblem(review([part("Save", ["Today", "A", "B"]).replace(cut, '<d-shot src="shot-1"></d-shot>')]))).toContain("[review_shot]");
     expect(reviewProblem(review([part("Save", ["Today", "A", "B"], "")]))).toContain("does not say why");
     expect(reviewProblem(review([part("Save", ["A", "B"])]))).toContain('has no "Today"');
     expect(reviewProblem(review([part("Save", ["Today", "A"])]))).toContain("one option beside Today");
@@ -90,5 +97,19 @@ describe("A review of something that exists (pass 223 A)", () => {
     expect(reviewProblem(review([part("Save", ["Today", "A", "B"], undefined, "")]))).toContain("[no_recommendation]");
     // The pick has to be one of the options, and never Today.
     expect(reviewProblem(review([part("Save", ["Today", "A", "B"], undefined, "Today")]))).toContain("[no_recommendation]");
+  });
+});
+
+describe("The real pictures a page shows (pass 240 A)", () => {
+  test("every <d-shot> is read with its picture and boxes; scripts and comments are not markup", () => {
+    expect(shotsOf(`<d-shot src="a" marks="1,2,3,4 | 5,6,7,8"></d-shot><d-shot src='b' box="0 0 10 10"></d-shot><!-- <d-shot src="c"> --><script>"<d-shot src='d'>"</script>`)).toEqual([
+      { src: "a", box: null, marks: ["1,2,3,4", "5,6,7,8"] }, { src: "b", box: "0 0 10 10", marks: [] }]);
+  });
+  test("a box is four numbers with a size", () => {
+    expect(shotBox("12, 40, 1416 ,52")).toEqual({ x: 12, y: 40, width: 1416, height: 52 });
+    expect(shotBox("1 2 3 4")).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+    expect(shotBox("1,2,0,4")).toBeNull();
+    expect(shotBox("#top")).toBeNull();
+    expect(shotBox("1,2,3")).toBeNull();
   });
 });

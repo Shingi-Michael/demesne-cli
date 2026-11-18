@@ -1308,7 +1308,12 @@ export interface FoundryArtifact {
 export interface FoundryArtifactDetail extends FoundryArtifact {
   source: string;
   versions: FoundryVersion[];
+  /// Pass 240 A: the real pictures this mockup shows (<d-shot src>), kept with it.
+  shots?: FoundryShot[];
 }
+
+/// A picture a mockup shows, at its own pixels; scale is pixels per point (2 on a Retina capture).
+export interface FoundryShot { id: string; width: number; height: number; scale: number; mimeType: string }
 
 /// One saved version, for Foundry's long page (pass 196 A): every version
 /// of every mockup, newest first.

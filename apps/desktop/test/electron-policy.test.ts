@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, usesRemember, withRemember, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -70,6 +70,8 @@ test("Foundry frames accept only artifact URLs and block the network", () => {
   expect(FOUNDRY_CSP).toContain("default-src 'none'");
   // Its only fetch: a page's own saves and asks, to foundry:.
   expect(FOUNDRY_CSP).toContain("connect-src foundry:;");
+  // Pass 240 A: a review's real picture comes from inside the app, and no picture from the web.
+  expect(FOUNDRY_CSP).toContain("img-src data: blob: foundry:;");
   expect(FOUNDRY_CSP).toMatch(/script-src 'unsafe-inline' foundry: https:\/\/cdnjs\.cloudflare\.com https:\/\/cdn\.jsdelivr\.net https:\/\/unpkg\.com;/);
   expect(FOUNDRY_CSP).toContain("style-src 'unsafe-inline' foundry: https://fonts.googleapis.com;");
   expect(FOUNDRY_CSP).toContain("font-src data: foundry: https://fonts.gstatic.com;");
@@ -131,6 +133,18 @@ test("the kit is served at foundry://kit/<file>, only the files it has", () => {
   expect(foundryKitFile("foundry://user:pw@kit/base.css")).toBeNull();
   expect(foundryURL("foundry://kit/base.css")).toBe(false);
   expect(foundryKitFile("foundry://kit/parts.js")).toBe("parts.js");
+});
+
+test("a review's real picture: only foundry://shot/<mockup>/<picture>, told to the kit before the page runs (pass 240 A)", () => {
+  expect(foundryShotURL("foundry://shot/abc-1/9f2c-77")).toEqual({ id: "abc-1", shot: "9f2c-77" });
+  for (const bad of ["foundry://shot/abc-1", "foundry://shot/a/b/c", "foundry://shot/a/b?x=1", "foundry://shot/a%2F../b", "foundry://kit/a/b", "foundry://artifact/a/b", "https://shot/a/b", "foundry://u:p@shot/a/b"]) expect(foundryShotURL(bad)).toBeNull();
+  expect(withShots("<!doctype html><p>x", {})).toBe("<!doctype html><p>x");
+  expect(withShots("<!doctype html><p>x", { s: { url: "foundry://shot/a/s", width: 2880, height: 1800, scale: 2 } }))
+    .toBe('<!doctype html><script>window.__demesneShots={"s":{"url":"foundry://shot/a/s","width":2880,"height":1800,"scale":2}};</script><p>x');
+  // A picture's address can never end the script early.
+  const odd = withShots("<p>x", { s: { url: "</script><b>", width: 1, height: 1, scale: 1 } });
+  expect(odd).toContain("\\u003c/script>\\u003cb>");
+  expect(odd.split("</script>").length).toBe(2);
 });
 
 test("pages that remember: only a page's own data and ask addresses, and the runtime goes in first", () => {

@@ -1583,6 +1583,8 @@ export class WorkspaceHost {
       "foundry-list",
       "foundry-shelf",
       "foundry-get",
+      // A real picture a review shows (pass 240 A), for the foundry: handler.
+      "foundry-shot",
       // A page's own saves and asks (pages that remember), from the foundry: handler.
       "foundry-data",
       "foundry-data-set",
@@ -2265,6 +2267,11 @@ export class WorkspaceHost {
       return `data:${/^image\/(png|jpeg|webp|gif)$/.test(artifact.mimeType) ? artifact.mimeType : "image/png"};base64,${Buffer.from(bytes).toString("base64")}`;
     }
     if (method === "foundry-get") return this.client.foundryGet(string(args.id, "artifact", 200), typeof args.version === "number" && Number.isSafeInteger(args.version) && args.version > 0 ? args.version : undefined);
+    if (method === "foundry-shot") {
+      const id = string(args.id, "artifact", 200), shot = string(args.shot, "picture", 200);
+      const found = await this.client.foundryShot(id, shot);
+      return { mimeType: /^image\/(png|jpeg|webp)$/.test(found.mimeType) ? found.mimeType : "image/png", data: Buffer.from(found.data).toString("base64") };
+    }
     if (method === "foundry-data") return this.client.foundryData(string(args.id, "artifact", 200));
     if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);
     if (method === "foundry-ask") return this.client.foundryAsk(string(args.id, "artifact", 200), string(args.question, "question", 8000));

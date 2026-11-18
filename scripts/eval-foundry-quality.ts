@@ -7,7 +7,7 @@
  *
  *   bun scripts/prepare-desktop.ts            (once, so the app can render; a fresh
  *                                             clone also needs node node_modules/electron/install.js)
- *   bun scripts/eval-foundry-quality.ts [--only id,id] [--label name] [--out dir] [--compare dir/report.json] [--no-look]
+ *   bun scripts/eval-foundry-quality.ts [--only id,id] [--label name] [--out dir] [--compare dir/report.json] [--no-look] [--pictures dir]
  *   bun scripts/eval-foundry-quality.ts --pages dir    (score .html files, no model)
  *   bun scripts/eval-foundry-quality.ts --fake         (a stand-in model, to check the harness)
  *
@@ -34,6 +34,8 @@ import { checks, compareLines, contactSheet, fitOf, QUALITY_CASES, score, type D
 const repo = resolve(import.meta.dir, "..");
 const flag = (name: string) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : undefined; };
 const only = flag("only")?.split(","), pagesDir = flag("pages"), comparePath = flag("compare");
+// Where the reviews' pictures are: scripts/shoot-desktop.ts writes them here.
+const pictures = resolve(flag("pictures") ?? "test-results/desktop");
 const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const out = resolve(flag("out") ?? join(tmpdir(), `demesne-foundry-quality-${stamp}`));
 mkdirSync(join(out, "shots"), { recursive: true });
@@ -92,7 +94,7 @@ if (pagesDir) {
 
 const READS = new Set(["list_files", "read_file", "read_files", "search_files", "git_status", "git_diff", "git_history", "session_tools", "foundry_read", "foundry_save", "foundry_edit",
   // What a chat reaches for on the way to a page: finding a tool, a read-only helper, its checklist, a picture, trying its own page.
-  "tool_search", "subagent", "agents", "update_plan", "view_image", "foundry_try"]);
+  "tool_search", "subagent", "agents", "update_plan", "view_image", "capture_window", "foundry_try"]);
 // Generous, like a real chat: a model that reads first still gets to make its page.
 // A review of the project reads its source first: the pass 223 run cut three asks off at 20.
 const MAX_ROUNDS = 32;
@@ -191,7 +193,11 @@ try {
     current = { rounds: 0, calls: [], outputTokens: 0, error: null };
     const started = Date.now();
     const { session } = await client.createSession(item.where === "project" ? { workspacePath: repo, trustWorkspace: true } : {});
-    await client.submitTurn(session.id, { content: item.prompt, permissionMode: "ask" });
+    // A review starts from a real picture of the screen (pass 240 A): sent with the ask, as a person attaches one.
+    const picture = item.picture ? join(pictures, item.picture) : null;
+    if (picture && !existsSync(picture)) console.log(`(no ${picture}: run scripts/shoot-desktop.ts first, or pass --pictures)`);
+    const attached = picture && existsSync(picture) ? [(await client.uploadAttachment(session.id, readFileSync(picture), "image/png", item.picture!)).id] : [];
+    await client.submitTurn(session.id, { content: item.prompt, permissionMode: "ask", ...(attached.length ? { attachmentIds: attached } : {}) });
     const status = await settle(session.id);
     const result: PageResult = { ...blank(item.id, item.prompt), seconds: Math.round((Date.now() - started) / 1000), rounds: current.rounds, outputTokens: current.outputTokens, calls: current.calls,
       error: status === "completed" ? current.error : `turn ${status}${current.error ? `: ${current.error}` : ""}` };

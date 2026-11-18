@@ -9,6 +9,15 @@ import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.
 import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { FOUNDRY_GUIDANCE, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
 import { noteSeen } from "../src/foundry-seen.ts";
+import type { AgentTool } from "../src/tools.ts";
+
+/// A window capture this chat took: 1440×900 points at 2x (pass 240 A).
+function picture(store: DemesneStore, sessionId: string, turnId: string, id = `shot-${sessionId}`) {
+  store.recordImageArtifact({ id, kind: "image", sessionId, turnId, toolCallId: `call-${id}`, createdAt: new Date().toISOString(), filename: "window-capture.png", mimeType: "image/png",
+    width: 2880, height: 1800, byteLength: 1, sha256: "0".repeat(64), source: { kind: "tool", name: "capture_window", modelId: null }, revisionOf: null,
+    viewport: { width: 1440, height: 900, deviceScaleFactor: 2 } }, `key-${id}`);
+  return id;
+}
 
 /// Why a test page looks the way it does (pass 218 A).
 const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new" };
@@ -593,14 +602,17 @@ describe("a mockup of something that exists starts from it", () => {
 
 describe("a review of something that exists (pass 223 A)", () => {
   const part = (name: string, options: string[], pick = options[1]) =>
-    `<section data-part="${name}" why="One line on what is wrong."><d-compare recommended="${pick}">${options.map((option) => `<section data-option="${option}"><button>${option}</button></section>`).join("")}</d-compare></section>`;
-  const review = (parts: string[]) => `<link rel="stylesheet" href="foundry://kit/base.css"><d-review><section data-today marks=".a | .b | .c | .d"><main>the screen</main></section>${parts.join("")}</d-review>`;
+    `<section data-part="${name}" why="One line on what is wrong."><d-compare recommended="${pick}">${options.map((option) => `<section data-option="${option}">${option === "Today" ? '<d-shot src="SHOT" box="0,0,400,60"></d-shot>' : `<button>${option}</button>`}</section>`).join("")}</d-compare></section>`;
+  const review = (parts: string[]) => `<link rel="stylesheet" href="foundry://kit/base.css"><d-review><section data-today><d-shot src="SHOT" marks="0,0,400,60 | 0,60,400,60 | 0,120,400,60 | 0,180,400,60"></d-shot></section>${parts.join("")}</d-review>`;
   const make = (store: DemesneStore, looked = true) => {
     const { session } = store.createSession("Review");
     const { turn } = store.createTurn(session.id, "look at my settings page and show me what most needs a redesign");
     if (looked) noteSeen(session.id, "read_file", { path: "src/settings.css" }, "…");
-    return { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: turn.id };
+    const shot = picture(store, session.id, turn.id);
+    return { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: turn.id, shot };
   };
+  // The page names the chat's own picture (pass 240 A).
+  const run = (tool: AgentTool, given: { source: string } & Record<string, unknown>, context: ReturnType<typeof make>) => tool.execute({ ...given, source: given.source.replaceAll("SHOT", context.shot) }, context);
   const input = (source: string, from = "src/settings.css", more: Record<string, unknown> = {}) => ({ title: "Settings, what needs work", kind: "html", description: "The parts of Settings that most need work.", source,
     why: { direction: "Keep the page, fix three parts.", look_at: "The switches.", starts_from: from }, ...more });
   const good = review([part("Switches", ["Today", "Grouped", "Three levels", "Important first"]), part("Save", ["Today", "Saves as you switch", "A bar that follows you"])]);
@@ -609,11 +621,11 @@ describe("a review of something that exists (pass 223 A)", () => {
     const store = new DemesneStore(":memory:");
     try {
       // Seven options and two Todays on one page: each part is held to its own three.
-      const saved = JSON.parse(await foundrySaveTool(store).execute(input(good, undefined, { surface: { frame: "window", width: 900, height: 600 } }), make(store)));
+      const saved = JSON.parse(await run(foundrySaveTool(store), input(good, undefined, { surface: { frame: "window", width: 900, height: 600 } }), make(store)) as string);
       expect(saved.surface).toEqual({ frame: "page" });
       // Why is said part by part on the sheet: no Direction or Look at line is kept to sit above it.
       expect(saved.why).toEqual({ direction: "", look: "", dropped: "", from: "src/settings.css" });
-      const again = JSON.parse(await foundrySaveTool(store).execute({ ...input(good), title: "Settings again", why: { starts_from: "src/settings.css" } }, make(store)));
+      const again = JSON.parse(await run(foundrySaveTool(store), { ...input(good), title: "Settings again", why: { starts_from: "src/settings.css" } }, make(store)) as string);
       expect(again.version).toBe(1);
       expect(saved.message).toContain("name the parts in order, your pick for each and why");
       // Its drawings have buttons, and a review still needs no demo.
@@ -628,7 +640,7 @@ describe("a review of something that exists (pass 223 A)", () => {
     try {
       const one = review([part("Save", ["Today", "Saves as you switch", "A bar that follows you"])]);
       const turn = make(store);
-      const saved = JSON.parse(await foundrySaveTool(store).execute(input(one), turn));
+      const saved = JSON.parse(await run(foundrySaveTool(store), input(one), turn) as string);
       expect(saved.message).toContain("This review shows one part. Unless the ask named that piece, add the next one or two");
       expect(saved.message).toContain("name the parts in order");
       // Said once: an edit that keeps one part is the model's answer, not a reason to ask again.
@@ -642,10 +654,10 @@ describe("a review of something that exists (pass 223 A)", () => {
     const store = new DemesneStore(":memory:");
     try {
       const save = foundrySaveTool(store);
-      await expect(save.execute(input(review(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"])))), make(store))).rejects.toThrow("[too_many_parts]");
-      await expect(save.execute(input(review([part("Save", ["A", "B"])])), make(store))).rejects.toThrow('has no "Today"');
-      await expect(save.execute(input(review([part("Save", ["Today", "A"])])), make(store))).rejects.toThrow("one option beside Today");
-      await expect(save.execute(input(review([part("Save", ["Today", "A", "B"], "")])), make(store))).rejects.toThrow("[no_recommendation]");
+      await expect(run(save, input(review(["One", "Two", "Three", "Four"].map((name) => part(name, ["Today", "A", "B"])))), make(store))).rejects.toThrow("[too_many_parts]");
+      await expect(run(save, input(review([part("Save", ["A", "B"])])), make(store))).rejects.toThrow('has no "Today"');
+      await expect(run(save, input(review([part("Save", ["Today", "A"])])), make(store))).rejects.toThrow("one option beside Today");
+      await expect(run(save, input(review([part("Save", ["Today", "A", "B"], "")])), make(store))).rejects.toThrow("[no_recommendation]");
       expect(store.listFoundryArtifacts()).toHaveLength(0);
     } finally { store.close(); }
   });
@@ -654,15 +666,42 @@ describe("a review of something that exists (pass 223 A)", () => {
     const store = new DemesneStore(":memory:");
     try {
       const save = foundrySaveTool(store), unseen = make(store, false);
-      await expect(save.execute(input(good, "new"), unseen)).rejects.toThrow("This reviews something that exists");
+      await expect(run(save, input(good, "new"), unseen)).rejects.toThrow("This reviews something that exists");
       // Asked once per ask, so a chat that cannot look is never stuck.
-      await save.execute(input(good, "could not look: no window here"), unseen);
+      await run(save, input(good, "could not look: no window here"), unseen);
+    } finally { store.close(); }
+  });
+
+  test("its Today is a real picture this chat has, kept with the mockup, with every box inside it (pass 240 A)", async () => {
+    const store = new DemesneStore(":memory:");
+    try {
+      const save = foundrySaveTool(store), context = make(store);
+      // A drawn Today is sent back to capture first.
+      const drawn = good.replace(/<section data-today>.*?<\/section>/, '<section data-today marks=".a | .b"><main>the screen</main></section>');
+      await expect(run(save, input(drawn), context)).rejects.toThrow("[review_shot]");
+      await expect(run(save, input(drawn), context)).rejects.toThrow("capture_window");
+      // A picture from another chat, or none, names the pictures this chat has.
+      await expect(run(save, input(good.replaceAll("SHOT", "elsewhere")), context)).rejects.toThrow(`"elsewhere" is not a picture this chat has`);
+      await expect(run(save, input(good.replaceAll("SHOT", "elsewhere")), context)).rejects.toThrow(context.shot);
+      await expect(run(save, input(good.replace('box="0,0,400,60"', 'box="2800,0,400,60"')), context)).rejects.toThrow("falls outside the picture, which is 2880×1800");
+      await expect(run(save, input(good.replace('box="0,0,400,60"', 'box=".save"')), context)).rejects.toThrow('".save" is not a box');
+      const saved = JSON.parse(await run(save, input(good), context) as string);
+      expect(store.getFoundryArtifact(saved.id)!.shots).toEqual([{ id: context.shot, width: 2880, height: 1800, scale: 2, mimeType: "image/png" }]);
+      // Kept with the mockup: an edit from another chat still shows it, and it goes with the mockup.
+      const other = make(store);
+      const edited = JSON.parse(await foundryEditTool(store).execute({ id: saved.id, base_version: 1, edits: [{ find: "Grouped", replace: "In groups", all: true }], note: "wording", why: { starts_from: "src/settings.css" } }, other));
+      expect(edited.version).toBe(2);
+      expect(store.getFoundryShot(saved.id, context.shot)?.filename).toBe("window-capture.png");
+      store.deleteFoundryArtifact(saved.id);
+      expect(store.getFoundryShot(saved.id, context.shot)).toBeNull();
     } finally { store.close(); }
   });
 
   test("the model is told what a review is, where to find its parts, and that options are the rule", () => {
     expect(PARTS_GUIDE).toContain("<d-review>");
     expect(PARTS_GUIDE).toContain("<d-crop");
+    expect(PARTS_GUIDE).toContain('<d-shot src="IMAGE_ID" box="x,y,w,h">');
+    expect(PARTS_GUIDE).toContain("capture_window");
     expect(PARTS_GUIDE).toContain("as plain markup in the page, never from a script");
     const store = new DemesneStore(":memory:");
     try {

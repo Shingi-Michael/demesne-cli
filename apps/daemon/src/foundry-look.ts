@@ -19,7 +19,9 @@ export const FOUNDRY_LOOK_PREFIX = "foundry-look-";
 export interface LookedPage { width: number; height: number; issues: string[]; png: string; design?: Record<string, number> }
 export interface LookResult { pages: LookedPage[]; errors: string[] }
 /// phone: the page is a phone screen (surface phone); it is looked at at a phone's width, everything else at the desktop's.
-export type FoundryLook = (page: { kind: string; source: string; title: string; phone?: boolean }, signal: AbortSignal) => Promise<LookResult | null>;
+/// shots: the real pictures the page shows (<d-shot>, pass 240 A), by id, base64.
+export interface PageShots { shots?: Record<string, { data: string; mimeType: string; width: number; height: number; scale: number }> }
+export type FoundryLook = (page: { kind: string; source: string; title: string; phone?: boolean } & PageShots, signal: AbortSignal) => Promise<LookResult | null>;
 
 /// The app binary that can render a page: DEMESNE_ELECTRON (with
 /// DEMESNE_ELECTRON_APP for an unpacked app folder), else the app this daemon
@@ -47,7 +49,7 @@ export function electronLook(command: string[]): FoundryLook {
 /// off-screen app runs the steps and reads the page's tree.
 export interface TriedStep { step: string; ok: boolean; said: string }
 export interface TryResult { width: number; steps: TriedStep[]; tree: string[]; errors: string[]; pictures: { after: string; png: string }[] }
-export type FoundryTry = (page: { kind: string; source: string; title: string }, plan: { width: number; steps: TryStep[] }, signal: AbortSignal) => Promise<TryResult | null>;
+export type FoundryTry = (page: { kind: string; source: string; title: string } & PageShots, plan: { width: number; steps: TryStep[] }, signal: AbortSignal) => Promise<TryResult | null>;
 
 export function electronTry(command: string[]): FoundryTry {
   return (page, plan, signal) => queued(async () => {

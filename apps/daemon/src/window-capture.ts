@@ -54,8 +54,13 @@ export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindow
     const shot = await deps.capture(window, signal);
     signal.throwIfAborted();
     const text = shot.text ? `\n\nText in the window${shot.text.length > MODEL_TEXT ? " (first part)" : ""}:\n${shot.text.slice(0, MODEL_TEXT)}` : shot.textNote ? `\n(${shot.textNote})` : "";
+    // The window's size in points beside the picture's pixels (2 to 1 on a Retina
+    // screen), so a Foundry review shows it at its own size (pass 240 A).
+    const bounds = shot.bounds ?? window.bounds, pixels = pngSize(shot.png);
+    const viewport = bounds && pixels && bounds.width > 0 && bounds.height > 0
+      ? { width: Math.round(bounds.width), height: Math.round(bounds.height), deviceScaleFactor: Math.round(pixels.width / bounds.width * 100) / 100 } : undefined;
     return { text: `Captured window ${window.id}: ${window.app} — ${window.title}${text}`,
-      images: [{ data: shot.png, mimeType: "image/png", filename: WINDOW_CAPTURE_FILE }] };
+      images: [{ data: shot.png, mimeType: "image/png", filename: WINDOW_CAPTURE_FILE, ...(viewport && viewport.deviceScaleFactor > 0 && viewport.deviceScaleFactor <= 8 ? { viewport } : {}) }] };
   }
   return {
     definition: { name: "capture_window", description: "Capture a visible desktop window as a picture, with the window's text where the system shares it. With no input it takes the window the user is in (besides Demesne): use it when the user says to look at their screen or window. Demesne is a native desktop app: to see Demesne itself use application Demesne; do not search web-server ports for it. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",
@@ -67,3 +72,10 @@ export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindow
 }
 
 export const windowCaptureSupported = () => supported();
+
+/// A PNG's width and height from its header, or null.
+export function pngSize(data: Uint8Array): { width: number; height: number } | null {
+  if (data.byteLength < 24 || data[0] !== 0x89 || data[1] !== 0x50 || data[12] !== 0x49 || data[13] !== 0x48) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return { width: view.getUint32(16), height: view.getUint32(20) };
+}

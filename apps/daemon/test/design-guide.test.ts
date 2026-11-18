@@ -37,7 +37,9 @@ test("Demesne's rules are numbered, and say what the old paragraph said", () => 
   expect(block).toContain("review before you draw");
   expect(block).toContain("unless the ask fixes one exact thing");
   expect(block).toContain("never the whole page");
-  expect(block.length).toBeLessThan(5800);
+  // Pass 240 A: a review starts from a real picture (about 100 characters more).
+  expect(block).toContain("Start from a real picture");
+  expect(block.length).toBeLessThan(5900);
 });
 
 test("your guide for every chat and the project's are both read, the project's last", () => {

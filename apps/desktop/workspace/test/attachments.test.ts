@@ -33,7 +33,7 @@ test("an attached image goes to the model with the next message and stays on the
     expect(turn.attachments).toEqual([{ id: image.id, filename: "shot.png", width: 40, height: 30 }]);
     expect(host.current!.runs().at(-1)?.attachments?.[0]?.filename).toBe("shot.png");
     const user = seen.flat().find((message) => message.role === "user" && message.imageInputs?.length)!;
-    expect(user.content).toContain("[Attached image shot.png, 40×30]");
+    expect(user.content).toContain(`[Attached image shot.png, 40×30, image artifact ${image.id}]`);
     expect(user.imageInputs![0]!.label).toBe("Image the user attached: shot.png");
     expect(user.imageInputs![0]!.url.startsWith("data:image/png;base64,")).toBe(true);
   } finally { host.dispose(); await f.close(); }
@@ -58,11 +58,11 @@ test("pictures and readable files attach, a model without vision gets the names 
     await host.handle("detach", { sessionId, id: host.snapshot().attachments[0]!.id });
     await expect(host.handle("attach", { sessionId, name: "a.gif", mimeType: "image/gif", data: Buffer.from("GIF89a").toString("base64") })).rejects.toThrow("PNG, JPEG or WebP");
     await expect(host.handle("attach", { sessionId, name: "fake.png", mimeType: "image/png", data: Buffer.from("not a png").toString("base64") })).rejects.toThrow();
-    await host.handle("attach", { sessionId, name: "shot.png", mimeType: "image/png", data: (await png()).toString("base64") });
+    const shot = await host.handle("attach", { sessionId, name: "shot.png", mimeType: "image/png", data: (await png()).toString("base64") }) as { id: string };
     await host.submit("What is this?");
     await eventually(() => host.current!.runs().at(-1)?.status === "completed");
     const user = seen.flat().findLast((message) => message.role === "user")!;
-    expect(user.content).toBe("What is this?\n\n[Attached image shot.png, 40×30]");
+    expect(user.content).toBe(`What is this?\n\n[Attached image shot.png, 40×30, image artifact ${shot.id}]`);
     expect(user.imageInputs).toBeUndefined();
     await expect(f.client.submitTurn(sessionId, { content: "Again", attachmentIds: ["missing"] })).rejects.toThrow("attach it again");
   } finally { host.dispose(); await f.close(); }

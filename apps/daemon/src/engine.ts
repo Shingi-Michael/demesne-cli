@@ -281,7 +281,7 @@ export class AgentEngine {
     // with the message so the conversation's start never changes.
     const content = (assistant ? `${assistantStamp(this.options.now?.() ?? new Date())} ${turn.content}` : turn.content) + filesText;
     const userMessage = attached.length
-      ? { role: "user" as const, content: `${content}\n\n${attached.map((image) => `[Attached image ${image.filename}, ${image.width}×${image.height}]`).join("\n")}`,
+      ? { role: "user" as const, content: `${content}\n\n${attached.map((image) => `[Attached image ${image.filename}, ${image.width}×${image.height}, image artifact ${image.id}]`).join("\n")}`,
         imageArtifactIds: attached.map((image) => image.id) }
       : { role: "user" as const, content };
     const currentUser = this.store.appendModelMessage(turnId, userMessage);

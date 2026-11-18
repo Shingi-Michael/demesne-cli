@@ -6,6 +6,7 @@ import {
   type FoundryArtifact,
   type FoundryArtifactDetail,
   type FoundryShelfVersion,
+  type FoundryShot,
   type FoundryWhy,
   type FoundryStage,
   stageText,
@@ -206,6 +207,13 @@ const parseWhy = (text: string | null | undefined): FoundryWhy | null => {
   } catch { return null; }
 };
 
+/// Pixels per point: what the picture says (a window capture, the browser), else a guess
+/// from its size (a picture wider than any 1x screen came from a Retina one).
+const foundryShot = (image: ImageArtifact): FoundryShot => {
+  const told = image.viewport?.deviceScaleFactor ?? (image.viewport?.width ? image.width / image.viewport.width : 0);
+  return { id: image.id, width: image.width, height: image.height, mimeType: image.mimeType,
+    scale: told > 0 && told <= 8 ? Math.round(told * 100) / 100 : image.width >= 2400 ? 2 : 1 };
+};
 const foundryArtifact = (row: FoundryRow): FoundryArtifact => ({ id: row.id, title: row.title, kind: row.kind, workspace: row.workspace,
   sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at, version: row.version, description: row.description ?? "",
   basedOn: row.based_on && row.based_on_version ? { id: row.based_on, version: row.based_on_version } : null });
@@ -273,6 +281,10 @@ export class DemesneStore {
     );
     CREATE TABLE IF NOT EXISTS foundry_data (
       artifact_id TEXT PRIMARY KEY REFERENCES foundry_artifacts(id) ON DELETE CASCADE, data TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS foundry_shots (
+      artifact_id TEXT NOT NULL REFERENCES foundry_artifacts(id) ON DELETE CASCADE, shot_id TEXT NOT NULL, descriptor TEXT NOT NULL,
+      PRIMARY KEY (artifact_id, shot_id)
     );`);
     // Pass 208 A: a description per mockup, what it was made from, and the
     // version one ask would use when it made several.
@@ -450,7 +462,8 @@ export class DemesneStore {
     const pick = version ?? row.version;
     const source = this.database.query("SELECT source FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, pick) as { source: string } | null;
     if (!source) return null;
-    return { ...foundryArtifact(row), version: pick, source: source.source,
+    const shots = this.listFoundryShots(id).map(foundryShot);
+    return { ...foundryArtifact(row), version: pick, source: source.source, ...(shots.length ? { shots } : {}),
       versions: versions.map((item) => ({ version: item.version, createdAt: item.created_at, sessionId: item.session_id, turnId: item.turn_id, note: item.note, recommended: item.recommended === 1, why: parseWhy(item.why), ...(item.ask ? { ask: item.ask } : {}), stage: stageFromText(item.stage), byteLength: item.bytes })) };
   }
 
@@ -483,9 +496,23 @@ export class DemesneStore {
     })();
   }
 
+  /// Pass 240 A: a picture a mockup shows, kept with the mockup so it outlives
+  /// the chat it was taken in (the bytes stay in the artifact folder, by hash).
+  keepFoundryShot(id: string, image: ImageArtifact): void {
+    this.database.query("INSERT INTO foundry_shots(artifact_id,shot_id,descriptor) VALUES (?,?,?) ON CONFLICT(artifact_id,shot_id) DO NOTHING").run(id, image.id, JSON.stringify(image));
+  }
+  getFoundryShot(id: string, shotId: string): ImageArtifact | null {
+    const row = this.database.query("SELECT descriptor FROM foundry_shots WHERE artifact_id = ? AND shot_id = ?").get(id, shotId) as { descriptor: string } | null;
+    return row ? JSON.parse(row.descriptor) : null;
+  }
+  listFoundryShots(id: string): ImageArtifact[] {
+    return (this.database.query("SELECT descriptor FROM foundry_shots WHERE artifact_id = ? ORDER BY rowid").all(id) as { descriptor: string }[]).map((row) => JSON.parse(row.descriptor));
+  }
+
   deleteFoundryArtifact(id: string): boolean {
     return this.database.transaction(() => {
       this.database.query("DELETE FROM foundry_data WHERE artifact_id = ?").run(id);
+      this.database.query("DELETE FROM foundry_shots WHERE artifact_id = ?").run(id);
       this.database.query("DELETE FROM foundry_versions WHERE artifact_id = ?").run(id);
       return this.database.query("DELETE FROM foundry_artifacts WHERE id = ?").run(id).changes > 0;
     })();

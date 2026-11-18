@@ -16,8 +16,9 @@ import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryP
 /// try: run these steps on the page instead of looking at it (foundry-try.ts).
 /// url: open the person's own app instead (look_at_page: a local dev server or a project file).
 /// phone: the page is a phone screen (surface phone), looked at at a phone's width instead of the desktop's.
+/// option: only that option of the page is drawn, as on Foundry's long page.
 /// shots: the real pictures the page shows (<d-shot>, pass 240 A), by id, base64.
-export interface LookJob { kind: string; source: string; title: string; phone?: boolean; try?: TryPlan; url?: string; shots?: Record<string, { data: string; mimeType: string; width: number; height: number; scale: number }> }
+export interface LookJob { kind: string; source: string; title: string; phone?: boolean; option?: number; try?: TryPlan; url?: string; shots?: Record<string, { data: string; mimeType: string; width: number; height: number; scale: number }> }
 export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
 export interface LookResult { pages: LookPage[]; errors: string[] }
 
@@ -78,7 +79,8 @@ export function runFoundryLook(path: string) {
         contents.setWindowOpenHandler(() => ({ action: "deny" }));
         contents.on("will-navigate", (event) => event.preventDefault());
         contents.on("console-message", (event) => { if (event.level === "error" && errors.length < 6) errors.push(event.message.slice(0, 200)); });
-        await win.loadURL("foundry://artifact/look");
+        // One option alone, as Foundry's long page stages it (pass 241 A: a build's pick).
+        await win.loadURL(Number.isSafeInteger(job.option) && job.option! >= 0 ? `foundry://artifact/look?stack=1&option=${job.option}` : "foundry://artifact/look");
         // Fonts and pictures (a review's real screen) land before the look.
         await Promise.race([contents.executeJavaScript("Promise.all([document.fonts.ready, ...[...document.images].map((image) => image.decode().catch(() => {}))]).then(() => true)"), settle(3000)]);
         await settle(400);

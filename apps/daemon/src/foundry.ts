@@ -10,12 +10,13 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
 export const FOUNDRY_TOOL_NAMES = new Set(["foundry_read", "foundry_save", "foundry_edit", "foundry_try"]);
+/// foundry_built (foundry-built.ts) is left out: it follows a build, so it needs a project.
 
 /// Where an artifact may load from (the frame's policy allows exactly this).
 export const FOUNDRY_LIBRARY_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com"] as const;
@@ -140,16 +141,19 @@ export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[]
 /// Pass 240 A: every picture a page shows (<d-shot src>) is one this chat has,
 /// or one the mockup already keeps, and every box lies inside it. Returns the
 /// pictures, to keep with the mockup once it is saved.
+/// The chat's newest pictures, for a hint: "; this chat's pictures: id (name, w×h), …".
+export function chatPictures(store: DemesneStore, sessionId: string | undefined): string {
+  if (!sessionId) return "";
+  let page; try { page = store.listImageArtifacts(sessionId, 0, 100); } catch { return ""; }
+  const recent = page.artifacts.slice(-6).reverse();
+  return recent.length ? `; this chat's pictures: ${recent.map((image) => `${image.id} (${image.filename}, ${image.width}×${image.height})`).join(", ")}` : "; this chat has no picture yet, so capture one first";
+}
+
 export function checkShots(store: DemesneStore, id: string | undefined, source: string, sessionId: string | undefined): ImageArtifact[] {
   const uses = shotsOf(source);
   if (!uses.length) return [];
   const found = new Map<string, ImageArtifact>();
-  const pictures = () => {
-    if (!sessionId) return "";
-    let page; try { page = store.listImageArtifacts(sessionId, 0, 100); } catch { return ""; }
-    const recent = page.artifacts.slice(-6).reverse();
-    return recent.length ? `; this chat's pictures: ${recent.map((image) => `${image.id} (${image.filename}, ${image.width}×${image.height})`).join(", ")}` : "; this chat has no picture yet, so capture one first";
-  };
+  const pictures = () => chatPictures(store, sessionId);
   for (const use of uses) {
     const image = found.get(use.src) ?? (use.src && sessionId ? store.getImageArtifact(sessionId, use.src) : null) ?? (use.src && id ? store.getFoundryShot(id, use.src) : null);
     if (!image) throw new Error(`[review_shot] ${use.src ? `"${use.src}" is not a picture this chat has.` : "A <d-shot> names no picture."} Hint: src is the image artifact id a capture or an attached picture gave${pictures()}`);
@@ -190,6 +194,13 @@ function checkOptions(kind: string | undefined, source: string) {
   // (recommended="A" on the <d-compare>, or data-recommended on the option of a page drawn without it).
   if (count > 1 && !/<d-compare\b[^>]*\brecommended\s*=\s*["']?[^\s"'>]/i.test(source) && !/<[^>]*\bdata-recommended\b[^>]*>/i.test(source))
     throw new Error(`[no_recommendation] This page has ${count} options and no pick. Hint: set recommended="<option name>" on the <d-compare> (or data-recommended on that option), put it first, and say why in the chat`);
+}
+
+/// Pass 241 A: a build's record is Demesne's, written from foundry_built; nobody writes or edits one.
+function checkNotBuilt(store: DemesneStore, id: string | undefined, source: string | undefined) {
+  const found = id ? store.getFoundryArtifact(id) : null;
+  if (found?.built) throw new Error(`[built] "${found.title}" is the record of a build. Hint: to change what was built, change the code, look at it again and call foundry_built${found.basedOn ? ` with the mockup it follows, id ${found.basedOn.id}` : ""}; to change the design, edit that mockup`);
+  if (source !== undefined && BUILT_PAGE.test(source)) throw new Error("[built] <d-built> is Demesne's record of a build. Hint: call foundry_built after building a mockup; it writes the record");
 }
 
 /// One ask that makes several mockups marks the one it would use (pass 208
@@ -456,6 +467,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       if (!id && (typeof input.title !== "string" || !input.title.trim())) throw new Error("[invalid_input] A new artifact needs a title. Hint: name it in a few words");
       if (!id && (typeof input.description !== "string" || !input.description.trim())) throw new Error("[invalid_input] A new artifact needs a description. Hint: one or two sentences on what it is and what to look at");
       checkName(input.title);
+      checkNotBuilt(store, id, input.source);
       checkOptions(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       // Made right after reading another mockup in this ask: based on it, unless said otherwise.
       const read = !id && input.based_on === undefined && context.turnId ? readInTurn.get(context.turnId) : undefined;
@@ -545,6 +557,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
     async execute(input, context) {
       if (!isRecord(input) || typeof input.id !== "string" || !input.id) throw new Error("[invalid_input] foundry_edit needs the artifact id. Hint: foundry_read lists them");
       checkName(input.title);
+      checkNotBuilt(store, input.id, undefined);
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       // Names and words only: no new version, no look.
       if (input.edits === undefined || (Array.isArray(input.edits) && input.edits.length === 0)) {
@@ -565,6 +578,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       if (!current) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
       if (current.version !== baseVersion) conflict(new Error(`Foundry artifact is at version ${current.version}, not ${baseVersion}`));
       const source = applyFoundryEdits(current.source, edits);
+      checkNotBuilt(store, undefined, source);
       if (Buffer.byteLength(source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
       checkOptions(current.kind, source);
       const why = whyFor(input.why, source);
@@ -616,6 +630,10 @@ const stageRead = (found: FoundryArtifactDetail) => {
   return { ...(stage?.surface ? { surface: stage.surface } : {}), ...(stage?.demo ? { demo: stage.demo } : {}) };
 };
 
+/// Pass 241 A: what a read says about building the mockup it returns.
+export const BUILD_CHECK = "Once it runs in the project, look at it (look_at_page, capture_window) and compare with foundry_built before you answer.";
+const BUILT_READ = "The record of a build, written by foundry_built: the pick beside what was built. It is not edited.";
+
 export function foundryReadTool(store: DemesneStore): AgentTool {
   return {
     definition: {
@@ -639,7 +657,8 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
-        ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...briefOf(found), ...stageRead(found), source: found.source,
+        ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
+        ...briefOf(found), ...stageRead(found), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };

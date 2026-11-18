@@ -192,7 +192,7 @@ interface ToolCallRow {
 }
 
 interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: string | null; session_id: string | null; created_at: string; updated_at: string; version: number;
-  description: string | null; based_on: string | null; based_on_version: number | null }
+  description: string | null; based_on: string | null; based_on_version: number | null; built?: number }
 /// A version's why, kept as JSON text; '' when it has none.
 const whyText = (why: FoundryWhy | null | undefined) => {
   const direction = why?.direction?.trim().slice(0, 300) ?? "", look = why?.look?.trim().slice(0, 300) ?? "", dropped = why?.dropped?.trim().slice(0, 300) ?? "";
@@ -216,7 +216,7 @@ const foundryShot = (image: ImageArtifact): FoundryShot => {
 };
 const foundryArtifact = (row: FoundryRow): FoundryArtifact => ({ id: row.id, title: row.title, kind: row.kind, workspace: row.workspace,
   sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at, version: row.version, description: row.description ?? "",
-  basedOn: row.based_on && row.based_on_version ? { id: row.based_on, version: row.based_on_version } : null });
+  basedOn: row.based_on && row.based_on_version ? { id: row.based_on, version: row.based_on_version } : null, ...(row.built ? { built: true as const } : {}) });
 
 export class NotFoundError extends Error {}
 export class InvalidStateError extends Error {}
@@ -298,6 +298,8 @@ export class DemesneStore {
     if (!this.hasColumn("foundry_versions", "ask")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN ask TEXT NOT NULL DEFAULT ''");
     // Pass 221 A: where each version sits and how its demo goes, as JSON.
     if (!this.hasColumn("foundry_versions", "stage")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN stage TEXT NOT NULL DEFAULT ''");
+    // Pass 241 A: a build's record, kept beside the mockup it was built from.
+    if (!this.hasColumn("foundry_artifacts", "built")) this.database.run("ALTER TABLE foundry_artifacts ADD COLUMN built INTEGER NOT NULL DEFAULT 0");
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
     this.userQuestions.recover();
@@ -347,7 +349,9 @@ export class DemesneStore {
   /// moved past it (someone else saved, or Edit source was used) the save is
   /// refused instead of silently clobbering that work, as an artifact publish is.
   saveFoundryArtifact(input: { id?: string; title?: string; kind?: FoundryKind; workspace?: string | null; sessionId?: string | null; turnId?: string | null; note?: string;
-    description?: string; basedOn?: { id: string; version: number } | null; recommended?: boolean; why?: FoundryWhy | null; stage?: FoundryStage | null; source: string; baseVersion?: number }): FoundryArtifactDetail {
+    description?: string; basedOn?: { id: string; version: number } | null; recommended?: boolean; why?: FoundryWhy | null; stage?: FoundryStage | null; source: string; baseVersion?: number;
+    /// A build's record (pass 241 A): set when it is made; a later build moves basedOn to the version it followed.
+    built?: boolean }): FoundryArtifactDetail {
     if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new InvalidStateError("Foundry source is larger than 512 KB");
     const now = new Date().toISOString();
     const why = whyText(input.why);
@@ -369,10 +373,12 @@ export class DemesneStore {
           this.database.query("UPDATE foundry_versions SET source = ?, created_at = ?, note = CASE WHEN note = '' THEN ? ELSE note END, recommended = ?, why = CASE WHEN ? = '' THEN why ELSE ? END, stage = ? WHERE artifact_id = ? AND version = ?")
             .run(input.source, now, input.note?.trim() ?? "", input.recommended === undefined ? last.recommended : input.recommended ? 1 : 0, why, why, stage, input.id, row.version);
           if (input.recommended) this.onlyRecommended(input.id, row.version, input.turnId);
+          if (input.built && input.basedOn) this.database.query("UPDATE foundry_artifacts SET based_on = ?, based_on_version = ? WHERE id = ? AND built = 1").run(input.basedOn.id, input.basedOn.version, input.id);
           return input.id;
         }
         const version = row.version + 1;
         this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?").run(version, now, input.title?.trim() || null, description, input.id);
+        if (input.built && input.basedOn) this.database.query("UPDATE foundry_artifacts SET based_on = ?, based_on_version = ? WHERE id = ? AND built = 1").run(input.basedOn.id, input.basedOn.version, input.id);
         this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask,stage) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
           .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask, stage);
         if (input.recommended && input.turnId) this.onlyRecommended(input.id, version, input.turnId);
@@ -382,8 +388,8 @@ export class DemesneStore {
       const title = input.title?.trim();
       if (!title) throw new InvalidStateError("A Foundry artifact needs a title");
       const created = crypto.randomUUID();
-      this.database.query("INSERT INTO foundry_artifacts(id,title,kind,workspace,session_id,created_at,updated_at,version,description,based_on,based_on_version) VALUES (?,?,?,?,?,?,?,1,?,?,?)")
-        .run(created, title.slice(0, 200), input.kind, input.workspace ?? null, input.sessionId ?? null, now, now, (description ?? "").slice(0, 600), input.basedOn?.id ?? null, input.basedOn?.version ?? null);
+      this.database.query("INSERT INTO foundry_artifacts(id,title,kind,workspace,session_id,created_at,updated_at,version,description,based_on,based_on_version,built) VALUES (?,?,?,?,?,?,?,1,?,?,?,?)")
+        .run(created, title.slice(0, 200), input.kind, input.workspace ?? null, input.sessionId ?? null, now, now, (description ?? "").slice(0, 600), input.basedOn?.id ?? null, input.basedOn?.version ?? null, input.built ? 1 : 0);
       this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask,stage) VALUES (?,1,?,?,?,?,?,?,?,?,?)")
         .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask, stageText(input.stage));
       if (input.recommended && input.turnId) this.onlyRecommended(created, 1, input.turnId);
@@ -433,6 +439,12 @@ export class DemesneStore {
       }
     })();
     return this.getFoundryArtifact(id)!;
+  }
+
+  /// The record of the builds of a mockup (pass 241 A), if one was made.
+  foundryBuiltFor(id: string): string | null {
+    const row = this.database.query("SELECT id FROM foundry_artifacts WHERE built = 1 AND based_on = ? ORDER BY updated_at DESC LIMIT 1").get(id) as { id: string } | null;
+    return row?.id ?? null;
   }
 
   /// What one ask made: each mockup it saved and whether it is the pick.
@@ -2822,6 +2834,13 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
       ...(typeof value.description === "string" && value.description ? { description: value.description.slice(0, 600) } : {}),
       ...(typeof value.note === "string" && value.note ? { note: value.note.slice(0, 300) } : {}),
       ...(value.recommended === true ? { recommended: true } : {}) }) };
+  }
+  // Pass 241 A: a build's record, with the verdict of its latest look.
+  if (name === "foundry_built" && value.built === true && typeof value.id === "string" && /^[\w-]{1,200}$/.test(value.id) && typeof value.title === "string"
+    && typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version > 0) {
+    return { message: JSON.stringify({ id: value.id, title: value.title.slice(0, 200), kind: "html", version: value.version, built: true,
+      ...(typeof value.description === "string" && value.description ? { description: value.description.slice(0, 600) } : {}),
+      ...(typeof value.note === "string" && value.note ? { note: value.note.slice(0, 300) } : {}) }) };
   }
   if (name === "edit_file" || name === "write_file") {
     return {

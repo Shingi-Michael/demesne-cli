@@ -56,6 +56,20 @@ How it is built:
 
 Read about it: [how to conduct a heuristic evaluation](https://www.nngroup.com/articles/how-to-conduct-a-heuristic-evaluation/) (the method), [design critiques](https://www.nngroup.com/articles/design-critiques/) (feedback on the real work, not a description of it), [devicePixelRatio](https://developer.mozilla.org/en-US/docs/Web/API/Window/devicePixelRatio) (why a 2x capture has twice the pixels of its points), [severity ratings for usability problems](https://www.nngroup.com/articles/how-to-rate-the-severity-of-usability-problems/) (how the three parts are chosen), [parallel and iterative design](https://www.nngroup.com/articles/parallel-and-iterative-design/) (why several options beat polishing one).
 
+## It checks what was built against your pick
+
+When you pick an option and say "build it" (or "build B", or @ the mockup), the chat writes the code and, before it says done, looks at what it built next to what you picked (pass 241 A). It works for whatever you are building:
+
+1. **It looks at the result** the way it looks at anything it built: a web app or site through its local server or file (`look_at_page`), a desktop app, a phone app in its simulator or Demesne itself through its window (`capture_window`), or the browser's picture.
+2. **It sees your pick beside it.** `foundry_built` without differences shows the model the option you picked, drawn by Foundry alone the way the long page stages it (`?stack=1&option=N`), next to its own picture of the build.
+3. **It names what differs, at most three things,** biggest first, each boxed on its picture; smaller ones are only counted ("and 4 more"). Something meant to differ, like sample words or made-up numbers, is left out.
+4. **It fixes them and looks again,** three looks at most in one turn. What it leaves different, it names and says why.
+5. **Foundry keeps a "Built" record** beside the mockup ("Plans page, built"): your pick beside the real result with "matches your pick" or what still differs, and the first look with its rings and each difference marked fixed. Every look in one turn lands on the same record; a later build is its next version. Demesne writes the record from the looks, so `foundry_save` and `foundry_edit` refuse to change one, and it takes no notes. The chat ends with one chip: "Built like the mockup · matches".
+
+When the result can't be seen (no server running, the app not open), the chat says what it could not look at instead of guessing. `foundry_read` of a mockup reminds the model to check a build this way, and the tool goes only to chats in a project, since it follows a build. The check is `scripts/check-foundry-built.ts` (a web app's plans page, built twice, in the real app).
+
+Read about it: [Visual comparisons](https://playwright.dev/docs/test-snapshots) (Playwright docs: a test that compares a screen with a picture of how it should look), and [Design critiques](https://www.nngroup.com/articles/design-critiques/) (Nielsen Norman Group: feedback on the real work, not on what should have made it).
+
 ## Rules
 
 - Blue stays the accent. Pink only marks where you are.

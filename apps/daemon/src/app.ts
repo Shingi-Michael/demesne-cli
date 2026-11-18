@@ -16,6 +16,7 @@ import { runTestsTool } from "./test-run.ts";
 import { updatePlanTool } from "./plan.ts";
 import { githubTools } from "./github.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
+import { foundryBuiltTool } from "./foundry-built.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
 import { browserTool, electronBrowser, type BrowserDriver } from "./browser.ts";
@@ -398,6 +399,8 @@ export function createDaemonApp(options: {
   // Trying a page needs the app that renders it, like the look.
   const tryer = options.foundryTry ?? (lookWith ? electronTry(lookWith) : undefined);
   if (tryer) tools.register(foundryTryTool(store, tryer));
+  // Built like the mockup (pass 241 A): a build beside the option it follows.
+  tools.register(foundryBuiltTool(store, look));
   // Seeing the app being built: the same hidden window, opened on a local address.
   const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
   if (pageLook) tools.register(lookAtPageTool(pageLook));

@@ -5,11 +5,13 @@
 /// version is always one click away (a quiet "Edited" line was missed).
 import { FOUNDRY_KINDS, type FoundryKind } from "@demesne/protocol";
 import type { ToolEntry, WorkbenchEntry } from "@demesne/workbench/entries.ts";
-import { KIND_ICON, KIND_WORD } from "./foundry-page.ts";
+import { BUILT_ICON, KIND_ICON, KIND_WORD } from "./foundry-page.ts";
 
 export interface ChatArtifact { id: string; title: string; kind: FoundryKind; version: number;
   /// Pass 208 A: what it is, the version's name, and whether it is the pick.
-  description?: string; note?: string; recommended?: boolean }
+  description?: string; note?: string; recommended?: boolean;
+  /// Pass 241 A: the record of a build beside its mockup (foundry_built); note is its verdict.
+  built?: true }
 
 /** Successful saves and edits are the durable link between a conversation and its chips.
  * Keep the last save of each artifact in a turn; failed or unfinished saves
@@ -17,7 +19,7 @@ export interface ChatArtifact { id: string; title: string; kind: FoundryKind; ve
 export function chatArtifacts(entries: readonly Pick<ToolEntry, "name" | "state" | "message">[]): ChatArtifact[] {
   const saved = new Map<string, ChatArtifact>();
   for (const entry of entries) {
-    if ((entry.name !== "foundry_save" && entry.name !== "foundry_edit") || entry.state !== "done" || !entry.message) continue;
+    if ((entry.name !== "foundry_save" && entry.name !== "foundry_edit" && entry.name !== "foundry_built") || entry.state !== "done" || !entry.message) continue;
     try {
       const value = JSON.parse(entry.message);
       if (!value || typeof value.id !== "string" || !/^[\w-]{1,200}$/.test(value.id)
@@ -27,7 +29,7 @@ export function chatArtifacts(entries: readonly Pick<ToolEntry, "name" | "state"
       saved.set(value.id, { id: value.id, title: value.title, kind: value.kind, version: value.version,
         ...(typeof value.description === "string" && value.description ? { description: value.description } : before?.description ? { description: before.description } : {}),
         ...(typeof value.note === "string" && value.note ? { note: value.note } : before?.note && before.version === value.version ? { note: before.note } : {}),
-        ...(value.recommended === true ? { recommended: true } : {}) });
+        ...(value.recommended === true ? { recommended: true } : {}), ...(entry.name === "foundry_built" && value.built === true ? { built: true as const } : {}) });
     } catch { /* Older or failed tool output remains available in the step. */ }
   }
   // One ask that made several shows the one it would use first, marked.
@@ -41,7 +43,8 @@ interface ChipOptions {
 }
 
 /** The chip's words: what it is and which version. */
-export const chipWords = (artifact: ChatArtifact) => `${KIND_WORD[artifact.kind]} · v${artifact.version}${artifact.note ? ` · ${artifact.note}` : ""}`;
+export const chipWords = (artifact: ChatArtifact) => artifact.built ? `Built like the mockup${artifact.note ? ` · ${artifact.note}` : ""}`
+  : `${KIND_WORD[artifact.kind]} · v${artifact.version}${artifact.note ? ` · ${artifact.note}` : ""}`;
 
 function chip(artifact: ChatArtifact, options: ChipOptions) {
   const node = document.createElement("button");
@@ -60,7 +63,7 @@ function fill(node: HTMLButtonElement, artifact: ChatArtifact) {
   // Its kind's tile; nothing live runs in the chat.
   const tile = document.createElement("span");
   tile.className = "fd-chip-thumb";
-  tile.innerHTML = KIND_ICON[artifact.kind];
+  tile.innerHTML = artifact.built ? BUILT_ICON : KIND_ICON[artifact.kind];
   const text = document.createElement("span"), words = document.createElement("span");
   text.className = "fd-chip-text";
   words.textContent = chipWords(artifact);

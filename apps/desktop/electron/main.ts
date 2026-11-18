@@ -13,7 +13,7 @@ import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -226,11 +226,19 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (kit) return new Response(kitFile(kit), { headers: { "Content-Type": FOUNDRY_KIT[kit]!.type, "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff", "Cache-Control": "max-age=3600" } });
     const call = foundryPageCall(request.url);
     if (call) return pageCall(call, request);
+    // A real picture a mockup shows (pass 240 A), kept with the mockup.
+    const shot = foundryShotURL(request.url);
+    if (shot) {
+      try {
+        const found = await backend!.request("foundry-shot", shot) as { mimeType: string; data: string };
+        return new Response(Buffer.from(found.data, "base64"), { headers: { "Content-Type": found.mimeType, "X-Content-Type-Options": "nosniff", "Cache-Control": "max-age=3600" } });
+      } catch { return new Response("Not found", { status: 404 }); }
+    }
     if (!foundryURL(request.url)) return new Response("Not found", { status: 404 });
     try {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
       const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
-      const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number };
+      const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[] };
       // A new version's first show: the previous version rides along, for outlining what changed.
       const first = url.searchParams.get("first") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
       let before: { kind: string; source: string; title: string } | null = null;
@@ -240,6 +248,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
       if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
+      if (found.kind === "html" && found.shots?.length) page = withShots(page, Object.fromEntries(found.shots.map((one) => [one.id, { url: `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`, width: one.width, height: one.height, scale: one.scale }])));
       // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
       // note.js (pass 233 A) tells the Foundry page which part is under the pointer, for notes pinned to a part.
       if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}\n;${kitFile("note.js").toString("utf8")}`);

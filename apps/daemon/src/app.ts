@@ -1798,6 +1798,13 @@ export function createDaemonApp(options: {
             }
           } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
         }
+        // Pass 240 A: a real picture a mockup shows, kept with it (the bytes by hash, in the artifact folder).
+        if (id && path.length === 5 && path[3] === "shots" && request.method === "GET") {
+          const shot = store.getFoundryShot(id, path[4]!);
+          if (!shot) return apiError("not_found", "Picture not found", 404);
+          try { return new Response(new Uint8Array(await readArtifact(store, shot, false)), { headers: { "Content-Type": shot.mimeType, "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff" } }); }
+          catch { return apiError("not_found", "Picture not found", 404); }
+        }
         if (id && path.length === 4 && path[3] === "ask" && request.method === "POST") {
           const body = await readJson(request);
           const question = isRecord(body) && typeof body.question === "string" ? body.question.trim() : "";

@@ -171,8 +171,10 @@ export function demoControls(source: string): string[] {
 /// to that.
 export const REVIEW_PAGE = /<d-review\b/i;
 export const MAX_REVIEW_PARTS = 3, REVIEW_OPTIONS = [2, 3] as const;
-export interface ReviewPart { name: string; why: string; options: string[]; today: boolean; recommended: boolean }
-export interface ReviewShape { today: boolean; marks: number; parts: ReviewPart[] }
+/// todayShot: the part's Today is cut from a real picture (<d-shot box>).
+export interface ReviewPart { name: string; why: string; options: string[]; today: boolean; recommended: boolean; todayShot: boolean }
+/// shot: the screen as it is today is a real picture (<d-shot src>), pass 240 A.
+export interface ReviewShape { today: boolean; shot: boolean; marks: number; parts: ReviewPart[] }
 
 const TAG = (name: string) => new RegExp(`<${name}\\b(?:[^>"']|"[^"]*"|'[^']*')*>`, "gi");
 const attribute = (tag: string, name: string) => {
@@ -188,34 +190,61 @@ export function reviewOf(source: string): ReviewShape | null {
   const sections = [...body.matchAll(TAG("section"))].map((match) => ({ tag: match[0], at: match.index!, end: match.index! + match[0].length }));
   const now = sections.find((section) => has(section.tag, "data-today"));
   const starts = sections.filter((section) => has(section.tag, "data-part"));
-  const marks = (now ? (attribute(now.tag, "marks") ?? "").split("|").filter((item) => item.trim()).length : 0) + (body.match(/\sdata-mark\s*=/gi)?.length ?? 0);
+  const count = (text: string | null) => (text ?? "").split("|").filter((item) => item.trim()).length;
+  const nowShots = now ? [...body.slice(now.end, starts.find((start) => start.at > now.at)?.at ?? body.length).matchAll(TAG("d-shot"))].map((match) => match[0]).filter((tag) => !!attribute(tag, "src")) : [];
+  const marks = (now ? count(attribute(now.tag, "marks")) : 0) + nowShots.reduce((sum, tag) => sum + count(attribute(tag, "marks")), 0) + (body.match(/\sdata-mark\s*=/gi)?.length ?? 0);
   const parts = starts.map((start, index): ReviewPart => {
     const inside = body.slice(start.end, starts[index + 1]?.at ?? body.length);
-    const options = [...inside.matchAll(TAG("[a-z][a-z0-9-]*"))].map((match) => attribute(match[0], "data-option")).filter((name): name is string => !!name);
+    const tags = [...inside.matchAll(TAG("[a-z][a-z0-9-]*"))];
+    const options = tags.map((match) => attribute(match[0], "data-option")).filter((name): name is string => !!name);
+    const todayAt = tags.findIndex((match) => /^today\b/i.test(attribute(match[0], "data-option") ?? ""));
+    // The part's Today runs up to the next option.
+    const rest = todayAt < 0 ? [] : tags.slice(todayAt + 1), next = rest.findIndex((match) => attribute(match[0], "data-option") !== null);
+    const todayShot = (next < 0 ? rest : rest.slice(0, next)).some((match) => /^<d-shot\b/i.test(match[0]) && !!attribute(match[0], "src") && !!attribute(match[0], "box"));
     const pick = [...inside.matchAll(TAG("d-compare"))].map((match) => attribute(match[0], "recommended")).find((name) => !!name) ?? "";
     const others = options.filter((name) => !/^today\b/i.test(name));
     return { name: attribute(start.tag, "data-part") ?? "", why: attribute(start.tag, "why") ?? "", options: others,
-      today: options.length > others.length, recommended: !!pick && others.some((name) => name.startsWith(pick)) };
+      today: options.length > others.length, recommended: !!pick && others.some((name) => name.startsWith(pick)), todayShot };
   });
-  return { today: !!now, marks, parts };
+  return { today: !!now, shot: nowShots.length > 0, marks, parts };
+}
+
+/// Pass 240 A: a review's Today is the real screen. The picture is one this
+/// chat has: a window capture, the browser's picture of a page, or one the
+/// person attached. Foundry keeps it with the mockup.
+export const SHOT_ASK = 'A review starts from a real picture of the screen as it is, and this one has none. Hint: capture it first (capture_window, with application "Demesne" for Demesne itself; the browser\'s picture for a web page; or a picture the person attached), then <section data-today><d-shot src="IMAGE_ID" marks="x,y,w,h | x,y,w,h"></d-shot></section> with the picture\'s image artifact id and one box per part in its own pixels. If nothing can be captured, ask the person for a screenshot instead of drawing the screen';
+
+/// Every <d-shot> a page shows: the picture it names and its boxes, as written.
+export interface ShotUse { src: string; marks: string[]; box: string | null }
+export function shotsOf(source: string): ShotUse[] {
+  const body = source.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
+  return [...body.matchAll(TAG("d-shot"))].map((match) => ({ src: attribute(match[0], "src") ?? "", box: attribute(match[0], "box"),
+    marks: (attribute(match[0], "marks") ?? "").split("|").map((item) => item.trim()).filter(Boolean) }));
+}
+/// A box written x,y,w,h (commas or spaces), or null.
+export function shotBox(text: string): { x: number; y: number; width: number; height: number } | null {
+  const n = text.trim().split(/[\s,]+/).map(Number);
+  return n.length === 4 && n.every(Number.isFinite) && n[2]! > 0 && n[3]! > 0 ? { x: n[0]!, y: n[1]!, width: n[2]!, height: n[3]! } : null;
 }
 
 /// What stops a review page from being one, as a refusal with its hint; null when it holds.
 export function reviewProblem(source: string): string | null {
   const review = reviewOf(source);
   if (!review) return null;
-  const SHAPE = 'Hint: <d-review><section data-today marks="selector | selector">the screen as it is</section><section data-part="Name" why="what is wrong, in one line"><d-compare recommended="B"><section data-option="Today">…</section><section data-option="A">…</section><section data-option="B">…</section></d-compare></section></d-review>';
+  const SHAPE = 'Hint: <d-review><section data-today><d-shot src="IMAGE_ID" marks="x,y,w,h | x,y,w,h"></d-shot></section><section data-part="Name" why="what is wrong, in one line"><d-compare recommended="B"><section data-option="Today"><d-shot src="IMAGE_ID" box="x,y,w,h"></d-shot></section><section data-option="A">…</section><section data-option="B">…</section></d-compare></section></d-review>';
   // Real models built the whole sheet in a script three times in five (pass 223 runs): say that, not "has none".
   const scripted = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].some((match) => /<section\b[^>]*\bdata-(today|part)\b/i.test(match[1]!) || REVIEW_PAGE.test(match[1]!));
   if (scripted && (!review.today || !review.parts.length)) return `[review] This review is built by a script, so its parts cannot be read. Hint: write <d-review> and every <section> as plain markup in the page, in the shape below; a script may still fill or change what is inside a section. ${SHAPE.replace(/^Hint: /, "")}`;
   if (!review.today) return `[review] A review starts with the screen as it is today, and this one has none. ${SHAPE}`;
+  if (!review.shot) return `[review_shot] ${SHOT_ASK}`;
   if (!review.parts.length) return `[review] This review names no part that needs work. ${SHAPE}`;
   if (review.parts.length > MAX_REVIEW_PARTS) return `[too_many_parts] This review has ${review.parts.length} parts; at most ${MAX_REVIEW_PARTS}. Hint: keep the ${MAX_REVIEW_PARTS} that most need work, most important first, and name the rest in the chat`;
-  if (review.marks < review.parts.length) return `[review] ${review.marks ? `Only ${review.marks} of the ${review.parts.length} parts are` : "No part is"} marked on the screen as it is. Hint: marks="selector | selector" on the data-today section, one selector per part in order (or data-mark="1" on the piece itself), so each part is outlined where it sits`;
+  if (review.marks < review.parts.length) return `[review] ${review.marks ? `Only ${review.marks} of the ${review.parts.length} parts are` : "No part is"} marked on the screen as it is. Hint: marks="x,y,w,h | x,y,w,h" on the <d-shot>, one box per part in order, in the picture's own pixels, so each part is outlined where it sits`;
   for (const part of review.parts) {
     const name = `"${part.name || "A part"}"`;
     if (!part.why) return `[review] ${name} does not say why it needs work. Hint: why="one line on what is wrong, from what you saw" on its section`;
-    if (!part.today) return `[review] ${name} has no "Today". Hint: its first option is <section data-option="Today"> with that piece exactly as it is now, so each option differs from it by the change alone`;
+    if (!part.today) return `[review] ${name} has no "Today". Hint: its first option is <section data-option="Today"><d-shot src="IMAGE_ID" box="x,y,w,h"></d-shot></section>, that piece cut from the picture, so each option differs from it by the change alone`;
+    if (!part.todayShot) return `[review_shot] ${name}'s Today is drawn, not cut from the picture. Hint: <section data-option="Today"><d-shot src="IMAGE_ID" box="x,y,w,h"></d-shot></section>, the piece's box in the picture's own pixels; only the options are drawn`;
     if (part.options.length < REVIEW_OPTIONS[0]) return `[review] ${name} offers ${part.options.length === 1 ? "one option" : "no options"} beside Today. Hint: two or three genuinely different options for each part`;
     if (part.options.length > REVIEW_OPTIONS[1]) return `[too_many_options] ${name} has ${part.options.length} options beside Today; at most ${REVIEW_OPTIONS[1]}. Hint: keep the best ${REVIEW_OPTIONS[1]}`;
     if (!part.recommended) return `[no_recommendation] ${name} has no pick. Hint: recommended="<the option's name>" on its <d-compare>, and say why in the chat`;

@@ -248,6 +248,12 @@ export class DemesneClient {
   async foundryRename(id: string, title: string): Promise<import("@demesne/protocol").FoundryArtifact> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
   }
+  /// Pass 240 A: a real picture a mockup shows, kept with it.
+  async foundryShot(id: string, shot: string, signal?: AbortSignal): Promise<{ mimeType: string; data: Uint8Array }> {
+    const response = await this.fetchImpl(new URL(`/v1/foundry/${encodeURIComponent(id)}/shots/${encodeURIComponent(shot)}`, this.server), { headers: this.authHeaders(), signal });
+    if (!response.ok) throw new ApiRequestError("Picture unavailable", response.status, null);
+    return { mimeType: response.headers.get("content-type") ?? "image/png", data: new Uint8Array(await response.arrayBuffer()) };
+  }
   /// Pages that remember: what a page saved, and a question it asks the model.
   async foundryData(id: string): Promise<{ data: Record<string, unknown> }> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}/data`);

@@ -38,7 +38,9 @@ export interface Fit {
   /// "Look at this and show me what needs work": one review sheet (<d-review>) that holds.
   review?: true;
 }
-export interface QualityCase { id: string; where: Where; prompt: string; fit?: Fit }
+/// picture: a real picture of the screen sent with the ask, as a person attaches one
+/// (scripts/shoot-desktop.ts makes it; pass 240 A reviews start from one).
+export interface QualityCase { id: string; where: Where; prompt: string; fit?: Fit; picture?: string }
 
 /// Twelve asks for whole pages (four mockups of Demesne itself, the rest the
 /// kinds of page people ask Foundry for), then small asks, which the first
@@ -61,8 +63,8 @@ export const QUALITY_CASES: QualityCase[] = [
   { id: "small-pin", where: "chat", prompt: "show me a pin button for a chat row in a sidebar list", fit: { surface: ["part"], offers: true, dialogs: 0, forms: 0, controls: 9, bytes: 12000, has: [/pin/i] } },
   { id: "small-toast", where: "chat", prompt: "mock a small toast that says a file was saved, with an undo", fit: { surface: ["part"], dialogs: 0, forms: 0, controls: 6, bytes: 12000, has: [/saved/i, /undo/i] } },
   { id: "small-toggle", where: "chat", prompt: "what would a settings row with a dark mode toggle look like", fit: { surface: ["part"], offers: true, dialogs: 0, forms: 0, controls: 6, bytes: 12000, has: [/dark/i] } },
-  { id: "review-settings", where: "project", prompt: "look at Demesne's Settings page and show me what most needs a redesign", fit: { review: true } },
-  { id: "review-sidebar", where: "project", prompt: "what in Demesne's sidebar most needs work? show me", fit: { review: true } },
+  { id: "review-settings", where: "project", prompt: "look at Demesne's Settings page and show me what most needs a redesign", fit: { review: true }, picture: "demesne-settings.png" },
+  { id: "review-sidebar", where: "project", prompt: "what in Demesne's sidebar most needs work? show me", fit: { review: true }, picture: "02-turn.png" },
 ];
 
 /// What a page holds, counted from its source (scripts and styles left out).

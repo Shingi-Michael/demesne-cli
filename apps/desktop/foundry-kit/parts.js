@@ -14,7 +14,7 @@
   var doc = document;
 
   var CSS = `
-:where(d-window,d-browser,d-phone,d-demesne,d-message,d-composer,d-card,d-row,d-toggle,d-seg,d-tabs,d-icon,d-avatar,d-chart,d-stat,d-compare,d-mark,d-sidebar,d-review,d-crop){box-sizing:border-box}
+:where(d-window,d-browser,d-phone,d-demesne,d-message,d-composer,d-card,d-row,d-toggle,d-seg,d-tabs,d-icon,d-avatar,d-chart,d-stat,d-compare,d-mark,d-sidebar,d-review,d-crop,d-shot){box-sizing:border-box}
 d-icon{display:inline-flex;width:var(--size,16px);height:var(--size,16px);flex:none;vertical-align:-.15em}
 d-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
 d-avatar{display:inline-grid;place-items:center;flex:none;width:var(--size,28px);height:var(--size,28px);border-radius:50%;font-size:calc(var(--size,28px)*.4);font-weight:600;color:#fff;letter-spacing:0}
@@ -118,6 +118,12 @@ d-review .dp-opt em{padding:0 7px;border-radius:6px;background:color-mix(in srgb
 .dr-ring>d-mark{position:absolute;top:-10px;right:-10px}
 d-crop{display:block;position:relative;overflow:hidden;max-width:100%;border-radius:10px}
 .dp-crop{position:absolute;top:0;left:0;transform-origin:0 0}
+/* A real picture (pass 240 A): the screen as it is, or one piece of it, at its own size. */
+d-shot{display:block;position:relative;width:100%;max-width:100%}
+.ds-frame{position:relative;overflow:hidden;border-radius:10px;box-shadow:0 0 0 1px var(--hair)}
+.ds-frame>img{position:absolute;display:block;max-width:none;-webkit-user-select:none;user-select:none;pointer-events:none}
+.ds-spot{position:absolute;pointer-events:none}
+d-shot.ds-gone{padding:var(--space-4);border-radius:10px;box-shadow:inset 0 0 0 1px var(--hair);color:var(--muted);font-size:var(--text-sm);text-align:center}
 .dp-strip{position:sticky;top:0;z-index:20;display:flex;flex-direction:row;align-items:center;gap:4px;padding:6px;border-radius:12px;background:color-mix(in srgb,var(--paper) 90%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:inset 0 0 0 1px var(--hair);flex-wrap:wrap}
 .dp-strip>button{padding:4px 12px;border-radius:99px;background:transparent;color:var(--secondary);font-size:14px}
 .dp-strip>button.on{background:var(--tone-2);color:var(--ink)}
@@ -395,7 +401,7 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
           if (compare.getAttribute("layout") === "stack" || part.getAttribute("layout") === "stack") { compare.classList.add("dr-wide"); return; }
           compare.classList.remove("dr-wide");
           var over = options.some(function (option) {
-            var tile = option.lastChild, inside = tile.firstElementChild, crop = tile.querySelector("d-crop");
+            var tile = option.lastChild, inside = tile.firstElementChild, crop = tile.querySelector("d-crop,d-shot");
             return crop ? crop.__needs > inner(tile) + 1 : !!inside && inside.scrollWidth > tile.clientWidth + 1;
           });
           compare.classList.toggle("dr-wide", over);
@@ -430,6 +436,46 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
       body.style.transform = "scale(" + scale + ") translate(" + (gap - x) + "px," + (gap - y) + "px)";
     };
     afterLayout([body, el.parentElement], fit);
+  });
+
+  /// The screen as it really is (pass 240 A): <d-shot src="IMAGE_ID"> shows a
+  /// picture the chat took or was given, kept with the mockup. Its pixels are
+  /// the picture's own: marks="x,y,w,h | …" put a numbered outline on each
+  /// part where it sits (in a review), box="x,y,w,h" shows only that piece,
+  /// with a little room around it (pad, in points), at its own size.
+  var shots = window.__demesneShots || {};
+  var boxOf = function (text) {
+    var n = String(text || "").trim().split(/[\s,]+/).map(Number);
+    return n.length === 4 && n.every(isFinite) && n[2] > 0 && n[3] > 0 ? { x: n[0], y: n[1], w: n[2], h: n[3] } : null;
+  };
+  define("d-shot", function (el) {
+    var shot = shots[el.getAttribute("src") || ""];
+    if (!shot || !shot.width || !shot.height) { el.classList.add("ds-gone"); el.textContent = "This picture is not kept with the mockup."; return; }
+    var W = shot.width, H = shot.height, scale = shot.scale || 1, box = boxOf(el.getAttribute("box")), view = { x: 0, y: 0, w: W, h: H };
+    if (box) {
+      var pad = (el.hasAttribute("pad") ? Number(el.getAttribute("pad")) || 0 : 8) * scale;
+      var x0 = Math.max(0, box.x - pad), y0 = Math.max(0, box.y - pad);
+      view = { x: x0, y: y0, w: Math.min(W, box.x + box.w + pad) - x0, h: Math.min(H, box.y + box.h + pad) - y0 };
+    }
+    var pct = function (value, of) { return value / of * 100 + "%"; };
+    var frame = doc.createElement("div"); frame.className = "ds-frame";
+    frame.style.aspectRatio = view.w + " / " + view.h;
+    var img = doc.createElement("img"); img.src = shot.url; img.alt = el.getAttribute("alt") || (box ? "This piece as it is today" : "The screen as it is today"); img.draggable = false;
+    img.style.width = pct(W, view.w); img.style.height = pct(H, view.h); img.style.left = pct(-view.x, view.w); img.style.top = pct(-view.y, view.h);
+    frame.appendChild(img);
+    // The marks are pieces of the picture a review outlines and numbers, like data-mark on a drawn piece.
+    if (!box) list(el.getAttribute("marks") || "").forEach(function (text, index) {
+      var at = boxOf(text);
+      if (!at) return;
+      var spot = doc.createElement("i"); spot.className = "ds-spot"; spot.setAttribute("data-mark", String(index + 1));
+      spot.style.left = pct(at.x, W); spot.style.top = pct(at.y, H); spot.style.width = pct(at.w, W); spot.style.height = pct(at.h, H);
+      frame.appendChild(spot);
+    });
+    el.textContent = "";
+    el.appendChild(frame);
+    // At its own size (points, not pixels), never wider than the room there is.
+    el.__needs = view.w / scale;
+    el.style.maxWidth = Math.round(view.w / scale) + "px";
   });
 
   define("d-stat", function (el) {

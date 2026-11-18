@@ -63,8 +63,8 @@ describe("Foundry quality ruler", () => {
   });
   test("as asked: a review is one sheet with the screen today and parts that each hold Today, options and a pick", () => {
     const ask = QUALITY_CASES.find((item) => item.id === "review-settings")!.fit!;
-    const part = (name: string, options: string[]) => `<section data-part="${name}" why="What is wrong."><d-compare recommended="${options[1]}">${options.map((option) => `<section data-option="${option}">x</section>`).join("")}</d-compare></section>`;
-    const sheet = (parts: string[]) => `<d-review><section data-today marks=".a | .b | .c | .d">screen</section>${parts.join("")}</d-review>`;
+    const part = (name: string, options: string[]) => `<section data-part="${name}" why="What is wrong."><d-compare recommended="${options[1]}">${options.map((option) => `<section data-option="${option}">${option === "Today" ? '<d-shot src="s" box="0,0,9,9"></d-shot>' : "x"}</section>`).join("")}</d-compare></section>`;
+    const sheet = (parts: string[]) => `<d-review><section data-today><d-shot src="s" marks="0,0,9,9 | 0,9,9,9 | 0,18,9,9 | 0,27,9,9"></d-shot></section>${parts.join("")}</d-review>`;
     expect(fitOf(ask, { source: sheet([part("Rows", ["Today", "A", "B"]), part("Save", ["Today", "A", "B", "C"])]) })).toEqual({ score: 1, misses: [] });
     // An open question answered with a review offers its options part by part: two parts of two are not "four options" (pass 223 run).
     const open = QUALITY_CASES.find((item) => item.id === "demesne-empty")!.fit!;

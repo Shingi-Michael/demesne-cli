@@ -54,7 +54,8 @@ export const DEMESNE_LOOK = "Something that exists (the person's app, site or sc
 export const REVIEW_HOW = "Asked to look at something that exists and show what needs work (or to redesign it with no piece named): review before you draw. "
   + "Critique the real screen as you do your own pages, rate each problem, and keep the two or three parts that most need work, most important first (one only if nothing else comes close). "
   + "A part is the smallest piece that holds the problem (a bar, a card, a row), never the whole page. "
-  + "Save one <d-review> page (foundry_read id \"kit:parts\"): the screen today with those pieces marked, then each piece alone at its own size, as \"Today\" beside two or three options and your pick, with one plain line on what is wrong. "
+  + "Start from a real picture (capture_window, the browser's, or an attached one; else ask for a screenshot). "
+  + "Save one <d-review> page (foundry_read id \"kit:parts\"): the picture with those pieces boxed, then each cut from it as \"Today\" beside two or three options and your pick, and one plain line on what is wrong. "
   + "Redraw nothing else. A named piece skips the ranking.";
 
 export interface DesignGuide {

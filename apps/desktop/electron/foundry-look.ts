@@ -10,13 +10,14 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DESIGN_MEASURE, LOOK_MEASURE, type DesignMeasure, type LookMeasure } from "./foundry-look-measure.ts";
-import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember, withRemember } from "./policy.ts";
+import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember, withRemember, withShots } from "./policy.ts";
 import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryPlan, type TryResult, type TryStep, type TryStepResult } from "./foundry-try.ts";
 
 /// try: run these steps on the page instead of looking at it (foundry-try.ts).
 /// url: open the person's own app instead (look_at_page: a local dev server or a project file).
 /// phone: the page is a phone screen (surface phone), looked at at a phone's width instead of the desktop's.
-export interface LookJob { kind: string; source: string; title: string; phone?: boolean; try?: TryPlan; url?: string }
+/// shots: the real pictures the page shows (<d-shot>, pass 240 A), by id, base64.
+export interface LookJob { kind: string; source: string; title: string; phone?: boolean; try?: TryPlan; url?: string; shots?: Record<string, { data: string; mimeType: string; width: number; height: number; scale: number }> }
 export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
 export interface LookResult { pages: LookPage[]; errors: string[] }
 
@@ -60,8 +61,11 @@ export function runFoundryLook(path: string) {
       const kit = foundryKitFile(request.url);
       if (kit) return new Response(kitFile(kit), { headers: { "Content-Type": FOUNDRY_KIT[kit]!.type, "Access-Control-Allow-Origin": "*" } });
       // A page that remembers runs on its own here: saves stay in memory, asks get a placeholder.
-      const page = foundryDocument(job.kind, job.source, job.title);
-      return new Response(job.kind === "html" && usesRemember(job.source) ? withRemember(page, kitFile("remember.js").toString("utf8")) : page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });
+      let page = foundryDocument(job.kind, job.source, job.title);
+      if (job.kind === "html" && usesRemember(job.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"));
+      // Its pictures ride in the job, so they go in as data.
+      if (job.kind === "html" && job.shots) page = withShots(page, Object.fromEntries(Object.entries(job.shots).map(([id, shot]) => [id, { url: `data:${shot.mimeType};base64,${shot.data}`, width: shot.width, height: shot.height, scale: shot.scale }])));
+      return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });
     });
     if (job.url) { done(await tryPage(session, job.try ?? { width: 1280, steps: [] }, job.url)); return; }
     if (job.try) { done(await tryPage(session, job.try)); return; }
@@ -75,7 +79,8 @@ export function runFoundryLook(path: string) {
         contents.on("will-navigate", (event) => event.preventDefault());
         contents.on("console-message", (event) => { if (event.level === "error" && errors.length < 6) errors.push(event.message.slice(0, 200)); });
         await win.loadURL("foundry://artifact/look");
-        await Promise.race([contents.executeJavaScript("document.fonts.ready.then(() => true)"), settle(3000)]);
+        // Fonts and pictures (a review's real screen) land before the look.
+        await Promise.race([contents.executeJavaScript("Promise.all([document.fonts.ready, ...[...document.images].map((image) => image.decode().catch(() => {}))]).then(() => true)"), settle(3000)]);
         await settle(400);
         const measured = await contents.executeJavaScript(LOOK_MEASURE) as LookMeasure;
         const design = await contents.executeJavaScript(DESIGN_MEASURE).catch(() => undefined) as DesignMeasure | undefined;

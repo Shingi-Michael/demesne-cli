@@ -1836,13 +1836,13 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-built i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); align-self: center; }
 .fd-ver { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 6px 0 10px; color: var(--t3); font-size: 12.5px; }
 .fd-ver b { color: var(--t1); font-weight: 500; }
-.fd-rec-pill, .fd-chip-rec { padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 16%, transparent); color: var(--blossom, #e48aa6); font-size: 11.5px; font-weight: 500; line-height: 18px; }
+.fd-rec-pill, .fd-chip-rec { padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t2); font-size: 11.5px; font-weight: 500; line-height: 18px; }
 /* "@Roaster pricing" in a message: opens that mockup in Foundry. */
 .fd-at { all: unset; cursor: pointer; padding: 0 5px; border-radius: 5px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 14%, transparent); color: var(--blossom, #e48aa6); white-space: nowrap; }
 .fd-at:hover { background: color-mix(in srgb, var(--blossom, #f2b6c8) 24%, transparent); }
 .fd-at:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 1px; }
-.fd-rec .fd-stage, .fd-rec .fd-doc { box-shadow: 0 0 0 1.5px var(--blossom, #f2b6c8); }
-.fd-stage { overflow: hidden; height: clamp(520px, 78vh, 900px); border-radius: var(--r-lg); background: #fff; box-shadow: 0 0 0 1px var(--hair); transition: box-shadow 400ms var(--ease); }
+/* Pass 242 A: no pink on the stage. A mockup lies on the page like a print on a table: a hairline and a soft shadow. */
+.fd-stage { overflow: hidden; height: clamp(520px, 78vh, 900px); border-radius: var(--r-lg); background: #fff; box-shadow: 0 0 0 1px var(--hair), 0 18px 40px -22px rgba(0, 0, 0, .6); transition: box-shadow 400ms var(--ease); }
 .fd-stage.graphic { height: clamp(320px, 50vh, 560px); background: repeating-conic-gradient(var(--surface2) 0 25%, transparent 0 50%) 0 0 / 20px 20px; }
 .fd-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
 .fd-stage.graphic .fd-frame { background: transparent; }
@@ -1881,37 +1881,43 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-opt:first-of-type { margin-top: 4px; }
 .fd-opt b { color: var(--t1); font-weight: 500; font-size: 13px; }
 .fd-doc { max-width: 760px; padding: 28px 32px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair); color: var(--t1); }
-.fd-here .fd-stage, .fd-here .fd-doc { box-shadow: 0 0 0 2px var(--blossom); }
-/* Pass 233 A: notes on a mockup. Nothing shows until the pointer rests on a
-   part: then a thin outline and a small tag. The tag opens a one-line note,
-   kept notes are numbered pins, and one quiet line under the mockup sends
-   them together. All of it is the page's, drawn over the frame, never in it. */
+.fd-here .fd-stage, .fd-here .fd-doc { box-shadow: 0 0 0 2px color-mix(in srgb, var(--t1) 40%, transparent), 0 18px 40px -22px rgba(0, 0, 0, .6); }
+/* Pass 242 A: notes on a mockup, pinned where you point. Nothing is outlined:
+   a small grey + rests beside a still pointer, a click drops a grey pin
+   exactly there (its point is the spot) with a one-line note beside it. A
+   keep has a heart, the one bit of colour. All of it is the page's, drawn
+   over the frame, never in it. */
 .fd-item { position: relative; }
 .fn-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .fn-layer [hidden] { display: none !important; }
-.fn-out { position: absolute; box-sizing: border-box; border: 1.5px solid var(--blossom, #f2b6c8); border-radius: 7px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .28); transition: left 90ms var(--ease), top 90ms var(--ease), width 90ms var(--ease), height 90ms var(--ease); }
-.fn-tag { all: unset; position: absolute; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; max-width: 280px; height: 22px; padding: 0 9px 0 7px; border-radius: 7px; background: #1c1c1f; color: #f4f4f5; font-size: 12px; line-height: 22px; white-space: nowrap; box-shadow: 0 0 0 1px rgba(255, 255, 255, .12), 0 6px 16px -6px rgba(0, 0, 0, .5); cursor: pointer; pointer-events: auto; }
-.fn-tag::after { content: ""; position: absolute; inset: -4px -6px -7px; }
-.fn-tag span { overflow: hidden; text-overflow: ellipsis; }
-.fn-tag svg { flex: none; width: 12px; height: 12px; fill: none; stroke: var(--blossom, #f2b6c8); stroke-width: 1.2; stroke-linejoin: round; }
-.fn-tag:hover, .fn-tag:focus-visible { background: #2a2a2e; }
-.fn-pin { all: unset; position: absolute; box-sizing: border-box; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px 10px 10px 3px; background: var(--blossom, #f2b6c8); color: #2a1119; font-size: 11px; font-weight: 600; line-height: 19px; text-align: center; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .3), 0 4px 10px -4px rgba(0, 0, 0, .5); cursor: pointer; pointer-events: auto; }
-.fn-pin:hover, .fn-pin:focus-visible { filter: brightness(1.08); }
-.fn-shot .fn-pin, .fn-shot .fn-tag { visibility: hidden; }
+.fn-plus { all: unset; position: absolute; box-sizing: border-box; width: 20px; height: 20px; border-radius: 50%; background: rgba(40, 40, 44, .88); cursor: pointer; pointer-events: auto; box-shadow: 0 0 0 1px rgba(255, 255, 255, .55), 0 3px 8px -2px rgba(0, 0, 0, .4); animation: fn-in 140ms var(--ease) both; }
+.fn-plus::before, .fn-plus::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 1.5px; margin: -.75px 0 0 -4.5px; border-radius: 1px; background: #f4f4f5; }
+.fn-plus::after { transform: rotate(90deg); }
+.fn-plus:hover, .fn-plus:focus-visible { background: #46464c; }
+@keyframes fn-in { from { opacity: 0; transform: scale(.6); } }
+.fn-pin { all: unset; position: absolute; box-sizing: border-box; min-width: 22px; height: 22px; padding: 0 6px; transform: translate(0, -100%); border-radius: 11px 11px 11px 2px; background: #2c2c30; color: #f4f4f5; font-size: 11px; font-weight: 600; line-height: 22px; text-align: center; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .92), 0 4px 10px -3px rgba(0, 0, 0, .5); cursor: pointer; pointer-events: auto; }
+.fn-pin svg, .fn-kind svg { width: 11px; height: 11px; fill: var(--blossom, #f2b6c8); vertical-align: -1px; }
+.fn-pin:hover, .fn-pin:focus-visible, .fn-pin.fn-open { background: #46464c; }
+.fn-new { pointer-events: none; }
+.fn-shot .fn-pin, .fn-shot .fn-plus { visibility: hidden; }
 .fn-box { position: absolute; box-sizing: border-box; display: grid; gap: 7px; padding: 10px 12px 9px; border-radius: 12px; background: var(--surface, #232326); box-shadow: 0 0 0 1px var(--hair2, var(--hair)), 0 16px 40px -14px rgba(0, 0, 0, .6); pointer-events: auto; }
-.fn-box label { overflow: hidden; color: var(--t3); font-size: 11.5px; line-height: 15px; white-space: nowrap; text-overflow: ellipsis; }
-.fn-box input { all: unset; box-sizing: border-box; width: 100%; height: 24px; color: var(--t1); font-size: 13.5px; line-height: 24px; caret-color: var(--blossom); }
+.fn-box label { display: flex; gap: 6px; overflow: hidden; color: var(--t3); font-size: 11.5px; line-height: 15px; white-space: nowrap; }
+.fn-on { overflow: hidden; text-overflow: ellipsis; }
+.fn-on::before { content: "·"; margin-right: 6px; }
+.fn-kind { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--t2); }
+.fn-kind.fn-keep { color: var(--blossom, #e48aa6); }
+.fn-box input { all: unset; box-sizing: border-box; width: 100%; height: 24px; color: var(--t1); font-size: 13.5px; line-height: 24px; caret-color: var(--t1); }
 .fn-box input::placeholder { color: var(--t3); }
-.fn-keys { display: flex; gap: 12px; color: var(--t3); font-size: 11px; line-height: 15px; }
+.fn-keys { display: flex; flex-wrap: wrap; gap: 2px 12px; color: var(--t3); font-size: 11px; line-height: 15px; }
 .fn-keys span:last-child { margin-left: auto; }
 .fn-keys kbd, .fd-notes kbd { font: inherit; color: var(--t2); }
 .fd-notes { display: flex; align-items: center; gap: 9px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-notes[hidden] { display: none; }
-.fd-notes-send { all: unset; padding: 0 7px; margin: 0 -7px; border-radius: 6px; color: var(--blossom, #e48aa6); cursor: pointer; }
-.fd-notes-send:hover, .fd-notes-send:focus-visible { background: color-mix(in srgb, var(--blossom, #f2b6c8) 12%, transparent); }
-.fd-notes-work { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--blossom) 30%, transparent); border-top-color: var(--blossom); animation: rl-spin .8s linear infinite; }
+.fd-notes-send { all: unset; padding: 0 7px; margin: 0 -7px; border-radius: 6px; color: var(--t2); cursor: pointer; }
+.fd-notes-send:hover, .fd-notes-send:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }
+.fd-notes-work { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--t2) 30%, transparent); border-top-color: var(--t2); animation: rl-spin .8s linear infinite; }
 .fd-notes .fd-quiet { color: var(--t3); }
-@media (prefers-reduced-motion: reduce) { .fn-out { transition: none; } .fd-notes-work { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .fn-plus { animation: none; } .fd-notes-work { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .fd-stage { transition: none; } }
 .fd-h { margin-bottom: 18px; }
 .fd-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 20px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair) inset; color: var(--t3); font-size: 13px; text-align: center; }

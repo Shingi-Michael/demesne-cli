@@ -447,6 +447,27 @@ export class DemesneStore {
     return row?.id ?? null;
   }
 
+  /// What the person said they like on a mockup (pass 242 A): the keep notes
+  /// pinned on it, oldest first, the newest eight. A keep is a line of the
+  /// notes message that starts with a heart ("♥ · Most chosen tag: keep it").
+  foundryLikes(id: string): string[] {
+    if (!/^[\w-]+$/.test(id)) return [];
+    const rows = this.database.query("SELECT content FROM turns WHERE content LIKE ? ESCAPE '\\' ORDER BY created_at, rowid")
+      .all(`%(id ${id.replace(/[\\%_]/g, (char) => `\\${char}`)}, v%`) as { content: string }[];
+    const liked: string[] = [];
+    for (const row of rows) {
+      const said = row.content.replace(/(^|\n)```parts\n[\s\S]*$/, "");
+      for (const line of said.split("\n")) {
+        const keep = /^♥ · (.+)$/.exec(line.trim())?.[1]?.replace(/\s+/g, " ").trim().slice(0, 240);
+        if (!keep) continue;
+        const at = liked.indexOf(keep);
+        if (at >= 0) liked.splice(at, 1);
+        liked.push(keep);
+      }
+    }
+    return liked.slice(-8);
+  }
+
   /// What one ask made: each mockup it saved and whether it is the pick.
   foundryInTurn(turnId: string): { id: string; title: string; version: number; recommended: boolean }[] {
     const rows = this.database.query("SELECT v.artifact_id AS id, a.title AS title, v.version AS version, v.recommended AS recommended FROM foundry_versions v JOIN foundry_artifacts a ON a.id = v.artifact_id WHERE v.turn_id = ? ORDER BY v.rowid")

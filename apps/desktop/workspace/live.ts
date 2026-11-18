@@ -2795,7 +2795,7 @@ function requestText(content: string) {
   const { text, refs } = splitMockupRefs(content);
   return splitPastes(text).map((part) => part.kind === "text" ? linkMockups(h(part.text), refs)
     // The parts of a mockup that notes were pinned to (pass 233 A) fold like a paste: the words stay, the markup is one chip.
-    : part.kind === "parts" ? `<details class="paste-chip parts-chip"><summary title="What the model gets: each part's place and markup">${PARTS_ICON}${h(partsLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`
+    : part.kind === "parts" ? `<details class="paste-chip parts-chip"><summary title="What the model gets: each pin's part, spot and markup">${PARTS_ICON}${h(partsLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`
     : `<details class="paste-chip"><summary title="${h(part.text.split("\n").slice(0, 6).join("\n"))}">${PASTE_ICON}${h(pasteLabel(part.text))}</summary><pre>${h(part.text)}</pre></details>`).join("");
 }
 const PASTE_ICON = '<span class="pc-ic" aria-hidden="true">TXT</span>';

@@ -625,6 +625,14 @@ export function briefOf(found: FoundryArtifactDetail): { brief?: Record<string, 
     ...(why?.dropped ? { dropped: why.dropped } : {}), ...(why?.from ? { starts_from: why.from } : {}) })), keep: BRIEF_KEEP };
 }
 
+/// Pass 242 A: what the person pinned as liked on this mockup, kept across
+/// asks so a later version does not lose it.
+export const LIKED_KEEP = "The person said they like these: keep each as it is unless a later note changes it.";
+const likedOf = (store: DemesneStore, id: string): { liked?: string[]; liked_rule?: string } => {
+  const liked = store.foundryLikes(id);
+  return liked.length ? { liked, liked_rule: LIKED_KEEP } : {};
+};
+
 const stageRead = (found: FoundryArtifactDetail) => {
   const stage = found.versions.find((item) => item.version === found.version)?.stage;
   return { ...(stage?.surface ? { surface: stage.surface } : {}), ...(stage?.demo ? { demo: stage.demo } : {}) };
@@ -658,7 +666,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
-        ...briefOf(found), ...stageRead(found), source: found.source,
+        ...briefOf(found), ...likedOf(store, found.id), ...stageRead(found), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };

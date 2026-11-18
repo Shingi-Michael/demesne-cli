@@ -45,8 +45,10 @@ describe("big pastes fold up", () => {
     const detail = "Notes on parts of the Foundry mockup \"Pin a chat\" (id a1, v2).\n1. Save button: green\n   selector `button`\n   <button>Save</button>\n2. Tabs: fewer\n   selector `nav`\n   <nav></nav>";
     const sent = `On “Pin a chat”:\n1 · Save button: green\n2 · Tabs: fewer\n\n${fenced(detail, "parts")}`;
     expect(splitPastes(sent)).toEqual([{ kind: "text", text: "On “Pin a chat”:\n1 · Save button: green\n2 · Tabs: fewer" }, { kind: "parts", text: detail }]);
-    expect(partsLabel(detail)).toBe("Marked parts · 2");
-    expect(partsLabel("Notes on one part.\n1. Save button: green")).toBe("Marked part · 1");
+    expect(partsLabel(detail)).toBe("Pinned notes · 2");
+    expect(partsLabel("Notes on one part.\n1. Save button: green")).toBe("Pinned note · 1");
+    // A keep counts too (pass 242 A).
+    expect(partsLabel("Notes pinned.\n1. change, Save button: green\n♥. keep, Tag: warm")).toBe("Pinned notes · 2");
     // Markup that holds a fence gets a longer one.
     const fence = "1. Code: fix\n   selector `pre`\n   <pre>```</pre>";
     expect(fenced(fence, "parts").startsWith("````parts\n")).toBe(true);

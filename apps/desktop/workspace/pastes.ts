@@ -39,5 +39,5 @@ export function splitPastes(content: string): MessagePiece[] {
   if (rest.trim() || !parts.length) parts.push({ kind: "text", text: parts.length ? rest.trim() : content });
   return parts;
 }
-/// "Marked parts · 2": the chip a message's noted parts fold into.
-export const partsLabel = (text: string) => { const n = text.split("\n").filter((line) => /^\d+\. /.test(line)).length; return `Marked part${n === 1 ? "" : "s"} · ${n}`; };
+/// "Pinned notes · 2": the chip a message's notes on a mockup fold into. A change is numbered, a keep has a heart.
+export const partsLabel = (text: string) => { const n = text.split("\n").filter((line) => /^(\d+|♥)\. /.test(line)).length; return `Pinned note${n === 1 ? "" : "s"} · ${n}`; };

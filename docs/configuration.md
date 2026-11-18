@@ -226,3 +226,6 @@ Provider config edits require a daemon restart: when no work is running, stop th
 Thinking choices come from each model's advertised `supported_reasoning_levels` (strings or `{ effort }` entries) or `reasoning_levels` when available. Demesne refreshes these capabilities when models are rediscovered. An optional `default_reasoning_level` selects a supported fallback; effort-capable models prefer medium.
 
 For servers that omit these fields, recognized Qwen/DeepSeek thinking models and Gemma 4 expose on/off controls. Gemma 4 defaults to on; Gemma 3 does not acquire thinking controls from its name. Gemma's binary switch does not imply support for low/medium/high effort. Explicit on/off choices are sent through the compatible server's chat template switch, or Ollama's `think` field. OpenRouter continues to use its reasoning API.
+
+Local provider connections (loopback, private-network and Tailscale addresses) use cache-preserving context planning even without a runtime profile. The planner keeps history intact while it fits the configured input budget, avoiding unnecessary prompt-prefix invalidation. Context and thinking settings are unchanged. Cache reuse still depends on the server retaining a matching prefix; changing tools, system instructions or earlier messages can require reprocessing.
+

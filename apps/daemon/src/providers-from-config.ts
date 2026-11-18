@@ -110,7 +110,10 @@ function createSingleProcessor(settings: ProviderConfig, dataDirectory: string):
     verifier,
     configuredContextCapacity,
     allowedModelIds,
-    settings.auth === "codex" || settings.auth === "chatgpt" || runtimeProfileSupportsPromptCache(runtimeProfile),
+    // Local llama.cpp/LM Studio connections also reuse the prompt prefix,
+    // including LAN and Tailscale endpoints without a named runtime profile.
+    // Rewriting old tool results below capacity makes them prefill again.
+    settings.auth === "codex" || settings.auth === "chatgpt" || isLocalProvider(settings) || runtimeProfileSupportsPromptCache(runtimeProfile),
     configuredStreamLimits(settings),
   );
 }

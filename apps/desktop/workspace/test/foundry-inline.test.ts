@@ -50,3 +50,14 @@ test("a chip carries the description and the version's name, and the pick leads 
   expect(chatArtifacts([save(bold)])).toEqual([{ ...artifact, id: "bold", title: "Bold", description: "Loud plans." }]);
   expect(chatArtifacts([save(calm), save({ ...artifact, id: "calm", title: "Calm" })])).toEqual([calm]);
 });
+
+test("a build's record is a chip that says how it came out (pass 241 A)", async () => {
+  const { chipWords } = await import("../foundry-inline.ts");
+  const record = { id: "plans-built", title: "Plans page, built", kind: "html", version: 1, note: "matches", built: true };
+  const [chip] = chatArtifacts([{ name: "foundry_built", state: "done", message: JSON.stringify(record) }]);
+  expect(chip).toEqual(record as ChatArtifact);
+  expect(chipWords(chip!)).toBe("Built like the mockup · matches");
+  expect(chipWords({ ...chip!, note: "2 still differ" })).toBe("Built like the mockup · 2 still differ");
+  // Only foundry_built makes a record chip; a save that says built is a plain mockup.
+  expect(chatArtifacts([save(record)])[0]!.built).toBeUndefined();
+});

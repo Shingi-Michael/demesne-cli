@@ -1160,6 +1160,7 @@ export * from "./thread-report.ts";
 export * from "./thread-note.ts";
 export * from "./foundry-try.ts";
 export * from "./foundry-stage.ts";
+export * from "./foundry-built.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 
@@ -1303,6 +1304,9 @@ export interface FoundryArtifact {
   description: string;
   /// The mockup it was made from, when it was.
   basedOn: { id: string; version: number } | null;
+  /// Pass 241 A: the record of a build, beside the mockup it was built from
+  /// (basedOn), written by Demesne from foundry_built and never edited.
+  built?: true;
 }
 
 export interface FoundryArtifactDetail extends FoundryArtifact {

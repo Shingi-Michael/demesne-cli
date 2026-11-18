@@ -701,15 +701,14 @@ function trimFace(src: string, fallback: string): Promise<ProjectFace> {
 /// a turning blue arc while a chat there works, amber while one asks you.
 function projectFaceHTML(path: string, ring: "" | "working" | "warn") {
   const face = projectFaces.get(path) ?? { src: null, tone: projectTone(projectLabel(path)) };
-  const letter = (projectLabel(path).replace(/^[^a-z0-9]+/i, "")[0] ?? "·").toLowerCase();
-  const inner = face.src ? `<img src="${h(face.src)}" alt="" draggable="false">` : `<b>${h(letter)}</b>`;
-  return `<span class="project-face${face.src ? " has-icon" : ""}${ring ? ` ring-${ring}` : ""}" style="--face:${h(face.tone)}" aria-hidden="true">${inner}</span>`;
+  // A project without its own icon file shows a plain grey folder (pass 239 1).
+  const inner = face.src ? `<img src="${h(face.src)}" alt="" draggable="false">` : chatIcon("list");
+  return `<span class="project-face${face.src ? " has-icon" : " folder"}${ring ? ` ring-${ring}` : ""}" style="--face:${h(face.tone)}" aria-hidden="true">${inner}</span>`;
 }
 const ICON_PIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>';
 const ICON_GROUP_ICONS: Record<string, string> = {
   pinned: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>',
   back: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
-  plain: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/></svg>',
   d: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="1.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>',
   s: '<svg class="ico sidebar-group-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 8v4l2.5 1.5"/></svg>',
 };
@@ -1032,9 +1031,9 @@ function renderSidebar() {
       const agentRows = showing ? `<div class="sidebar-agent-rows">${here.map(agent => `<div class="sidebar-agent-row" title="${h(agent.address)}">${agentMark(agent)}<span>${h(agent.name)} · ${h(agentPlace(agent).replace(/^on /, ""))}</span>${btn("agent-message", "Message", { address: agent.address, name: agent.name }, "sidebar-agent-message")}</div>`).join("")}</div>` : "";
       groups.push(`<section class="sidebar-project${active ? " active" : ""}" data-project="${h(path)}" style="--face:${h(projectFaces.get(path)?.tone ?? projectTone(name))}"><div class="sidebar-project-header">${label}${marks}${status}${start}${viewButton(key)}</div>${viewLine(key)}${agentRows}<div class="sidebar-project-chats${key === unfoldingGroup && expanded ? " unfolding" : ""}" id="project-chats-${index}"${expanded ? "" : " hidden"}>${rows.length ? rows.join("") : '<p class="sidebar-empty">No chats yet</p>'}</div></section>`);
     }
-    // Chats with no project follow, under Just a chat.
+    // Chats with no project follow, under a plain grey Chats label.
     const plainChats = sorted(rest.filter((item) => !item.workspace && matches(item)));
-    if (plainChats.length) plainGroup = group("plain", "Just a chat", groupRows("plain", plainChats), plainChats.length);
+    if (plainChats.length) plainGroup = group("plain", "Chats", groupRows("plain", plainChats), plainChats.length);
   } else {
     // By date or by state, every chat in one list, each naming its project.
     // The open project's branches to review lead it.

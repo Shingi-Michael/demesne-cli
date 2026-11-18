@@ -3222,3 +3222,16 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop .code-header button .ico { width: 14px; height: 14px; }
 .desktop .ask-chev .ico { width: 14px; height: 14px; }
 .desktop .ask-chev .ico.up { transform: rotate(180deg); }
+
+/* Grey folders (pass 239 1, 2026-11-18): a project without its own icon file
+   shows a plain grey folder, not a coloured letter tile; its own icon still
+   wins. Chats with no project sit under a plain grey "Chats" label, set like
+   "Projects", with no icon. The rings for working and asking stay. */
+.project-face.folder { background: none; box-shadow: none; color: var(--t3); }
+.project-face.folder .ico { width: 17px; height: 17px; }
+.sidebar-project.active .project-face.folder, .sidebar-project-name:hover .project-face.folder { color: var(--t2); }
+#desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-row { height: 26px; margin-top: 10px; }
+#desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-row:hover { background: none; }
+#desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-toggle { height: 26px; padding: 0 6px 0 10px; color: var(--t4); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+#desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-toggle:hover { color: var(--t2); }
+#desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-count { font-size: 11px; color: var(--t4); }

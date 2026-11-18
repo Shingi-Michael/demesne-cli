@@ -1,16 +1,20 @@
-/* Notes on a mockup (pass 233 A). Demesne puts this in front of every page
-   on the Foundry page. It tells the Foundry page which part is under the
-   pointer (its place, what it is, where it is in the markup) and where the
-   parts that carry notes are now, so the Foundry page can outline a part,
-   name it and pin notes to it.
+/* Notes on a mockup (pass 233 A, pass 242 A). Demesne puts this in front of
+   every page on the Foundry page. It tells the Foundry page where the pointer
+   is, and where the parts that carry notes are now, so the Foundry page can
+   show a small + when the pointer rests and pin notes exactly where you click.
 
-   It draws nothing and changes nothing on the page: the outline, the tag,
-   the pins and the note box are the Foundry page's, outside this frame. */
+   A click on the mockup is a pin: it is told to the Foundry page and kept from
+   the page. A click on a control (a button, a link, a field, a switch) still
+   works, so a page that is a tool to keep stays one; resting on it shows the +
+   beside the pointer, and the Foundry page asks for a pin there ("pin-at").
+   Only a page the Foundry page takes notes on pins at all.
+   It draws nothing and changes nothing on the page: the +, the pins and the
+   note box are the Foundry page's, outside this frame. */
 (function () {
   "use strict";
   if (window.__demesneNote) return;
   window.__demesneNote = true;
-  var doc = document, over = null, watched = [], queued = false, last = "";
+  var doc = document, point = null, watched = [], queued = false, last = "", noting = false;
   // A piece a person would name: a control, a row, or one of the kit's parts.
   var PIECE = "button,a,input,select,textarea,label,summary,tr,li,[role=button],[role=tab],[role=switch],[role=checkbox],[role=radio],[role=menuitem],[role=option],[role=link],"
     + "d-row,d-card,d-stat,d-toggle,d-seg,d-tabs,d-chart,d-avatar,d-message,d-composer,d-icon,d-mark";
@@ -86,11 +90,10 @@
   }
   function find(sel) { try { return doc.querySelector(sel); } catch (error) { return null; } }
 
-  /* Where things are now: the part under the pointer, and each part with a note. */
+  /* Where things are now: the pointer, and each part with a note. */
   function send(force) {
     queued = false;
-    if (over && !over.isConnected) over = null;
-    var message = { state: "at", vw: innerWidth, vh: innerHeight, part: over ? describe(over) : null,
+    var message = { state: "at", vw: innerWidth, vh: innerHeight, point: point,
       pins: watched.map(function (pin) { var el = find(pin.selector); return { n: pin.n, rect: el ? box(el.getBoundingClientRect()) : null }; }) };
     var now = JSON.stringify(message);
     if (!force && now === last) return;
@@ -98,24 +101,47 @@
     tell(message);
   }
   function soon() { if (!queued) { queued = true; requestAnimationFrame(function () { send(false); }); } }
+  // The page itself holds a pin that is on no part: it moves with the page as it scrolls.
+  function page() {
+    return { tag: "html", role: "", type: "", cls: "", label: "", text: "", heading: "", kids: 0, selector: "html", html: "", rect: box(doc.documentElement.getBoundingClientRect()) };
+  }
+  // Controls keep working when clicked: the page's own, and the deck's arrows and strip.
+  var CONTROL = "button,a[href],input,select,textarea,label,summary,[contenteditable],[onclick],[data-go],[role=button],[role=tab],[role=switch],[role=checkbox],[role=radio],[role=menuitem],[role=option],[role=link],[role=slider],d-toggle,d-seg,d-composer,.deck-prev,.deck-next,.deck-strip";
+  function control(el) { return !!(el && el.closest && el.closest(CONTROL)); }
+  function pinAt(x, y) {
+    var el = partOf(doc.elementFromPoint(x, y)), part = el ? describe(el) : page(), r = part.rect;
+    tell({ state: "pin", vw: innerWidth, vh: innerHeight, point: { x: x, y: y }, part: part, fx: r.w > 0 ? (x - r.x) / r.w : 0, fy: r.h > 0 ? (y - r.y) / r.h : 0 });
+  }
 
   doc.addEventListener("pointermove", function (event) {
     // The demo's own pointer moves are not the person's.
     if (!event.isTrusted) return;
-    var el = partOf(doc.elementFromPoint(event.clientX, event.clientY));
-    if (el !== over) { over = el; soon(); }
+    point = { x: event.clientX, y: event.clientY };
+    soon();
   }, true);
-  doc.documentElement.addEventListener("pointerleave", function (event) { if (event.isTrusted && over) { over = null; soon(); } });
+  doc.documentElement.addEventListener("pointerleave", function (event) { if (event.isTrusted && point) { point = null; soon(); } });
+  /* A click is a pin, exactly where it landed, held by the smallest piece under it. */
+  doc.addEventListener("click", function (event) {
+    if (!noting || !event.isTrusted || event.button !== 0 || control(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pinAt(event.clientX, event.clientY);
+  }, true);
+  // Off the controls, a press is the start of a pin, not of a selection.
+  doc.addEventListener("mousedown", function (event) { if (noting && event.isTrusted && event.button === 0 && !control(event.target)) event.preventDefault(); }, true);
   addEventListener("scroll", soon, true);
   addEventListener("resize", soon);
-  // The page moves under a part (a tab switches, a list grows): keep the outline and the pins on it.
-  setInterval(function () { if (over || watched.length) send(false); }, 400);
+  // The page moves under a part (a tab switches, a list grows): keep the pins on it.
+  setInterval(function () { if (watched.length) send(false); }, 400);
   addEventListener("message", function (event) {
     var data = event.data;
     if (!data || data.demesne !== "note" || event.source !== parent) return;
     // The pointer is on the Foundry page's own drawing over this frame: it is on no part here.
-    if (data.action === "away") { if (over) { over = null; soon(); } return; }
+    if (data.action === "away") { if (point) { point = null; soon(); } return; }
+    // The + beside a control was clicked: a pin where the pointer rested.
+    if (data.action === "pin-at" && typeof data.x === "number" && typeof data.y === "number") { pinAt(data.x, data.y); return; }
     if (data.action === "watch" && Array.isArray(data.pins)) {
+      noting = true;
       watched = data.pins.filter(function (pin) { return pin && typeof pin.selector === "string" && typeof pin.n === "number"; }).slice(0, 40);
       send(true);
     }

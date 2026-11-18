@@ -92,7 +92,6 @@ d-toggle[on]{background:var(--dm-blue,var(--accent))}d-toggle[on]::after{left:19
 /* Options to choose between: a strip on top, one option at a time, at full size. */
 d-compare.dp-switch{display:flex;flex-direction:column;align-items:stretch;gap:16px}
 d-compare.dp-stack{display:flex;flex-direction:column;align-items:stretch;gap:40px}
-d-compare.dp-stack>.dp-rec{outline:2px solid #f2b6c8;outline-offset:10px;border-radius:12px}
 d-compare.dp-switch>[hidden]{display:none}
 d-compare.dp-one{display:block}d-compare.dp-one>[hidden]{display:none}
 /* A review of something that exists (pass 223 A): the screen as it is with the parts that need work outlined, then each part at its own size. */
@@ -110,7 +109,7 @@ d-review d-compare{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),
 d-review d-compare.dr-wide{grid-template-columns:minmax(0,1fr);gap:var(--space-4)}
 d-review d-compare>*{gap:var(--space-2)}
 d-review d-compare>*>.dr-tile{flex:1;padding:var(--space-4) var(--space-3)}
-d-review d-compare>.dp-rec>.dr-tile{box-shadow:0 0 0 2px #f2b6c8}
+d-review d-compare>.dp-rec>.dr-tile{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--secondary,#666) 45%,transparent)}
 d-review .dp-opt{flex-wrap:wrap;font-size:var(--text-xs);font-weight:500;color:var(--secondary)}
 d-review .dr-now>.dp-opt{color:var(--muted);font-weight:400}
 d-review .dp-opt em{padding:0 7px;border-radius:6px;background:color-mix(in srgb,#f2b6c8 24%,transparent);color:color-mix(in srgb,#d9648c 72%,var(--ink));font-size:11.5px;line-height:18px}

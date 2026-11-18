@@ -1,3 +1,4 @@
+import { chatIcon } from "./chat-icons.ts";
 /// The environment card (pass 173 A): the top of the cards says where this
 /// chat runs, in three dim facts and no greeting (no tile, no big name). The
 /// machine with a dot while the daemon is up, the branch with how far it is
@@ -61,11 +62,7 @@ const words = (model: WhereView["model"]) => model.displayName?.trim() || model.
 const short = (value: number) => value >= 1e6 ? `${+(value / 1e6).toFixed(1)}m` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value);
 const home = (path: string) => path.replace(/^\/Users\/[^/]+|^\/home\/[^/]+|^[A-Za-z]:\\Users\\[^\\]+/, "~");
 
-const ICON = {
-  machine: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
-  branch: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5a7 7 0 0 1-7 7H8.5"/></svg>',
-  model: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
-};
+const ICON = { machine: chatIcon("machine"), branch: chatIcon("branch"), model: chatIcon("model") };
 const row = (icon: string, value: string, right = "", title = "") => `<span class="env-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="env-v">${value}</span>${right ? `<span class="env-r">${right}</span>` : ""}</span>`;
 
 export function whereCard(view: WhereView): WhereCard {

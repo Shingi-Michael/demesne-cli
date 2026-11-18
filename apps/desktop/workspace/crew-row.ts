@@ -1,3 +1,4 @@
+import { foldMark } from "./chat-icons.ts";
 /// Sub-agents at work (pass 183 A): a round of sub-agents is one line. The
 /// faces of whoever is working (the d. for one on your own model, no light
 /// bulb), "3 agents working" with a saying, and the newest step any of them
@@ -67,7 +68,7 @@ export function crewRowHTML(view: CrewView): string {
   const meta = busy.length && !one ? `${members.length - busy.length} of ${members.length} done`
     : failed.length && failed.length < members.length ? `<span class="${failed.every((member) => member.crew === "stopped") ? "crew-stopped-n" : "bad"}">${failed.length} stopped</span>` : "";
   const head = `<button type="button" class="tool-row ask-row crew-row${busy.length ? " running" : ""}${failed.length === members.length ? " failed" : ""}" data-action="toggle-crew" data-args="${h(JSON.stringify({ id: view.key }))}" aria-expanded="${view.open}">`
-    + `${faces}<span class="verb">${h(verb)}</span>${phrase}${after}<span class="sp"></span><small class="meta">${meta}</small><span class="ask-chev" aria-hidden="true">${view.open ? "▴" : "▾"}</span></button>`;
+    + `${faces}<span class="verb">${h(verb)}</span>${phrase}${after}<span class="sp"></span><small class="meta">${meta}</small><span class="ask-chev" aria-hidden="true">${foldMark(view.open)}</span></button>`;
   if (!view.open) return `<div class="crew" data-crew="${h(view.key)}">${head}</div>`;
   const lines = members.map((member) => {
     const mark = running(member) ? "◦" : stopped(member) ? "✕" : "✓";

@@ -3197,3 +3197,28 @@ html.mac-chrome #desktop-toolbar #workspace-pins .bar-tab { -webkit-app-region: 
 .dp-meter i.on { background: color-mix(in srgb, var(--t1) 70%, transparent); }
 /* A tab's menu opens over the top bar. */
 #row-menu { z-index: 90; }
+
+/* Chat icons (pass 236 D, colour by kind): one set drawn on a 16px grid with
+   a 1.5px line (chat-icons.ts). A closed shape carries a faint fill of its
+   own colour; a step's icon takes the colour of its kind, the rest stay grey. */
+.ico.ico16 { stroke-width: 1.5; }
+.ico16 .tint { fill: currentColor; fill-opacity: 0.2; stroke: none; }
+body.desktop { --k-read: #7eaef0; --k-search: #b39cf0; --k-edit: #e8b46a; --k-run: #7fd49a; --k-list: #5fb0c8; --k-ask: #f08ab0; --k-mail: #f08ab0; }
+html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #7d5fd0; --k-edit: #b07a1f; --k-run: #2f9a57; --k-list: #2c8aa3; --k-ask: #c94a7e; --k-mail: #c94a7e; }
+.desktop .ico.step-ico { opacity: 0.9; }
+.desktop .steps .ico.k-read, .desktop .ico.k-read { color: var(--k-read); }
+.desktop .steps .ico.k-search, .desktop .ico.k-search { color: var(--k-search); }
+.desktop .steps .ico.k-edit, .desktop .ico.k-edit { color: var(--k-edit); }
+.desktop .steps .ico.k-run, .desktop .ico.k-run { color: var(--k-run); }
+.desktop .steps .ico.k-list, .desktop .ico.k-list { color: var(--k-list); }
+.desktop .steps .ico.k-ask, .desktop .ico.k-ask { color: var(--k-ask); }
+.desktop .steps .ico.k-mail, .desktop .ico.k-mail { color: var(--k-mail); }
+.desktop .tool-row .ask-d.step-face { width: 16px; height: 16px; }
+.desktop .turn-receipt .receipt-action .ico.ico16, .desktop .turn-receipt .receipt-files .chev.ico16 { width: 14px; height: 14px; }
+.desktop #composer .send .send-arrow.ico16 { width: 20px; height: 20px; stroke-width: 1.5; }
+.desktop .code-header button { display: grid; place-items: center; width: 22px; height: 18px; color: var(--t3); }
+.desktop .code-header button:hover { color: var(--t1); }
+.desktop .code-header button.copied { color: var(--k-run); }
+.desktop .code-header button .ico { width: 14px; height: 14px; }
+.desktop .ask-chev .ico { width: 14px; height: 14px; }
+.desktop .ask-chev .ico.up { transform: rotate(180deg); }

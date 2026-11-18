@@ -1,3 +1,4 @@
+import { chatIcon } from "./chat-icons.ts";
 import { previewable } from "@demesne/protocol";
 import { marked, Renderer, type Token, type TokensList } from "marked";
 import DOMPurify from "dompurify";
@@ -157,7 +158,9 @@ function decorate(parsed: string): string {
     const copy = document.createElement("button");
     copy.type = "button";
     copy.dataset.action = "copy-code";
-    copy.textContent = "copy";
+    copy.title = "Copy code";
+    copy.setAttribute("aria-label", "Copy code");
+    copy.innerHTML = chatIcon("copy");
     head.append(label, copy);
     block.prepend(head);
   }

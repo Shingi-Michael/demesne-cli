@@ -2,6 +2,7 @@
 /// of whoever is researching, "Researching", and a page count that ticks
 /// up. A face greys out when that researcher is done; the judge's part reads
 /// "Putting it together". Click it for who took which question.
+import { foldMark } from "./chat-icons.ts";
 import type { ResearchState } from "../../../packages/protocol/src/index.ts";
 
 const h = (value: unknown) =>
@@ -45,7 +46,7 @@ export function researchRowHTML(view: ResearchRowView): string {
   const pages = research?.pages ?? 0;
   const meta = [pages ? `${pages} page${pages === 1 ? "" : "s"}` : running ? "starting…" : "", done ? duration(tool.durationMs) : ""].filter(Boolean).join(" · ");
   const head = `<button type="button" class="tool-row ask-row research-row${running ? " running" : ""}${failed ? " failed" : ""}" data-action="toggle-research" data-args="${h(JSON.stringify({ id: view.key }))}" aria-expanded="${view.open}">`
-    + `${faces}<span class="verb">${h(verb)}</span><span class="rs-topic">${h(topic)}</span><span class="sp"></span><small class="meta">${h(meta)}</small><span class="ask-chev" aria-hidden="true">${view.open ? "▴" : "▾"}</span></button>`;
+    + `${faces}<span class="verb">${h(verb)}</span><span class="rs-topic">${h(topic)}</span><span class="sp"></span><small class="meta">${h(meta)}</small><span class="ask-chev" aria-hidden="true">${foldMark(view.open)}</span></button>`;
   if (!view.open || !lanes.length) return head;
   const lines = lanes.map((lane) => {
     const right = lane.state === "failed" ? `<span class="bad">didn't finish</span>` : lane.state === "running" ? (running ? "reading…" : "") : `${lane.pages} page${lane.pages === 1 ? "" : "s"}`;

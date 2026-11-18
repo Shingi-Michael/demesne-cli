@@ -80,6 +80,7 @@ import { OpenTabs } from "./tabs.ts";
 import { GoogleAIForm } from "./google-ai-form.ts";
 import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
 import { updateCheckLine, type AppUpdate } from "./release-line.ts";
+import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-icons.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -1496,11 +1497,11 @@ const planName = (limits: PlanLimits) => `${capital(limits.provider)} plan`;
 /// chat uses it, and a chat that uses none has no column (pass 86 A). The
 /// only colour is a pink dot on what needs you.
 const CARD_ICON = {
-  context: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 7.6 10.5L12 12z"/></svg>',
-  changes: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14h6M12 11v6"/></svg>',
-  agents: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
-  preview: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg>',
-  connectors: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>',
+  context: chatIcon("context"),
+  changes: chatIcon("changes"),
+  agents: chatIcon("person"),
+  preview: chatIcon("preview"),
+  connectors: chatIcon("connectors"),
 } as const;
 const cardsOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-open") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
@@ -2253,18 +2254,10 @@ function subagentSteps(tool: ToolEntry) {
 /// One quiet line per step: an icon for the kind of work, the verb, the
 /// target in mono, and what came of it on the right. An edit or a command
 /// carries a chevron and unfolds its diff or output under the row.
-const STEP_ICONS: Record<string, string> = {
-  read: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
-  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
-  edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
-  run: '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
-  list: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  agent: '<path d="M12 3v2"/><path d="m5.6 5.6 1.4 1.4"/><path d="M3 12h2"/><path d="m18.4 5.6-1.4 1.4"/><path d="M21 12h-2"/><circle cx="12" cy="13" r="5"/><path d="M12 18v3"/>',
-  ask: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
-  other: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
-  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
-};
-const stepIconFor = (kind: string) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${STEP_ICONS[kind] ?? STEP_ICONS.other}</svg>`;
+/// A step's icon by its kind, coloured by kind (chat-icons.ts, pass 236 D);
+/// an agent's step shows Demesne's face.
+const stepIconFor = (kind: string) => kind === "agent" ? DEMESNE_FACE
+  : chatIcon(kind in SHAPES ? kind as ChatIcon : "other", `step-ico k-${kind in SHAPES ? kind : "other"}`);
 const stepIcon = (tool: ToolEntry) => {
   const kind = tool.name === "run_command" ? "run"
     : tool.phase === "change" ? "edit"
@@ -2279,10 +2272,10 @@ const stepIcon = (tool: ToolEntry) => {
 };
 const ICON_SWITCH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h12l-3-3"/><path d="M21 17H9l3 3"/><path d="M15 7a6 6 0 0 1 6 6"/></svg>';
 const ICON_SPARK = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
-const ICON_COPY = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-const ICON_UNDO = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
-const ICON_AGAIN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>';
-const CHEVRON = '<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+const ICON_COPY = chatIcon("copy");
+const ICON_UNDO = chatIcon("undo");
+const ICON_AGAIN = chatIcon("again");
+const CHEVRON = chatIcon("chev", "chev");
 /// Whether a step has something to unfold: an edit's diff, a command's
 /// output, a sub-agent's own steps and what it found.
 const foldable = (tool: ToolEntry) =>
@@ -2701,7 +2694,7 @@ function agentFold(run: WorkspaceRun, tool: ToolEntry) {
     `<div class="tool-row quiet">${stepIconFor(kind)}<span class="verb">${shining ? shine(verb) : h(verb)}</span>${target ? `<code class="target" title="${h(target)}">${h(target)}</code>` : ""}<span class="sp"></span><small class="meta">${meta}</small></div>`;
   const cli = cliAgent(tool);
   let body = cli && tool.subagentWhy ? `<div class="agent-why"><b>Why ${h(CLI_NAMES[cli]!)}:</b> ${h(tool.subagentWhy.replace(/^[^:]+:\s*/, ""))}</div>`
-    : tool.subagentModel ? `<div class="tool-row quiet agent-on">${stepIconFor("agent")}<span class="verb">on ${h(cli ? CLI_NAMES[cli]! : tool.subagentModel)}</span></div>` : "";
+    : tool.subagentModel ? `<div class="tool-row quiet agent-on">${cli ? `<span class="agent-face step-face" data-provider="${h(cli)}" aria-hidden="true">${agentFace(cli, "calm")}</span>` : stepIconFor("agent")}<span class="verb">on ${h(cli ? CLI_NAMES[cli]! : tool.subagentModel)}</span></div>` : "";
   for (let i = 0; i < steps.length; i++) {
     const last = i === steps.length - 1 && live;
     let j = i;
@@ -7295,8 +7288,10 @@ async function dispatch(
       target?.closest("pre")?.querySelector("code")?.textContent ?? "";
     await api("copy", { text });
     if (target) {
-      target.textContent = "copied";
-      setTimeout(() => (target.textContent = "copy"), 1500);
+      // The icon turns into a tick for a moment (pass 236 D).
+      target.innerHTML = chatIcon("check");
+      target.classList.add("copied");
+      setTimeout(() => { target.innerHTML = chatIcon("copy"); target.classList.remove("copied"); }, 1500);
     }
     return;
   }

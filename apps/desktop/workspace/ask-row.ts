@@ -3,6 +3,7 @@
 /// many have answered. Click it for a line per agent, with the first line of
 /// its answer once that comes back as mail.
 
+import { foldMark } from "./chat-icons.ts";
 import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts";
 
 export interface Asked { key: string; id: string; to: string; agent: string | null; name: string; project: string; state: string }
@@ -77,7 +78,7 @@ export function askRowHTML(view: AskRowView): string {
   const busy = sending || (answered < reached.length && reached.some((item) => view.working(item.agent)));
   const faces = `<span class="ask-faces" aria-hidden="true">${asked.slice(0, 4).map((item) => `<span class="ask-face">${view.face(item.agent, answers.has(item.to) ? "calm" : "focus")}</span>`).join("")}</span>`;
   const head = `<button type="button" class="tool-row ask-row${busy ? " running" : ""}" data-action="toggle-asked" data-args="${h(JSON.stringify({ id: `${view.runId}:${asked[0]!.key}` }))}" aria-expanded="${view.open}">`
-    + `${view.mail}${faces}<span class="verb">${h(who)}</span><code class="target">${h(projects.join(", "))}</code><span class="sp"></span><small class="meta">${meta}</small><span class="ask-chev" aria-hidden="true">${view.open ? "▴" : "▾"}</span></button>`;
+    + `${view.mail}${faces}<span class="verb">${h(who)}</span><code class="target">${h(projects.join(", "))}</code><span class="sp"></span><small class="meta">${meta}</small><span class="ask-chev" aria-hidden="true">${foldMark(view.open)}</span></button>`;
   if (!view.open) return head;
   const lines = asked.map((item) => {
     const answer = answers.get(item.to);

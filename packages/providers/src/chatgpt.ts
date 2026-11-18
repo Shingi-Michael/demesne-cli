@@ -9,8 +9,11 @@ export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
 /// Codex's own backend, the one the Codex CLI and app talk to. Requests here
 /// are signed in as Codex, so they count against the Codex plan.
 export const CODEX_BACKEND_URL = "https://chatgpt.com/backend-api/codex";
-/// The catalog is served per client version; this is the one it was read with.
-const CODEX_CLIENT_VERSION = "0.164.0";
+/// Codex's backend serves its model catalog per client version: a model whose
+/// minimal client version is newer than the one asked with is left out. Keep
+/// this at the latest Codex release (npm @openai/codex) so new models, such as
+/// GPT-6.2 Astra and Sol (2026-11-17), show up in the picker.
+const CODEX_CLIENT_VERSION = "0.170.0";
 
 /// One Responses adapter, two routes: the public plan-sharing route (ChatGPT)
 /// and Codex's backend (Codex). They differ in where requests go, the

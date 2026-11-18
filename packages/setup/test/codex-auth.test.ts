@@ -58,5 +58,5 @@ test("connectCodex skips the browser for an account that is already signed in an
     fetch: (async (url: string | URL | Request) => { events.push(String(url)); return Response.json({ models: [{ slug: "gpt-6.1-sol", visibility: "list", context_window: 272_000 }] }); }) as unknown as typeof fetch });
   expect(account.email).toBe("person@example.test");
   expect(models.map(m => m.id)).toEqual(["codex/gpt-6.1-sol"]);
-  expect(events).toEqual(["https://chatgpt.com/backend-api/codex/models?client_version=0.164.0"]);
+  expect(events).toEqual(["https://chatgpt.com/backend-api/codex/models?client_version=0.170.0"]);
 });

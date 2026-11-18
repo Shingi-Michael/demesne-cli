@@ -14,7 +14,7 @@ const collect = async (p: CodexProvider, r = request) => Array.fromAsync(p.strea
 
 test("lists Codex's catalog under codex/ ids with its thinking levels", async () => {
   const p = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async (url: string | URL | Request, init?: RequestInit) => {
-    expect(String(url)).toBe("https://chatgpt.com/backend-api/codex/models?client_version=0.164.0");
+    expect(String(url)).toBe("https://chatgpt.com/backend-api/codex/models?client_version=0.170.0");
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer access");
     expect(new Headers(init?.headers).get("chatgpt-account-id")).toBe("acct-1");
     return Response.json({ models: [

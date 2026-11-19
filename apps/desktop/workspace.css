@@ -2898,6 +2898,12 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
    cards below it still fit. */
 .desktop #cards .card[data-card=context] .card-body { padding: 4px 10px 10px; }
 .desktop #cards .card[data-card=context] .card-line .warn { color: var(--warn); }
+/* The Cache half of the context card (pass 243 A): a tick per request, greys only. */
+.desktop :is(#context-card, #cards .ctx-card) .cache-ticks { display: flex; align-items: flex-end; gap: 2px; height: 14px; margin: 2px 0 8px; }
+.desktop :is(#context-card, #cards .ctx-card) .cache-ticks i { flex: 1; min-width: 2px; max-width: 8px; height: 100%; border-radius: 1px; background: var(--t3); }
+.desktop :is(#context-card, #cards .ctx-card) .cache-ticks i.again { height: 55%; background: var(--line2); }
+.desktop :is(#context-card, #cards .ctx-card) .cache-foot { font-size: 12px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.desktop :is(#context-card, #cards .ctx-card) .cache-why { margin: 6px 0 0; font-size: 12px; line-height: 17px; color: var(--t3); }
 .desktop #cards .ctx-card { font-size: 13px; }
 .desktop #cards .ctx-card .context-divider { margin: 10px -10px; }
 .desktop #cards .ctx-card .context-compact { margin-top: 0; }

@@ -65,7 +65,8 @@ import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, Routine } from "@demesne/protocol";
+import type { ChatCache, FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, Routine } from "@demesne/protocol";
+import { cacheHalfHTML } from "./cache-line.ts";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
 import { agoWords, prHandable, prHandText, prStanding } from "./pr-row.ts";
@@ -1432,9 +1433,30 @@ function columnContextCard() {
   const node = document.querySelector<HTMLElement>("#cards [data-card=context]");
   return node && node.offsetParent ? node : null;
 }
+/// The open chat's cache line (pass 243 A): how much of it the provider read
+/// from its cache. Asked for when the card is drawn and the chat has moved
+/// on since the last answer: another chat, another request, a turn ending.
+let chatCacheOf: { key: string; session: string; cache: ChatCache | null } | null = null;
+function chatCache(): ChatCache | null {
+  const session = state?.session?.id;
+  if (!session) return null;
+  const key = `${session}:${state!.runs.length}:${state!.activeTurnId ?? ""}:${state!.provider?.usage?.totalTokens ?? ""}`;
+  if (chatCacheOf?.key !== key) {
+    // The last answer stays up while the next one is on its way.
+    chatCacheOf = { key, session, cache: chatCacheOf?.session === session ? chatCacheOf.cache : null };
+    void api<ChatCache | null>("session-cache", { id: session }).then((cache) => {
+      if (chatCacheOf?.key !== key) return;
+      chatCacheOf.cache = cache ?? null;
+      renderContextCard();
+      renderCards();
+    }, () => {});
+  }
+  return chatCacheOf.cache;
+}
 function contextCardHTML(c: ReturnType<typeof context>, limits: PlanLimits | undefined, showContext: boolean, showPlan: boolean) {
   const compact = showContext && worthCompacting(c.percentage) ? btn("compact", state!.activeTurnId ? "Compact after this turn" : "Compact now", {}, "link context-compact") : "";
-  const halves = [showContext ? contextHalf(c) : "", showPlan ? planHalf(limits!) : ""].filter(Boolean);
+  const cache = showContext ? cacheHalfHTML(chatCache(), Date.now(), modelWords({ id: state!.model.id, displayName: state!.model.displayName }), Boolean(state!.activeTurnId)) : "";
+  const halves = [showContext ? contextHalf(c) : "", cache, showPlan ? planHalf(limits!) : ""].filter(Boolean);
   const drive = showPlan ? `<span>${planUsed(limits!)!.window.usedPercent >= PLAN_LIMIT_DRIVE_PAUSE ? "Drive has paused its own runs" : `Drive pauses its own runs at ${PLAN_LIMIT_DRIVE_PAUSE}%`}</span>` : "<span></span>";
   return halves.join('<div class="context-divider"></div>') + (showPlan || compact ? `<div class="context-foot">${drive}${compact}</div>` : "");
 }
@@ -1595,7 +1617,7 @@ function renderCards() {
   app.classList.toggle("cards-wide", Boolean(filePreview?.wide) || Boolean(shownNow && shownBig));
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide], madeRoutines]);
+  const signature = JSON.stringify([c, chatCacheOf?.cache, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide], madeRoutines]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1966,6 +1988,8 @@ setInterval(() => {
   const turn = state.activeTurnId ?? null, since = Date.now() - planLimitsAt;
   if ((planLimitsTurn && !turn) || since > (turn ? 20_000 : 60_000)) void loadPlanLimits();
   planLimitsTurn = turn;
+  // "Warm for 24 more minutes" counts down while the card is open.
+  if (contextCardOpen) renderContextCard();
 }, 2_000);
 /// The rim says the state (pass 74 B): the panel's hairline edge carries the
 /// open chat's state, readable from across the room. A blue light runs along

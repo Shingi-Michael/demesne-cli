@@ -1952,6 +1952,8 @@ export class WorkspaceHost {
     }
     if (method === "model-scores") return this.client.modelScoreboard({ days: 30 });
     if (method === "plan-limits") return (await this.client.planLimits()).limits;
+    // The open chat's cache line, for the context card.
+    if (method === "session-cache") return typeof args.id === "string" && args.id.length <= 200 ? (await this.client.sessionCache(args.id)).cache : null;
     // Rest on a chat: its card, read from that chat's own state.
     // Its pull request on the row: what gh last said about the chats' PRs.
     if (method === "session-prs") {

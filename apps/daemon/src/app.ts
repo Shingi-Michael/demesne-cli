@@ -42,7 +42,7 @@ import {
   type SessionCleanupResponse,
   type DriveAlertsResponse,
   type DriveFixAction,
-  type DriveFixesResponse, type SessionPullRequestsResponse, type DriveAwayResponse, type DriveAutoResponse, type PlanLimitsResponse, planUsed,
+  type DriveFixesResponse, type SessionPullRequestsResponse, type DriveAwayResponse, type DriveAutoResponse, type PlanLimitsResponse, type ChatCacheResponse, planUsed,
   type ApiErrorBody,
   type ArchiveSessionResponse,
   type CancelTurnResponse,
@@ -71,6 +71,8 @@ import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
 import { AUTO_COMPACT_AT, KeepEdits, keepLines, NOTES_FROM } from "./turn-notes.ts";
 import { CacheClock } from "./cache-clock.ts";
+import { chatCache } from "./cache-line.ts";
+import { CACHE_LIFE_MS } from "@demesne/providers";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
@@ -2014,6 +2016,23 @@ export function createDaemonApp(options: {
         }));
         const response: SessionPullRequestsResponse = { pullRequests: Object.fromEntries(found.filter((entry) => entry !== null)) };
         return json(response);
+      }
+
+      // The chat's cache line, for the context card (cache-line.ts).
+      if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "sessions" && path[3] === "cache") {
+        if (!store.getSession(path[2]!)) return apiError("not_found", "Session not found", 404);
+        const calls = store.chatCacheCalls(path[2]!), last = calls.at(-1);
+        // How long the newest request's model keeps its cache, if it is still configured.
+        let life = { keepsMs: null as number | null, ownMachine: false };
+        if (last) for (const model of [last.model, undefined]) {
+          try {
+            const inference = snapshotTurnInference(processor, undefined, model ? { model } : undefined);
+            if (inference.providerId !== last.provider || inference.modelId !== last.model) continue;
+            life = { keepsMs: cacheClock.coldAfterMs(inference), ownMachine: (inference.cacheLifeMs ?? 0) >= CACHE_LIFE_MS.ownMachine };
+            break;
+          } catch { /* a model that is no longer offered: its lifetime is not known */ }
+        }
+        return json({ cache: chatCache(calls, life) } satisfies ChatCacheResponse);
       }
 
       if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

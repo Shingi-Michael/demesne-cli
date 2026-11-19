@@ -4,7 +4,8 @@
  * the previous one from its first byte. This runs one scripted chat through
  * the daemon's own engine with a stand-in model, flipping every switch that
  * could change what is sent (a tool beyond the everyday ones, plan mode,
- * auto-approve, a Foundry page, pictures, the permission mode, stepping away), then a
+ * auto-approve, a Foundry page, pictures, the permission mode, stepping away
+ * for less and for more than the cache's lifetime), then a
  * short second chat on a small window, where tools wait and are called
  * through use_tool (apps/daemon/src/tool-search.ts), and reads back what the
  * cache meter (apps/daemon/src/cache-prefix.ts) recorded for each request.
@@ -56,8 +57,10 @@ export const CHAT: ScriptedTurn[] = [
     ...Array.from({ length: 4 }, () => ({ call: [{ name: "view_image", args: { path: "shot.png" } }] })), { say: "They match." }] },
   { id: "attended", what: "a turn that asks before it acts", ask: "One more thing, what is 2+2?", mode: "ask", rounds: [{ say: "4" }] },
   { id: "unattended", what: "back to acting without asking", ask: "And 3+3?", rounds: [{ say: "6" }] },
-  { id: "away", what: "the next ask after 20 minutes away", ask: "Still there?", idleMinutes: 20, rounds: [{ say: "Yes." }] },
+  { id: "away", what: "the next ask after 20 minutes away, inside the cache's 30", ask: "Still there?", idleMinutes: 20, rounds: [{ say: "Yes." }] },
   { id: "back", what: "a plain follow-up", ask: "Good.", rounds: [{ say: "Yes." }] },
+  { id: "long-away", what: "the next ask after 45 minutes away, past the cache's 30", ask: "And now?", idleMinutes: 45, rounds: [{ say: "Still here." }] },
+  { id: "long-back", what: "a plain follow-up", ask: "Good.", rounds: [{ say: "Yes." }] },
 ];
 
 /// A short chat on a window too small for every tool's description: the
@@ -75,8 +78,10 @@ const SMALL_WINDOW = 32_768;
 /// The breaks that exist today: request (turn id # round) -> where it
 /// breaks, and the step of the caching plan that removes it.
 export const KNOWN: Record<string, { at: NonNullable<PrefixReport["brokeAt"]>; step: number; why: string }> = {
-  // By design: after this long the provider's cache is gone, so old reads are cut for free (forget-reads.ts).
-  "away#1": { at: "history", step: 5, why: "old reads and page sources are cut once the chat has sat idle" },
+  // By design: the stand-in model says it keeps its cache 30 minutes
+  // (cache-clock.ts). Past that the cache is gone, so old reads and page
+  // sources are cut for free (forget-reads.ts). Inside it nothing is touched.
+  "long-away#1": { at: "history", step: 5, why: "old reads and page sources are cut once the provider's cache is gone" },
 };
 
 export interface MeasuredRequest { id: string; what: string; report: PrefixReport;
@@ -106,7 +111,7 @@ async function runChat(chat: ScriptedTurn[], contextCapacity: number, problems: 
   let turnIndex = 0, round = 0, calls = 0;
   const asked: string[] = [];
   const model: TurnProcessor = {
-    providerId: "stand-in", modelId: "scripted", contextCapacity, maxOutputTokens: Math.min(8000, Math.floor(contextCapacity / 8)), preservesPromptCache: true,
+    providerId: "stand-in", modelId: "scripted", contextCapacity, maxOutputTokens: Math.min(8000, Math.floor(contextCapacity / 8)), preservesPromptCache: true, cacheLifeMs: 30 * 60_000,
     async listModels() { return [{ id: "scripted", provider: "stand-in", contextWindow: contextCapacity }]; },
     async *stream(messages): AsyncGenerator<ProviderStreamEvent> {
       asked.push(String(messages.findLast((message) => message.role === "user")?.content ?? ""));

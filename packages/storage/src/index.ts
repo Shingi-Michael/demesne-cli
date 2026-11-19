@@ -1765,6 +1765,15 @@ export class DemesneStore {
 
   /// The cache meter's finding for a request (daemon cache-prefix.ts), kept
   /// with its call so a miss can be explained later.
+  /// What the cache clock reads (apps/daemon/src/cache-clock.ts): recent
+  /// requests to one model that have a cache meter record and a cache count.
+  cacheSamples(provider: string, model: string, sinceIso: string, limit = 500): { inputTokens: number; cachedTokens: number; prefix: PrefixReport }[] {
+    const rows = this.database.query(`SELECT input_tokens, cached_input_tokens, prefix_json FROM provider_calls
+      WHERE provider = ? AND model = ? AND status = 'completed' AND started_at >= ? AND prefix_json IS NOT NULL AND input_tokens > 0 AND cached_input_tokens IS NOT NULL
+      ORDER BY started_at DESC LIMIT ?`).all(provider, model, sinceIso, limit) as { input_tokens: number; cached_input_tokens: number; prefix_json: string }[];
+    return rows.flatMap((row) => { try { return [{ inputTokens: row.input_tokens, cachedTokens: row.cached_input_tokens, prefix: JSON.parse(row.prefix_json) as PrefixReport }]; } catch { return []; } });
+  }
+
   recordProviderPrefix(providerCallId: string, prefix: PrefixReport): void {
     this.database.query("UPDATE provider_calls SET prefix_json = ? WHERE id = ?").run(JSON.stringify(prefix), providerCallId);
   }

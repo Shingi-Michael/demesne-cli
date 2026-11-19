@@ -27,7 +27,10 @@ import { createDaemonApp } from "../apps/daemon/src/app.ts";
 import { serveDaemon } from "../apps/daemon/src/http-server.ts";
 import type { TurnInference, TurnProcessor } from "../apps/daemon/src/processor.ts";
 import { createProcessor, signedInAccounts } from "../apps/daemon/src/providers-from-config.ts";
-import { CACHE_COLD_MS } from "../apps/daemon/src/forget-reads.ts";
+import { CACHE_LIFE_MS } from "../packages/providers/src/index.ts";
+
+/// Longer than any provider keeps its cache (apps/daemon/src/cache-clock.ts).
+const CACHE_COLD_MS = CACHE_LIFE_MS.ownMachine + 60 * 60_000;
 
 interface Step { ask: string; right: (answer: string, project: string) => boolean }
 interface Task { id: string; steps: Step[] }

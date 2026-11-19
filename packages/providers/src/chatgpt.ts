@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { defaultThinkingLevel, isRecord, planLimitsFromEvent, planLimitsFromHeaders, type ModelDescriptor, type PlanLimits } from "@demesne/protocol";
-import { ProviderError, readEventData, readLimitedText, type ProviderAdapter, type ProviderMessage, type ProviderRequest, type ProviderStreamEvent } from "./index.ts";
+import { CACHE_LIFE_MS, keepsCacheLong, ProviderError, readEventData, readLimitedText, type ProviderAdapter, type ProviderMessage, type ProviderRequest, type ProviderStreamEvent } from "./index.ts";
 
 import { randomUUID } from "node:crypto";
 
@@ -62,6 +62,13 @@ export class ResponsesProvider implements ProviderAdapter {
   private verifiedSol = false;
   /// The plan's 5-hour and weekly windows, from the last response that said.
   private limits: PlanLimits | null = null;
+  /// The 12-hour cache lifetime (GPT-5.6 and later): asked for until this
+  /// route refuses it. null: not asked yet.
+  private longCache: boolean | null = null;
+  /// Asking requests that failed for a reason nobody could name, and whether
+  /// the next request goes out without the option because of one.
+  private longStrikes = 0;
+  private longRest = false;
   constructor(private readonly options: {
     accountId: string;
     accessToken: (signal?: AbortSignal) => Promise<string>;
@@ -75,6 +82,9 @@ export class ResponsesProvider implements ProviderAdapter {
     fetch?: typeof fetch;
   }, private readonly route: Route = CHATGPT_ROUTE) { this.fetcher = options.fetch ?? fetch; this.id = route.id; }
   planLimits(): PlanLimits | null { return this.limits; }
+  cacheLifeMs(model: string): number {
+    return !keepsCacheLong(model) ? CACHE_LIFE_MS.short : this.longCache ? CACHE_LIFE_MS.long : CACHE_LIFE_MS.gpt;
+  }
   async listModels(signal?: AbortSignal): Promise<ModelDescriptor[]> {
     const response = await this.request(this.route.modelsPath, { signal }, { Accept: "application/json" });
     if (!response.ok) throw await httpError(response, this.route);
@@ -115,7 +125,40 @@ export class ResponsesProvider implements ProviderAdapter {
     }
     return this.listedSol ? { ...this.listedSol, ...(this.listedSol.reasoningLevels ? { reasoningLevels: [...this.listedSol.reasoningLevels] } : {}) } : solDescriptor();
   }
+  /// The cache lives 30 minutes on GPT-5.6 and later, 12 hours when asked
+  /// (https://developers.openai.com/api/docs/guides/prompt-caching), so a
+  /// chat you come back to after lunch still reads from it. Not every route
+  /// is the public API, so the first request that asks is watched: when it
+  /// fails before the model says anything, the same request goes out once
+  /// more as it always was, and if that one gets through the option was the
+  /// reason and is not asked for again (until Demesne restarts).
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
+    let asks = keepsCacheLong(request.model.slice(this.route.modelPrefix.length)) && this.longCache !== false;
+    if (asks && this.longRest) { this.longRest = false; asks = false; }
+    if (!asks || this.longCache === true) { yield* this.attempt(request, signal, asks); return; }
+    let said = false;
+    try {
+      for await (const event of this.attempt(request, signal, true)) { said = true; this.longCache = true; yield event; }
+      return;
+    } catch (error) {
+      // A refused option is a bad request, or a stream that fails with a
+      // reason this file does not know; a full plan, a sign-in, a server
+      // fault or a response cut short is not about the option.
+      const refused = error instanceof ProviderError && (error.status === 400 || error.status === 422
+        || (error.status === undefined && error.code !== undefined && !NOT_THE_OPTION.has(error.code)));
+      if (said || signal.aborted) throw error;
+      if (!refused) {
+        // A failure with no HTTP status and no reason to blame the option
+        // may still be its doing. The next request goes out without it, and
+        // a second such failure ends the asking: two failed requests at the
+        // most, never a provider that stops working.
+        if (!(error instanceof ProviderError && error.status !== undefined)) { if (++this.longStrikes >= 2) this.longCache = false; else this.longRest = true; }
+        throw error;
+      }
+    }
+    for await (const event of this.attempt(request, signal, false)) { this.longCache ??= false; yield event; }
+  }
+  private async *attempt(request: ProviderRequest, signal: AbortSignal, long: boolean): AsyncGenerator<ProviderStreamEvent> {
     // Medium is the default where supported; an explicit choice always wins.
     const slug = request.model.slice(this.route.modelPrefix.length);
     const sol = this.route.sol && request.model === SOL;
@@ -130,12 +173,13 @@ export class ResponsesProvider implements ProviderAdapter {
     const names = new Map((request.tools ?? []).map(t => [wireName(t.name), t.name]));
     const functions = (request.tools ?? []).map(t => ({ type: "function", name: wireName(t.name), description: t.description, parameters: t.inputSchema, strict: false }));
     const instructions = this.route.instructions ? request.messages.filter(m => m.role === "system").map(m => m.content).join("\n\n") : "";
-    const response = await this.request("responses", { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+    const send = (long: boolean) => this.request("responses", { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       model: request.model.slice(this.route.modelPrefix.length), store: false, stream: true,
       ...(this.route.instructions ? { instructions, tool_choice: "auto", parallel_tool_calls: true } : {}),
       // Each tool round resends the conversation; the key lets the plan route
       // reuse its cached prefix instead of reprocessing every token.
       ...(request.cacheKey ? { prompt_cache_key: request.cacheKey } : {}),
+      ...(long ? { prompt_cache_options: { ttl: "12h" } } : {}),
       // The chosen effort, and a readable summary of the model's reasoning
       // (shown as its thinking) when the model offers one.
       ...(() => {
@@ -146,6 +190,7 @@ export class ResponsesProvider implements ProviderAdapter {
       // The plan route forbids max_output_tokens, temperature and other Chat Completions knobs.
       ...(functions.length ? { tools: this.route.namespace ? [{ type: "namespace", name: this.route.namespace, description: "Demesne workspace and agent tools.", tools: functions }] : functions } : {}),
     }) }, {}, request.cacheKey);
+    const response = await send(long);
     if (!response.ok) throw await httpError(response, this.route);
     if (!response.body) throw new ProviderError(`${this.id} returned an empty stream.`);
     const calls = new Map<number, { index: number; id: string; name: string; arguments: string; done: boolean }>();
@@ -292,6 +337,8 @@ const messages: Record<string, string> = {
   chatpass_v2_scope_not_authorized: "ChatGPT plan permission is missing. Sign in again with --consent.",
   invalid_authorization_context: "ChatGPT rejected this authorization. Sign in again with --consent.",
 };
+/// Failures that have nothing to do with an option the route might not take.
+const NOT_THE_OPTION = new Set([...Object.keys(messages).filter((code) => code !== "unsupported_capability"), "incomplete_response", "model_mismatch", "unsupported_reasoning_effort", "model_not_listed"]);
 function responseError(value: Record<string, unknown>, route: Route, status?: number): ProviderError {
   // Codex's backend names its errors under `type` ("usage_limit_reached"); the public route under `code`.
   const raw = typeof value.code === "string" ? value.code : typeof value.type === "string" ? value.type : undefined;

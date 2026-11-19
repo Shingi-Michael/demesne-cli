@@ -102,6 +102,41 @@ read everything after that turn again. Two rules follow:
   ones leave three at a time (`apps/daemon/src/image-inputs.ts`), so a turn
   that looks at a page again and again rewrites a third as often.
 
+## The cache clock
+
+"Cold" used to be a guess: 15 minutes before old turns were cut, 10 before
+a chat compacted while you were away, the same for every provider. Now one
+place knows how long each provider keeps its cache
+(`apps/daemon/src/cache-clock.ts`), and both wait for it.
+
+| Provider | Keeps its cache |
+| --- | --- |
+| GPT-5.6 and later | 30 minutes; 12 hours when asked, which Demesne does on the Codex and ChatGPT plan routes |
+| Claude, Gemini, earlier GPT models, anything else by key | 5 minutes |
+| A model on your own machine | until another request takes its slot: time alone never makes it cold |
+
+- **The published figure comes first.** Each provider adapter says what its
+  provider promises (`cacheLifeMs`).
+- **Demesne asks for the long lifetime.** On GPT-5.6 and later every request
+  carries `prompt_cache_options: {"ttl": "12h"}`, so a chat you come back to
+  after lunch still reads from its cache. The plan routes are not the public
+  API, so the first request that asks is watched: if it is refused before
+  the model says anything, the same request goes out once more without the
+  option, and it is not asked for again until Demesne restarts. A request
+  that fails for a reason nobody can name counts against the option too:
+  two of those and the asking stops, so it can never keep a provider failing.
+- **What is measured corrects it.** The cache meter records how long a chat
+  sat idle before each request and whether the request repeated the one
+  before it. A request that repeated everything and still read nothing
+  shows the cache was gone by then; one that read it shows it was alive.
+  From the last 14 days, per provider and model: the cache is taken to be
+  gone from the first wait after which most requests missed (at least three
+  of them), and alive at least as long as most were seen to hit. A provider
+  that never reports a cache read is left at its published figure.
+
+With this, 20 minutes away from a GPT-6 chat no longer costs anything: the
+old turns stay as they were and the whole chat is read from cache.
+
 ## The cache meter
 
 Each model request is compared with the one before it in the same chat
@@ -123,12 +158,14 @@ Where a provider reports what it wrote to its cache, that is kept too
 `bun scripts/check-cache-prefix.ts` runs one scripted chat through the real
 engine with a stand-in model, flipping everything that could change a request
 (a tool beyond the everyday ones, plan mode, auto-approve, a Foundry page,
-pictures, the permission mode, stepping away), then a short second chat on a small
+pictures, the permission mode, stepping away for less and for more than the
+cache's lifetime), then a short second chat on a small
 window that calls a waiting tool through `use_tool`, and prints what each
 request kept. It runs with the tests. Today a cache could reuse 95% of what
 those chats send (56% at first, 86% with the fixed start). One request still
-breaks the prefix, by design: the first after 20 minutes away, when the
-cache is gone and the old turns are shortened.
+breaks the prefix, by design: the first after 45 minutes away from a model
+that keeps its cache 30, when the cache is gone and the old turns are
+shortened. The one after 20 minutes away keeps everything.
 
 `KNOWN` in that script lists the breaks that exist today, each with the step
 of the caching plan that removes it. The check fails when a request breaks

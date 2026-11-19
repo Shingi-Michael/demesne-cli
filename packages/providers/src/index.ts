@@ -55,6 +55,33 @@ export interface ProviderAdapter {
   planLimits?(): import("@demesne/protocol").PlanLimits | null;
   /// Release a conversation that can be paused at an external tool boundary.
   release?(cacheKey?: string): Promise<void>;
+  /// How long this provider says it keeps a prompt cache after a request to
+  /// this model, in milliseconds: the published figure, which the daemon's
+  /// cache clock corrects with what it measures (apps/daemon/src/cache-clock.ts).
+  cacheLifeMs?(model: string): number;
+}
+
+/// Published cache lifetimes. A cache that is asked about before it has
+/// gone is a cache kept; these are the least each provider promises.
+///  - GPT-5.6 and later keep a prefix 30 minutes, 12 hours when asked:
+///    https://developers.openai.com/api/docs/guides/prompt-caching
+///  - Claude keeps one 5 minutes (1 hour when asked), Gemini a few minutes,
+///    earlier GPT models 5 to 10:
+///    https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+///  - A model on your own machine keeps it until another request takes its
+///    slot, however long you were away: time alone never makes it cold.
+export const CACHE_LIFE_MS = { short: 5 * 60_000, gpt: 30 * 60_000, long: 12 * 60 * 60_000, ownMachine: 24 * 60 * 60_000 } as const;
+
+/// GPT-5.6 and later: the models with the 30-minute and 12-hour lifetimes.
+export function keepsCacheLong(model: string): boolean {
+  const match = /(?:^|\/)gpt-(\d+)(?:\.(\d+))?/.exec(model.toLowerCase());
+  return Boolean(match) && (Number(match![1]) > 5 || (Number(match![1]) === 5 && Number(match![2] ?? 0) >= 6));
+}
+
+/// Loopback, private and Tailscale addresses, and .local names: a machine of your own.
+export function isOwnMachine(hostname: string): boolean {
+  return hostname === "localhost" || hostname.endsWith(".local") || hostname === "[::1]" || hostname === "::1"
+    || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(hostname);
 }
 
 export class ProviderError extends Error {
@@ -106,6 +133,10 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     this.openRouterIgnore = [...(options.openRouterIgnore ?? [])];
     this.configuredContextWindow = options.contextWindow;
     this.fetchImplementation = options.fetch ?? fetch;
+  }
+
+  cacheLifeMs(model: string): number {
+    return isOwnMachine(this.baseUrl.hostname) ? CACHE_LIFE_MS.ownMachine : keepsCacheLong(model) ? CACHE_LIFE_MS.gpt : CACHE_LIFE_MS.short;
   }
 
   async listModels(signal?: AbortSignal): Promise<ModelDescriptor[]> {

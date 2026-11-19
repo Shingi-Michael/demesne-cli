@@ -56,7 +56,7 @@ test("explicit Sol verification requires completed inference and caches only thi
   expect((await p.listModels()).map(model => model.id)).toEqual(["first"]);
   const verified = await p.verifyModel("gpt-6.1-sol", signal);
   expect(verified).toMatchObject({ id: "gpt-6.1-sol", provider: "ChatGPT", contextWindow: 1_050_000 });
-  expect(bodies).toEqual([{ model: "gpt-6.1-sol", store: false, stream: true, reasoning: { effort: "low" },
+  expect(bodies).toEqual([{ model: "gpt-6.1-sol", store: false, stream: true, prompt_cache_options: { ttl: "12h" }, reasoning: { effort: "low" },
     input: [{ role: "user", content: "Reply exactly: OK." }], include: ["reasoning.encrypted_content"] }]);
   // A cached verification is copied, so callers cannot mutate later discovery.
   verified.reasoningLevels!.push("ultra");

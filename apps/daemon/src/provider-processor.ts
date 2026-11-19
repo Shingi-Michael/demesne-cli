@@ -126,6 +126,7 @@ export class ProviderTurnProcessor implements TurnProcessor {
       preservesPromptCache: this.preservesPromptCache,
       vision: this.provider.vision === true,
       contextCapacity,
+      cacheLifeMs: this.provider.cacheLifeMs?.(model),
       maxOutputTokens: requestDefaults.maxOutputTokens,
       temperature: requestDefaults.temperature,
       seed: requestDefaults.seed,

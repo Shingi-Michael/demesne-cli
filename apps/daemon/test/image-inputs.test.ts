@@ -6,7 +6,7 @@ import sharp from "sharp";
 import { DemesneStore } from "@demesne/storage";
 import { serializeMessages, type ProviderMessage } from "@demesne/providers";
 import { ingestImage } from "../src/artifacts.ts";
-import { hydrateImageInputs } from "../src/image-inputs.ts";
+import { hydrateImageInputs, keptFrom } from "../src/image-inputs.ts";
 import { viewImageTool } from "../src/tools.ts";
 import { createDaemonApp } from "../src/app.ts";
 
@@ -24,19 +24,22 @@ test("workspace screenshots become artifacts and vision inputs without persistin
     const output = await tool.executeWithArtifacts!({ path: "screenshot.png" }, context);
     if (typeof output === "string") throw new Error("Expected image");
     const messages: ProviderMessage[] = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const artifact = await ingestImage(store, output.images[0]!, { sessionId: session.id, turnId: turn.id, toolCallId: `call-${i}`, name: "view_image" }, 0);
       const message: ProviderMessage = { role: "tool", content: "Screenshot captured", toolCallId: `call-${i}`, imageArtifactIds: [artifact.id] };
       store.appendModelMessage(turn.id, message); messages.push(message);
     }
+    // Up to four pictures ride along; the fifth takes the oldest three out together.
+    const four = await hydrateImageInputs(store, session.id, messages.slice(0, 4), context.signal);
+    expect(four.map((message) => message.imageInputs?.length ?? 0)).toEqual([1, 1, 1, 1]);
     const hydrated = await hydrateImageInputs(store, session.id, messages, context.signal);
-    expect(hydrated[0]!.imageInputs).toBeUndefined();
-    expect(hydrated[1]!.imageInputs?.[0]!.url).toStartWith("data:image/png;base64,");
+    expect(hydrated.map((message) => message.imageInputs?.length ?? 0)).toEqual([0, 0, 0, 1, 1]);
+    expect(hydrated[3]!.imageInputs?.[0]!.url).toStartWith("data:image/png;base64,");
     expect(JSON.stringify(messages)).not.toContain("base64");
     const wire = serializeMessages(hydrated);
-    expect(wire.map((message) => message.role)).toEqual(["tool", "tool", "tool", "user"]);
+    expect(wire.map((message) => message.role)).toEqual(["tool", "tool", "tool", "tool", "tool", "user"]);
     expect(JSON.stringify(wire)).not.toContain("imageArtifactIds");
-    expect((wire[3]!.content as unknown[]).length).toBe(4);
+    expect((wire[5]!.content as unknown[]).length).toBe(4);
     const foreign = await hydrateImageInputs(store, "another-session", messages, context.signal);
     expect(foreign.every((message) => !message.imageInputs)).toBe(true);
     store.completeTurn(turn.id);
@@ -44,12 +47,23 @@ test("workspace screenshots become artifacts and vision inputs without persistin
     const stored = store.getCompletedModelTranscript(session.id).map((entry) => entry.message);
     expect(stored).toEqual(messages);
     const replay = await hydrateImageInputs(store, session.id, stored, context.signal);
-    expect(replay[2]!.imageInputs).toEqual(hydrated[2]!.imageInputs);
+    expect(replay[4]!.imageInputs).toEqual(hydrated[4]!.imageInputs);
     await expect(tool.executeWithArtifacts!({ path: "../outside.png" }, context)).rejects.toThrow();
     symlinkSync("/etc/hosts", join(root, "escape.png"));
     await expect(tool.executeWithArtifacts!({ path: "escape.png" }, context)).rejects.toThrow();
     await expect(hydrateImageInputs(store, session.id, messages, AbortSignal.abort())).rejects.toThrow();
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("pictures leave the conversation in blocks, not one each time a new one arrives", () => {
+  // Where the kept pictures start, for 1 to 11 of them, keeping two to four.
+  expect(Array.from({ length: 11 }, (_, index) => keptFrom(index + 1, 2, 4))).toEqual([0, 0, 0, 0, 3, 3, 3, 6, 6, 6, 9]);
+  // It never moves back, and never keeps fewer than two or more than four.
+  for (let count = 2; count < 40; count++) {
+    expect(keptFrom(count + 1, 2, 4)).toBeGreaterThanOrEqual(keptFrom(count, 2, 4));
+    expect(count - keptFrom(count, 2, 4)).toBeGreaterThanOrEqual(2);
+    expect(count - keptFrom(count, 2, 4)).toBeLessThanOrEqual(4);
+  }
 });
 
 test("the agent receives screenshot pixels after a tool call and on replay", async () => {

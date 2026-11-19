@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Architecture](architecture.md) · [Configuration](configuration.md#images-and-mcp)
 
-The daemon stores images that tools produce and can hand the latest two to a vision-capable model. The desktop window does not show them yet: its image panel went with the side panels. The data and routes below remain for the model, for history, and for a future inline view.
+The daemon stores images that tools produce and can hand the latest few (two to four) to a vision-capable model. The desktop window does not show them yet: its image panel went with the side panels. The data and routes below remain for the model, for history, and for a future inline view.
 
 ## Producers
 
@@ -19,7 +19,7 @@ The daemon ingests static PNG, JPEG and WebP images. Files are limited to 20 MiB
 
 Enabling `vision`, image generation, or MCP servers registers the image path; `capture_window` is macOS-specific and needs OS screenshot permission. Generation credentials are separate from ChatGPT sign-in.
 
-Storing an image does not give its pixels to the language model. With vision enabled, the latest two retained tool-image IDs in model context are resolved into image inputs at the provider boundary. Older images keep metadata; missing cached bytes fall back to text. The chat model, the image-generation model and the tool that captured a screenshot can all differ; keep those labels distinct when describing a result.
+Storing an image does not give its pixels to the language model. With vision enabled, the latest two to four retained tool-image IDs in model context are resolved into image inputs at the provider boundary (older ones leave three at a time, so the conversation is not rewritten at every new picture; see [Prompt caching](caching.md)). Older images keep metadata; missing cached bytes fall back to text. The chat model, the image-generation model and the tool that captured a screenshot can all differ; keep those labels distinct when describing a result.
 
 ## Data flow
 
@@ -79,7 +79,7 @@ Messages can name up to six staged `attachmentIds`. Clients that require actual 
 
 ## Model input and packaging
 
-Vision hydration selects the last two retained image IDs in tool messages, resolves their previews, and adds data URLs only at the provider boundary. The engine reserves additional context for those image inputs. A missing file does not prevent text-only replay. Chat Completions and Responses serialize image inputs differently through their respective adapters.
+Vision hydration selects the last two to four retained image IDs in tool messages, resolves their previews, and adds data URLs only at the provider boundary. The engine reserves additional context for those image inputs. A missing file does not prevent text-only replay. Chat Completions and Responses serialize image inputs differently through their respective adapters.
 
 Compiled daemons load native image dependencies beside the real executable, outside Bun's embedded filesystem. Keep `dist/node_modules` with `demesned`; building only the executable and omitting those codecs is incomplete packaging.
 

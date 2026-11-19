@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ModelMessage } from "@demesne/protocol";
-import { CACHE_COLD_MS, COLD_CUT_CHARS, CUT_AFTER_CHARS, cutPoint, forgetOldReads, forgetThrough, KEEP_UNDER, nextForgetThrough } from "../src/forget-reads.ts";
+import { CACHE_COLD_MS, COLD_CUT_CHARS, CUT_AFTER_CHARS, CUT_AFTER_SHARE, cutPoint, forgetOldReads, forgetThrough, KEEP_UNDER, nextForgetThrough } from "../src/forget-reads.ts";
 
 /// The old rule's size, kept only to place chats from before stored cuts.
 const OLD_CUT = 240_000;
@@ -75,6 +75,11 @@ test("old reads are cut only when the cache has gone cold, and the cut holds", (
   expect(nextForgetThrough(more, 20, 1_000)).toBe(20);
   // ...unless the pile gets huge, when the cut pays for its rebuild.
   expect(nextForgetThrough(numbered([readTurn(CUT_AFTER_CHARS + 1), chat(), chat()]), 0, 1_000)).toBe(10);
+  // On a small window "huge" comes sooner: a share of the window, not a fixed pile.
+  const window = 32_768, share = window * 4 * CUT_AFTER_SHARE;
+  expect(nextForgetThrough(numbered([readTurn(share + 1_000), chat(), chat()]), 0, 1_000, window)).toBe(10);
+  expect(nextForgetThrough(numbered([readTurn(share / 2), chat(), chat()]), 0, 1_000, window)).toBe(0);
+  expect(nextForgetThrough(numbered([readTurn(share + 1_000), chat(), chat()]), 0, 1_000, 1_000_000)).toBe(0);
   // A chat from before starts where the old rule had cut.
   const step = Math.floor(OLD_CUT / 2.5);
   expect(nextForgetThrough(numbered([readTurn(step), readTurn(step), readTurn(step), chat(), chat()]), null, 1_000)).toBe(30);

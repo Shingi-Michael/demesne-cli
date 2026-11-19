@@ -128,7 +128,7 @@ Read about it:
 
 ## It remembers the course
 
-A page's source leaves the chat once its turn is over, so a later ask used to start from a title alone. Now reading a mockup (`foundry_read`) hands back its brief with the source: for each ask so far, what you asked, the direction taken, what leads, what was dropped and what it started from. The first ask and the newest five are kept. The model is told to answer the newest ask, keep every earlier decision you did not change, and never bring back what was dropped unless you ask. (`briefOf` in `apps/daemon/src/foundry.ts`.)
+A page's source leaves the chat once its turn is old (with the old reads, when the provider's cache has gone cold, see [Prompt caching](caching.md)), so a later ask used to start from a title alone. Now reading a mockup (`foundry_read`) hands back its brief with the source: for each ask so far, what you asked, the direction taken, what leads, what was dropped and what it started from. The first ask and the newest five are kept. The model is told to answer the newest ask, keep every earlier decision you did not change, and never bring back what was dropped unless you ask. (`briefOf` in `apps/daemon/src/foundry.ts`.)
 
 ## Every mockup says why
 

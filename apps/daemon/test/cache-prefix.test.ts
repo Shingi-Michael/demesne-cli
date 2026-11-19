@@ -81,9 +81,9 @@ describe("prefix check", () => {
   test("a scripted chat through the engine breaks its prefix only where KNOWN says", async () => {
     const check = await runPrefixCheck();
     expect(check.problems).toEqual([]);
-    expect(check.requests.length).toBe(24);
+    expect(check.requests.length).toBe(23);
     // What a cache can reuse today; it should only ever go up.
-    expect(check.keptChars / check.sentChars).toBeGreaterThan(0.8);
+    expect(check.keptChars / check.sentChars).toBeGreaterThan(0.9);
     // Step 2: what changes in a chat is said in a note with the message, and
     // only when it changes. The instructions and the tool list never do.
     const asked = (id: string) => check.requests.find((request) => request.id === id)!.asked;

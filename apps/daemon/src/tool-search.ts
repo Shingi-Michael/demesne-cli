@@ -1,11 +1,19 @@
 import type { ProviderToolDefinition } from "@demesne/providers";
 
-/// Tool search, the way Codex does it. A chat's tool descriptions were about
-/// 18% of every request's input, mostly tools a turn never calls (Foundry,
-/// threads, research, MCP servers…). Only the everyday tools go out whole;
-/// the rest are one line each in the system prompt, and tool_search loads
-/// the ones a turn needs. A tool loaded once stays loaded for the chat, so
-/// the request (and its prompt cache) stays the same from then on.
+/// Tool search: tools that wait as one line each in the system prompt until
+/// tool_search loads them. A loaded tool joins the tool list, and the tool
+/// list is at the very start of a request, so every load makes the provider
+/// read the whole chat again (docs/caching.md). So Demesne's own tools don't
+/// wait where there is room: on a model with a large window they all go out
+/// whole from the first request, cached after it at a tenth of the price,
+/// and the tool list never changes. They wait only on a small window, where
+/// their descriptions would take too much of it. Tools from MCP servers
+/// always wait: there can be any number of them.
+///
+/// Read more: https://developers.openai.com/api/docs/guides/prompt-caching
+/// (tools are part of the cached prefix) and
+/// https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool
+/// (deferring tools that are rarely needed).
 
 export const TOOL_SEARCH = "tool_search";
 
@@ -14,20 +22,34 @@ export const TOOL_SEARCH = "tool_search";
 export const CORE_TOOLS = new Set([
   "read_file", "read_files", "list_files", "search_files", "edit_file", "write_file", "run_command", "run_tests",
   "git_status", "git_diff", "ask_user", "update_plan", "subagent", "agents", "web_search", "view_image", "propose_next",
-  // Offered only when a chat has sources (sources.ts), so it rides whole.
-  "read_source",
+  // Small, and in every chat's list (sources.ts, turn-notes.ts).
+  "read_source", "recall_turn",
 ]);
 /// Below this, deferring saves less than the list and the search cost.
 const MIN_DEFERRED_CHARS = 3000;
+/// Demesne's own tools wait only when their descriptions would take more
+/// than this share of the model's window (about 85k tokens and up go whole).
+const WHOLE_SHARE = 0.08;
+const isMcp = (name: string) => name.startsWith("mcp__");
 const MAX_RESULTS = 4;
 
 const size = (definition: ProviderToolDefinition) => JSON.stringify(definition).length;
 
+/// Whether Demesne's own tools wait too: only on a window they would crowd.
+/// A window nobody told us is taken to be a large one.
+export function builtinsWait(definitions: readonly ProviderToolDefinition[], contextCapacity?: number | null): boolean {
+  if (!contextCapacity) return false;
+  const own = definitions.filter((definition) => !CORE_TOOLS.has(definition.name) && !isMcp(definition.name));
+  return own.reduce((total, definition) => total + size(definition), 0) / 4 > contextCapacity * WHOLE_SHARE;
+}
+
 /// What goes to the model this round, and what waits behind tool_search.
-export function splitTools(definitions: readonly ProviderToolDefinition[], loaded: ReadonlySet<string>): { sent: ProviderToolDefinition[]; deferrable: ProviderToolDefinition[] } {
-  const deferrable = definitions.filter((definition) => !CORE_TOOLS.has(definition.name) && definition.name !== TOOL_SEARCH);
+export function splitTools(definitions: readonly ProviderToolDefinition[], loaded: ReadonlySet<string>, contextCapacity?: number | null): { sent: ProviderToolDefinition[]; deferrable: ProviderToolDefinition[] } {
+  const all = builtinsWait(definitions, contextCapacity);
+  const waits = (definition: ProviderToolDefinition) => !CORE_TOOLS.has(definition.name) && definition.name !== TOOL_SEARCH && (all || isMcp(definition.name));
+  const deferrable = definitions.filter(waits);
   if (deferrable.reduce((total, definition) => total + size(definition), 0) < MIN_DEFERRED_CHARS) return { sent: [...definitions], deferrable: [] };
-  const sent = definitions.filter((definition) => CORE_TOOLS.has(definition.name) || loaded.has(definition.name));
+  const sent = definitions.filter((definition) => !waits(definition) || loaded.has(definition.name));
   if (deferrable.some((definition) => !loaded.has(definition.name))) sent.push(toolSearchDefinition);
   return { sent, deferrable };
 }

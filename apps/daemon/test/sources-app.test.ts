@@ -42,9 +42,11 @@ test("sources are kept with the chat, told to the model, and read on need", asyn
     }
   };
   try {
-    // With none, the model isn't told and read_source isn't offered.
+    // With none, the model isn't told. read_source is in the list all the
+    // same: a tool that joined later would cost the chat its prompt cache.
     expect(await consume(await client.submitTurn(session.id, { content: "Hello" }))).toBe("turn.completed");
-    expect(requests[0]!.tools.map((tool) => tool.name)).not.toContain("read_source");
+    expect(requests[0]!.tools.map((tool) => tool.name)).toContain("read_source");
+    const tools = JSON.stringify(requests[0]!.tools);
     expect(JSON.stringify(requests[0]!.messages)).not.toContain("Sources the person keeps");
     const instructions = requests[0]!.messages[0]!.content;
 
@@ -55,7 +57,7 @@ test("sources are kept with the chat, told to the model, and read on need", asyn
 
     requests.length = 0;
     expect(await consume(await client.submitTurn(session.id, { content: "Why is checkout slow?" }))).toBe("turn.completed");
-    expect(requests[0]!.tools.map((tool) => tool.name)).toContain("read_source");
+    expect(JSON.stringify(requests[0]!.tools)).toBe(tools);
     // The list goes out as a note with the message; the instructions stay as they were (chat-notes.ts).
     expect(requests[0]!.messages[0]!.content).toBe(instructions);
     expect(requests[0]!.messages.at(-1)!.content).toContain(`- ${source.id}: file schema.sql (in the project at db/schema.sql)`);

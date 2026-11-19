@@ -30,6 +30,8 @@ import { planRawContextRequest } from "../src/context-planner.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 import { NOTES_GUIDANCE, unattendedNote, withoutNotes } from "../src/chat-notes.ts";
 import { openTool, showTool } from "../src/open-show.ts";
+import { readSourceDefinition } from "../src/sources.ts";
+import { recallTurnDefinition } from "../src/turn-notes.ts";
 import { ToolRegistry } from "../src/tools.ts";
 
 /// What the person wrote: a message without the notes Demesne sends after it (chat-notes.ts).
@@ -43,8 +45,9 @@ const apps: DaemonApp[] = [];
 function plainChatToolOverhead(plan = true): number {
   const store = new DemesneStore(":memory:");
   try {
-    // ask_user, open and show are in every chat's list (chat-notes.ts), whoever is at the window.
-    const always = new ToolRegistry().definitions().filter((tool) => tool.name === "ask_user");
+    // ask_user, open and show are in every chat's list (chat-notes.ts), whoever is at the window;
+    // so are recall_turn and read_source, whether or not there is anything to bring back yet.
+    const always = [...new ToolRegistry().definitions().filter((tool) => tool.name === "ask_user"), recallTurnDefinition, readSourceDefinition];
     const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition, foundryEditTool(store).definition, webSearchTool().definition, webFetchTool().definition, ...(plan ? [researchDefinition, updatePlanTool().definition] : []), ...always, openTool().definition, showTool().definition];
     const estimate = (tools: typeof definitions) => planRawContextRequest({
       messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools }) }], tools, historicalTurns: [],

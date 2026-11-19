@@ -328,13 +328,16 @@ export class AgentEngine {
     if (hidden?.size) for (let index = definitions.length - 1; index >= 0; index--) if (hidden.has(definitions[index]!.name)) definitions.splice(index, 1);
     const checkpoint = themefy ? null : this.store.getSessionCheckpoint(session.id);
     const checkpointMessages: ProviderMessage[] = checkpoint ? [{ role: "assistant", content: checkpoint.summary }] : [];
-    // Turns swapped for notes can be brought back whole, one at a time.
-    if (!themefy && !assistant && checkpoint?.noteTurnIds?.some(Boolean)) definitions.push(recallTurnDefinition);
-    // Sources you keep with the chat: one line each in the prompt, read on need.
+    // Turns swapped for notes can be brought back whole, one at a time. The
+    // tool is in every chat's list from its first request, like read_source:
+    // a tool that joins the list later makes the provider read the chat again.
+    if (!themefy && !assistant) definitions.push(recallTurnDefinition);
+    // Sources you keep with the chat: one line each in a note, read on need.
     const keptSources = !themefy && !assistant ? this.options.sources?.list(session.id) ?? [] : [];
-    if (keptSources.length && !hidden?.has(READ_SOURCE)) definitions.push(readSourceDefinition);
-    // Tool search (tool-search.ts): the everyday tools go whole, the rest
-    // wait as one line each until the model loads them for this chat.
+    if (!themefy && !assistant && this.options.sources && !hidden?.has(READ_SOURCE)) definitions.push(readSourceDefinition);
+    // Tool search (tool-search.ts): on a small window the everyday tools go
+    // whole and the rest wait as one line each until the model loads them;
+    // on a large one only MCP servers' tools wait.
     const deferring = !themefy && !assistant && this.options.deferTools === true;
     let loadedTools = this.loadedTools.get(session.id);
     if (!loadedTools) { loadedTools = new Set(); this.loadedTools.set(session.id, loadedTools); }
@@ -386,7 +389,7 @@ export class AgentEngine {
       if (round === maxModelRounds) budgetReason ??= `Reached the configured ${maxModelRounds} model-round allowance`;
       if (totalToolCalls >= maxToolCalls) budgetReason ??= `Reached the configured ${maxToolCalls} tool-call allowance`;
       const finalizing = budgetReason !== undefined;
-      const { sent, deferrable } = deferring ? splitTools(definitions, loadedTools) : { sent: definitions, deferrable: [] };
+      const { sent, deferrable } = deferring ? splitTools(definitions, loadedTools, inference.contextCapacity) : { sent: definitions, deferrable: [] };
       this.turnDeferrable.set(turnId, deferrable);
       for (const key of this.turnDeferrable.keys()) { if (this.turnDeferrable.size <= 64) break; this.turnDeferrable.delete(key); }
       const requestDefinitions = finalizing ? [] : sent;

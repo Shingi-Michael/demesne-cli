@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { withoutNotes } from "../../../daemon/src/chat-notes.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EventEnvelope, SessionStateResponse } from "@demesne/protocol";
@@ -16,7 +17,7 @@ test("session auto-approve releases the current approval and follows selection, 
   const f = await fixture({
     providerId: "test", modelId: "test", async listModels() { return []; },
     async *stream(messages) {
-      if (messages.findLast(message => message.role === "user")?.content !== prompt) {
+      if (withoutNotes(messages.findLast(message => message.role === "user")?.content ?? "") !== prompt) {
         yield { type: "text_delta", delta: '{"proposals":[]}' };
         yield { type: "finish", reason: "stop" }; return;
       }

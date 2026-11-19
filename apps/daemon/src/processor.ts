@@ -1,3 +1,4 @@
+import { withoutNotes } from "./chat-notes.ts";
 import type { ProviderStreamLimits } from "./provider-limits.ts";
 import type { ModelDescriptor, PlanLimits, RuntimeProfileStatus } from "@demesne/protocol";
 import type { ProviderMessage, ProviderStreamEvent, ProviderToolDefinition } from "@demesne/providers";
@@ -138,6 +139,6 @@ export class PlaceholderTurnProcessor implements TurnProcessor {
     await Bun.sleep(10);
     if (signal.aborted) throw signal.reason;
     const lastUser = messages.findLast((message) => message.role === "user");
-    yield { type: "text_delta", delta: `Request accepted: ${lastUser?.content ?? ""}` };
+    yield { type: "text_delta", delta: `Request accepted: ${withoutNotes(lastUser?.content ?? "")}` };
   }
 }

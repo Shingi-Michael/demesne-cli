@@ -9,7 +9,7 @@
  *    (the cache meter's record where there is one, apps/daemon/src/cache-prefix.ts),
  *    and the biggest of them.
  *
- *   bun scripts/cache-report.ts [--db path/state.sqlite] [--days 14] [--json file]
+ *   bun scripts/cache-report.ts [--db path/demesne.sqlite] [--days 14] [--json file]
  *
  * Read more: https://code.claude.com/docs/en/prompt-caching#check-cache-performance
  */
@@ -111,8 +111,8 @@ export function cacheReport(calls: CallRow[]): CacheReport {
 if (import.meta.main) {
   const flag = (name: string) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : undefined; };
   const days = Number(flag("days") ?? 14);
-  const path = flag("db") ?? join(loadConfig({ includeProject: false }).config.dataDir ?? join(homedir(), ".demesne"), "state.sqlite");
-  if (!existsSync(path)) { console.error(`No history at ${path}. Pass --db path/to/state.sqlite.`); process.exit(1); }
+  const path = flag("db") ?? join(loadConfig({ includeProject: false }).config.dataDir ?? join(homedir(), ".demesne"), "demesne.sqlite");
+  if (!existsSync(path)) { console.error(`No history at ${path}. Pass --db path/to/demesne.sqlite.`); process.exit(1); }
   const database = new Database(path, { readonly: true });
   const report = cacheReport(readCalls(database, new Date(Date.now() - days * 86_400_000).toISOString()));
   database.close();

@@ -28,7 +28,12 @@ import type { TurnInference } from "../src/processor.ts";
 import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE } from "../src/engine.ts";
 import { planRawContextRequest } from "../src/context-planner.ts";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { NOTES_GUIDANCE, unattendedNote, withoutNotes } from "../src/chat-notes.ts";
+import { openTool, showTool } from "../src/open-show.ts";
+import { ToolRegistry } from "../src/tools.ts";
 
+/// What the person wrote: a message without the notes Demesne sends after it (chat-notes.ts).
+const said = (message?: { content?: string | null }) => withoutNotes(String(message?.content ?? ""));
 const temporaryDirectories: string[] = [];
 const servers: Bun.Server<unknown>[] = [];
 const apps: DaemonApp[] = [];
@@ -38,12 +43,16 @@ const apps: DaemonApp[] = [];
 function plainChatToolOverhead(plan = true): number {
   const store = new DemesneStore(":memory:");
   try {
-    const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition, foundryEditTool(store).definition, webSearchTool().definition, webFetchTool().definition, ...(plan ? [researchDefinition, updatePlanTool().definition] : [])];
+    // ask_user, open and show are in every chat's list (chat-notes.ts), whoever is at the window.
+    const always = new ToolRegistry().definitions().filter((tool) => tool.name === "ask_user");
+    const definitions = [foundryReadTool(store).definition, foundrySaveTool(store).definition, foundryEditTool(store).definition, webSearchTool().definition, webFetchTool().definition, ...(plan ? [researchDefinition, updatePlanTool().definition] : []), ...always, openTool().definition, showTool().definition];
     const estimate = (tools: typeof definitions) => planRawContextRequest({
-      // These tests submit turns without a permission mode ("deny"): nobody is at the window.
-      messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools, attended: false }) }], tools, historicalTurns: [],
+      messages: [{ role: "system", content: agentSystemPrompt({ definitions: tools }) }], tools, historicalTurns: [],
     }).plan.estimatedInputTokens;
-    return estimate(definitions) - estimate([]);
+    // These tests submit turns without a permission mode ("deny"): the first
+    // message carries the note that nobody is at the window.
+    const text = (value: string) => Math.ceil(Buffer.byteLength(value, "utf8") / 3 * 1.2);
+    return estimate(definitions) - estimate([]) + text(`\n${NOTES_GUIDANCE}`) + text(`\n\n<system-note>\n${unattendedNote(false)}\n</system-note>`);
   } finally { store.close(); }
 }
 
@@ -97,7 +106,7 @@ describe("Demesne daemon", () => {
       providerId: "planned-provider",
       modelId: "planned-model",
       // Room for the tool definitions (about 5k tokens) and the design guide (about 2.4k) under the soft limit.
-      contextCapacity: 12_288,
+      contextCapacity: 16_384,
       maxOutputTokens: 1_536,
       async listModels() {
         return [{ id: this.modelId, provider: this.providerId, contextWindow: this.contextCapacity }];
@@ -138,7 +147,7 @@ describe("Demesne daemon", () => {
     for (const start of starts) {
       expect(start.payload.contextPlan).toEqual(expect.objectContaining({
         schemaVersion: 3,
-        capacityTokens: 12_288,
+        capacityTokens: 16_384,
         budgetStatus: "within_soft_limit",
       }));
     }
@@ -186,7 +195,7 @@ describe("Demesne daemon", () => {
           yield { type: "text_delta" as const, delta: "Thanks, changing the lexer guard." };
           return;
         }
-        if (messages.some((message) => message.role === "user" && String(message.content).includes("non-interactive"))) {
+        if (String(messages.findLast((message) => message.role === "user")?.content).includes("non-interactive")) {
           yield { type: "text_delta" as const, delta: "Done." };
           return;
         }
@@ -221,16 +230,19 @@ describe("Demesne daemon", () => {
     const after = await jsonRequest<{ session: { turns: { id: string; content: string; responseText: string }[] } }>(running.url, `/v1/sessions/${created.session.id}`);
     expect(after.session.turns.at(-1)!.content).toBe('Answer to your question "Which guard should change?": The lexer guard\nAnswer to your question "Allow digits?": yes, after the first letter');
     expect(offered[0]).toContain("ask_user");
-    // A non-interactive turn is never offered the tool.
+    // A non-interactive turn keeps the chat's tool list (the start of the
+    // request stays the same); a question asked there is refused at once.
     const quiet = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
       { method: "POST", body: JSON.stringify({ content: "non-interactive follow-up", permissionMode: "deny" }) });
     await collectPersistedEvents(running.url, created.session.id, quiet.eventId);
-    expect(offered.at(-1)).not.toContain("ask_user");
-    // Nor is an Auto turn (Drive, mail): nobody is there to answer.
+    expect(offered.at(-1)).toEqual(offered[0]!);
+    // So is one on an Auto turn (Drive, mail): nobody is there to answer.
     const auto = await jsonRequest<SubmitTurnResponse>(running.url, `/v1/sessions/${created.session.id}/turns`,
-      { method: "POST", body: JSON.stringify({ content: "non-interactive Drive step", permissionMode: "allow" }) });
-    await collectPersistedEvents(running.url, created.session.id, auto.eventId);
-    expect(offered.at(-1)).not.toContain("ask_user");
+      { method: "POST", body: JSON.stringify({ content: "Drive step that asks anyway", permissionMode: "allow" }) });
+    const refusedEvents = await collectPersistedEvents(running.url, created.session.id, auto.eventId);
+    expect(offered.at(-1)).toEqual(offered[0]!);
+    expect(refusedEvents.map((event) => event.type)).not.toContain("question.requested");
+    expect(toolResult).toStartWith("Error: nobody is here to answer");
   });
 
   test("persists a completed turn and replays its events after restart", async () => {
@@ -353,7 +365,7 @@ describe("Demesne daemon", () => {
       modelId: "one-slot-model",
       async listModels() { return []; },
       async *stream(messages) {
-        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        const content = said(messages.findLast((message) => message.role === "user")) || "missing";
         activeStreams += 1;
         maximumActiveStreams = Math.max(maximumActiveStreams, activeStreams);
         order.push(content);
@@ -412,7 +424,7 @@ describe("Demesne daemon", () => {
       modelId: "one-slot-model",
       async listModels() { return []; },
       async *stream(messages) {
-        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        const content = said(messages.findLast((message) => message.role === "user")) || "missing";
         entered.push(content);
         if (content === "holder") {
           markFirstStarted();
@@ -461,7 +473,7 @@ describe("Demesne daemon", () => {
       id: "scripted",
       async listModels() { return []; },
       async *stream(request) {
-        const user = request.messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        const user = said(request.messages.findLast((message) => message.role === "user")) || "missing";
         requests.push({ model: request.model, thinkingEnabled: request.thinkingEnabled, user });
         const hasToolResult = request.messages.some((message) => message.role === "tool");
         if (user === "edit" && !hasToolResult) {
@@ -586,7 +598,7 @@ describe("Demesne daemon", () => {
       modelId: "one-slot-model",
       async listModels() { return []; },
       async *stream(messages, _tools, signal) {
-        entered.push(messages.findLast((message) => message.role === "user")?.content ?? "missing");
+        entered.push(said(messages.findLast((message) => message.role === "user")) || "missing");
         markStarted();
         await new Promise<void>((_resolve, reject) => {
           signal.addEventListener("abort", () => {
@@ -632,7 +644,7 @@ describe("Demesne daemon", () => {
       modelId: "one-slot-model",
       async listModels() { return []; },
       async *stream(messages) {
-        const content = messages.findLast((message) => message.role === "user")?.content ?? "missing";
+        const content = said(messages.findLast((message) => message.role === "user")) || "missing";
         entered.push(content);
         try {
           yield { type: "text_delta" as const, delta: content };
@@ -766,7 +778,11 @@ describe("Demesne daemon", () => {
       { method: "POST", body: JSON.stringify({ content: "What did you change?" }) },
     );
     await collectPersistedEventTypes(running.url, created.session.id, followUp.eventId);
-    expect(modelMessages[2]).toEqual([
+    // The first message carries what the chat was told about Drive, the
+    // follow-up (sent without a permission mode) that nobody is at the window.
+    expect(modelMessages[2]![1]!.content).toContain("<system-note>\nDrive: ");
+    expect(modelMessages[2]!.at(-1)!.content).toContain("<system-note>\nNobody is watching this message");
+    expect(modelMessages[2]!.map((message) => message.role === "user" ? { ...message, content: said(message) } : message)).toEqual([
       expect.objectContaining({ role: "system" }),
       { role: "user", content: "Set the answer to 42" },
       {
@@ -796,18 +812,18 @@ describe("Demesne daemon", () => {
       async *stream(messages) {
         requests.push(structuredClone(messages));
         const lastUser = messages.findLast((message) => message.role === "user");
-        const hasFirstTurn = messages.some((message) => message.role === "user" && message.content === "first");
-        const hasSecondTurn = messages.some((message) => message.role === "user" && message.content === "second");
-        if (lastUser?.content === "third" && hasFirstTurn) {
+        const hasFirstTurn = messages.some((message) => message.role === "user" && said(message) === "first");
+        const hasSecondTurn = messages.some((message) => message.role === "user" && said(message) === "second");
+        if (said(lastUser) === "third" && hasFirstTurn) {
           throw new ProviderError("maximum context length exceeded", 400);
         }
-        if (lastUser?.content === "coded overflow" && hasSecondTurn) {
+        if (said(lastUser) === "coded overflow" && hasSecondTurn) {
           throw new ProviderError("maximum context length exceeded", 400, "invalid_request_error");
         }
-        if (lastUser?.content === "false positive") {
+        if (said(lastUser) === "false positive") {
           throw new ProviderError("context window configuration is invalid", 400, "invalid_request");
         }
-        yield { type: "text_delta" as const, delta: `answer:${lastUser?.content ?? ""}` };
+        yield { type: "text_delta" as const, delta: `answer:${said(lastUser)}` };
       },
     };
     const running = startApp(databasePath, processor);
@@ -833,8 +849,8 @@ describe("Demesne daemon", () => {
 
     expect(eventTypes).toContain("model.context_trimmed");
     const retry = requests.at(-1) ?? [];
-    expect(retry.some((message) => message.role === "user" && message.content === "first")).toBe(false);
-    expect(retry.some((message) => message.role === "user" && message.content === "second")).toBe(true);
+    expect(retry.some((message) => message.role === "user" && said(message) === "first")).toBe(false);
+    expect(retry.some((message) => message.role === "user" && said(message) === "second")).toBe(true);
     expect(retry.at(-1)).toEqual({ role: "user", content: "third" });
 
     await running.server.stop(true);
@@ -849,9 +865,9 @@ describe("Demesne daemon", () => {
     );
     await collectPersistedEventTypes(restarted.url, created.session.id, fourth.eventId);
     const afterRestart = requests.at(-1) ?? [];
-    expect(afterRestart.some((message) => message.role === "user" && message.content === "first")).toBe(false);
-    expect(afterRestart.some((message) => message.role === "user" && message.content === "second")).toBe(true);
-    expect(afterRestart.some((message) => message.role === "user" && message.content === "third")).toBe(true);
+    expect(afterRestart.some((message) => message.role === "user" && said(message) === "first")).toBe(false);
+    expect(afterRestart.some((message) => message.role === "user" && said(message) === "second")).toBe(true);
+    expect(afterRestart.some((message) => message.role === "user" && said(message) === "third")).toBe(true);
 
     const codedOverflow = await jsonRequest<SubmitTurnResponse>(
       restarted.url,
@@ -945,7 +961,7 @@ describe("Demesne daemon", () => {
     expect(plan?.actions).toContainEqual(expect.objectContaining({ kind: "drop_historical_turn" }));
     expect(thirdRequest.some((message) => message.role === "user" && message.content.startsWith("first-marker"))).toBe(false);
     expect(thirdRequest.some((message) => message.role === "user" && message.content.startsWith("second-marker"))).toBe(true);
-    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[2])).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "user" && said(message) === contents[2])).toBe(true);
     expect(thirdRequest.some((message) => message.role === "tool" && message.toolCallId === "planned-missing")).toBe(true);
 
     await running.server.stop(true);
@@ -1708,25 +1724,27 @@ describe("Demesne daemon", () => {
       `second-marker:${"b".repeat(1_000)}`,
       `third-marker:${"c".repeat(1_000)}`,
     ];
+    // The plan of the request itself: the chat compacts from its notes once
+    // the turn is over, and the session's latest plan is then the checkpoint's.
+    let plan: ContextPlan | undefined;
     for (const content of contents) {
       const submitted = await jsonRequest<SubmitTurnResponse>(
         running.url,
         `/v1/sessions/${created.session.id}/turns`,
         { method: "POST", body: JSON.stringify({ content }) },
       );
-      await collectPersistedEventTypes(running.url, created.session.id, submitted.eventId);
+      const events = await collectPersistedEvents(running.url, created.session.id, submitted.eventId);
+      plan = events.find((event) => event.type === "model.request_started")?.payload.contextPlan as ContextPlan | undefined;
     }
 
     const thirdRequest = requests.at(-1) ?? [];
-    const state = await jsonRequest<SessionStateResponse>(running.url, `/v1/sessions/${created.session.id}`);
-    const plan = state.latestProviderCall?.contextPlan;
 
     expect(plan?.originalEstimatedInputTokens).toBeGreaterThan(plan?.maximumPlannedInputTokens ?? Infinity);
     expect(plan?.originalEstimatedInputTokens).toBeLessThanOrEqual(plan?.hardInputLimitTokens ?? 0);
     expect(plan?.actions).toEqual([]);
-    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[0])).toBe(true);
-    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[1])).toBe(true);
-    expect(thirdRequest.some((message) => message.role === "user" && message.content === contents[2])).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "user" && said(message) === contents[0])).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "user" && said(message) === contents[1])).toBe(true);
+    expect(thirdRequest.some((message) => message.role === "user" && said(message) === contents[2])).toBe(true);
   });
 
   test("injects workspace instructions into the system prompt", async () => {
@@ -1938,7 +1956,7 @@ describe("Demesne daemon", () => {
     expect(existsSync(join(workspacePath, "b.txt"))).toBe(false);
   });
 
-  test("plan mode offers read-only tools and denies write attempts", async () => {
+  test("plan mode keeps the chat's tool list, says so in a note, and denies write attempts", async () => {
     const directory = mkdtempSync(join(tmpdir(), "demesne-test-"));
     temporaryDirectories.push(directory);
     const workspacePath = join(directory, "ws");
@@ -1948,6 +1966,7 @@ describe("Demesne daemon", () => {
     writeFileSync(join(workspacePath, "notes.txt"), "existing\n");
     let offered: string[] = [];
     let denial = "";
+    let asked = "";
     let round = 0;
     const processor: TurnProcessor = {
       providerId: "plan-provider",
@@ -1958,6 +1977,7 @@ describe("Demesne daemon", () => {
       async *stream(messages, tools) {
         if (round++ === 0) {
           offered = tools.map((tool) => tool.name);
+          asked = messages.findLast((message) => message.role === "user")?.content ?? "";
           yield {
             type: "tool_call_delta" as const,
             index: 0,
@@ -1985,9 +2005,11 @@ describe("Demesne daemon", () => {
     for await (const event of readServerSentEvents(await fetch(new URL(`/v1/events?session_id=${created.session.id}&after=${submitted.eventId}`, running.url)))) {
       if (event.type === "turn.completed") break;
     }
+    // The tool list is the chat's own, so the start of the request (and the
+    // provider's cache of it) is the same in and out of plan mode.
     expect(offered).toContain("read_file");
-    expect(offered).not.toContain("write_file");
-    expect(offered).not.toContain("run_command");
+    expect(offered).toContain("write_file");
+    expect(asked).toStartWith("plan the change\n\n<system-note>\nPlan mode is on");
     expect(denial).toContain("not available in plan mode");
     expect(existsSync(join(workspacePath, "plan.txt"))).toBe(false);
   });

@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { withoutNotes } from "../src/chat-notes.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,7 +67,7 @@ test("a thread that strays outside its files is sent back once, then reports wha
   const { root, workspace } = repo();
   const reports: string[] = [], sentBack: string[] = [];
   const { call, close } = await serve(root, async function* (messages) {
-    const last = messages.at(-1)!, said = String(last.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { reports.push(said); yield* say("Noted."); return; }
     if (last.role === "user" && said.includes("You're one of the threads")) {
       yield { type: "tool_call_delta" as const, index: 0, idDelta: "w1", nameDelta: "write_file", argumentsDelta: JSON.stringify({ path: "src/a.ts", content: "export const a = 2;\n" }) };
@@ -103,7 +104,7 @@ test("a thread can wait for another: it starts on that branch, and merges after 
   let release: () => void = () => {};
   const firstMayFinish = new Promise<void>((resolve) => { release = resolve; });
   const { call, close } = await serve(root, async function* (messages) {
-    const last = messages.at(-1)!, said = String(last.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { reports.push(said); yield* say("Noted."); return; }
     if (last.role === "user" && said.includes("Your job: Add the endpoint")) { await firstMayFinish; yield* write("w1", "src/a.ts", "export const a = 2;\n"); return; }
     if (last.role === "user" && said.includes("Your job: Wire it")) {
@@ -147,7 +148,7 @@ test("a thread that no longer merges settles the conflict itself, then merges", 
   const { root, workspace } = repo();
   const fixing: string[] = [];
   const { call, close } = await serve(root, async function* (messages) {
-    const last = messages.at(-1)!, said = String(last.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { yield* say("Noted."); return; }
     if (last.role === "user" && said.includes("You're one of the threads")) { yield* write("w1", "src/a.ts", "export const a = 2;\n"); return; }
     if (last.role === "user" && said.startsWith("Your work didn't merge")) { fixing.push(said); yield* write("w2", "src/a.ts", "export const a = 2;\nexport const yours = true;\n"); return; }
@@ -204,7 +205,7 @@ test("pass 232: a thread may ask the person; it waits, and goes on with the answ
   const { root, workspace } = repo();
   let offered = false, answer = "";
   const { call, close } = await serve(root, async function* (messages, tools) {
-    const last = messages.at(-1)!, said = String(last.content), first = String(messages.find((message) => message.role === "user")?.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content)), first = withoutNotes(String(messages.find((message) => message.role === "user")?.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { yield* say("Noted."); return; }
     if (first.includes("You're one of the threads")) {
       const results = messages.filter((message) => message.role === "tool");

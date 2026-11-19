@@ -30,7 +30,6 @@ test("the model sees only the one-liners, and is told when to offer saving", () 
   expect(text).toContain("- rebuild-demesne: Use when Mike asks to rebuild the Mac app.");
   expect(text).not.toContain("127.0.0.1:9");
   expect(text).toContain(".demesne/skills/<name>/SKILL.md");
-  expect(skillsGuidance([], false)).not.toContain("offering to save");
   const prompt = agentSystemPrompt({ workspaceRoot: root, definitions: [useSkillTool({ home }).definition] });
   expect(prompt).toContain("call use_skill");
   expect(agentSystemPrompt({ workspaceRoot: root, definitions: [] })).not.toContain("use_skill");

@@ -177,7 +177,8 @@ test("a coding chat keeps its tools and never gets the assistant's notes", async
     expect(seen[0]!.tools).toContain("run_command");
     expect(seen[0]!.tools).not.toContain("assistant_notes");
     expect(seen[0]!.system).toContain("Configured coding prompt");
-    expect(seen[0]!.user).toBe("Fix the build");
+    // An Auto turn in a coding chat is told nobody is at the window; the assistant's chat gets no notes.
+    expect(seen[0]!.user).toStartWith("Fix the build\n\n<system-note>\nNobody is watching this message");
     expect(executed).toEqual(["run_command"]);
   } finally { await schedulers.close(); store.close(); }
 });

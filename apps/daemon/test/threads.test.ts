@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { withoutNotes } from "../src/chat-notes.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +31,7 @@ test("an orchestrator chat splits work into threads that run side by side, repor
   const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; },
     async *stream(messages, tools) {
       const last = messages.at(-1)!;
-      const said = String(last.content);
+      const said = withoutNotes(String(last.content));
       if (last.role === "user" && said.startsWith("Thread report: ")) { reports.push(said); yield { type: "text_delta" as const, delta: "Noted." }; yield { type: "finish" as const, reason: "stop" }; return; }
       if (last.role === "user" && said.includes("You're one of the threads")) {
         threadTools.push((tools ?? []).map((tool) => tool.name));

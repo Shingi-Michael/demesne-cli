@@ -23,7 +23,7 @@ test("sources are kept with the chat, told to the model, and read on need", asyn
     async listModels() { return []; },
     async *stream(messages, tools) {
       requests.push({ messages: structuredClone(messages), tools });
-      const id = /- ([a-z0-9-]+): file schema\.sql/.exec(messages[0]?.content ?? "")?.[1];
+      const id = /- ([a-z0-9-]+): file schema\.sql/.exec(messages.findLast((message) => message.role === "user")?.content ?? "")?.[1];
       if (id && !messages.some((message) => message.role === "tool")) {
         yield { type: "tool_call_delta", index: 0, idDelta: "src", nameDelta: "read_source", argumentsDelta: JSON.stringify({ id }) };
         yield { type: "finish", reason: "tool_calls" };
@@ -45,7 +45,8 @@ test("sources are kept with the chat, told to the model, and read on need", asyn
     // With none, the model isn't told and read_source isn't offered.
     expect(await consume(await client.submitTurn(session.id, { content: "Hello" }))).toBe("turn.completed");
     expect(requests[0]!.tools.map((tool) => tool.name)).not.toContain("read_source");
-    expect(requests[0]!.messages[0]!.content).not.toContain("Sources the person keeps");
+    expect(JSON.stringify(requests[0]!.messages)).not.toContain("Sources the person keeps");
+    const instructions = requests[0]!.messages[0]!.content;
 
     const { source } = await client.addSource(session.id, { path: join(root, "project", "db", "schema.sql") });
     expect(source).toMatchObject({ name: "schema.sql", detail: "in this project · db/", inProject: "db/schema.sql" });
@@ -55,7 +56,9 @@ test("sources are kept with the chat, told to the model, and read on need", asyn
     requests.length = 0;
     expect(await consume(await client.submitTurn(session.id, { content: "Why is checkout slow?" }))).toBe("turn.completed");
     expect(requests[0]!.tools.map((tool) => tool.name)).toContain("read_source");
-    expect(requests[0]!.messages[0]!.content).toContain(`- ${source.id}: file schema.sql (in the project at db/schema.sql)`);
+    // The list goes out as a note with the message; the instructions stay as they were (chat-notes.ts).
+    expect(requests[0]!.messages[0]!.content).toBe(instructions);
+    expect(requests[0]!.messages.at(-1)!.content).toContain(`- ${source.id}: file schema.sql (in the project at db/schema.sql)`);
     const read = requests[1]!.messages.find((message) => message.role === "tool");
     expect(JSON.parse(read!.content!).content).toBe("create table orders(user_id int);");
 

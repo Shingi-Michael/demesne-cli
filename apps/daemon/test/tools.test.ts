@@ -3,7 +3,8 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalWorkspace, fitDiff, fitRead, listWorkspaceFiles, ToolRegistry } from "../src/tools.ts";
-import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE, defaultSystemPrompt, FOUNDRY_GUIDANCE, FOUNDRY_UNATTENDED_GUIDANCE, planModeDefinitions, planModeGuidance, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
+import { agentSystemPrompt, ANSWER_FORMAT_GUIDANCE, defaultSystemPrompt, FOUNDRY_GUIDANCE, planModeDefinitions, planModeGuidance, turnToolGuidance } from "../src/engine.ts";
+import { noteStates, notesFor, unattendedNote } from "../src/chat-notes.ts";
 import { applyEdits, EditApplyError } from "../src/edit-engine.ts";
 
 const temporaryDirectories: string[] = [];
@@ -21,19 +22,14 @@ describe("built-in tools", () => {
     expect(prompt).toContain("Use purpose-built tools, never run_command");
     expect(prompt).toContain("do not compute line counts, file counts, or disk usage unless requested");
     expect(command?.description).toContain("do not use for file listing, reading, searching, or unsolicited counts");
-    expect(selectToolsForTurn(definitions, "give me a summary of this folder. you can tabulate it").map((tool) => tool.name))
-      .toEqual(["list_files", "read_file", "read_files", "search_files"]);
     expect(turnToolGuidance("give me a summary of this folder. you can tabulate it"))
       .toContain("use one initial tool round");
-    expect(selectToolsForTurn(definitions, "summarize this project and count its lines")).toEqual(definitions);
     expect(turnToolGuidance("summarize this project and count its lines")).toBeNull();
-    expect(selectToolsForTurn(definitions, "summarize this repository and fix the failing tests")).toEqual(definitions);
     expect(turnToolGuidance("summarize this repository and fix the failing tests")).toBeNull();
     // Drive's real request: asking for sub-agents keeps every tool, subagent included.
     const drive = "Use subagents to read files in the current workspace. First identify available project files, then delegate distinct files or small groups to subagents for read-only inspection. Have them report the paths actually read and concise findings; summarize those results.";
-    expect(selectToolsForTurn(definitions, drive)).toEqual(definitions);
     expect(turnToolGuidance(drive)).toBeNull();
-    expect(selectToolsForTurn(definitions, "send a sub-agent to give me an overview of this project")).toEqual(definitions);
+    expect(turnToolGuidance("send a sub-agent to give me an overview of this project")).toBeNull();
   });
 
   test("plan mode restricts tool definitions and explains the boundary", () => {
@@ -51,14 +47,15 @@ describe("built-in tools", () => {
     expect(planModeGuidance(true)).toContain("Foundry pages are allowed");
   });
 
-  test("Foundry goes by the answer's shape when someone is there, and only on request when nobody is", () => {
+  test("Foundry goes by the answer's shape, and a note says only on request when nobody is there", () => {
     const definitions = [{ name: "foundry_save", description: "", inputSchema: {} }];
-    const attended = agentSystemPrompt({ workspaceRoot: "/workspace", definitions });
-    expect(attended).toContain(FOUNDRY_GUIDANCE);
-    expect(attended).toContain("\"Show me\"");
-    const away = agentSystemPrompt({ workspaceRoot: "/workspace", definitions, attended: false });
-    expect(away).toContain(FOUNDRY_UNATTENDED_GUIDANCE);
-    expect(away).not.toContain(FOUNDRY_GUIDANCE);
+    const prompt = agentSystemPrompt({ workspaceRoot: "/workspace", definitions });
+    expect(prompt).toContain(FOUNDRY_GUIDANCE);
+    expect(prompt).toContain("\"Show me\"");
+    // Nobody at the window is a note with the message, never other instructions.
+    const away = notesFor(noteStates({ planOnly: false, autoApprove: false, acceptEdits: false, attended: false, canAsk: false, noting: false }), []);
+    expect(away).toEqual([{ kind: "window", text: unattendedNote(false) }]);
+    expect(away[0]!.text).toContain("Make a Foundry page only when the task asks");
     expect(agentSystemPrompt({ workspaceRoot: "/workspace", definitions: [] })).not.toContain("Foundry");
   });
 

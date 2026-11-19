@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { withoutNotes } from "../src/chat-notes.ts";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,7 +47,7 @@ test("PATCH releases pending approvals only for the selected session and rejects
       if (messages.some(message => message.role === "tool")) {
         yield { type: "text_delta", delta: "Done." }; return;
       }
-      const title = messages.findLast(message => message.role === "user")?.content;
+      const title = withoutNotes(messages.findLast(message => message.role === "user")?.content ?? "");
       yield { type: "tool_call_delta", index: 0, idDelta: "write", nameDelta: "write_file",
         argumentsDelta: JSON.stringify({ path: `${title}.txt`, content: "written" }) };
     },
@@ -149,7 +150,7 @@ test("enabling from a permission event before waiter registration resolves the r
   } finally { await fixture.schedulers.close(); store.close(); }
 });
 
-test("disabling auto-approve applies to the next action in the same model round and refreshes prompt guidance", async () => {
+test("disabling auto-approve applies to the next action in the same model round; the model is told with the next message", async () => {
   let fixture: ReturnType<typeof engineFixture>;
   fixture = engineFixture(["run_command"], () => fixture.store.setSessionAutoApprove(fixture.session.id, false));
   const { store, session, broker, engine, executed, events } = fixture;
@@ -159,26 +160,33 @@ test("disabling auto-approve applies to the next action in the same model round 
     if (event.type === "permission.requested") queueMicrotask(() => broker.resolve(String(event.payload.permissionId), "deny"));
   });
   const { turn } = store.createTurn(session.id, "Run two commands", "ask");
-  const prompts: string[] = [];
+  const prompts: string[] = [], asked: string[] = [];
   let round = 0;
   try {
-    await engine.run(turn.id, inference(async function* (messages) {
+    const model = inference(async function* (messages) {
       prompts.push(messages[0]?.content ?? "");
+      asked.push(messages.findLast(message => message.role === "user")?.content ?? "");
       if (round++ === 0) {
         for (const index of [0, 1]) yield { type: "tool_call_delta", index, idDelta: `command-${index}`, nameDelta: "run_command",
           argumentsDelta: JSON.stringify({ argv: ["fixture-command", String(index)] }) };
       } else yield { type: "text_delta", delta: "Done." };
-    }), new AbortController().signal);
+    });
+    await engine.run(turn.id, model, new AbortController().signal);
     expect(executed).toEqual(["run_command"]);
     expect(events.filter(event => event.type === "permission.requested")).toHaveLength(1);
-    expect(prompts[0]).toContain("Session auto-approve is enabled");
-    expect(prompts[1]).not.toContain("Session auto-approve is enabled");
-    expect(prompts[1]).toContain("edits and commands need approval");
+    // The instructions never change inside a chat (chat-notes.ts): the
+    // switch is a note with the message, and the engine decides who is asked.
+    expect(prompts[0]).not.toContain("Session auto-approve is on");
+    expect(prompts[1]).toBe(prompts[0]!);
+    expect(asked[0]).toContain("<system-note>\nSession auto-approve is on");
+    await engine.run(store.createTurn(session.id, "And now?", "ask").turn.id, model, new AbortController().signal);
+    expect(prompts[2]).toBe(prompts[0]!);
+    expect(asked[2]).toBe("And now?\n\n<system-note>\nApprovals are back to usual: reads are automatic; edits and commands need approval.\n</system-note>");
     expect(broker.listGrants(session.id)).toEqual([]);
   } finally { await fixture.schedulers.close(); store.close(); }
 });
 
-test("Plan mode still filters and rejects writes with auto-approve enabled", async () => {
+test("Plan mode still rejects writes with auto-approve enabled", async () => {
   const fixture = engineFixture(["write_file", "run_command", "read_file"]);
   const { store, session, engine, executed, events } = fixture;
   store.setSessionAutoApprove(session.id, true);
@@ -189,16 +197,15 @@ test("Plan mode still filters and rejects writes with auto-approve enabled", asy
     await engine.run(turn.id, inference(async function* (messages, tools) {
       if (round++ === 0) {
         offered = tools.map(tool => tool.name);
-        prompt = messages[0]?.content ?? "";
+        prompt = messages.findLast(message => message.role === "user")?.content ?? "";
         yield { type: "tool_call_delta", index: 0, idDelta: "write", nameDelta: "write_file",
           argumentsDelta: JSON.stringify({ path: "plan.txt", content: "bad" }) };
       } else yield { type: "text_delta", delta: "Plan ready." };
     }), new AbortController().signal);
+    // One tool list per chat: plan mode is a note, and the write is refused where it runs.
     expect(offered).toContain("read_file");
-    expect(offered).not.toContain("write_file");
-    expect(offered).not.toContain("run_command");
-    expect(prompt).toContain("Plan mode: this turn is read-only");
-    expect(prompt).not.toContain("Session auto-approve is enabled");
+    expect(offered).toContain("write_file");
+    expect(prompt).toContain("Plan mode is on: this message is read-only");
     expect(executed).toEqual([]);
     expect(events.filter(event => event.type === "permission.requested")).toEqual([]);
     expect(events.some(event => event.type === "tool.call_denied")).toBe(true);

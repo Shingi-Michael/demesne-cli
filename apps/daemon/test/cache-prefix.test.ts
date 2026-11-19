@@ -81,7 +81,9 @@ describe("prefix check", () => {
   test("a scripted chat through the engine breaks its prefix only where KNOWN says", async () => {
     const check = await runPrefixCheck();
     expect(check.problems).toEqual([]);
-    expect(check.requests.length).toBe(30);
+    expect(check.requests.length).toBe(35);
+    // Step 4: only the first request after a long idle rewrites earlier turns.
+    expect(check.requests.filter((request) => request.report.brokeAt).map((request) => request.id)).toEqual(["away#1"]);
     // Step 3: on a small window a waiting tool is called through use_tool,
     // and nothing in that chat's seven requests changes its start.
     const small = check.requests.filter((request) => request.id.startsWith("small:"));

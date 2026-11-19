@@ -90,7 +90,7 @@ export const STAGE_RULES = "The page holds only the thing, with only the control
 
 const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
 
-/// What stands in for a page's source once its turn is over.
+/// What stands in for a page's source once its turn is old.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";
 
 const forget = (value: unknown, callName: string) =>
@@ -105,11 +105,30 @@ const forgetJSON = (text: string, callName: string) => {
   return forgotten ? JSON.stringify(forgotten) : null;
 };
 
-/// A finished turn's messages without the page sources in them: the source
-/// the agent sent to foundry_save and the one foundry_read gave back, in
-/// the tool calls, their results and the retained Responses items alike.
-/// The artifact itself is kept, so the agent reads it again when it needs
-/// the text; what stays is the title, kind, version and note.
+/// How much page source these messages carry, roughly: what forgetting it
+/// would take off (a save's arguments and a read's result are mostly source).
+export function foundrySourceChars(messages: readonly ModelMessage[]): number {
+  const reads = new Set<string>();
+  let total = 0;
+  for (const message of messages) {
+    if (message.role === "assistant") for (const call of message.toolCalls ?? []) {
+      const inner = called(call);
+      if (inner.name === "foundry_save") total += inner.arguments.length;
+      if (inner.name === "foundry_read") reads.add(call.id);
+    }
+    if (message.role === "tool" && reads.has(message.toolCallId)) total += message.content.length;
+  }
+  return total;
+}
+
+/// An old turn's messages without the page sources in them: the source the
+/// agent sent to foundry_save and the one foundry_read gave back, in the tool
+/// calls, their results and the retained Responses items alike. The artifact
+/// itself is kept, so the agent reads it again when it needs the text; what
+/// stays is the title, kind, version and note. Which turns count as old is
+/// decided with the old reads (forget-reads.ts): only when the provider's
+/// cache has gone cold, because rewriting a turn the cache still holds makes
+/// the provider read everything after it again.
 export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[] {
   const names = new Map<string, string>();
   for (const message of messages) {

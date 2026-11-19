@@ -7,7 +7,18 @@
 /// fresher than the copy it had. Edits, answers, questions and short results
 /// stay whole. Only turns up to the stored cut (nextForgetThrough) are
 /// touched: the last two finished turns and the turn in progress keep everything.
+///
+/// The source of a Foundry page leaves the same way and at the same cut
+/// (foundry.ts forgetFoundrySources). It used to leave as soon as its turn
+/// was over, which rewrote a turn the provider's cache still held, so the
+/// request after every page was read again from that turn on.
+///
+/// Read more: docs/caching.md ("Old turns are shortened only when the cache
+/// is cold") and
+/// https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus
+/// (make the context append-only).
 import { isRecord, type ModelMessage } from "@demesne/protocol";
+import { forgetFoundrySources, foundrySourceChars } from "./foundry.ts";
 import { called } from "./tool-search.ts";
 
 /// Tools whose output can be fetched again, and so need not be carried.
@@ -74,7 +85,12 @@ export const CACHE_COLD_MS = 15 * 60_000;
 export const COLD_CUT_CHARS = 8_000;
 /// Even with a warm cache, past this much the cut pays for its rebuild.
 export const CUT_AFTER_CHARS = 480_000;
+/// On a smaller window that point comes sooner: once what a cut would take
+/// off fills this share of the window, cutting is cheaper than the
+/// compaction it puts off (which rewrites everything and costs a model call).
+export const CUT_AFTER_SHARE = 0.4;
 
+/// What a cut would take off a turn: its long reads and its page sources.
 const longOutput = (messages: ModelMessage[]) => {
   const names = new Map<string, string>();
   let total = 0;
@@ -82,7 +98,7 @@ const longOutput = (messages: ModelMessage[]) => {
     if (message.role === "assistant") for (const call of message.toolCalls ?? []) names.set(call.id, called(call).name);
     else if (message.role === "tool" && message.content.length > KEEP_UNDER && REREADABLE_TOOLS.has(names.get(message.toolCallId) ?? "")) total += message.content.length;
   }
-  return total;
+  return total + foundrySourceChars(messages);
 };
 
 /// How many of the earliest turns the old rule (a cut each 240k, worked out
@@ -105,18 +121,21 @@ interface Turn<T extends ModelMessage> { firstMessageId: number; messages: T[] }
 /// cold (or the pile is huge), then moved up to all but the last turns.
 /// Decided once at the start of a turn, so every round of it sends the same
 /// history and keeps the cache. `through` null = a chat from before stored
-/// cuts; `idleMs` null = no request yet (nothing cached).
-export function nextForgetThrough<T extends ModelMessage>(turns: Turn<T>[], through: number | null, idleMs: number | null): number {
+/// cuts; `idleMs` null = no request yet (nothing cached); `windowTokens` the
+/// model's window, when known.
+export function nextForgetThrough<T extends ModelMessage>(turns: Turn<T>[], through: number | null, idleMs: number | null, windowTokens?: number | null): number {
   let at = through ?? (() => { const cut = cutPoint(turns.map((turn) => turn.messages)); return cut ? turns[cut - 1]!.firstMessageId : 0; })();
   const end = turns.length - KEEP_RECENT_TURNS;
   if (end <= 0 || turns[end - 1]!.firstMessageId <= at) return at;
   const pending = turns.slice(0, end).filter((turn) => turn.firstMessageId > at).reduce((total, turn) => total + longOutput(turn.messages), 0);
   const cold = idleMs === null || idleMs >= CACHE_COLD_MS;
-  if ((cold && pending >= COLD_CUT_CHARS) || pending > CUT_AFTER_CHARS) at = turns[end - 1]!.firstMessageId;
+  const warmLimit = windowTokens ? Math.min(CUT_AFTER_CHARS, windowTokens * 4 * CUT_AFTER_SHARE) : CUT_AFTER_CHARS;
+  if ((cold && pending >= COLD_CUT_CHARS) || pending > warmLimit) at = turns[end - 1]!.firstMessageId;
   return at;
 }
 
-/// The history's turns, those up to the cut with their long reads as notes.
+/// The history's turns, those up to the cut with their long reads as notes
+/// and their page sources left out.
 export function forgetThrough<T extends ModelMessage, U extends Turn<T>>(turns: U[], through: number): U[] {
-  return turns.map((turn) => turn.firstMessageId <= through ? { ...turn, messages: forgetOldReads(turn.messages) } : turn);
+  return turns.map((turn) => turn.firstMessageId <= through ? { ...turn, messages: forgetFoundrySources(forgetOldReads(turn.messages)) } : turn);
 }

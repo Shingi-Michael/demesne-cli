@@ -4,7 +4,7 @@
  * the previous one from its first byte. This runs one scripted chat through
  * the daemon's own engine with a stand-in model, flipping every switch that
  * could change what is sent (a tool beyond the everyday ones, plan mode,
- * auto-approve, a Foundry page, the permission mode, stepping away), then a
+ * auto-approve, a Foundry page, pictures, the permission mode, stepping away), then a
  * short second chat on a small window, where tools wait and are called
  * through use_tool (apps/daemon/src/tool-search.ts), and reads back what the
  * cache meter (apps/daemon/src/cache-prefix.ts) recorded for each request.
@@ -52,6 +52,8 @@ export const CHAT: ScriptedTurn[] = [
   { id: "approve-off", what: "auto-approve turned off", ask: "Ask me again from here.", set: { autoApprove: false }, rounds: [{ say: "Asking again." }] },
   { id: "foundry", what: "makes a Foundry page", ask: "Sketch the plans page.", rounds: [{ call: [{ name: "foundry_save", args: { title: "Plans", kind: "page", source: PAGE } }] }, { say: "Saved." }] },
   { id: "after-foundry", what: "a plain follow-up", ask: "Nice.", rounds: [{ say: "Thanks." }] },
+  { id: "pictures", what: "looks at four pictures, one after the other", ask: "Look at the screenshot after each change.", rounds: [
+    ...Array.from({ length: 4 }, () => ({ call: [{ name: "view_image", args: { path: "shot.png" } }] })), { say: "They match." }] },
   { id: "attended", what: "a turn that asks before it acts", ask: "One more thing, what is 2+2?", mode: "ask", rounds: [{ say: "4" }] },
   { id: "unattended", what: "back to acting without asking", ask: "And 3+3?", rounds: [{ say: "6" }] },
   { id: "away", what: "the next ask after 20 minutes away", ask: "Still there?", idleMinutes: 20, rounds: [{ say: "Yes." }] },
@@ -73,9 +75,8 @@ const SMALL_WINDOW = 32_768;
 /// The breaks that exist today: request (turn id # round) -> where it
 /// breaks, and the step of the caching plan that removes it.
 export const KNOWN: Record<string, { at: NonNullable<PrefixReport["brokeAt"]>; step: number; why: string }> = {
-  "after-foundry#1": { at: "history", step: 4, why: "the page's source becomes a stub once its turn is over" },
   // By design: after this long the provider's cache is gone, so old reads are cut for free (forget-reads.ts).
-  "away#1": { at: "history", step: 5, why: "old reads are cut once the chat has sat idle" },
+  "away#1": { at: "history", step: 5, why: "old reads and page sources are cut once the chat has sat idle" },
 };
 
 export interface MeasuredRequest { id: string; what: string; report: PrefixReport;
@@ -119,11 +120,13 @@ async function runChat(chat: ScriptedTurn[], contextCapacity: number, problems: 
   const root = realpathSync(mkdtempSync(join(tmpdir(), "demesne-prefix-check-")));
   const repo = resolve(import.meta.dir, ".."), project = join(root, "project");
   for (const part of ["apps/daemon/src", "packages/protocol/src", "README.md"]) cpSync(join(repo, part), join(project, part), { recursive: true });
+  // The smallest PNG there is: one grey pixel.
+  writeFileSync(join(project, "shot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNoAAAAggCBd81ytgAAAABJRU5ErkJggg==", "base64"));
   mkdirSync(join(root, "data"));
   writeFileSync(join(root, "data", "trusted-workspaces.json"), JSON.stringify({ trusted: [project] }));
   const database = join(root, "data", "state.sqlite");
   let clock = Date.now();
-  const app = createDaemonApp({ databasePath: database, authToken: "prefix-check", processor: model, heartbeat: { enabled: false }, nameChats: false, deferTools: true, now: () => new Date(clock) });
+  const app = createDaemonApp({ databasePath: database, authToken: "prefix-check", processor: model, heartbeat: { enabled: false }, nameChats: false, deferTools: true, providerVision: true, now: () => new Date(clock) });
   const server = serveDaemon(app, { hostname: "127.0.0.1", port: 0 });
   const client = new DemesneClient({ server: server.url.href, token: "prefix-check" });
   const requests: MeasuredRequest[] = [];

@@ -6,7 +6,8 @@ import { DemesneClient } from "../../../packages/client/src/index.ts";
 import type { ModelMessage, PermissionMode, SessionStateResponse } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
-import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
+import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool, foundrySourceChars } from "../src/foundry.ts";
+import { CACHE_COLD_MS, forgetThrough, nextForgetThrough } from "../src/forget-reads.ts";
 import { FOUNDRY_GUIDANCE, turnToolGuidance } from "../src/engine.ts";
 import { noteSeen } from "../src/foundry-seen.ts";
 import type { AgentTool } from "../src/tools.ts";
@@ -328,7 +329,7 @@ test("a page saved through use_tool (a small window) is forgotten the same way, 
   expect(JSON.parse((forgotten[4] as Extract<ModelMessage, { role: "tool" }>).content)).toMatchObject({ source: FORGOTTEN_SOURCE });
 });
 
-test("the next turn's request carries a stub where the earlier turn's page was, and the current turn keeps its own", async () => {
+test("a page's source stays in the chat while the cache is warm, and leaves at the cut made when it is cold", async () => {
   const page = "<h1>Garden one</h1>" + "<p>a paragraph of the page</p>".repeat(20);
   const requests: ModelMessage[][] = [];
   const { client } = daemon(async function* (messages) {
@@ -350,16 +351,34 @@ test("the next turn's request carries a stub where the earlier turn's page was, 
   await completed(client, session.id);
   await client.submitTurn(session.id, { content: "Now look at it", permissionMode: "ask" });
   await completed(client, session.id);
-  // Turn 1, second round: the save just made is still in full.
+  // Turn 1, second round: the save just made is in full.
   expect(JSON.stringify(requests[1])).toContain(page);
-  // Turn 2, first round: the page is gone from history, its title and version are not.
-  const later = JSON.stringify(requests[2]);
-  expect(later).not.toContain("a paragraph of the page");
-  expect(later).toContain(FORGOTTEN_SOURCE);
-  expect(later).toContain("Tiny garden");
-  // Turn 2, second round: what foundry_read gave back this turn is there in full.
-  expect(JSON.stringify(requests[3])).toContain(page);
-  expect(requests[3]!.filter((message) => JSON.stringify(message).includes("a paragraph of the page"))).toHaveLength(1);
+  // Turn 2 repeats turn 1 as it was sent, page and all: rewriting it now
+  // would make the provider read everything after it again.
+  const said = (messages: ModelMessage[]) => messages.slice(1).map((message) => JSON.stringify(message));
+  expect(said(requests[2]!).slice(0, requests[1]!.length - 1)).toEqual(said(requests[1]!));
+  expect(JSON.stringify(requests[2])).not.toContain(FORGOTTEN_SOURCE);
+  expect(requests[3]!.filter((message) => JSON.stringify(message).includes("a paragraph of the page"))).toHaveLength(2);
+
+  // The cut (forget-reads.ts) is what takes it out: it counts a page's source
+  // like a long read, moves only when the cache is cold, and spares the last turns.
+  const big = "<h1>Garden</h1>" + "<p>a paragraph of the page</p>".repeat(400);
+  const pageTurn: ModelMessage[] = [
+    { role: "user", content: "Make me a page" },
+    { role: "assistant", content: null, toolCalls: [{ id: "c1", name: "foundry_save", arguments: JSON.stringify({ title: "Tiny garden", kind: "html", why: W, source: big }) }] },
+    { role: "tool", toolCallId: "c1", content: JSON.stringify({ id: "art", version: 1 }) },
+    { role: "assistant", content: "Saved." },
+  ];
+  const chat = (text: string): ModelMessage[] => [{ role: "user", content: text }, { role: "assistant", content: "Ok." }];
+  const turns = [pageTurn, chat("Nice"), chat("Thanks")].map((messages, index) => ({ firstMessageId: (index + 1) * 10, messages }));
+  expect(foundrySourceChars(pageTurn)).toBeGreaterThan(big.length);
+  expect(nextForgetThrough(turns, 0, 60_000)).toBe(0);
+  expect(nextForgetThrough(turns, 0, CACHE_COLD_MS)).toBe(10);
+  const kept = JSON.stringify(forgetThrough(turns, 0)), cut = JSON.stringify(forgetThrough(turns, 10));
+  expect(kept).toContain("a paragraph of the page");
+  expect(cut).not.toContain("a paragraph of the page");
+  expect(cut).toContain(FORGOTTEN_SOURCE);
+  expect(cut).toContain("Tiny garden");
 });
 
 test("a deck, doc or dashboard is saved as content, and the tool says how to write it", async () => {

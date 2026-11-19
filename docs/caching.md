@@ -80,6 +80,28 @@ the list a chat starts with is the list it keeps:
   there a changed start is not a higher price but a wait, while the machine
   reads the whole chat again.
 
+## Old turns are shortened only when the cache is cold
+
+A chat can't carry everything forever: long file reads, a Foundry page's
+whole source and pictures all take room. But a provider's cache holds the
+conversation as it was sent, so shortening a turn it still holds makes it
+read everything after that turn again. Two rules follow:
+
+- **Shorten when it costs nothing.** Old reads and the source of old Foundry
+  pages leave together, at one cut that moves only when the chat has sat
+  idle long enough for the cache to be gone anyway, and never into the last
+  two turns (`apps/daemon/src/forget-reads.ts`). A warm cache is given up
+  only when the pile a cut would take off is huge: 480k characters, or 40%
+  of the model's window on a smaller one, where the alternative is a
+  compaction that rewrites everything. A page's source used to
+  leave as soon as its turn was over, which cost the request after every
+  page.
+- **Shorten in blocks.** A model that sees gets the newest pictures with the
+  conversation. Keeping "the latest two" dropped one each time a new one
+  arrived, a rewrite per picture. Now two to four ride along and the older
+  ones leave three at a time (`apps/daemon/src/image-inputs.ts`), so a turn
+  that looks at a page again and again rewrites a third as often.
+
 ## The cache meter
 
 Each model request is compared with the one before it in the same chat
@@ -101,11 +123,12 @@ Where a provider reports what it wrote to its cache, that is kept too
 `bun scripts/check-cache-prefix.ts` runs one scripted chat through the real
 engine with a stand-in model, flipping everything that could change a request
 (a tool beyond the everyday ones, plan mode, auto-approve, a Foundry page,
-the permission mode, stepping away), then a short second chat on a small
+pictures, the permission mode, stepping away), then a short second chat on a small
 window that calls a waiting tool through `use_tool`, and prints what each
-request kept. It runs with the tests. Today a cache could reuse 94% of what
-those chats send (56% at first, 86% with the fixed start), which is all it
-could with nothing rewritten but the two breaks below.
+request kept. It runs with the tests. Today a cache could reuse 95% of what
+those chats send (56% at first, 86% with the fixed start). One request still
+breaks the prefix, by design: the first after 20 minutes away, when the
+cache is gone and the old turns are shortened.
 
 `KNOWN` in that script lists the breaks that exist today, each with the step
 of the caching plan that removes it. The check fails when a request breaks

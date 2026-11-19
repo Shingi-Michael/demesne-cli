@@ -81,7 +81,7 @@ describe("prefix check", () => {
   test("a scripted chat through the engine breaks its prefix only where KNOWN says", async () => {
     const check = await runPrefixCheck();
     expect(check.problems).toEqual([]);
-    expect(check.requests.length).toBe(37);
+    expect(check.requests.length).toBe(42);
     // Steps 4 and 5: earlier turns are rewritten only once the provider's
     // cache is gone. 20 minutes away is inside this model's 30, 45 is past it.
     expect(check.requests.filter((request) => request.report.brokeAt).map((request) => request.id)).toEqual(["long-away#1"]);
@@ -89,6 +89,12 @@ describe("prefix check", () => {
     // and nothing in that chat's seven requests changes its start.
     const small = check.requests.filter((request) => request.id.startsWith("small:"));
     expect(small.map((request) => request.report.brokeAt)).toEqual(Array(7).fill(null));
+    // Step 6: a turn that runs out of its allowance keeps its instructions
+    // and its tools on the last request, and is told in a note at the end.
+    const spent = check.requests.filter((request) => request.id.startsWith("allowance:spent"));
+    expect(spent.map((request) => request.report.brokeAt)).toEqual([null, null, null]);
+    expect(spent[2]!.asked).toStartWith("<system-note>\nReached the configured 2 model-round allowance. This is the last request of this turn");
+    expect(check.requests.find((request) => request.id === "allowance:after#1")!.report.brokeAt).toBeNull();
     // What a cache can reuse today; it should only ever go up.
     expect(check.keptChars / check.sentChars).toBeGreaterThan(0.9);
     // Step 2: what changes in a chat is said in a note with the message, and

@@ -110,7 +110,9 @@ async function runSubagentInference(options: Parameters<typeof runSubagent>[0]):
   for (let round = 0; round <= SUBAGENT_LIMITS.rounds; round++) {
     signal.throwIfAborted();
     const finalizing = round === SUBAGENT_LIMITS.rounds || toolCalls >= SUBAGENT_LIMITS.toolCalls;
-    const tools = finalizing ? [] : definitions;
+    // The same tools as every round before, so this one reads from cache
+    // too; a tool asked for now is not run (below).
+    const tools = definitions;
     const request: ProviderMessage[] = finalizing
       ? [...messages, { role: "user", content: "Your tool budget is spent. Write your report now from what you have found, and say what remains unknown." }]
       : messages;

@@ -1,5 +1,5 @@
 import { called, draftOfUse, moreToolsSection, searchTools, splitTools, TOOL_SEARCH, USE_TOOL, shownTools as shownToolsIn, useToolAnswer, type ToolGuide } from "./tool-search.ts";
-import { NOTES_GUIDANCE, noteStates, notesFor, withNotes } from "./chat-notes.ts";
+import { lastRequestNote, NOTES_GUIDANCE, noteStates, notesFor, withNotes } from "./chat-notes.ts";
 import { AGENTS_TOOL, agentsDefinition, Crew, parseAgentsInput } from "./crew.ts";
 import type { CommandMonitor } from "./command-monitor.ts";
 import { isRecord, type NearbyAgent, type PermissionMode, type StoredModelMessage, type UserQuestion } from "@demesne/protocol";
@@ -389,8 +389,8 @@ export class AgentEngine {
     const storedForget = themefy ? 0 : this.store.getForgetThrough(session.id);
     const forgetUpTo = themefy ? 0 : nextForgetThrough(history, storedForget, idleMs, inference.contextCapacity, this.cacheClock.coldAfterMs(inference));
     if (!themefy && forgetUpTo !== storedForget) this.store.setForgetThrough(session.id, forgetUpTo);
-    let round = 0;
-    // Reserve one tool-free status request after an allowance is exhausted.
+    let round = 0, lastNoted = false;
+    // Reserve one status request after an allowance is exhausted.
     while (round <= maxModelRounds) {
       if (signal.aborted) throw signal.reason;
       if (round === maxModelRounds) budgetReason ??= `Reached the configured ${maxModelRounds} model-round allowance`;
@@ -399,7 +399,19 @@ export class AgentEngine {
       const { sent, deferrable } = deferring ? splitTools(definitions, inference.contextCapacity) : { sent: definitions, deferrable: [] };
       this.turnDeferrable.set(turnId, { deferrable, sent: new Set(sent.map((definition) => definition.name)) });
       for (const key of this.turnDeferrable.keys()) { if (this.turnDeferrable.size <= 64) break; this.turnDeferrable.delete(key); }
-      const requestDefinitions = finalizing ? [] : sent;
+      // The last request of a turn that ran out of its allowance keeps the
+      // same instructions and tool list as every request before it, so it
+      // reads the whole turn from cache. That it is the last, and that tools
+      // are not run in it, is said in a note at the end (chat-notes.ts).
+      // Themefy and the assistant keep their own tool-free last request.
+      const noted = finalizing && !themefy && !assistant;
+      if (noted && !lastNoted) {
+        lastNoted = true;
+        const last = { role: "user" as const, content: "", notes: [{ kind: "allowance", text: lastRequestNote(budgetReason!) }] };
+        currentMessages.push(last);
+        this.store.appendModelMessage(turnId, last);
+      }
+      const requestDefinitions = finalizing && !noted ? [] : sent;
       // A page made in an old turn is stored, and a file read then can be
       // read again: neither needs to ride along in full. Only turns up to the
       // cut are shortened, and the cut moves when the cache is cold.
@@ -409,7 +421,7 @@ export class AgentEngine {
         designing: sent.some((tool) => tool.name === "foundry_save"), home: this.options.designHome,
         delegate: { often: this.subagentOften, onAgents: Boolean(this.options.cliSubagents?.available(session.workspace?.root).length) && this.options.subagentModel !== "same" && !this.options.subagentModel?.includes("/") }, providerVision: this.options.providerVision, modelSees: inference.vision === true, configured: this.configuredSystemPrompt }) + moreToolsSection(deferrable);
       const unplannedMessages: ProviderMessage[] = [
-        { role: "system", content: systemPrompt + (finalizing
+        { role: "system", content: systemPrompt + (finalizing && !noted
           ? `\n${budgetReason}. Tools are unavailable for this final status request. Report what was actually done, checks and their outcomes, and the specific next steps. Distinguish unfinished work from completed work. The user can send a follow-up to continue from this saved context.` : "") },
         ...checkpointMessages,
         ...historyMessages.map(withNotes),
@@ -527,7 +539,15 @@ export class AgentEngine {
           // answer. Validate before settling the call or executing any tools.
           assertModelResponseComplete({ finishReason, outputTokens, maxOutputTokens: inference.maxOutputTokens,
             provider: inference.providerId, text: roundText, hasReasoning: roundHasReasoning, hasToolCalls: assembled.size > 0 });
-          if (finalizing && assembled.size > 0) throw new Error(`${budgetReason}. Model requested tools during the final status request. Progress is saved; send a follow-up to continue.`);
+          if (finalizing && assembled.size > 0) {
+            if (!noted) throw new Error(`${budgetReason}. Model requested tools during the final status request. Progress is saved; send a follow-up to continue.`);
+            // Asked for a tool all the same: it is not run, and what the
+            // model wrote beside it is the turn's last word. The calls are
+            // not kept, so the next turn finds no call without a result.
+            assembled.clear();
+            responses = undefined;
+            roundText ||= "(Out of allowance before a report was written.)";
+          }
           const requestCompletedAt = performance.now();
           this.store.recordProviderMetrics(providerCallId, {
             queueDurationMs: Math.max(0, Math.round(lease.queueDurationMs)),

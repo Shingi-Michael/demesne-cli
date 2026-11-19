@@ -199,7 +199,7 @@ export function recallText(messages: ProviderMessage[]): string {
   const calls = new Map<string, string>();
   const parts: string[] = [];
   for (const message of messages) {
-    if (message.role === "user") parts.push(`User: ${message.content}`);
+    if (message.role === "user" && message.content) parts.push(`User: ${message.content}`);
     if (message.role === "assistant") {
       const text = message.content ? splitNote(message.content).text.trim() : "";
       if (text) parts.push(`Assistant: ${text}`);

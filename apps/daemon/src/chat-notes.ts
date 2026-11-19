@@ -44,6 +44,11 @@ const WINDOW_OFF = "The person is at the window again: open, show and ask_user w
 const CONTEXT_OFF = "The earlier note about Drive and the other agents no longer applies.";
 const SOURCES_OFF = "No sources are kept with this chat any more.";
 
+/// What the last request of a turn that ran out of its allowance is told.
+export function lastRequestNote(reason: string): string {
+  return `${reason}. This is the last request of this turn: tools are not run in it, so call none. Report what was actually done, checks and their outcomes, and the specific next steps. Distinguish unfinished work from completed work. The user can send a follow-up to continue from this saved context.`;
+}
+
 export function unattendedNote(canAsk: boolean): string {
   return `Nobody is watching this message (Drive, a routine or a turn that runs on its own): open and show are refused${canAsk ? "" : ", and so is ask_user, so decide small things yourself and say what you chose"}. Make a Foundry page only when the task asks for a page, a mockup or a design, and don't offer to save skills.`;
 }
@@ -88,11 +93,14 @@ export function notesFor(states: readonly NoteState[], history: readonly Provide
 export function withNotes<Message extends ProviderMessage>(message: Message): Message {
   if (message.role !== "user" || !message.notes?.length) return message;
   const { notes, ...rest } = message;
-  return { ...rest, content: `${message.content}\n\n${OPEN}\n${notes.map((note) => note.text).join("\n")}\n${CLOSE}` } as Message;
+  // A message that is only a note (the last request of a turn) has no text of its own.
+  return { ...rest, content: `${message.content ? `${message.content}\n\n` : ""}${OPEN}\n${notes.map((note) => note.text).join("\n")}\n${CLOSE}` } as Message;
 }
 
 /// A message's own text, without the notes sent after it.
 export function withoutNotes(content: string): string {
+  if (!content.endsWith(CLOSE)) return content;
+  if (content.startsWith(`${OPEN}\n`) && content.indexOf(OPEN, 1) < 0) return "";
   const at = content.lastIndexOf(`\n\n${OPEN}\n`);
-  return at >= 0 && content.endsWith(CLOSE) ? content.slice(0, at) : content;
+  return at >= 0 ? content.slice(0, at) : content;
 }

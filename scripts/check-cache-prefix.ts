@@ -25,6 +25,7 @@ import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DemesneClient } from "../packages/client/src/index.ts";
+import type { AgentConfig } from "../packages/config/src/index.ts";
 import type { PermissionMode, PrefixReport } from "../packages/protocol/src/index.ts";
 import type { ProviderStreamEvent } from "../packages/providers/src/index.ts";
 import { createDaemonApp } from "../apps/daemon/src/app.ts";
@@ -33,6 +34,8 @@ import type { TurnProcessor } from "../apps/daemon/src/processor.ts";
 
 type Round = { call: { name: string; args: unknown }[] } | { say: string };
 interface ScriptedTurn { id: string; what: string; ask: string; rounds: Round[]; planOnly?: boolean; mode?: PermissionMode; idleMinutes?: number;
+  /// How the turn ends when not completed: one that runs out of its allowance is interrupted.
+  ends?: "interrupted";
   /// A switch flipped on the chat just before this message.
   set?: { autoApprove?: boolean } }
 
@@ -75,6 +78,15 @@ export const SMALL_CHAT: ScriptedTurn[] = [
 /// Small enough that Demesne's own tools wait (tool-search.ts WHOLE_SHARE).
 const SMALL_WINDOW = 32_768;
 
+/// A short chat whose turns may make two model requests and then one last
+/// one: the last keeps the instructions and the tools, and is told in a note.
+export const SHORT_ALLOWANCE_CHAT: ScriptedTurn[] = [
+  { id: "allowance:first", what: "short allowance: a plain ask", ask: "Hello.", rounds: [{ say: "Hello." }] },
+  { id: "allowance:spent", what: "short allowance: a turn that runs out", ask: "Read the two files.", ends: "interrupted", rounds: [
+    { call: [{ name: "read_file", args: { path: "apps/daemon/src/chat-notes.ts" } }] }, { call: [{ name: "read_file", args: { path: "apps/daemon/src/cache-clock.ts" } }] }, { say: "Read both; nothing was changed." }] },
+  { id: "allowance:after", what: "short allowance: the follow-up", ask: "Go on.", rounds: [{ say: "Done." }] },
+];
+
 /// The breaks that exist today: request (turn id # round) -> where it
 /// breaks, and the step of the caching plan that removes it.
 export const KNOWN: Record<string, { at: NonNullable<PrefixReport["brokeAt"]>; step: number; why: string }> = {
@@ -91,7 +103,8 @@ export interface PrefixCheck { requests: MeasuredRequest[]; problems: string[]; 
 
 export async function runPrefixCheck(): Promise<PrefixCheck> {
   const problems: string[] = [];
-  const requests = [...await runChat(CHAT, 1_000_000, problems), ...await runChat(SMALL_CHAT, SMALL_WINDOW, problems)];
+  const requests = [...await runChat(CHAT, 1_000_000, problems), ...await runChat(SMALL_CHAT, SMALL_WINDOW, problems),
+    ...await runChat(SHORT_ALLOWANCE_CHAT, 1_000_000, problems, { maxModelRounds: 2 })];
   for (const { id, report } of requests) {
     const known = KNOWN[id];
     if (report.brokeAt && !known) problems.push(`New break at ${id}: ${report.cause ?? report.brokeAt}. Keep the start of the request the same and add what changed at the end instead.`);
@@ -107,7 +120,7 @@ export async function runPrefixCheck(): Promise<PrefixCheck> {
 }
 
 /// One scripted chat through the engine, on a model with this window.
-async function runChat(chat: ScriptedTurn[], contextCapacity: number, problems: string[]): Promise<MeasuredRequest[]> {
+async function runChat(chat: ScriptedTurn[], contextCapacity: number, problems: string[], agent?: AgentConfig): Promise<MeasuredRequest[]> {
   let turnIndex = 0, round = 0, calls = 0;
   const asked: string[] = [];
   const model: TurnProcessor = {
@@ -131,7 +144,7 @@ async function runChat(chat: ScriptedTurn[], contextCapacity: number, problems: 
   writeFileSync(join(root, "data", "trusted-workspaces.json"), JSON.stringify({ trusted: [project] }));
   const database = join(root, "data", "state.sqlite");
   let clock = Date.now();
-  const app = createDaemonApp({ databasePath: database, authToken: "prefix-check", processor: model, heartbeat: { enabled: false }, nameChats: false, deferTools: true, providerVision: true, now: () => new Date(clock) });
+  const app = createDaemonApp({ databasePath: database, authToken: "prefix-check", processor: model, heartbeat: { enabled: false }, nameChats: false, deferTools: true, providerVision: true, agent, now: () => new Date(clock) });
   const server = serveDaemon(app, { hostname: "127.0.0.1", port: 0 });
   const client = new DemesneClient({ server: server.url.href, token: "prefix-check" });
   const requests: MeasuredRequest[] = [];
@@ -144,7 +157,7 @@ async function runChat(chat: ScriptedTurn[], contextCapacity: number, problems: 
       const { turn: submitted } = await client.submitTurn(session.id, { content: turn.ask, permissionMode: turn.mode ?? "allow", ...(turn.planOnly ? { planOnly: true } : {}) });
       for (const deadline = Date.now() + 60_000; ;) {
         const state = (await client.getSessionState(session.id)).session.turns.find((entry) => entry.id === submitted.id);
-        if (state && !["queued", "running"].includes(state.status)) { if (state.status !== "completed") problems.push(`Turn "${turn.id}" ended ${state.status}.`); break; }
+        if (state && !["queued", "running"].includes(state.status)) { if (state.status !== (turn.ends ?? "completed")) problems.push(`Turn "${turn.id}" ended ${state.status}.`); break; }
         if (Date.now() > deadline) { problems.push(`Turn "${turn.id}" did not finish.`); break; }
         await Bun.sleep(20);
       }

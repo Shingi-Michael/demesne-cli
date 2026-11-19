@@ -248,7 +248,10 @@ describe("DemesneStore", () => {
       outputTokens: 20,
       totalTokens: 120,
       cachedInputTokens: 80,
+      cacheWriteTokens: 15,
     });
+    const prefix = { sentChars: 900, previousChars: 700, keptChars: 120, brokeAt: "tools" as const, cause: "The tool list changed: added git_history", idleMs: 4000 };
+    first.recordProviderPrefix(providerCallId, prefix);
     first.recordProviderMetrics(providerCallId, { queueDurationMs: 125, durationMs: 500, timeToFirstTokenMs: 75 });
     first.settleProviderCall(providerCallId, "completed");
     first.appendMessageDelta(turn.id, "Read the file.");
@@ -267,10 +270,11 @@ describe("DemesneStore", () => {
       { role: "assistant", content: "Read the file." },
     ]);
     expect(second.database.query(`
-      SELECT cached_input_tokens, queue_duration_ms, duration_ms, time_to_first_token_ms
+      SELECT cached_input_tokens, cache_write_tokens, queue_duration_ms, duration_ms, time_to_first_token_ms
       FROM provider_calls WHERE id = ?
     `).get(providerCallId)).toEqual({
       cached_input_tokens: 80,
+      cache_write_tokens: 15,
       queue_duration_ms: 125,
       duration_ms: 500,
       time_to_first_token_ms: 75,
@@ -279,8 +283,9 @@ describe("DemesneStore", () => {
       provider: "provider",
       model: "model",
       contextPlan,
-      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 80 },
+      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 80, cacheWriteTokens: 15 },
       metrics: { queueDurationMs: 125, durationMs: 500, timeToFirstTokenMs: 75 },
+      prefix,
     });
     second.close();
   });

@@ -20,6 +20,7 @@ import {
   type ArtifactPage,
   PROTOCOL_VERSION,
   type ContextPlan,
+  type PrefixReport,
   type SessionCheckpoint,
   type EventEnvelope,
   type EventType,
@@ -159,6 +160,8 @@ interface ProviderCallRow {
   output_tokens: number | null;
   total_tokens: number | null;
   cached_input_tokens: number | null;
+  cache_write_tokens: number | null;
+  prefix_json: string | null;
   queue_duration_ms: number | null;
   duration_ms: number | null;
   time_to_first_token_ms: number | null;
@@ -1743,9 +1746,9 @@ export class DemesneStore {
       const now = new Date().toISOString();
       this.database
         .query(
-          "UPDATE provider_calls SET input_tokens = ?, output_tokens = ?, total_tokens = ?, cached_input_tokens = ? WHERE id = ?",
+          "UPDATE provider_calls SET input_tokens = ?, output_tokens = ?, total_tokens = ?, cached_input_tokens = ?, cache_write_tokens = ? WHERE id = ?",
         )
-        .run(usage.inputTokens, usage.outputTokens, usage.totalTokens, usage.cachedInputTokens ?? null, providerCallId);
+        .run(usage.inputTokens, usage.outputTokens, usage.totalTokens, usage.cachedInputTokens ?? null, usage.cacheWriteTokens ?? null, providerCallId);
       return this.insertEvent(
         "model.usage",
         turn.sessionId,
@@ -1756,6 +1759,12 @@ export class DemesneStore {
     })();
     this.eventSink?.(event);
     return event;
+  }
+
+  /// The cache meter's finding for a request (daemon cache-prefix.ts), kept
+  /// with its call so a miss can be explained later.
+  recordProviderPrefix(providerCallId: string, prefix: PrefixReport): void {
+    this.database.query("UPDATE provider_calls SET prefix_json = ? WHERE id = ?").run(JSON.stringify(prefix), providerCallId);
   }
 
   recordProviderMetrics(
@@ -2342,6 +2351,8 @@ export class DemesneStore {
         output_tokens INTEGER,
         total_tokens INTEGER,
         cached_input_tokens INTEGER,
+        cache_write_tokens INTEGER,
+        prefix_json TEXT,
         queue_duration_ms INTEGER,
         duration_ms INTEGER,
         time_to_first_token_ms INTEGER,
@@ -2399,6 +2410,12 @@ export class DemesneStore {
     }
     if (!this.hasColumn("provider_calls", "cached_input_tokens")) {
       this.database.run("ALTER TABLE provider_calls ADD COLUMN cached_input_tokens INTEGER");
+    }
+    if (!this.hasColumn("provider_calls", "cache_write_tokens")) {
+      this.database.run("ALTER TABLE provider_calls ADD COLUMN cache_write_tokens INTEGER");
+    }
+    if (!this.hasColumn("provider_calls", "prefix_json")) {
+      this.database.run("ALTER TABLE provider_calls ADD COLUMN prefix_json TEXT");
     }
     if (!this.hasColumn("provider_calls", "duration_ms")) {
       this.database.run("ALTER TABLE provider_calls ADD COLUMN duration_ms INTEGER");
@@ -2737,8 +2754,10 @@ function mapProviderCallSnapshot(row: ProviderCallRow): ProviderCallSnapshot {
         outputTokens: row.output_tokens,
         totalTokens: row.total_tokens,
         ...(row.cached_input_tokens !== null ? { cachedInputTokens: row.cached_input_tokens } : {}),
+        ...(row.cache_write_tokens !== null ? { cacheWriteTokens: row.cache_write_tokens } : {}),
       }
       : null,
+    ...(row.prefix_json ? { prefix: JSON.parse(row.prefix_json) as PrefixReport } : {}),
     metrics: row.duration_ms === null
       ? null
       : {

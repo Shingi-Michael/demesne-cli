@@ -234,7 +234,8 @@ export class ResponsesProvider implements ProviderAdapter {
         yield { type: "response_state", state: { accountId: this.options.accountId, model: request.model, output } };
         const usage = event.response.usage;
         if (isRecord(usage)) yield { type: "usage", usage: { inputTokens: count(usage.input_tokens), outputTokens: count(usage.output_tokens), totalTokens: count(usage.total_tokens),
-          ...(isRecord(usage.input_tokens_details) && count(usage.input_tokens_details.cached_tokens) !== null ? { cachedInputTokens: count(usage.input_tokens_details.cached_tokens)! } : {}) } };
+          ...(isRecord(usage.input_tokens_details) && count(usage.input_tokens_details.cached_tokens) !== null ? { cachedInputTokens: count(usage.input_tokens_details.cached_tokens)! } : {}),
+          ...(isRecord(usage.input_tokens_details) && count(usage.input_tokens_details.cache_write_tokens) !== null ? { cacheWriteTokens: count(usage.input_tokens_details.cache_write_tokens)! } : {}) } };
         yield { type: "finish", reason: calls.size ? "tool_calls" : "stop" };
         completed = true; break;
       }

@@ -24,7 +24,7 @@ describe("OpenAICompatibleProvider", () => {
               prompt_tokens: 4,
               completion_tokens: 2,
               total_tokens: 6,
-              prompt_tokens_details: { cached_tokens: 3 },
+              prompt_tokens_details: { cached_tokens: 3, cache_write_tokens: 1 },
             } })}\n\n`,
             "data: [DONE]\n\n",
           ].join("");
@@ -74,7 +74,7 @@ describe("OpenAICompatibleProvider", () => {
         { type: "text_delta", delta: "hé" },
         { type: "text_delta", delta: "llo" },
         { type: "finish", reason: "stop" },
-        { type: "usage", usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6, cachedInputTokens: 3 } },
+        { type: "usage", usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6, cachedInputTokens: 3, cacheWriteTokens: 1 } },
       ]);
       expect(String(authorization)).toBe("Bearer secret");
       expect(requestBody).toEqual({

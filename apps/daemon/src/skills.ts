@@ -11,14 +11,14 @@ const LISTED_MAX = 40;
 
 /// The system prompt's part: the one-liners, how to use them, and when to
 /// offer saving steps as a new skill. Static per project, so the cache holds.
-export function skillsGuidance(skills: Skill[], attended = true): string {
+export function skillsGuidance(skills: Skill[]): string {
   const listed = skills.slice(0, LISTED_MAX).map((skill) => `- ${skill.name}: ${skill.description}`);
   return [
     "Skills are saved steps for work that comes up again.",
     listed.length ? `When a task matches one below, call use_skill with its name before anything else and follow its steps:\n${listed.join("\n")}` : "There are no skills here yet.",
-    attended && "When the person asks to save steps as a skill, or the same steps just worked in this chat for the second time, end your answer with one line offering to save them as a skill. "
+    "When the person asks to save steps as a skill, or the same steps just worked in this chat for the second time, end your answer with one line offering to save them as a skill. "
       + "Once they say yes, write .demesne/skills/<name>/SKILL.md (name in lowercase with dashes) with front matter name and description (one line starting \"Use when\"), then the steps as a short numbered list.",
-  ].filter(Boolean).join("\n");
+  ].join("\n");
 }
 
 /// use_skill: the steps of one skill, counted as a use.

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { withoutNotes } from "../src/chat-notes.ts";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,7 +43,7 @@ test("a turn whose provider drops carries on with the next one, and says so once
     await engine.run(turn.id, pc, new AbortController().signal);
     expect(store.getTurn(turn.id)?.status).toBe("completed");
     expect(store.getTurn(turn.id)?.responseText).toBe("Drive is diagnosing CI.");
-    expect(asked).toEqual(["what is drive working on?"]);
+    expect(asked.map(withoutNotes)).toEqual(["what is drive working on?"]);
     const switched = events.filter((event) => event.type === "model.provider_switched");
     expect(switched).toHaveLength(1);
     expect(switched[0]!.payload).toMatchObject({ from: { provider: "Qwen on PC" }, to: { provider: "ChatGPT", model: "ChatGPT-model" } });

@@ -170,6 +170,7 @@ interface ProviderCallRow {
 }
 
 interface ModelMessageRow {
+  notes_json: string | null;
   responses_json: string | null;
   image_artifact_ids_json: string | null;
   id: number;
@@ -1048,8 +1049,8 @@ export class DemesneStore {
       ? JSON.stringify(message.toolCalls)
       : null;
     const result = this.database.query(`
-      INSERT INTO model_messages (session_id, turn_id, role, content, tool_call_id, tool_calls_json, created_at, image_artifact_ids_json, responses_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO model_messages (session_id, turn_id, role, content, tool_call_id, tool_calls_json, created_at, image_artifact_ids_json, responses_json, notes_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       turn.sessionId,
       turnId,
@@ -1060,6 +1061,7 @@ export class DemesneStore {
       new Date().toISOString(),
       (message.role === "tool" || message.role === "user") && message.imageArtifactIds?.length ? JSON.stringify(message.imageArtifactIds) : null,
       message.role === "assistant" && message.responses ? JSON.stringify(message.responses) : null,
+      message.role === "user" && message.notes?.length ? JSON.stringify(message.notes) : null,
     );
     return { id: Number(result.lastInsertRowid), turnId, message };
   }
@@ -1084,7 +1086,7 @@ export class DemesneStore {
   getTurnModelMessages(sessionId: string, turnId: string): ModelMessage[] {
     const rows = this.database.query(`
       SELECT model_messages.id, model_messages.turn_id, model_messages.role, model_messages.content,
-              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json, model_messages.responses_json
+              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json, model_messages.responses_json, model_messages.notes_json
       FROM model_messages JOIN turns ON turns.id = model_messages.turn_id
       WHERE model_messages.session_id = ? AND model_messages.turn_id = ? AND turns.kind = 'chat'
       ORDER BY model_messages.id
@@ -1096,7 +1098,7 @@ export class DemesneStore {
     const session = this.getSessionOrThrow(sessionId);
     const rows = this.database.query(`
       SELECT model_messages.id, model_messages.turn_id, model_messages.role, model_messages.content,
-              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json, model_messages.responses_json
+              model_messages.tool_call_id, model_messages.tool_calls_json, model_messages.image_artifact_ids_json, model_messages.responses_json, model_messages.notes_json
       FROM model_messages
       JOIN turns ON turns.id = model_messages.turn_id
       JOIN sessions ON sessions.id = model_messages.session_id
@@ -2405,6 +2407,9 @@ export class DemesneStore {
     if (!this.hasColumn("model_messages", "responses_json")) {
       this.database.run("ALTER TABLE model_messages ADD COLUMN responses_json TEXT");
     }
+    if (!this.hasColumn("model_messages", "notes_json")) {
+      this.database.run("ALTER TABLE model_messages ADD COLUMN notes_json TEXT");
+    }
     if (!this.hasColumn("model_messages", "image_artifact_ids_json")) {
       this.database.run("ALTER TABLE model_messages ADD COLUMN image_artifact_ids_json TEXT");
     }
@@ -2772,7 +2777,8 @@ function mapModelMessage(row: ModelMessageRow): StoredModelMessage {
   if (row.role === "user") {
     if (row.content === null) throw new InvalidStateError(`User model message ${row.id} has no content`);
     return { id: row.id, turnId: row.turn_id, message: { role: "user", content: row.content,
-      ...(row.image_artifact_ids_json ? { imageArtifactIds: JSON.parse(row.image_artifact_ids_json) as string[] } : {}) } };
+      ...(row.image_artifact_ids_json ? { imageArtifactIds: JSON.parse(row.image_artifact_ids_json) as string[] } : {}),
+      ...(row.notes_json ? { notes: JSON.parse(row.notes_json) as import("@demesne/protocol").ChatNote[] } : {}) } };
   }
   if (row.role === "tool") {
     if (row.content === null || !row.tool_call_id) {

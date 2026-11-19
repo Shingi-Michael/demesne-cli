@@ -7,7 +7,7 @@ import type { ModelMessage, PermissionMode, SessionStateResponse } from "@demesn
 import { DemesneStore } from "@demesne/storage";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
 import { applyFoundryEdits, PARTS_GUIDE, READY_KINDS_RULES, forgetFoundrySources, FORGOTTEN_SOURCE, foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
-import { FOUNDRY_GUIDANCE, selectToolsForTurn, turnToolGuidance } from "../src/engine.ts";
+import { FOUNDRY_GUIDANCE, turnToolGuidance } from "../src/engine.ts";
 import { noteSeen } from "../src/foundry-seen.ts";
 import type { AgentTool } from "../src/tools.ts";
 
@@ -24,15 +24,8 @@ const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_fro
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
 
-test("project overview mockups keep Foundry tools instead of becoming file inspection", () => {
-  const store = new DemesneStore(":memory:");
-  try {
-    const definitions = [foundrySaveTool(store).definition, foundryReadTool(store).definition];
-    for (const request of ["Foundry: an overview of the project", "Make an overview of the project as a dashboard mockup"]) {
-      expect(selectToolsForTurn(definitions, request)).toEqual(definitions);
-      expect(turnToolGuidance(request)).toBeNull();
-    }
-  } finally { store.close(); }
+test("project overview mockups get no file-inspection hint", () => {
+  for (const request of ["Foundry: an overview of the project", "Make an overview of the project as a dashboard mockup"]) expect(turnToolGuidance(request)).toBeNull();
 });
 const fixtures: { app: DaemonApp; root: string }[] = [];
 afterEach(async () => {
@@ -65,10 +58,11 @@ async function completed(client: DemesneClient, id: string): Promise<SessionStat
 for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
   test(`a chat without a project can create, read and revise Foundry artifacts (${permissionMode})`, async () => {
     const offered: string[][] = [];
-    let prompt = "";
+    let prompt = "", asked = "";
     const { client } = daemon(async function* (messages, tools) {
       offered.push(tools.map(tool => tool.name));
       prompt = messages[0]!.content ?? "";
+      asked ||= messages.find(message => message.role === "user")?.content ?? "";
       if (!tools.some(tool => tool.name === "foundry_save")) {
         yield { type: "text_delta", delta: "Foundry is unavailable." };
         yield { type: "finish", reason: "stop" }; return;
@@ -96,12 +90,14 @@ for (const permissionMode of ["ask", "allow", "deny"] as PermissionMode[]) {
     expect(offered[0]).not.toContain("write_file");
     expect(offered[0]).not.toContain("run_command");
     expect(offered[0]).not.toContain("subagent");
-    // Only a chat someone is in ("ask") makes pages on its own; Auto turns make one when asked.
-    if (permissionMode === "ask") {
-      expect(prompt).toContain("Foundry (foundry_save) is how you show the person something");
-      expect(prompt).toContain("Decide by what the best answer is, not by the words used");
-      expect(prompt).toContain("Make it in this turn rather than offering or asking first");
-    } else expect(prompt).toContain("nobody is watching this turn");
+    // The instructions are the same whoever is at the window. Only a chat
+    // someone is in ("ask") makes pages on its own; an Auto turn is told, in a
+    // note with the message, to make one only when asked.
+    expect(prompt).toContain("Foundry (foundry_save) is how you show the person something");
+    expect(prompt).toContain("Decide by what the best answer is, not by the words used");
+    expect(prompt).toContain("Make it in this turn rather than offering or asking first");
+    if (permissionMode === "ask") expect(asked).toBe("Make me a small interactive page in Foundry");
+    else expect(asked).toContain("Make a Foundry page only when the task asks for a page, a mockup or a design");
     const { artifacts } = await client.foundryList();
     expect(artifacts).toHaveLength(1);
     const artifact = await client.foundryGet(artifacts[0]!.id);

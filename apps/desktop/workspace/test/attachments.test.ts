@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { withoutNotes } from "../../../daemon/src/chat-notes.ts";
 import sharp from "sharp";
 import { WorkspaceHost } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
@@ -62,7 +63,7 @@ test("pictures and readable files attach, a model without vision gets the names 
     await host.submit("What is this?");
     await eventually(() => host.current!.runs().at(-1)?.status === "completed");
     const user = seen.flat().findLast((message) => message.role === "user")!;
-    expect(user.content).toBe(`What is this?\n\n[Attached image shot.png, 40×30, image artifact ${shot.id}]`);
+    expect(withoutNotes(user.content ?? "")).toBe(`What is this?\n\n[Attached image shot.png, 40×30, image artifact ${shot.id}]`);
     expect(user.imageInputs).toBeUndefined();
     await expect(f.client.submitTurn(sessionId, { content: "Again", attachmentIds: ["missing"] })).rejects.toThrow("attach it again");
   } finally { host.dispose(); await f.close(); }

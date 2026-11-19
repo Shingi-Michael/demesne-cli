@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { withoutNotes } from "../src/chat-notes.ts";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +28,7 @@ test("a thread merged or squashed onto your branch by hand turns Merged; one tha
   git(workspace, "init", "-q", "-b", "main"); git(workspace, "add", "-A"); git(workspace, "commit", "-qm", "init");
   const reports: string[] = [];
   const processor: TurnProcessor = { providerId: "test", modelId: "coder", async listModels() { return []; }, async *stream(messages) {
-    const last = messages.at(-1)!, said = String(last.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { reports.push(said); yield { type: "text_delta", delta: "Noted." }; yield { type: "finish", reason: "stop" }; return; }
     const job = /Your job: Bump (\w)/.exec(said)?.[1];
     if (last.role === "user" && job) {

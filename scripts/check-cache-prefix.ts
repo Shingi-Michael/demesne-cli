@@ -3,8 +3,9 @@
  * A provider's prompt cache reuses only the part of a request that repeats
  * the previous one from its first byte. This runs one scripted chat through
  * the daemon's own engine with a stand-in model, flipping every switch that
- * could change what is sent (loading a tool, plan mode, a Foundry page, the
- * permission mode, stepping away), and reads back what the cache meter
+ * could change what is sent (loading a tool, plan mode, auto-approve, a
+ * Foundry page, the permission mode, stepping away), and reads back what the
+ * cache meter
  * (apps/daemon/src/cache-prefix.ts) recorded for each request.
  *
  * KNOWN lists the breaks that exist today, each with the step of the caching
@@ -29,7 +30,9 @@ import { serveDaemon } from "../apps/daemon/src/http-server.ts";
 import type { TurnProcessor } from "../apps/daemon/src/processor.ts";
 
 type Round = { call: { name: string; args: unknown }[] } | { say: string };
-interface ScriptedTurn { id: string; what: string; ask: string; rounds: Round[]; planOnly?: boolean; mode?: PermissionMode; idleMinutes?: number }
+interface ScriptedTurn { id: string; what: string; ask: string; rounds: Round[]; planOnly?: boolean; mode?: PermissionMode; idleMinutes?: number;
+  /// A switch flipped on the chat just before this message.
+  set?: { autoApprove?: boolean } }
 
 const PAGE = `<!doctype html><html><head><link rel="stylesheet" href="foundry://kit/base.css"></head><body>${"<section><h2>Plans</h2><p>A long page, so its source is worth leaving out later.</p></section>".repeat(120)}</body></html>`;
 
@@ -44,6 +47,8 @@ export const CHAT: ScriptedTurn[] = [
   { id: "plan-off", what: "plan mode off", ask: "Go on.", rounds: [{ say: "Tidied." }] },
   { id: "overview", what: "an ask that reads like an overview", ask: "Give me an overview of this project.", rounds: [{ say: "It is a harness." }] },
   { id: "after-overview", what: "a plain follow-up", ask: "Shorter please.", rounds: [{ say: "Harness." }] },
+  { id: "approve-on", what: "auto-approve turned on", ask: "Do the next ones without asking.", set: { autoApprove: true }, rounds: [{ say: "Will do." }] },
+  { id: "approve-off", what: "auto-approve turned off", ask: "Ask me again from here.", set: { autoApprove: false }, rounds: [{ say: "Asking again." }] },
   { id: "foundry", what: "makes a Foundry page", ask: "Sketch the plans page.", rounds: [{ call: [{ name: "tool_search", args: { names: ["foundry_save"] } }] }, { call: [{ name: "foundry_save", args: { title: "Plans", kind: "page", source: PAGE } }] }, { say: "Saved." }] },
   { id: "after-foundry", what: "a plain follow-up", ask: "Nice.", rounds: [{ say: "Thanks." }] },
   { id: "attended", what: "a turn that asks before it acts", ask: "One more thing, what is 2+2?", mode: "ask", rounds: [{ say: "4" }] },
@@ -56,27 +61,25 @@ export const CHAT: ScriptedTurn[] = [
 /// breaks, and the step of the caching plan that removes it.
 export const KNOWN: Record<string, { at: NonNullable<PrefixReport["brokeAt"]>; step: number; why: string }> = {
   "load-tool#2": { at: "tools", step: 3, why: "a tool loaded with tool search is put into the tool list" },
-  "plan-on#1": { at: "instructions", step: 2, why: "plan mode adds a line to the instructions and swaps the tool list" },
-  "plan-off#1": { at: "instructions", step: 2, why: "leaving plan mode changes them back" },
-  "overview#1": { at: "instructions", step: 2, why: "an overview ask adds a hint to the instructions and cuts the tool list" },
-  "after-overview#1": { at: "instructions", step: 2, why: "the hint leaves again" },
   "foundry#2": { at: "instructions", step: 3, why: "loading a Foundry tool adds the design guide to the instructions" },
   "after-foundry#1": { at: "history", step: 4, why: "the page's source becomes a stub once its turn is over" },
-  "attended#1": { at: "instructions", step: 2, why: "someone at the window changes the instructions" },
-  "unattended#1": { at: "instructions", step: 2, why: "and nobody at the window changes them back" },
   // By design: after this long the provider's cache is gone, so old reads are cut for free (forget-reads.ts).
   "away#1": { at: "history", step: 5, why: "old reads are cut once the chat has sat idle" },
 };
 
-export interface MeasuredRequest { id: string; what: string; report: PrefixReport }
+export interface MeasuredRequest { id: string; what: string; report: PrefixReport;
+  /// The newest message as the model got it: the ask, then any notes (chat-notes.ts).
+  asked: string }
 export interface PrefixCheck { requests: MeasuredRequest[]; problems: string[]; sentChars: number; keptChars: number; possibleChars: number }
 
 export async function runPrefixCheck(): Promise<PrefixCheck> {
   let turnIndex = 0, round = 0, calls = 0;
+  const asked: string[] = [];
   const model: TurnProcessor = {
     providerId: "stand-in", modelId: "scripted", contextCapacity: 1_000_000, maxOutputTokens: 8000, preservesPromptCache: true,
     async listModels() { return [{ id: "scripted", provider: "stand-in", contextWindow: 1_000_000 }]; },
-    async *stream(): AsyncGenerator<ProviderStreamEvent> {
+    async *stream(messages): AsyncGenerator<ProviderStreamEvent> {
+      asked.push(String(messages.findLast((message) => message.role === "user")?.content ?? ""));
       const step = CHAT[turnIndex]!.rounds[round++] ?? { say: "(the script ran out)" };
       if ("call" in step) {
         for (const [index, call] of step.call.entries()) yield { type: "tool_call_delta", index, idDelta: `call-${calls++}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.args) };
@@ -98,8 +101,9 @@ export async function runPrefixCheck(): Promise<PrefixCheck> {
   try {
     const { session } = await client.createSession({ workspacePath: project, trustWorkspace: true });
     for (const [index, turn] of CHAT.entries()) {
-      turnIndex = index; round = 0;
+      turnIndex = index; round = 0; asked.length = 0;
       clock += (turn.idleMinutes ?? 0.5) * 60_000;
+      if (turn.set) await client.updateSession(session.id, turn.set);
       const { turn: submitted } = await client.submitTurn(session.id, { content: turn.ask, permissionMode: turn.mode ?? "allow", ...(turn.planOnly ? { planOnly: true } : {}) });
       for (const deadline = Date.now() + 60_000; ;) {
         const state = (await client.getSessionState(session.id)).session.turns.find((entry) => entry.id === submitted.id);
@@ -113,7 +117,7 @@ export async function runPrefixCheck(): Promise<PrefixCheck> {
       if (rows.length !== turn.rounds.length) problems.push(`Turn "${turn.id}" made ${rows.length} requests, the script has ${turn.rounds.length}.`);
       for (const [at, row] of rows.entries()) {
         if (!row.prefix_json) { problems.push(`Request ${turn.id}#${at + 1} has no cache meter record.`); continue; }
-        requests.push({ id: `${turn.id}#${at + 1}`, what: `${turn.what}${rows.length > 1 ? `, round ${at + 1}` : ""}`, report: JSON.parse(row.prefix_json) as PrefixReport });
+        requests.push({ id: `${turn.id}#${at + 1}`, what: `${turn.what}${rows.length > 1 ? `, round ${at + 1}` : ""}`, report: JSON.parse(row.prefix_json) as PrefixReport, asked: asked[at] ?? "" });
       }
     }
   } finally {

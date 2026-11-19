@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { withoutNotes } from "../src/chat-notes.ts";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,7 +54,7 @@ test("threads proposed first: nothing runs until the person starts one, and a ne
   const results: string[] = [];
   let reports = 0;
   const stream: TurnProcessor["stream"] = async function* (messages) {
-    const last = messages.at(-1)!, said = String(last.content), first = String(messages.find((message) => message.role === "user")?.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content)), first = withoutNotes(String(messages.find((message) => message.role === "user")?.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { reports++; yield* say("Noted."); return; }
     if (first.includes("You're one of the threads")) {
       if (last.role === "tool") { yield* say("Done."); return; }
@@ -117,7 +118,7 @@ test("a thread built on a proposed one waits for it to be started", async () => 
   const { root, workspace } = repo();
   let reports = 0;
   const { call, close } = await serve(root, async function* (messages) {
-    const last = messages.at(-1)!, said = String(last.content), first = String(messages.find((message) => message.role === "user")?.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content)), first = withoutNotes(String(messages.find((message) => message.role === "user")?.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { reports++; yield* say("Noted."); return; }
     if (first.includes("You're one of the threads")) {
       if (last.role === "tool") { yield* say("Done."); return; }
@@ -147,7 +148,7 @@ test("Try again: a thread that stopped picks up in its own chat and worktree", a
   const { root, workspace } = repo();
   let tries = 0, resumed = "", reports = 0;
   const { call, close } = await serve(root, async function* (messages) {
-    const last = messages.at(-1)!, said = String(last.content), first = String(messages.find((message) => message.role === "user")?.content);
+    const last = messages.at(-1)!, said = withoutNotes(String(last.content)), first = withoutNotes(String(messages.find((message) => message.role === "user")?.content));
     if (last.role === "user" && said.startsWith("Thread report: ")) { reports++; yield* say("Noted."); return; }
     if (first.includes("You're one of the threads")) {
       if (last.role === "tool") { yield* say("Set a to 2."); return; }

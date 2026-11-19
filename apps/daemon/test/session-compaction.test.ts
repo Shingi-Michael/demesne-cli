@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { withoutNotes } from "../src/chat-notes.ts";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -118,7 +119,7 @@ test("manual compaction preserves the journal and tool pairs, persists a summary
     await consume(await client.submitTurn(id, { content: "Continue the task" }));
     const next = requests.at(-1)!;
     expect(next[1]).toEqual({ role: "assistant", content: checkpoint.summary });
-    expect(next.filter((message) => message.role === "user").map((message) => message.content)).toEqual([
+    expect(next.filter((message) => message.role === "user").map((message) => withoutNotes(message.content ?? ""))).toEqual([
       "Request 3: preserve Unicode support", "Request 4: preserve Unicode support", "Continue the task",
     ]);
     expect(JSON.stringify(next)).not.toContain("OLD_SOURCE_0");
@@ -264,7 +265,8 @@ test.each(["partial", "full"] as const)("%s undo invalidates a checkpoint and re
     expect(messages).toContain("src/parser.ts");
     expect(messages).not.toContain("Historical conversation checkpoint");
     expect((await client.getSessionState(id)).session.turns[0]?.responseText).toBe("Answer 0");
-  }, { undo: true });
+    // Room for all five turns beside a project chat's whole tool list.
+  }, { undo: true, capacity: 40_000 });
 });
 
 test("undo during summarization prevents committing a stale checkpoint", async () => {
@@ -480,7 +482,9 @@ test("past two fifths of the window the model writes a hidden note, kept for com
       yield { type: "usage", usage: { inputTokens: 9000, outputTokens: 40, totalTokens: 9040 } };
     });
     await consume(await client.submitTurn(id, { content: "Finish the parser" }));
-    expect(requests.at(-1)![0]?.content).toContain("<turn-note>");
+    // Asked for in a note with the message: the instructions don't change as a chat grows (chat-notes.ts).
+    expect(requests.at(-1)![0]?.content).not.toContain("<turn-note>");
+    expect(requests.at(-1)!.at(-1)?.content).toContain("<turn-note>");
     const state = await client.getSessionState(id);
     expect(state.session.turns.at(-1)?.responseText).toBe("Done.");
     expect(state.latestProviderCall?.contextPlan?.parts?.keep).toEqual([]);

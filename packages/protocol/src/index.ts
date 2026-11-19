@@ -240,9 +240,15 @@ export interface WorkspaceFileText extends WorkspaceFileStatus { content: string
 /// Opaque Responses items, retained for stateless tool and reasoning continuity.
 export interface ResponsesState { accountId: string; model: string; output: Record<string, unknown>[] }
 
+/// Something that changed in a chat (plan mode, who approves, what Drive is
+/// doing), told to the model with the message it came with. It is kept with
+/// that message and sent after its text every time, so the start of the chat
+/// never has to change (apps/daemon/src/chat-notes.ts).
+export interface ChatNote { kind: string; text: string }
+
 export type ModelMessage =
   | { role: "system"; content: string }
-  | { role: "user"; content: string; imageArtifactIds?: string[] }
+  | { role: "user"; content: string; imageArtifactIds?: string[]; notes?: ChatNote[] }
   | { role: "assistant"; content: string | null; toolCalls?: ModelToolCall[]; responses?: ResponsesState }
   | { role: "tool"; toolCallId: string; content: string; imageArtifactIds?: string[] };
 

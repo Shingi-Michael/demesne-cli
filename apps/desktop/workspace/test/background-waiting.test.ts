@@ -1,4 +1,5 @@
 import { test } from "bun:test";
+import { withoutNotes } from "../../../daemon/src/chat-notes.ts";
 import { WorkspaceHost } from "../host.ts";
 import { fixture, eventually } from "./fixture.ts";
 
@@ -8,7 +9,7 @@ test("a chat that asks for approval in the background is marked waiting until it
   const f = await fixture({
     providerId: "test", modelId: "test", async listModels() { return []; },
     async *stream(messages) {
-      if (messages.findLast(message => message.role === "user")?.content !== prompt) {
+      if (withoutNotes(messages.findLast(message => message.role === "user")?.content ?? "") !== prompt) {
         yield { type: "text_delta", delta: '{"proposals":[]}' };
         yield { type: "finish", reason: "stop" }; return;
       }

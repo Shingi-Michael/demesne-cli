@@ -13,6 +13,8 @@ export interface TurnInference {
   /// The provider takes images (attachments and tool screenshots).
   readonly vision?: boolean;
   readonly contextCapacity?: number;
+  /// How long the provider says it keeps a prompt cache after a request (cache-clock.ts).
+  readonly cacheLifeMs?: number;
   readonly maxOutputTokens?: number;
   readonly temperature?: number;
   readonly seed?: number;
@@ -37,6 +39,8 @@ export interface TurnProcessor {
   readonly providerId: string;
   readonly modelId: string;
   readonly contextCapacity?: number;
+  /// How long the provider says it keeps a prompt cache after a request (cache-clock.ts).
+  readonly cacheLifeMs?: number;
   readonly maxOutputTokens?: number;
   readonly temperature?: number;
   readonly seed?: number;
@@ -101,6 +105,7 @@ export function snapshotTurnInference(
     preservesPromptCache,
     vision: processor.vision === true,
     contextCapacity,
+    cacheLifeMs: processor.cacheLifeMs,
     maxOutputTokens,
     temperature,
     seed,

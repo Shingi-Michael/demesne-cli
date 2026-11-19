@@ -69,7 +69,8 @@ import { pictureMaker } from "./social-pictures.ts";
 import { PlaceholderTurnProcessor, snapshotTurnInference, type TurnInference, type TurnProcessor } from "./processor.ts";
 import { AgentEngine } from "./engine.ts";
 import { SessionCompactor } from "./session-compaction.ts";
-import { AUTO_COMPACT_AT, CACHE_COLD_MS, KeepEdits, keepLines, NOTES_FROM } from "./turn-notes.ts";
+import { AUTO_COMPACT_AT, KeepEdits, keepLines, NOTES_FROM } from "./turn-notes.ts";
+import { CacheClock } from "./cache-clock.ts";
 import type { ContextPlanner } from "./context-planner.ts";
 import { runtimeProfileRequiresSingleInferenceSlot } from "./ollama-runtime.ts";
 import { PermissionBroker } from "./permissions.ts";
@@ -851,7 +852,10 @@ export function createDaemonApp(options: {
   /// Compacting while you're away (pass 114): once a chat has sat idle
   /// long enough that its provider's prompt cache is cold, a chat past
   /// NOTES_FROM swaps its older turns for their notes before you come back.
-  const awayTimers = new Map<string, ReturnType<typeof setTimeout>>(), compactAwayMs = options.compactAwayMs ?? CACHE_COLD_MS;
+  /// How long that is comes from the cache clock (cache-clock.ts): 30
+  /// minutes or 12 hours on a GPT-6 model, a few minutes on others, and on a
+  /// model of your own machine time alone never does it.
+  const awayTimers = new Map<string, ReturnType<typeof setTimeout>>(), cacheClock = new CacheClock(store, () => (options.now?.() ?? new Date()).getTime());
   function compactWhenAway(sessionId: string, turnId: string, inference: TurnInference) {
     clearTimeout(awayTimers.get(sessionId));
     const timer = setTimeout(() => {
@@ -866,7 +870,7 @@ export function createDaemonApp(options: {
       } catch (error) {
         console.error(`Could not compact ${sessionId} while you were away`, error);
       }
-    }, compactAwayMs);
+    }, options.compactAwayMs ?? cacheClock.coldAfterMs(inference));
     timer.unref?.();
     awayTimers.set(sessionId, timer);
   }

@@ -122,13 +122,14 @@ interface Turn<T extends ModelMessage> { firstMessageId: number; messages: T[] }
 /// Decided once at the start of a turn, so every round of it sends the same
 /// history and keeps the cache. `through` null = a chat from before stored
 /// cuts; `idleMs` null = no request yet (nothing cached); `windowTokens` the
-/// model's window, when known.
-export function nextForgetThrough<T extends ModelMessage>(turns: Turn<T>[], through: number | null, idleMs: number | null, windowTokens?: number | null): number {
+/// model's window, when known; `coldMs` how long this provider keeps its
+/// cache (cache-clock.ts), CACHE_COLD_MS when nobody knows.
+export function nextForgetThrough<T extends ModelMessage>(turns: Turn<T>[], through: number | null, idleMs: number | null, windowTokens?: number | null, coldMs = CACHE_COLD_MS): number {
   let at = through ?? (() => { const cut = cutPoint(turns.map((turn) => turn.messages)); return cut ? turns[cut - 1]!.firstMessageId : 0; })();
   const end = turns.length - KEEP_RECENT_TURNS;
   if (end <= 0 || turns[end - 1]!.firstMessageId <= at) return at;
   const pending = turns.slice(0, end).filter((turn) => turn.firstMessageId > at).reduce((total, turn) => total + longOutput(turn.messages), 0);
-  const cold = idleMs === null || idleMs >= CACHE_COLD_MS;
+  const cold = idleMs === null || idleMs >= coldMs;
   const warmLimit = windowTokens ? Math.min(CUT_AFTER_CHARS, windowTokens * 4 * CUT_AFTER_SHARE) : CUT_AFTER_CHARS;
   if ((cold && pending >= COLD_CUT_CHARS) || pending > warmLimit) at = turns[end - 1]!.firstMessageId;
   return at;

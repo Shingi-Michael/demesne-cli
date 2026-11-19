@@ -3,7 +3,7 @@
 import type { loadConfig, ProviderConfig } from "@demesne/config";
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
 import { CodexAuth } from "@demesne/codex-auth";
-import { ChatGPTProvider, CodexProvider, OpenAICompatibleProvider } from "@demesne/providers";
+import { ChatGPTProvider, CodexProvider, isOwnMachine, OpenAICompatibleProvider } from "@demesne/providers";
 import { MultiProviderProcessor } from "./multi-provider-processor.ts";
 import {
   createRuntimeProfileVerifier,
@@ -29,8 +29,7 @@ function signedOut(settings: ProviderConfig, chatgptSignedIn: Set<string>): bool
 export function isLocalProvider(settings: ProviderConfig): boolean {
   if (settings.auth === "chatgpt" || settings.auth === "codex") return false;
   try {
-    const host = new URL(settings.url ?? "http://127.0.0.1:1234/v1").hostname;
-    return host === "localhost" || host.endsWith(".local") || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host) || host === "[::1]";
+    return isOwnMachine(new URL(settings.url ?? "http://127.0.0.1:1234/v1").hostname);
   } catch { return false; }
 }
 

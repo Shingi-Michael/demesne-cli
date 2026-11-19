@@ -7,6 +7,7 @@ import { DEFAULT_AGENT_LIMITS, type AgentConfig, type SubagentOften } from "@dem
 import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
 import { FOUNDRY_LOOK_PREFIX } from "./foundry-look.ts";
+import { CacheClock } from "./cache-clock.ts";
 import { PrefixMeter } from "./cache-prefix.ts";
 import { PAGE_LOOK_PREFIX } from "./page-look.ts";
 import { BROWSER_PICTURE_PREFIX } from "./browser.ts";
@@ -154,7 +155,7 @@ export class AgentEngine {
     private readonly configuredSystemPrompt?: string,
     private readonly contextPlanner?: ContextPlanner,
     private readonly options: AgentEngineOptions = {},
-  ) {}
+  ) { this.cacheClock = new CacheClock(store, () => (options.now?.() ?? new Date()).getTime()); }
 
   /// Per chat, when it last read or wrote each file (its mtime then): a file
   /// that has moved on since, while another agent works in the project, was
@@ -164,6 +165,8 @@ export class AgentEngine {
   /// tools that wait and the names in the tool list.
   private readonly shownTools = new Map<string, Set<string>>();
   private readonly prefixMeter = new PrefixMeter();
+  /// How long each provider keeps its cache: what "cold" means for a chat.
+  private readonly cacheClock: CacheClock;
   private readonly turnDeferrable = new Map<string, { deferrable: ProviderToolDefinition[]; sent: Set<string> }>();
 
   /// Words sent to a running turn, waiting for the end of its current step.
@@ -384,7 +387,7 @@ export class AgentEngine {
     const lastCall = this.store.lastProviderCallAt(session.id);
     const idleMs = lastCall ? (this.options.now?.() ?? new Date()).getTime() - Date.parse(lastCall) : null;
     const storedForget = themefy ? 0 : this.store.getForgetThrough(session.id);
-    const forgetUpTo = themefy ? 0 : nextForgetThrough(history, storedForget, idleMs, inference.contextCapacity);
+    const forgetUpTo = themefy ? 0 : nextForgetThrough(history, storedForget, idleMs, inference.contextCapacity, this.cacheClock.coldAfterMs(inference));
     if (!themefy && forgetUpTo !== storedForget) this.store.setForgetThrough(session.id, forgetUpTo);
     let round = 0;
     // Reserve one tool-free status request after an allowance is exhausted.

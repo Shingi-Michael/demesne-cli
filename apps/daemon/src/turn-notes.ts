@@ -17,9 +17,6 @@ export const NOTES_FROM = 0.4;
 /// Share of the room for input (the window less the reply) at which a chat
 /// compacts itself after a turn.
 export const AUTO_COMPACT_AT = 0.75;
-/// How long a chat sits idle before its provider's prompt cache is surely
-/// cold: compacting then costs nothing a next request wouldn't pay anyway.
-export const CACHE_COLD_MS = 10 * 60_000;
 const RECALL_CHARACTERS = 24_000;
 const RECALL_RESULT_CHARACTERS = 6_000;
 const MAX_KEEP = 24;

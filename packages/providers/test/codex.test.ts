@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CodexProvider, type ProviderRequest } from "../src/index.ts";
+import { CACHE_LIFE_MS, CodexProvider, isOwnMachine, keepsCacheLong, type ProviderRequest } from "../src/index.ts";
 import { reasoning, responseStream, tool } from "./chatgpt-fixture.ts";
 
 const request: ProviderRequest = { model: "codex/gpt-6.1-sol", cacheKey: "session-1", messages: [{ role: "system", content: "Be helpful" }, { role: "user", content: "Inspect input.txt" }],
@@ -35,7 +35,7 @@ test("sends the slug, Codex's headers, system text as instructions and plain fun
   }) as unknown as typeof fetch });
   const first = await collect(p);
   expect(headers[0]!.get("chatgpt-account-id")).toBe("acct-1"); expect(headers[0]!.get("session_id")).toBe("session-1"); expect(headers[0]!.get("originator")).toBe("codex_cli_rs");
-  expect(bodies[0]).toEqual({ model: "gpt-6.1-sol", store: false, stream: true, instructions: "Be helpful", tool_choice: "auto", parallel_tool_calls: true, prompt_cache_key: "session-1",
+  expect(bodies[0]).toEqual({ model: "gpt-6.1-sol", store: false, stream: true, instructions: "Be helpful", tool_choice: "auto", parallel_tool_calls: true, prompt_cache_key: "session-1", prompt_cache_options: { ttl: "12h" },
     input: [{ role: "user", content: "Inspect input.txt" }], include: ["reasoning.encrypted_content"],
     tools: [{ type: "function", name: "read_file", description: "Read a file", parameters: request.tools![0]!.inputSchema, strict: false }] });
   expect(first.find(e => e.type === "tool_call_delta")).toMatchObject({ nameDelta: "read_file", idDelta: "call_1" });
@@ -95,4 +95,79 @@ test("Codex's prefixed model uses medium by default on the wire, and honors an e
   await collect(p);
   await collect(p, { ...request, reasoningLevel: "low" });
   expect(bodies.map(body => body.reasoning)).toEqual([{ effort: "medium", summary: "auto" }, { effort: "low", summary: "auto" }]);
+});
+
+test("asks for the 12-hour cache, and stops asking on a route that refuses it", async () => {
+  // A route that takes the option: asked every time, and the cache is said to live 12 hours.
+  const taken: Record<string, unknown>[] = [];
+  const takes = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+    taken.push(JSON.parse(String(init?.body)));
+    return codexStream();
+  }) as unknown as typeof fetch });
+  expect(takes.cacheLifeMs("codex/gpt-6.1-sol")).toBe(CACHE_LIFE_MS.gpt);
+  await collect(takes); await collect(takes);
+  expect(taken.map((body) => body.prompt_cache_options)).toEqual([{ ttl: "12h" }, { ttl: "12h" }]);
+  expect(takes.cacheLifeMs("codex/gpt-6.1-sol")).toBe(CACHE_LIFE_MS.long);
+  // Models from before the long lifetimes are not asked for it.
+  expect(takes.cacheLifeMs("codex/gpt-5.2")).toBe(CACHE_LIFE_MS.short);
+
+  // A route that refuses it: the same request goes out once more without, and it is not asked again.
+  const refused: Record<string, unknown>[] = [];
+  const refuses = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    refused.push(body);
+    return body.prompt_cache_options ? Response.json({ detail: "Unsupported parameter: prompt_cache_options" }, { status: 400 }) : codexStream();
+  }) as unknown as typeof fetch });
+  expect((await collect(refuses)).at(-1)).toEqual({ type: "finish", reason: "stop" });
+  await collect(refuses);
+  expect(refused.map((body) => "prompt_cache_options" in body)).toEqual([true, false, false]);
+  expect(refuses.cacheLifeMs("codex/gpt-6.1-sol")).toBe(CACHE_LIFE_MS.gpt);
+
+  // A failure that is not about the option is not retried, and nothing is concluded from it.
+  let calls = 0;
+  const full = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async () => {
+    calls++;
+    return Response.json({ error: { type: "usage_limit_reached" } }, { status: 429 });
+  }) as unknown as typeof fetch });
+  await expect(collect(full)).rejects.toThrow("usage limit");
+  expect(calls).toBe(1);
+});
+
+test("which models keep a cache long, and which hosts are your own machine", () => {
+  expect(["gpt-6.1-sol", "codex/gpt-6-astra", "openai/gpt-5.6", "gpt-5.10"].map(keepsCacheLong)).toEqual([true, true, true, true]);
+  expect(["gpt-5.5", "gpt-5", "gpt-4.1", "claude-sonnet-5", "qwen3-coder", "my-gpt-6-clone"].map(keepsCacheLong)).toEqual([false, false, false, false, false, false]);
+  expect(["localhost", "127.0.0.1", "192.168.1.20", "100.101.4.9", "studio.local", "10.0.0.3"].map(isOwnMachine)).toEqual([true, true, true, true, true, true]);
+  expect(["openrouter.ai", "api.openai.com", "172.15.0.1", "100.128.0.1"].map(isOwnMachine)).toEqual([false, false, false, false]);
+});
+
+test("a route that refuses the 12-hour cache inside the stream is asked once, too", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const p = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    return body.prompt_cache_options
+      ? new Response(`data: ${JSON.stringify({ type: "response.failed", response: { error: { code: "invalid_request_error", message: "Unknown parameter" } } })}\n\n`, { headers: { "Content-Type": "text/event-stream" } })
+      : codexStream();
+  }) as unknown as typeof fetch });
+  expect((await collect(p)).at(-1)).toEqual({ type: "finish", reason: "stop" });
+  await collect(p);
+  expect(bodies.map((body) => "prompt_cache_options" in body)).toEqual([true, false, false]);
+});
+
+test("an asking request that fails for no nameable reason can't keep failing", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const p = new CodexProvider({ accountId: "acct-1", accessToken: async () => "access", fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    // A route that takes the option and then never completes a response that carries it.
+    return body.prompt_cache_options
+      ? new Response(`data: ${JSON.stringify({ type: "response.incomplete", response: { status: "incomplete" } })}\n\n`, { headers: { "Content-Type": "text/event-stream" } })
+      : codexStream();
+  }) as unknown as typeof fetch });
+  await expect(collect(p)).rejects.toThrow();
+  // The next goes out without the option, the one after asks once more, and then never again.
+  await collect(p);
+  await expect(collect(p)).rejects.toThrow();
+  await collect(p); await collect(p);
+  expect(bodies.map((body) => "prompt_cache_options" in body)).toEqual([true, false, true, false, false]);
 });

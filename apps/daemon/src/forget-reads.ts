@@ -8,6 +8,7 @@
 /// stay whole. Only turns up to the stored cut (nextForgetThrough) are
 /// touched: the last two finished turns and the turn in progress keep everything.
 import { isRecord, type ModelMessage } from "@demesne/protocol";
+import { called } from "./tool-search.ts";
 
 /// Tools whose output can be fetched again, and so need not be carried.
 export const REREADABLE_TOOLS = new Set([
@@ -48,7 +49,7 @@ export function forgetOldReads<T extends ModelMessage>(messages: T[]): T[] {
   const names = new Map<string, string>();
   for (const message of messages) {
     if (message.role !== "assistant") continue;
-    for (const call of message.toolCalls ?? []) names.set(call.id, call.name);
+    for (const call of message.toolCalls ?? []) names.set(call.id, called(call).name);
   }
   return messages.map((message) => {
     if (message.role !== "tool" || typeof message.content !== "string" || message.content.length <= KEEP_UNDER) return message;
@@ -78,7 +79,7 @@ const longOutput = (messages: ModelMessage[]) => {
   const names = new Map<string, string>();
   let total = 0;
   for (const message of messages) {
-    if (message.role === "assistant") for (const call of message.toolCalls ?? []) names.set(call.id, call.name);
+    if (message.role === "assistant") for (const call of message.toolCalls ?? []) names.set(call.id, called(call).name);
     else if (message.role === "tool" && message.content.length > KEEP_UNDER && REREADABLE_TOOLS.has(names.get(message.toolCallId) ?? "")) total += message.content.length;
   }
   return total;

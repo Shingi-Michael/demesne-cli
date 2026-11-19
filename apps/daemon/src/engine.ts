@@ -1,4 +1,4 @@
-import { moreToolsSection, searchTools, splitTools, TOOL_SEARCH } from "./tool-search.ts";
+import { called, draftOfUse, moreToolsSection, searchTools, splitTools, TOOL_SEARCH, USE_TOOL, shownTools as shownToolsIn, useToolAnswer, type ToolGuide } from "./tool-search.ts";
 import { NOTES_GUIDANCE, noteStates, notesFor, withNotes } from "./chat-notes.ts";
 import { AGENTS_TOOL, agentsDefinition, Crew, parseAgentsInput } from "./crew.ts";
 import type { CommandMonitor } from "./command-monitor.ts";
@@ -160,10 +160,11 @@ export class AgentEngine {
   /// that has moved on since, while another agent works in the project, was
   /// probably changed by that agent.
   private readonly seenFiles = new Map<string, Map<string, number>>();
-  /// Per chat, the tools tool_search loaded; per turn, the ones it can load.
-  private readonly loadedTools = new Map<string, Set<string>>();
+  /// Per chat, the waiting tools it was shown how to call; per turn, the
+  /// tools that wait and the names in the tool list.
+  private readonly shownTools = new Map<string, Set<string>>();
   private readonly prefixMeter = new PrefixMeter();
-  private readonly turnDeferrable = new Map<string, ProviderToolDefinition[]>();
+  private readonly turnDeferrable = new Map<string, { deferrable: ProviderToolDefinition[]; sent: Set<string> }>();
 
   /// Words sent to a running turn, waiting for the end of its current step.
   private readonly steers = new Map<string, { id: string; text: string }[]>();
@@ -339,8 +340,11 @@ export class AgentEngine {
     // whole and the rest wait as one line each until the model loads them;
     // on a large one only MCP servers' tools wait.
     const deferring = !themefy && !assistant && this.options.deferTools === true;
-    let loadedTools = this.loadedTools.get(session.id);
-    if (!loadedTools) { loadedTools = new Set(); this.loadedTools.set(session.id, loadedTools); }
+    // The waiting tools this chat was shown how to call, read from what it
+    // still holds, so a restart keeps them and compaction lets them go.
+    const shownTools = shownToolsIn(history.flatMap((entry) => entry.messages));
+    this.shownTools.set(session.id, shownTools);
+    for (const key of this.shownTools.keys()) { if (this.shownTools.size <= 64) break; this.shownTools.delete(key); }
     // Past NOTES_FROM of the window the model ends each answer with a hidden
     // note, so compacting later swaps old turns for notes with no model call.
     const noting = !themefy && !assistant && Boolean(inference.contextCapacity)
@@ -389,8 +393,8 @@ export class AgentEngine {
       if (round === maxModelRounds) budgetReason ??= `Reached the configured ${maxModelRounds} model-round allowance`;
       if (totalToolCalls >= maxToolCalls) budgetReason ??= `Reached the configured ${maxToolCalls} tool-call allowance`;
       const finalizing = budgetReason !== undefined;
-      const { sent, deferrable } = deferring ? splitTools(definitions, loadedTools, inference.contextCapacity) : { sent: definitions, deferrable: [] };
-      this.turnDeferrable.set(turnId, deferrable);
+      const { sent, deferrable } = deferring ? splitTools(definitions, inference.contextCapacity) : { sent: definitions, deferrable: [] };
+      this.turnDeferrable.set(turnId, { deferrable, sent: new Set(sent.map((definition) => definition.name)) });
       for (const key of this.turnDeferrable.keys()) { if (this.turnDeferrable.size <= 64) break; this.turnDeferrable.delete(key); }
       const requestDefinitions = finalizing ? [] : sent;
       // A page made in an earlier turn is stored, and a file read then can be
@@ -622,7 +626,11 @@ export class AgentEngine {
       currentMessages.push(assistantMessage);
       this.store.appendModelMessage(turnId, assistantMessage);
 
-      const callRecords = providerCalls.map((call) => {
+      // A waiting tool called through use_tool runs, and is shown, as itself
+      // (tool-search.ts). The conversation keeps the call as the model made it.
+      const callRecords = providerCalls.map((asked) => {
+        const inner = called(asked);
+        const call = inner.wrapped && shownTools.has(inner.name) && deferrable.some((definition) => definition.name === inner.name) ? { ...asked, name: inner.name, arguments: inner.arguments } : asked;
         const { toolCallId } = this.store.recordToolCall(
           turnId,
           providerCallId,
@@ -712,10 +720,13 @@ export class AgentEngine {
     if (!call.draftId || !call.name) return;
     const now = performance.now();
     if (!force && call.draftAt !== undefined && now - call.draftAt < 60) return;
-    const delta = call.arguments.slice(call.draftSent ?? 0);
+    // A use_tool call is drawn as the tool inside it, once its name is written.
+    const draft = call.name === USE_TOOL ? draftOfUse(call.arguments) : call;
+    if (!draft) return;
+    const delta = draft.arguments.slice(call.draftSent ?? 0);
     if (!delta && call.draftAt !== undefined) return;
-    this.store.appendToolDraft(turnId, call.draftId, call.name, delta);
-    call.draftSent = call.arguments.length; call.draftAt = now;
+    this.store.appendToolDraft(turnId, call.draftId, draft.name, delta);
+    call.draftSent = draft.arguments.length; call.draftAt = now;
   }
 
   private captureSnapshot(
@@ -1220,13 +1231,24 @@ export class AgentEngine {
         return result;
       }
     }
+    // A waiting Foundry tool brings the design guide with it: on a large
+    // window the guide is in the instructions, here it is read when needed.
+    const toolGuide: ToolGuide = (definition) => definition.name === "foundry_save" ? designGuideBlock(loadDesignGuides(workspaceRoot, this.options.designHome)) : null;
     if (call.name === TOOL_SEARCH) {
       this.store.startToolCall(toolCallId);
-      const { found, result } = searchTools(this.turnDeferrable.get(turnId) ?? [], input);
-      let loaded = this.loadedTools.get(sessionId);
-      if (!loaded) { loaded = new Set(); this.loadedTools.set(sessionId, loaded); }
-      for (const definition of found) loaded.add(definition.name);
+      const { found, result } = searchTools(this.turnDeferrable.get(turnId)?.deferrable ?? [], input, toolGuide);
+      for (const definition of found) this.shownTools.get(sessionId)?.add(definition.name);
       this.store.settleToolCall(toolCallId, "completed", result);
+      return result;
+    }
+    // A use_tool call that reached here was not run as its tool: the chat
+    // had not been shown how the tool is called, or it names no waiting tool.
+    if (call.name === USE_TOOL) {
+      this.store.startToolCall(toolCallId);
+      const waiting = this.turnDeferrable.get(turnId);
+      const { show, result } = useToolAnswer(waiting?.deferrable ?? [], waiting?.sent ?? new Set(), input, toolGuide);
+      if (show) this.shownTools.get(sessionId)?.add(show.name);
+      this.store.settleToolCall(toolCallId, show ? "completed" : "failed", result);
       return result;
     }
     if (call.name === HANDOFF_TOOL) {

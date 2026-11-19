@@ -212,7 +212,7 @@ export function createDaemonApp(options: {
   /// external GitHub queries from the caller's account and CI environment.
   driveSignals?: typeof collectDriveSignals;
   providerVision?: boolean;
-  /// Tool search (tool-search.ts): rarely used tools wait behind tool_search.
+  /// Tool search (tool-search.ts): tools that wait are called through use_tool.
   deferTools?: boolean;
   /// Renders a saved Foundry page for the model to look at (tests); by default the desktop app does it when present.
   foundryLook?: FoundryLook;

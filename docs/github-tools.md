@@ -2,8 +2,8 @@
 
 A chat can follow its pull request on GitHub through the `gh` you are signed in to
 (`gh auth login`). Nothing else is set up. On a model with a small window the
-tools wait behind `tool_search` until a turn needs them; on a large one they
-are part of the chat's cached start (see [Prompt caching](caching.md)).
+tools wait as one line each and are called through `use_tool`; on a large one
+they are part of the chat's cached start (see [Prompt caching](caching.md)).
 
 | Tool | What it does | Asks? |
 | --- | --- | --- |

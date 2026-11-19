@@ -308,6 +308,26 @@ test("a page's source leaves the transcript once its turn is over, in the calls,
   expect(forgotten[8]).toBe(messages[8]);
 });
 
+test("a page saved through use_tool (a small window) is forgotten the same way, wrapper kept", () => {
+  const page = "<h1>" + "a".repeat(100) + "</h1>";
+  const wrapped = (name: string, input: unknown) => JSON.stringify({ name, input });
+  const messages: ModelMessage[] = [
+    { role: "user", content: "Make a page" },
+    { role: "assistant", content: null, toolCalls: [{ id: "c1", name: "use_tool", arguments: wrapped("foundry_save", { title: "Garden", kind: "html", why: W, source: page }) }],
+      responses: { accountId: "acct", model: "m", output: [{ type: "function_call", call_id: "c1", name: "use_tool", arguments: wrapped("foundry_save", { title: "Garden", kind: "html", why: W, source: page }) }] } },
+    { role: "tool", toolCallId: "c1", content: JSON.stringify({ id: "art", version: 1 }) },
+    { role: "assistant", content: null, toolCalls: [{ id: "c2", name: "use_tool", arguments: wrapped("foundry_read", { id: "art" }) }] },
+    { role: "tool", toolCallId: "c2", content: JSON.stringify({ id: "art", version: 1, source: page, versions: [] }) },
+  ];
+  const forgotten = forgetFoundrySources(messages);
+  expect(JSON.stringify(forgotten)).not.toContain("aaaa");
+  const save = forgotten[1] as Extract<ModelMessage, { role: "assistant" }>;
+  expect(save.toolCalls![0]!.name).toBe("use_tool");
+  expect(JSON.parse(save.toolCalls![0]!.arguments)).toEqual({ name: "foundry_save", input: { title: "Garden", kind: "html", why: W, source: FORGOTTEN_SOURCE } });
+  expect(JSON.parse(String(save.responses!.output[0]!.arguments))).toEqual({ name: "foundry_save", input: { title: "Garden", kind: "html", why: W, source: FORGOTTEN_SOURCE } });
+  expect(JSON.parse((forgotten[4] as Extract<ModelMessage, { role: "tool" }>).content)).toMatchObject({ source: FORGOTTEN_SOURCE });
+});
+
 test("the next turn's request carries a stub where the earlier turn's page was, and the current turn keeps its own", async () => {
   const page = "<h1>Garden one</h1>" + "<p>a paragraph of the page</p>".repeat(20);
   const requests: ModelMessage[][] = [];

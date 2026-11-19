@@ -1,5 +1,6 @@
 import type { ContextBudgetStatus, ContextCompactionAction, ContextParts, ContextPlan } from "@demesne/protocol";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
+import { called } from "./tool-search.ts";
 
 const ESTIMATOR_METHOD = "openai-json-utf8-bytes-divisor-3" as const;
 const TOOL_RESULT_RESERVE_TOKENS = 768;
@@ -319,7 +320,7 @@ export function contextParts(
 ): ContextParts {
   const calls = new Map<string, { name: string; arguments: string }>();
   for (const message of planned) {
-    if (message.role === "assistant") for (const call of message.toolCalls ?? []) calls.set(call.id, call);
+    if (message.role === "assistant") for (const call of message.toolCalls ?? []) calls.set(call.id, called(call));
   }
   const bytes = { instruction: 0, conversation: 0, tool: 0 };
   const outputs: { label: string; bytes: number }[] = [];

@@ -28,6 +28,7 @@ grows at its end, so the provider's cache of everything before it holds.
 | The sources you keep with the chat | a note when the list changes |
 | An ask that reads like an overview | a hint with that message |
 | A chat long enough to need its hidden turn notes | a note with every message from then on |
+| A turn that ran out of its allowance | a note on its own before the last request |
 
 A note says what changed; it does not decide what is allowed. Plan mode,
 `open`, `show` and `ask_user` stay in the tool list on every turn, and a call
@@ -39,8 +40,26 @@ Notes are stored beside the message, not in it, so search, exports and the
 notes of a compacted turn read only what you wrote. When older turns are
 compacted away, the notes they carried go with them and are said again.
 
-Not fixed yet: Orchestrate turned on or off mid-chat, and the last request
-of a turn that ran out of its allowance.
+## The last request of a turn
+
+A turn may make only so many model requests and tool calls (`[agent]` in the
+config). When it runs out, one more request asks the model to report where it
+stands. That request used to go out with no tools and with a sentence added
+to the instructions: both are at the very start, so the longest request of
+the turn was read again whole, and so was the first request of the follow-up.
+
+Now it starts exactly like the request before it, tools and all. What is new
+is a note at the end: this is the last request, tools are not run in it,
+report what was done and what is left. A tool the model asks for anyway is
+not run, and what it wrote beside the call is the turn's last word. A
+sub-agent's last round keeps its tools the same way.
+
+Two side requests deliberately do not share a chat's start. Naming a chat
+sends only the first message and its answer, which is cheaper than reading
+the chat from cache. Compaction is stitched from each turn's hidden notes, and a model is
+asked only when those are too long.
+
+Not fixed yet: Orchestrate turned on or off mid-chat.
 
 ## Tools never join the list later
 
@@ -160,9 +179,12 @@ engine with a stand-in model, flipping everything that could change a request
 (a tool beyond the everyday ones, plan mode, auto-approve, a Foundry page,
 pictures, the permission mode, stepping away for less and for more than the
 cache's lifetime), then a short second chat on a small
-window that calls a waiting tool through `use_tool`, and prints what each
-request kept. It runs with the tests. Today a cache could reuse 95% of what
-those chats send (56% at first, 86% with the fixed start). One request still
+window that calls a waiting tool through `use_tool` and a third whose turn
+runs out of its allowance, and prints what each
+request kept. It runs with the tests. Today a cache could reuse 93% of what
+those chats send, of the 94% that repeats at all: the first request of each
+of the three chats has nothing before it (one chat alone: 95%; 56% at first,
+86% with the fixed start). One request still
 breaks the prefix, by design: the first after 45 minutes away from a model
 that keeps its cache 30, when the cache is gone and the old turns are
 shortened. The one after 20 minutes away keeps everything.

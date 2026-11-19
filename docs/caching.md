@@ -187,6 +187,29 @@ Not done: pinning each chat to its own slot on llama.cpp. The server already
 sends a request to the slot whose prompt it repeats most, and a pinned slot
 would take another chat's place when there are more chats than slots.
 
+## The number on screen
+
+The context word under the composer opens a card that says how full the chat
+is. Below that, the same card now says how the chat's cache is doing
+(`apps/daemon/src/cache-line.ts`, `apps/desktop/workspace/cache-line.ts`):
+
+- **How much of this chat was read from cache**: cached input over all
+  input, from what the provider reported on each request. A provider that
+  reports no cache count gets no line.
+- **How long it stays warm**, from the cache clock, counted from the newest
+  request. Past that it says the cache has gone cold and that the next
+  message reads the chat once again. A model on your own machine never goes
+  cold by time: it stays until another chat takes its place.
+- **A tick per request**, the newest 60. A faint, short tick is a request
+  that was read again (the chat's first always is).
+- **The last miss, in one sentence**: you were away past the cache's
+  lifetime, the model changed, the tool list or the instructions changed, an
+  earlier part of the chat was rewritten, another chat took the local model,
+  or the provider let it go early.
+
+It is all grey, and nothing shows until you open the card. The same card
+sits in the right column once a chat is half full.
+
 ## The cache meter
 
 Each model request is compared with the one before it in the same chat

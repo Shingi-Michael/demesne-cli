@@ -1774,6 +1774,20 @@ export class DemesneStore {
     return rows.flatMap((row) => { try { return [{ inputTokens: row.input_tokens, cachedTokens: row.cached_input_tokens, prefix: JSON.parse(row.prefix_json) as PrefixReport }]; } catch { return []; } });
   }
 
+  /// A chat's own model requests, oldest first, for its cache line
+  /// (apps/daemon/src/cache-line.ts). Compaction's requests are not the chat's.
+  chatCacheCalls(sessionId: string): { provider: string; model: string; startedAt: string; completedAt: string | null; inputTokens: number; cachedTokens: number | null; prefix: PrefixReport | null }[] {
+    const rows = this.database.query(`SELECT c.provider, c.model, c.started_at, c.completed_at, c.input_tokens, c.cached_input_tokens, c.prefix_json
+      FROM provider_calls c JOIN turns t ON t.id = c.turn_id
+      WHERE t.session_id = ? AND t.kind = 'chat' AND c.status = 'completed' AND c.input_tokens > 0
+      ORDER BY c.started_at, c.rowid`).all(sessionId) as { provider: string; model: string; started_at: string; completed_at: string | null; input_tokens: number; cached_input_tokens: number | null; prefix_json: string | null }[];
+    return rows.map((row) => {
+      let prefix: PrefixReport | null = null;
+      try { prefix = row.prefix_json ? JSON.parse(row.prefix_json) as PrefixReport : null; } catch { /* an unreadable record is no record */ }
+      return { provider: row.provider, model: row.model, startedAt: row.started_at, completedAt: row.completed_at, inputTokens: row.input_tokens, cachedTokens: row.cached_input_tokens, prefix };
+    });
+  }
+
   recordProviderPrefix(providerCallId: string, prefix: PrefixReport): void {
     this.database.query("UPDATE provider_calls SET prefix_json = ? WHERE id = ?").run(JSON.stringify(prefix), providerCallId);
   }

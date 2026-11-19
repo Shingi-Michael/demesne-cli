@@ -203,6 +203,10 @@ export class DemesneClient {
   async forgetTrusted(root: string): Promise<import("@demesne/protocol").TrustedResponse> {
     return this.request("/v1/trusted/forget", { method: "POST", body: JSON.stringify({ root }) });
   }
+  /// A chat's prompt cache in numbers, for the context card.
+  async sessionCache(sessionId: string): Promise<import("@demesne/protocol").ChatCacheResponse> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/cache`);
+  }
   /// Your plan's usage windows, for the word under the composer.
   async planLimits(): Promise<import("@demesne/protocol").PlanLimitsResponse> {
     return this.request("/v1/limits");

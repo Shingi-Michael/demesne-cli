@@ -352,6 +352,40 @@ export interface ContextParts {
   wholeTurns?: number;
 }
 
+/// One chat's prompt cache, for the context card (docs/caching.md, "The
+/// number on screen"): how much of what the chat sent was read from the
+/// provider's cache, how long the cache lasts, and the last time it was lost.
+export interface ChatCache {
+  /// Requests that came back with a cache count, and their tokens.
+  requests: number;
+  inputTokens: number;
+  cachedTokens: number;
+  /// The newest requests, oldest first: the chat's first, one that read its
+  /// cache, one that was read again.
+  ticks: ("first" | "hit" | "miss")[];
+  /// How long the provider keeps the cache after a request. Null: not known.
+  keepsMs: number | null;
+  /// A model on your own machine: time alone never makes its cache cold.
+  ownMachine: boolean;
+  /// When the newest request finished.
+  lastRequestAt: string | null;
+  lastMiss: ChatCacheMiss | null;
+}
+/// Why a request was read again:
+///  - away: the chat sat idle past the cache's lifetime (shortened: old
+///    reads were cut then, which costs nothing once the cache is gone);
+///  - model: another model, with a cache of its own;
+///  - tools, instructions, history: the start of the request changed;
+///  - taken: another chat took the local model's slot;
+///  - dropped: the provider let it go early.
+export interface ChatCacheMiss {
+  at: string;
+  why: "away" | "model" | "tools" | "instructions" | "history" | "taken" | "dropped";
+  idleMs: number;
+  shortened?: boolean;
+}
+export interface ChatCacheResponse { cache: ChatCache }
+
 export interface ProviderCallSnapshot {
   provider: string;
   model: string;

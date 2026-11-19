@@ -26,6 +26,7 @@ These guides describe the current implementation. They were last audited on **20
 ## Build and maintain
 
 - [Architecture and API map](architecture.md)
+- [Prompt caching: the meter, the prefix check and the report](caching.md)
 - [Interface design](interface-design.md)
 - [Desktop workspace code](../apps/desktop/workspace/README.md): host, state wire, Markdown, Drive
 - [Contribution and verification workflow](../CONTRIBUTING.md)

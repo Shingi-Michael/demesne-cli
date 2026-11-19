@@ -310,7 +310,8 @@ export function parseDriveStreamEvent(value: unknown): DriveStreamEvent {
     const usage = value.usage;
     const count = (field: string): number | null => usage[field] === null ? null : coordinate(usage[field], Number.MAX_SAFE_INTEGER, `stream.usage.${field}`);
     return { type: "usage", usage: { inputTokens: count("inputTokens"), outputTokens: count("outputTokens"), totalTokens: count("totalTokens"),
-      ...(usage.cachedInputTokens !== undefined ? { cachedInputTokens: coordinate(usage.cachedInputTokens, Number.MAX_SAFE_INTEGER, "stream.usage.cachedInputTokens") } : {}) } };
+      ...(usage.cachedInputTokens !== undefined ? { cachedInputTokens: coordinate(usage.cachedInputTokens, Number.MAX_SAFE_INTEGER, "stream.usage.cachedInputTokens") } : {}),
+      ...(usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: coordinate(usage.cacheWriteTokens, Number.MAX_SAFE_INTEGER, "stream.usage.cacheWriteTokens") } : {}) } };
   }
   if (value.type === "result" && isRecord(value.response) && typeof value.response.imageInspected === "boolean") return { type: "result", response: {
     decision: parseDriveDecision(value.response.decision), model: text(value.response.model, 1000, "stream.model"),

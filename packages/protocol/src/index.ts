@@ -191,6 +191,31 @@ export interface TokenUsage {
   outputTokens: number | null;
   totalTokens: number | null;
   cachedInputTokens?: number;
+  /// Input the provider wrote to its prompt cache on this request, where it
+  /// says so: a first write, not a miss.
+  cacheWriteTokens?: number;
+}
+
+/// The cache meter's finding for one model request (daemon cache-prefix.ts):
+/// how much of the chat's previous request this one repeats from its first
+/// byte, which is all a provider's prompt cache can reuse.
+export interface PrefixReport {
+  /// Characters in this request: instructions, tool list and messages.
+  sentChars: number;
+  /// Characters in the chat's previous request. Null: nothing to compare
+  /// with (the first request, or the first since Demesne started).
+  previousChars: number | null;
+  /// Leading characters identical to the previous request.
+  keptChars: number | null;
+  /// Where the first difference was. Null: the previous request is a whole
+  /// prefix of this one, so nothing cached was thrown away.
+  brokeAt: "instructions" | "tools" | "history" | null;
+  /// With brokeAt "history": the first rewritten message, counted from 0.
+  messageIndex?: number;
+  /// What changed, in a sentence.
+  cause?: string;
+  /// Milliseconds since the previous request was sent.
+  idleMs: number | null;
 }
 
 export interface ModelToolCall {
@@ -327,6 +352,8 @@ export interface ProviderCallSnapshot {
   contextPlan: ContextPlan | null;
   usage: TokenUsage | null;
   metrics: ProviderMetrics | null;
+  /// The cache meter's finding for this request, once it was measured.
+  prefix?: PrefixReport;
 }
 
 export interface EventEnvelope {

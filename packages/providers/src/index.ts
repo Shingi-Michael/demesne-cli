@@ -606,12 +606,15 @@ function readUsage(value: unknown): TokenUsage | null {
       ? value.input_tokens_details
       : null;
   const cachedInputTokens = promptDetails ? integerOrNull(promptDetails.cached_tokens) : null;
+  // A first write to the provider's prompt cache (OpenAI, OpenRouter).
+  const cacheWriteTokens = promptDetails ? integerOrNull(promptDetails.cache_write_tokens) : null;
   if (inputTokens === null && outputTokens === null && totalTokens === null) return null;
   return {
     inputTokens,
     outputTokens,
     totalTokens,
     ...(cachedInputTokens !== null ? { cachedInputTokens } : {}),
+    ...(cacheWriteTokens !== null ? { cacheWriteTokens } : {}),
   };
 }
 

@@ -6,6 +6,7 @@ import { DEFAULT_AGENT_LIMITS, type AgentConfig, type SubagentOften } from "@dem
 import { ingestImage } from "./artifacts.ts";
 import { hydrateImageInputs } from "./image-inputs.ts";
 import { FOUNDRY_LOOK_PREFIX } from "./foundry-look.ts";
+import { PrefixMeter } from "./cache-prefix.ts";
 import { PAGE_LOOK_PREFIX } from "./page-look.ts";
 import { BROWSER_PICTURE_PREFIX } from "./browser.ts";
 import { WINDOW_CAPTURE_FILE } from "./window-capture.ts";
@@ -160,6 +161,7 @@ export class AgentEngine {
   private readonly seenFiles = new Map<string, Map<string, number>>();
   /// Per chat, the tools tool_search loaded; per turn, the ones it can load.
   private readonly loadedTools = new Map<string, Set<string>>();
+  private readonly prefixMeter = new PrefixMeter();
   private readonly turnDeferrable = new Map<string, ProviderToolDefinition[]>();
 
   /// Words sent to a running turn, waiting for the end of its current step.
@@ -436,6 +438,9 @@ export class AgentEngine {
               // A model that sees but wasn't set up for tool pictures still gets
               // Foundry's look at its own page and the windows it captures.
               { tools: this.options.providerVision === true || seenToolPicture, attachments: true }) : messages;
+          // The cache meter (cache-prefix.ts): how much of this chat's previous
+          // request this one repeats, and what changed when it doesn't.
+          this.store.recordProviderPrefix(providerCallId, this.prefixMeter.measure(session.id, visualMessages, requestDefinitions, (this.options.now?.() ?? new Date()).getTime()));
           const stream = inference.stream(visualMessages, requestDefinitions, providerController.signal, { cacheKey: session.id });
           for await (const event of withProviderDeadlines(
             stream,

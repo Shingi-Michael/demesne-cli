@@ -4,9 +4,10 @@
  * the previous one from its first byte. This runs one scripted chat through
  * the daemon's own engine with a stand-in model, flipping every switch that
  * could change what is sent (a tool beyond the everyday ones, plan mode,
- * auto-approve, a Foundry page, the permission mode, stepping away), and
- * reads back what the cache meter
- * (apps/daemon/src/cache-prefix.ts) recorded for each request.
+ * auto-approve, a Foundry page, the permission mode, stepping away), then a
+ * short second chat on a small window, where tools wait and are called
+ * through use_tool (apps/daemon/src/tool-search.ts), and reads back what the
+ * cache meter (apps/daemon/src/cache-prefix.ts) recorded for each request.
  *
  * KNOWN lists the breaks that exist today, each with the step of the caching
  * plan that removes it. The check fails when a request breaks the prefix and
@@ -57,6 +58,18 @@ export const CHAT: ScriptedTurn[] = [
   { id: "back", what: "a plain follow-up", ask: "Good.", rounds: [{ say: "Yes." }] },
 ];
 
+/// A short chat on a window too small for every tool's description: the
+/// tools beyond the everyday ones wait, and are called through use_tool.
+export const SMALL_CHAT: ScriptedTurn[] = [
+  { id: "small:first", what: "small window: a plain ask", ask: "Hello.", rounds: [{ say: "Hello." }] },
+  { id: "small:waiting-tool", what: "small window: a waiting tool, first asked how it is called", ask: "Check the history please.", rounds: [
+    { call: [{ name: "tool_search", args: { names: ["git_history"] } }] }, { call: [{ name: "use_tool", args: { name: "git_history", input: { action: "log" } } }] }, { say: "Done." }] },
+  { id: "small:after-tool", what: "small window: a plain follow-up", ask: "Ok and then?", rounds: [{ say: "Nothing more." }] },
+  { id: "small:tool-again", what: "small window: the waiting tool again", ask: "Once more.", rounds: [{ call: [{ name: "use_tool", args: { name: "git_history", input: { action: "log" } } }] }, { say: "Same." }] },
+];
+/// Small enough that Demesne's own tools wait (tool-search.ts WHOLE_SHARE).
+const SMALL_WINDOW = 32_768;
+
 /// The breaks that exist today: request (turn id # round) -> where it
 /// breaks, and the step of the caching plan that removes it.
 export const KNOWN: Record<string, { at: NonNullable<PrefixReport["brokeAt"]>; step: number; why: string }> = {
@@ -71,14 +84,32 @@ export interface MeasuredRequest { id: string; what: string; report: PrefixRepor
 export interface PrefixCheck { requests: MeasuredRequest[]; problems: string[]; sentChars: number; keptChars: number; possibleChars: number }
 
 export async function runPrefixCheck(): Promise<PrefixCheck> {
+  const problems: string[] = [];
+  const requests = [...await runChat(CHAT, 1_000_000, problems), ...await runChat(SMALL_CHAT, SMALL_WINDOW, problems)];
+  for (const { id, report } of requests) {
+    const known = KNOWN[id];
+    if (report.brokeAt && !known) problems.push(`New break at ${id}: ${report.cause ?? report.brokeAt}. Keep the start of the request the same and add what changed at the end instead.`);
+    else if (report.brokeAt && known && report.brokeAt !== known.at) problems.push(`${id} now breaks at the ${report.brokeAt}, not the ${known.at}: ${report.cause ?? ""}`);
+    else if (!report.brokeAt && known && report.previousChars !== null) problems.push(`${id} no longer breaks the prefix. Remove it from KNOWN in scripts/check-cache-prefix.ts.`);
+  }
+  for (const id of Object.keys(KNOWN)) if (!requests.some((request) => request.id === id)) problems.push(`KNOWN lists ${id}, which the chat never sent.`);
+  const sentChars = requests.reduce((total, { report }) => total + report.sentChars, 0);
+  const keptChars = requests.reduce((total, { report }) => total + (report.keptChars ?? 0), 0);
+  // With nothing rewritten, each request would keep all of the one before it.
+  const possibleChars = requests.reduce((total, { report }) => total + Math.min(report.previousChars ?? 0, report.sentChars), 0);
+  return { requests, problems, sentChars, keptChars, possibleChars };
+}
+
+/// One scripted chat through the engine, on a model with this window.
+async function runChat(chat: ScriptedTurn[], contextCapacity: number, problems: string[]): Promise<MeasuredRequest[]> {
   let turnIndex = 0, round = 0, calls = 0;
   const asked: string[] = [];
   const model: TurnProcessor = {
-    providerId: "stand-in", modelId: "scripted", contextCapacity: 1_000_000, maxOutputTokens: 8000, preservesPromptCache: true,
-    async listModels() { return [{ id: "scripted", provider: "stand-in", contextWindow: 1_000_000 }]; },
+    providerId: "stand-in", modelId: "scripted", contextCapacity, maxOutputTokens: Math.min(8000, Math.floor(contextCapacity / 8)), preservesPromptCache: true,
+    async listModels() { return [{ id: "scripted", provider: "stand-in", contextWindow: contextCapacity }]; },
     async *stream(messages): AsyncGenerator<ProviderStreamEvent> {
       asked.push(String(messages.findLast((message) => message.role === "user")?.content ?? ""));
-      const step = CHAT[turnIndex]!.rounds[round++] ?? { say: "(the script ran out)" };
+      const step = chat[turnIndex]!.rounds[round++] ?? { say: "(the script ran out)" };
       if ("call" in step) {
         for (const [index, call] of step.call.entries()) yield { type: "tool_call_delta", index, idDelta: `call-${calls++}`, nameDelta: call.name, argumentsDelta: JSON.stringify(call.args) };
         yield { type: "finish", reason: "tool_calls" };
@@ -95,10 +126,10 @@ export async function runPrefixCheck(): Promise<PrefixCheck> {
   const app = createDaemonApp({ databasePath: database, authToken: "prefix-check", processor: model, heartbeat: { enabled: false }, nameChats: false, deferTools: true, now: () => new Date(clock) });
   const server = serveDaemon(app, { hostname: "127.0.0.1", port: 0 });
   const client = new DemesneClient({ server: server.url.href, token: "prefix-check" });
-  const problems: string[] = [], requests: MeasuredRequest[] = [];
+  const requests: MeasuredRequest[] = [];
   try {
     const { session } = await client.createSession({ workspacePath: project, trustWorkspace: true });
-    for (const [index, turn] of CHAT.entries()) {
+    for (const [index, turn] of chat.entries()) {
       turnIndex = index; round = 0; asked.length = 0;
       clock += (turn.idleMinutes ?? 0.5) * 60_000;
       if (turn.set) await client.updateSession(session.id, turn.set);
@@ -123,18 +154,7 @@ export async function runPrefixCheck(): Promise<PrefixCheck> {
     await app.close();
     rmSync(root, { recursive: true, force: true });
   }
-  for (const { id, report } of requests) {
-    const known = KNOWN[id];
-    if (report.brokeAt && !known) problems.push(`New break at ${id}: ${report.cause ?? report.brokeAt}. Keep the start of the request the same and add what changed at the end instead.`);
-    else if (report.brokeAt && known && report.brokeAt !== known.at) problems.push(`${id} now breaks at the ${report.brokeAt}, not the ${known.at}: ${report.cause ?? ""}`);
-    else if (!report.brokeAt && known && report.previousChars !== null) problems.push(`${id} no longer breaks the prefix. Remove it from KNOWN in scripts/check-cache-prefix.ts.`);
-  }
-  for (const id of Object.keys(KNOWN)) if (!requests.some((request) => request.id === id)) problems.push(`KNOWN lists ${id}, which the chat never sent.`);
-  const sentChars = requests.reduce((total, { report }) => total + report.sentChars, 0);
-  const keptChars = requests.reduce((total, { report }) => total + (report.keptChars ?? 0), 0);
-  // With nothing rewritten, each request would keep all of the one before it.
-  const possibleChars = requests.reduce((total, { report }) => total + Math.min(report.previousChars ?? 0, report.sentChars), 0);
-  return { requests, problems, sentChars, keptChars, possibleChars };
+  return requests;
 }
 
 if (import.meta.main) {

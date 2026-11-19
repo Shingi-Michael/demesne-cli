@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProviderMessage, ProviderToolDefinition } from "@demesne/providers";
+import { called } from "./tool-search.ts";
 
 /// Compaction from notes (pass 114). Once a chat is past NOTES_FROM of its
 /// window, the model ends each answer with a short hidden note, and every
@@ -89,7 +90,7 @@ export function turnNote(messages: ProviderMessage[]): string {
   for (const message of messages) {
     if (message.role === "user" && !asked) asked = message.content;
     if (message.role === "assistant") {
-      for (const call of message.toolCalls ?? []) calls.set(call.id, { name: call.name, input: parseInput(call.arguments) });
+      for (const call of (message.toolCalls ?? []).map(called)) calls.set(call.id, { name: call.name, input: parseInput(call.arguments) });
       if (message.content) {
         const { text, lines: note } = splitNote(message.content);
         if (text.trim()) replied = text;
@@ -205,7 +206,7 @@ export function recallText(messages: ProviderMessage[]): string {
     if (message.role === "assistant") {
       const text = message.content ? splitNote(message.content).text.trim() : "";
       if (text) parts.push(`Assistant: ${text}`);
-      for (const call of message.toolCalls ?? []) {
+      for (const call of (message.toolCalls ?? []).map(called)) {
         calls.set(call.id, call.name);
         parts.push(`Tool call ${call.name}: ${call.arguments}`);
       }

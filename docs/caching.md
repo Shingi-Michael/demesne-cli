@@ -54,14 +54,31 @@ the list a chat starts with is the list it keeps:
   cache after the first at a tenth of the price (on the Codex plan cached
   input counts a tenth of fresh input, and cache writes are free), where
   loading one tool used to cost the whole chat once.
-- On a small window, where the descriptions would crowd the conversation,
-  the tools beyond the everyday ones still wait behind `tool_search`
-  (`apps/daemon/src/tool-search.ts`), and a load still costs the cache once.
 - `recall_turn` and `read_source` are in every chat's list from the start,
   not added when a chat first compacts or gets its first source.
-- Tools from MCP servers always wait behind `tool_search`: there can be any
-  number of them. Loading one still changes the list; that is the next part
-  of this step.
+- Some tools still wait as one line each in the instructions: tools from MCP
+  servers always (there can be any number of them), and Demesne's own beyond
+  the everyday ones on a small window, where their descriptions would crowd
+  the conversation. A waiting tool never joins the list. Two tools that are
+  in the list from the start stand in for all of them
+  (`apps/daemon/src/tool-search.ts`):
+  - `tool_search` answers with how a tool is called (its description and
+    parameters). That answer is a tool result at the end of the
+    conversation, so it is cached from then on like any other.
+  - `use_tool` calls it: `{"name": "mcp__linear__list_issues", "input": {…}}`.
+    A first call for a tool the chat has not been shown is answered with its
+    parameters and not run.
+  - What a tool needs said with it comes the same way: Foundry's design
+    guide is in the instructions when `foundry_save` is in the list, and in
+    the answer that shows how it is called when it waits.
+
+  Everything past the model's call sees the real tool: the step in the chat,
+  its approval, plan mode, the checks, and what later reads the conversation
+  (notes, what to forget). What a chat has been shown is read from the
+  conversation itself, so it holds across a restart and is shown again after
+  compaction took those turns away. This matters most for a local model:
+  there a changed start is not a higher price but a wait, while the machine
+  reads the whole chat again.
 
 ## The cache meter
 
@@ -84,10 +101,11 @@ Where a provider reports what it wrote to its cache, that is kept too
 `bun scripts/check-cache-prefix.ts` runs one scripted chat through the real
 engine with a stand-in model, flipping everything that could change a request
 (a tool beyond the everyday ones, plan mode, auto-approve, a Foundry page,
-the permission mode, stepping away), and prints what each request kept. It
-runs with the tests. Today a cache could reuse 94% of what that chat sends
-(56% at first, 86% with the fixed start); 95% is the most it could with
-nothing rewritten.
+the permission mode, stepping away), then a short second chat on a small
+window that calls a waiting tool through `use_tool`, and prints what each
+request kept. It runs with the tests. Today a cache could reuse 94% of what
+those chats send (56% at first, 86% with the fixed start), which is all it
+could with nothing rewritten but the two breaks below.
 
 `KNOWN` in that script lists the breaks that exist today, each with the step
 of the caching plan that removes it. The check fails when a request breaks
@@ -112,5 +130,6 @@ keeps its cache), and the requests that lost a cache, grouped by why.
 - [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching)
 - [Codex rate card](https://help.openai.com/en/articles/20001106-codex-rate-card-2): what cached input costs against a plan.
 - [Tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool): deferring rarely used tools, and why the list they join matters.
+- [Code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp): why a tool's definition is better read when it is needed than sent with every request.
 - [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
 - [Context engineering for AI agents: lessons from building Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)

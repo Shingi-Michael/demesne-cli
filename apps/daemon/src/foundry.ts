@@ -13,6 +13,7 @@ import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
 import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
+import { called, rewriteCalled } from "./tool-search.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
 export const FOUNDRY_TOOL_NAMES = new Set(["foundry_read", "foundry_save", "foundry_edit", "foundry_try"]);
@@ -113,18 +114,19 @@ export function forgetFoundrySources<T extends ModelMessage>(messages: T[]): T[]
   const names = new Map<string, string>();
   for (const message of messages) {
     if (message.role !== "assistant") continue;
-    for (const call of message.toolCalls ?? []) names.set(call.id, call.name);
+    for (const call of message.toolCalls ?? []) names.set(call.id, called(call).name);
   }
   return messages.map((message) => {
-    if (message.role === "assistant" && message.toolCalls?.some((call) => FOUNDRY_TOOL_NAMES.has(call.name))) {
+    // A Foundry tool called through use_tool (a small window) counts too.
+    if (message.role === "assistant" && message.toolCalls?.some((call) => FOUNDRY_TOOL_NAMES.has(called(call).name))) {
       const toolCalls = message.toolCalls.map((call) => {
-        const forgotten = forgetJSON(call.arguments, call.name);
+        const forgotten = rewriteCalled(call.name, call.arguments, (name, args) => forgetJSON(args, name));
         return forgotten ? { ...call, arguments: forgotten } : call;
       });
       const responses = message.responses
         ? { ...message.responses, output: message.responses.output.map((item) => {
           if (item.type !== "function_call" || typeof item.arguments !== "string") return item;
-          const forgotten = forgetJSON(item.arguments, names.get(String(item.call_id)) ?? "");
+          const forgotten = rewriteCalled(message.toolCalls!.find((call) => call.id === String(item.call_id))?.name ?? "", item.arguments, (name, args) => forgetJSON(args, name));
           return forgotten ? { ...item, arguments: forgotten } : item;
         }) }
         : undefined;

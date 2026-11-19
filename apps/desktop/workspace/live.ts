@@ -2462,7 +2462,7 @@ const stepPreviewPath = (tool: ToolEntry) => ["read_file", "write_file", "edit_f
 function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   // The plan is the ribbon; loading tools (tool_search) is plumbing; waiting
   // on, asking or stopping background agents shows on their crew line.
-  if (tool.name === UPDATE_PLAN || tool.name === "tool_search" || tool.name === "agents") return "";
+  if (tool.name === UPDATE_PLAN || tool.name === "tool_search" || tool.name === "use_tool" || tool.name === "agents") return "";
   if (isSend(tool)) return firstSend(run, tool) ? askStep(run) : "";
   // Finding who to ask is part of asking: no row of its own beside the one above.
   if (tool.name === "heartbeat" && tool.input.action === "agents" && run.entries.some((entry) => entry.type === "tool" && isSend(entry))) return "";

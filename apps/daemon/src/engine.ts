@@ -434,7 +434,8 @@ export class AgentEngine {
         return { id: entry.id, startMessageIndex, endMessageIndex: historyMessageIndex };
       });
       const planner = this.contextPlanner
-        ?? (inference.preservesPromptCache ? planCacheAwareContextRequest : planContextRequest);
+        // Keeping the cached start needs to know where the window ends.
+        ?? (inference.preservesPromptCache && inference.contextCapacity && inference.maxOutputTokens ? planCacheAwareContextRequest : planContextRequest);
       const { messages, plan: contextPlan, droppedHistoricalTurnIds } = planner({
         messages: unplannedMessages,
         tools: requestDefinitions,

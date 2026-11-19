@@ -9,7 +9,6 @@ import {
   createRuntimeProfileVerifier,
   runtimeProfileDefaultMaxOutputTokens,
   runtimeProfileMinimumFirstEventTimeoutMs,
-  runtimeProfileSupportsPromptCache,
 } from "./ollama-runtime.ts";
 import { ProviderTurnProcessor } from "./provider-processor.ts";
 
@@ -109,10 +108,11 @@ function createSingleProcessor(settings: ProviderConfig, dataDirectory: string):
     verifier,
     configuredContextCapacity,
     allowedModelIds,
-    // Local llama.cpp/LM Studio connections also reuse the prompt prefix,
-    // including LAN and Tailscale endpoints without a named runtime profile.
-    // Rewriting old tool results below capacity makes them prefill again.
-    settings.auth === "codex" || settings.auth === "chatgpt" || isLocalProvider(settings) || runtimeProfileSupportsPromptCache(runtimeProfile),
+    // Every provider reuses the prompt prefix: the plans and a model on your
+    // own machine always did, and providers by key cache by themselves or
+    // when asked (packages/providers openRouterCacheAsk). Rewriting old tool
+    // results below capacity makes them read, or prefill, again.
+    true,
     configuredStreamLimits(settings),
   );
 }

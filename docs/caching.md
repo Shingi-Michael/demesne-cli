@@ -156,6 +156,37 @@ place knows how long each provider keeps its cache
 With this, 20 minutes away from a GPT-6 chat no longer costs anything: the
 old turns stay as they were and the whole chat is read from cache.
 
+## Every provider
+
+A provider caches only what it is asked to, on the machine the request
+lands on. So each chat carries its own key, and the models that do not cache
+by themselves are asked to (`packages/providers/src/index.ts`):
+
+| Where | What goes with each request |
+| --- | --- |
+| Codex and the ChatGPT plan | the chat's key, and the 12-hour cache (above) |
+| OpenRouter, any model | the chat's key as `session_id`, so the chat stays on the provider that holds its cache: OpenRouter spreads a model over several, each with a cache of its own |
+| OpenRouter, Claude | `cache_control` at the top of the request: OpenRouter marks the last block and moves the mark on as the chat grows |
+| OpenRouter, Qwen and DeepSeek served by Alibaba | the instructions and the newest message marked with `cache_control` |
+| OpenAI by key | the chat's key as `prompt_cache_key` |
+| Gemini, DeepSeek, Grok and the rest by key | nothing: they cache a repeated start by themselves |
+| A model on your own machine | nothing: llama.cpp, LM Studio and Ollama keep the last prompt in the slot that served it |
+
+If a model refuses a request that asks it to cache, the same request goes
+out once more without the ask, and that model is not asked again until
+Demesne restarts. A request that fails both ways reports its own error.
+
+Old tool results are no longer shortened below the window on any provider:
+that used to happen for providers by key, as if they had no cache, and made
+them read everything after the shortened turn again.
+
+What each provider wrote to its cache is kept where it says so
+(`cache_write_tokens`; OpenRouter reports Claude's and Qwen's).
+
+Not done: pinning each chat to its own slot on llama.cpp. The server already
+sends a request to the slot whose prompt it repeats most, and a pinned slot
+would take another chat's place when there are more chats than slots.
+
 ## The cache meter
 
 Each model request is compared with the one before it in the same chat
@@ -214,4 +245,6 @@ keeps its cache), and the requests that lost a cache, grouped by why.
 - [Tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool): deferring rarely used tools, and why the list they join matters.
 - [Code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp): why a tool's definition is better read when it is needed than sent with every request.
 - [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+- [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching): which models cache by themselves, `cache_control`, and sticky routing by `session_id`.
+- [KV cache reuse with llama-server](https://github.com/ggml-org/llama.cpp/discussions/13606): slots, and how a request finds the one that holds its prompt.
 - [Context engineering for AI agents: lessons from building Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)

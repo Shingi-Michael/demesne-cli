@@ -23,9 +23,9 @@ test("local connections preserve cached history without a runtime profile", () =
   }
 });
 
-test("an unprofiled cloud endpoint keeps its existing planning policy", () => {
+test("a cloud endpoint by key keeps its cached start too: every provider caches a repeated prefix", () => {
   const config = defaultConfig();
   config.provider = { url: "https://api.example.com/v1", model: "cloud", contextWindow: 262144, maxOutputTokens: 2048 };
-  expect(createProcessor(config, ".", new Set())!.createTurnInference!(true).preservesPromptCache).toBe(false);
+  expect(createProcessor(config, ".", new Set())!.createTurnInference!(true).preservesPromptCache).toBe(true);
 });
 

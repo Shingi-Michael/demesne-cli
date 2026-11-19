@@ -121,6 +121,8 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   private readonly openRouterIgnore: readonly string[];
   private readonly configuredContextWindow: number | undefined;
   private readonly fetchImplementation: typeof fetch;
+  /// Models that refused a request asking them to cache (openRouterCacheAsk).
+  private readonly cacheAskRefused = new Set<string>();
 
   constructor(options: OpenAICompatibleOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl, options.allowHttpEndpoint);
@@ -216,13 +218,20 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
           ? "low"
           : this.reasoningEffort;
     const openRouter = this.baseUrl.hostname === "openrouter.ai";
-    const response = await this.fetchImplementation(new URL("chat/completions", this.baseUrl), {
+    const serialized = serializeMessages(request.messages);
+    const send = (cacheAsk: ReturnType<typeof openRouterCacheAsk>) => this.fetchImplementation(new URL("chat/completions", this.baseUrl), {
       method: "POST",
       headers: { ...this.headers(), "Content-Type": "application/json" },
       body: JSON.stringify({
         model: request.model,
-        messages: serializeMessages(request.messages),
+        messages: cacheAsk === "marks" ? markForCache(serialized) : serialized,
         stream: true,
+        // The chat's own key keeps it on the provider that holds its cache:
+        // OpenRouter spreads a model over several, each with a cache of its own.
+        ...(openRouter && request.cacheKey ? { session_id: request.cacheKey.slice(0, 256) } : {}),
+        ...(cacheAsk === "top" ? { cache_control: CACHE_MARK } : {}),
+        // OpenAI by key: requests with one key go to the machine that served the last.
+        ...(this.baseUrl.hostname === "api.openai.com" && request.cacheKey && request.cacheKey.length <= 64 ? { prompt_cache_key: request.cacheKey } : {}),
         ...(openRouter && this.openRouterIgnore.length ? { provider: { ignore: this.openRouterIgnore } } : {}),
         ...(openRouter
           ? (reasoningEffort ? { reasoning: { effort: reasoningEffort } }
@@ -254,6 +263,19 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       redirect: "manual",
       signal,
     });
+    const cacheAsk = openRouter && !this.cacheAskRefused.has(request.model) ? openRouterCacheAsk(request.model) : null;
+    let response = await send(cacheAsk);
+    // A request refused outright may have been refused for the ask. It goes
+    // out once more without; if that one is taken, this model is not asked
+    // again until Demesne restarts, so the ask can never keep a model failing.
+    if (cacheAsk && (response.status === 400 || response.status === 422)) {
+      const plain = await send(null);
+      if (plain.ok) {
+        this.cacheAskRefused.add(request.model);
+        await response.body?.cancel().catch(() => {});
+        response = plain;
+      } else await plain.body?.cancel().catch(() => {});
+    }
     if (!response.ok) throw await providerHttpError(response, this.id);
     if (!response.body) throw new ProviderError("Provider returned an empty stream");
 
@@ -384,6 +406,31 @@ function readContextWindow(value: Record<string, unknown>): number | undefined {
 
 function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+/// What an OpenRouter model must be asked before it caches a prompt. Most
+/// cache by themselves (OpenAI, Gemini, DeepSeek, Grok, Moonshot); two do not:
+///  - "top": Claude. One field at the top of the request, and OpenRouter puts
+///    the breakpoint on the last block and moves it on as the chat grows.
+///  - "marks": Qwen and DeepSeek served by Alibaba. The blocks to cache are
+///    marked themselves, here the instructions and the newest message.
+/// Read more: https://openrouter.ai/docs/guides/best-practices/prompt-caching
+export function openRouterCacheAsk(model: string): "top" | "marks" | null {
+  if (model.startsWith("anthropic/")) return "top";
+  return /^(qwen\/(qwen3-max|qwen-plus|qwen3\.6-plus|qwen3-coder-plus|qwen3-coder-flash)|deepseek\/deepseek-v3\.2)(:|$)/.test(model) ? "marks" : null;
+}
+
+const CACHE_MARK = { type: "ephemeral" } as const;
+
+/// Marks the instructions and the newest message as blocks to cache. The
+/// mark on the newest message moves with the chat: what was written at the
+/// last mark is read, and only what came after it is written.
+export function markForCache(messages: Record<string, unknown>[]): Record<string, unknown>[] {
+  const marked = (message: Record<string, unknown>) => ({ ...message, content: [{ type: "text", text: message.content, cache_control: CACHE_MARK }] });
+  const text = (message: Record<string, unknown> | undefined) => typeof message?.content === "string" && message.content.length > 0;
+  const start = messages.findIndex((message) => message.role === "system" && text(message));
+  const newest = messages.findLastIndex((message) => (message.role === "user" || message.role === "tool") && text(message));
+  return messages.map((message, index) => index === start || index === newest ? marked(message) : message);
 }
 
 export function serializeMessages(messages: ProviderMessage[]): Record<string, unknown>[] {

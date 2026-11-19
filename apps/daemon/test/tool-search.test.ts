@@ -6,7 +6,7 @@ import type { ProviderToolDefinition } from "@demesne/providers";
 import type { SessionStateResponse } from "@demesne/protocol";
 import { DemesneClient } from "../../../packages/client/src/index.ts";
 import { createDaemonApp, type DaemonApp, type TurnProcessor } from "../src/app.ts";
-import { moreToolsSection, searchTools, splitTools, summary, TOOL_SEARCH } from "../src/tool-search.ts";
+import { builtinsWait, moreToolsSection, searchTools, splitTools, summary, TOOL_SEARCH } from "../src/tool-search.ts";
 
 const tool = (name: string, description: string, padding = 0): ProviderToolDefinition => ({ name, description: description + " x".repeat(padding), inputSchema: { type: "object", properties: {} } });
 const definitions = [
@@ -17,31 +17,47 @@ const definitions = [
   tool("notify_phone", "Send a push notification to the user's phone.", 200),
 ];
 
-test("everyday tools go whole; the rest wait behind tool_search", () => {
-  const { sent, deferrable } = splitTools(definitions, new Set());
+/// A window small enough that the tools above would crowd it.
+const SMALL = 4_000;
+
+test("on a small window everyday tools go whole; the rest wait behind tool_search", () => {
+  const { sent, deferrable } = splitTools(definitions, new Set(), SMALL);
   expect(sent.map((one) => one.name)).toEqual(["read_file", "edit_file", TOOL_SEARCH]);
   expect(deferrable.map((one) => one.name)).toEqual(["foundry_save", "git_history", "notify_phone"]);
-  const loaded = splitTools(definitions, new Set(["git_history"])).sent.map((one) => one.name);
+  const loaded = splitTools(definitions, new Set(["git_history"]), SMALL).sent.map((one) => one.name);
   expect(loaded).toEqual(["read_file", "edit_file", "git_history", TOOL_SEARCH]);
-  expect(splitTools(definitions, new Set(["foundry_save", "git_history", "notify_phone"])).sent.map((one) => one.name)).not.toContain(TOOL_SEARCH);
+  expect(splitTools(definitions, new Set(["foundry_save", "git_history", "notify_phone"]), SMALL).sent.map((one) => one.name)).not.toContain(TOOL_SEARCH);
+});
+
+test("on a large window Demesne's own tools all go whole, so the tool list never changes; MCP tools still wait", () => {
+  expect(builtinsWait(definitions, SMALL)).toBe(true);
+  expect(builtinsWait(definitions, 272_000)).toBe(false);
+  // A window nobody told us is taken to be a large one.
+  expect(builtinsWait(definitions)).toBe(false);
+  expect(splitTools(definitions, new Set(), 272_000)).toEqual({ sent: definitions, deferrable: [] });
+  expect(splitTools(definitions, new Set())).toEqual({ sent: definitions, deferrable: [] });
+  const withServers = [...definitions, tool("mcp__linear__list_issues", "[linear] List issues.", 900), tool("mcp__linear__create_issue", "[linear] Create an issue.", 900)];
+  const { sent, deferrable } = splitTools(withServers, new Set(), 272_000);
+  expect(sent.map((one) => one.name)).toEqual([...definitions.map((one) => one.name), TOOL_SEARCH]);
+  expect(deferrable.map((one) => one.name)).toEqual(["mcp__linear__list_issues", "mcp__linear__create_issue"]);
 });
 
 test("small sets aren't worth deferring", () => {
   const few = [tool("read_file", "Read."), tool("remember", "Remember a rule.")];
-  expect(splitTools(few, new Set())).toEqual({ sent: few, deferrable: [] });
+  expect(splitTools(few, new Set(), 100)).toEqual({ sent: few, deferrable: [] });
 });
 
 test("the list is one line per tool and never changes as tools load", () => {
   expect(summary(tool("a", "Save a page to Foundry. It keeps versions."))).toBe("Save a page to Foundry.");
-  const { deferrable } = splitTools(definitions, new Set());
+  const { deferrable } = splitTools(definitions, new Set(), SMALL);
   const section = moreToolsSection(deferrable);
   expect(section).toContain("- foundry_save: Save a page, deck or document to Foundry.");
   expect(section).toContain("- notify_phone: Send a push notification to the user's phone.");
-  expect(moreToolsSection(splitTools(definitions, new Set(["git_history"])).deferrable)).toBe(section);
+  expect(moreToolsSection(splitTools(definitions, new Set(["git_history"]), SMALL).deferrable)).toBe(section);
 });
 
 test("tool_search finds by name, then by words", () => {
-  const { deferrable } = splitTools(definitions, new Set());
+  const { deferrable } = splitTools(definitions, new Set(), SMALL);
   expect(searchTools(deferrable, { names: ["Foundry_Save"] }).found.map((one) => one.name)).toEqual(["foundry_save"]);
   expect(searchTools(deferrable, { query: "who changed this file, commits" }).found[0]!.name).toBe("git_history");
   expect(searchTools(deferrable, { query: "phone notification" }).found[0]!.name).toBe("notify_phone");
@@ -64,7 +80,7 @@ async function completed(client: DemesneClient, id: string, turns: number): Prom
   throw new Error("turn did not finish");
 }
 
-test("a chat loads a tool once and keeps it for later turns", async () => {
+test("on a small window a chat loads a tool once and keeps it for later turns", async () => {
   const root = mkdtempSync(join(tmpdir(), "demesne-tool-search-")), workspace = mkdtempSync(join(tmpdir(), "demesne-tool-search-project-"));
   apps.push({ app: { close: async () => {} } as DaemonApp, root: workspace });
   const offered: string[][] = [], prompts: string[] = [], results: string[] = [];
@@ -81,7 +97,7 @@ test("a chat loads a tool once and keeps it for later turns", async () => {
     yield { type: "text_delta", delta: "Done." };
     yield { type: "finish", reason: "stop" };
   };
-  const app = createDaemonApp({ databasePath: join(root, "state.sqlite"), heartbeat: { enabled: false }, deferTools: true, processor: { providerId: "test", modelId: "m", async listModels() { return []; }, stream } });
+  const app = createDaemonApp({ databasePath: join(root, "state.sqlite"), heartbeat: { enabled: false }, deferTools: true, processor: { providerId: "test", modelId: "m", contextCapacity: 32_768, maxOutputTokens: 1_024, async listModels() { return []; }, stream } });
   apps.push({ app, root });
   const client = new DemesneClient({ server: "http://fixture", fetch: ((url, init) => Promise.resolve(app.fetch(new Request(url, init)))) as typeof fetch });
   const { session } = await client.createSession({ title: "Search", workspacePath: workspace, trustWorkspace: true });

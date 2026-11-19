@@ -39,10 +39,29 @@ Notes are stored beside the message, not in it, so search, exports and the
 notes of a compacted turn read only what you wrote. When older turns are
 compacted away, the notes they carried go with them and are said again.
 
-Not fixed yet, each with its step of the plan: a tool loaded with tool
-search and Foundry's design guide (step 3), the first source added to a chat
-(its `read_source` tool, step 3), Orchestrate turned on or off mid-chat, and
-the last request of a turn that ran out of its allowance.
+Not fixed yet: Orchestrate turned on or off mid-chat, and the last request
+of a turn that ran out of its allowance.
+
+## Tools never join the list later
+
+The tool list is at the very start of a request, before the conversation. A
+tool added to it mid-chat makes the provider read the whole chat again, so
+the list a chat starts with is the list it keeps:
+
+- On a model with a large window (about 85k tokens and up) all of Demesne's
+  own tools go out whole from the first request, Foundry's and its design
+  guide included. That is about 7,500 more tokens per request, read from
+  cache after the first at a tenth of the price (on the Codex plan cached
+  input counts a tenth of fresh input, and cache writes are free), where
+  loading one tool used to cost the whole chat once.
+- On a small window, where the descriptions would crowd the conversation,
+  the tools beyond the everyday ones still wait behind `tool_search`
+  (`apps/daemon/src/tool-search.ts`), and a load still costs the cache once.
+- `recall_turn` and `read_source` are in every chat's list from the start,
+  not added when a chat first compacts or gets its first source.
+- Tools from MCP servers always wait behind `tool_search`: there can be any
+  number of them. Loading one still changes the list; that is the next part
+  of this step.
 
 ## The cache meter
 
@@ -64,10 +83,11 @@ Where a provider reports what it wrote to its cache, that is kept too
 
 `bun scripts/check-cache-prefix.ts` runs one scripted chat through the real
 engine with a stand-in model, flipping everything that could change a request
-(loading a tool, plan mode, auto-approve, a Foundry page, the permission
-mode, stepping away), and prints what each request kept. It runs with the
-tests. Today a cache could reuse 86% of what that chat sends (56% before
-the fixed start); 94% is the most it could with nothing rewritten.
+(a tool beyond the everyday ones, plan mode, auto-approve, a Foundry page,
+the permission mode, stepping away), and prints what each request kept. It
+runs with the tests. Today a cache could reuse 94% of what that chat sends
+(56% at first, 86% with the fixed start); 95% is the most it could with
+nothing rewritten.
 
 `KNOWN` in that script lists the breaks that exist today, each with the step
 of the caching plan that removes it. The check fails when a request breaks
@@ -90,5 +110,7 @@ keeps its cache), and the requests that lost a cache, grouped by why.
 - [How Claude Code uses prompt caching](https://code.claude.com/docs/en/prompt-caching): prefixes, what breaks them, what keeps them. Its `<system-reminder>` messages are what Demesne's notes are modelled on.
 - [Lessons from building Claude Code: prompt caching is everything](https://claude.com/blog/lessons-from-building-claude-code-prompt-caching-is-everything)
 - [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching)
+- [Codex rate card](https://help.openai.com/en/articles/20001106-codex-rate-card-2): what cached input costs against a plan.
+- [Tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool): deferring rarely used tools, and why the list they join matters.
 - [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
 - [Context engineering for AI agents: lessons from building Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)

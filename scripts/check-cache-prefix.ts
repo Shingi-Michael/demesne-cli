@@ -3,9 +3,9 @@
  * A provider's prompt cache reuses only the part of a request that repeats
  * the previous one from its first byte. This runs one scripted chat through
  * the daemon's own engine with a stand-in model, flipping every switch that
- * could change what is sent (loading a tool, plan mode, auto-approve, a
- * Foundry page, the permission mode, stepping away), and reads back what the
- * cache meter
+ * could change what is sent (a tool beyond the everyday ones, plan mode,
+ * auto-approve, a Foundry page, the permission mode, stepping away), and
+ * reads back what the cache meter
  * (apps/daemon/src/cache-prefix.ts) recorded for each request.
  *
  * KNOWN lists the breaks that exist today, each with the step of the caching
@@ -41,15 +41,15 @@ export const CHAT: ScriptedTurn[] = [
   { id: "read", what: "reads a file", ask: "Read apps/daemon/src/forget-reads.ts and say what it does.", rounds: [{ call: [{ name: "read_file", args: { path: "apps/daemon/src/forget-reads.ts" } }] }, { say: "It cuts old reads to notes." }] },
   { id: "read-more", what: "reads a big file and searches", ask: "Now look at apps/daemon/src/tools.ts.", rounds: [{ call: [{ name: "read_file", args: { path: "apps/daemon/src/tools.ts" } }] }, { call: [{ name: "search_files", args: { query: "givenBefore" } }] }, { say: "Seen." }] },
   { id: "follow-up", what: "a plain follow-up", ask: "Thanks. Which of those is larger?", rounds: [{ say: "tools.ts" }] },
-  { id: "load-tool", what: "loads a tool with tool search", ask: "Check the history please.", rounds: [{ call: [{ name: "tool_search", args: { names: ["git_history"] } }] }, { call: [{ name: "git_status", args: {} }] }, { say: "Done." }] },
-  { id: "after-load", what: "a plain follow-up", ask: "Ok and then?", rounds: [{ say: "Nothing more." }] },
+  { id: "more-tool", what: "uses a tool beyond the everyday ones", ask: "Check the history please.", rounds: [{ call: [{ name: "git_history", args: { action: "log" } }] }, { call: [{ name: "git_status", args: {} }] }, { say: "Done." }] },
+  { id: "after-tool", what: "a plain follow-up", ask: "Ok and then?", rounds: [{ say: "Nothing more." }] },
   { id: "plan-on", what: "plan mode on", ask: "Plan a small tidy up.", planOnly: true, rounds: [{ say: "1. Tidy." }] },
   { id: "plan-off", what: "plan mode off", ask: "Go on.", rounds: [{ say: "Tidied." }] },
   { id: "overview", what: "an ask that reads like an overview", ask: "Give me an overview of this project.", rounds: [{ say: "It is a harness." }] },
   { id: "after-overview", what: "a plain follow-up", ask: "Shorter please.", rounds: [{ say: "Harness." }] },
   { id: "approve-on", what: "auto-approve turned on", ask: "Do the next ones without asking.", set: { autoApprove: true }, rounds: [{ say: "Will do." }] },
   { id: "approve-off", what: "auto-approve turned off", ask: "Ask me again from here.", set: { autoApprove: false }, rounds: [{ say: "Asking again." }] },
-  { id: "foundry", what: "makes a Foundry page", ask: "Sketch the plans page.", rounds: [{ call: [{ name: "tool_search", args: { names: ["foundry_save"] } }] }, { call: [{ name: "foundry_save", args: { title: "Plans", kind: "page", source: PAGE } }] }, { say: "Saved." }] },
+  { id: "foundry", what: "makes a Foundry page", ask: "Sketch the plans page.", rounds: [{ call: [{ name: "foundry_save", args: { title: "Plans", kind: "page", source: PAGE } }] }, { say: "Saved." }] },
   { id: "after-foundry", what: "a plain follow-up", ask: "Nice.", rounds: [{ say: "Thanks." }] },
   { id: "attended", what: "a turn that asks before it acts", ask: "One more thing, what is 2+2?", mode: "ask", rounds: [{ say: "4" }] },
   { id: "unattended", what: "back to acting without asking", ask: "And 3+3?", rounds: [{ say: "6" }] },
@@ -60,8 +60,6 @@ export const CHAT: ScriptedTurn[] = [
 /// The breaks that exist today: request (turn id # round) -> where it
 /// breaks, and the step of the caching plan that removes it.
 export const KNOWN: Record<string, { at: NonNullable<PrefixReport["brokeAt"]>; step: number; why: string }> = {
-  "load-tool#2": { at: "tools", step: 3, why: "a tool loaded with tool search is put into the tool list" },
-  "foundry#2": { at: "instructions", step: 3, why: "loading a Foundry tool adds the design guide to the instructions" },
   "after-foundry#1": { at: "history", step: 4, why: "the page's source becomes a stub once its turn is over" },
   // By design: after this long the provider's cache is gone, so old reads are cut for free (forget-reads.ts).
   "away#1": { at: "history", step: 5, why: "old reads are cut once the chat has sat idle" },

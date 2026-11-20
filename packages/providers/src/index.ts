@@ -700,6 +700,7 @@ function integerOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+export { AnthropicProvider, isAnthropicEndpoint } from "./anthropic.ts";
 export { ChatGPTProvider, CodexProvider, CODEX_BACKEND_URL } from "./chatgpt.ts";
 
 /// Prefer a server's per-model capabilities over name heuristics. Unknown

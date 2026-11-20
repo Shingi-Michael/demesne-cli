@@ -3,7 +3,7 @@
 import type { loadConfig, ProviderConfig } from "@demesne/config";
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
 import { CodexAuth } from "@demesne/codex-auth";
-import { ChatGPTProvider, CodexProvider, isOwnMachine, OpenAICompatibleProvider } from "@demesne/providers";
+import { AnthropicProvider, isAnthropicEndpoint, ChatGPTProvider, CodexProvider, isOwnMachine, OpenAICompatibleProvider } from "@demesne/providers";
 import { MultiProviderProcessor } from "./multi-provider-processor.ts";
 import {
   createRuntimeProfileVerifier,
@@ -20,6 +20,7 @@ const OPENROUTER_API = "https://openrouter.ai/api/v1";
 function signedOut(settings: ProviderConfig, chatgptSignedIn: Set<string>): boolean {
   if (settings.auth === "chatgpt") return !settings.authProfile || !chatgptSignedIn.has(settings.authProfile);
   if (settings.auth === "codex") return !chatgptSignedIn.has("codex");
+  if (isAnthropicEndpoint(settings.url)) return !(settings.apiKey || process.env.ANTHROPIC_API_KEY);
   return (settings.url ?? "").replace(/\/$/, "") === OPENROUTER_API && !settings.apiKey;
 }
 
@@ -84,7 +85,9 @@ function createSingleProcessor(settings: ProviderConfig, dataDirectory: string):
   const auth = settings.auth === "chatgpt" ? new ChatGPTAuth(dataDirectory) : undefined;
   const codex = settings.auth === "codex" ? new CodexAuth(dataDirectory) : undefined;
   const provider = codex ? new CodexProvider({ accountId: "codex", accessToken: signal => codex.accessToken(signal), billingAccount: () => codex.accountId(), contextWindow: configuredContextCapacity, configuredModel: model })
-    : auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity, configuredModel: model }) : new OpenAICompatibleProvider({
+    : auth ? new ChatGPTProvider({ accountId: settings.authProfile!, accessToken: signal => auth.accessToken(settings.authProfile!, signal), contextWindow: configuredContextCapacity, configuredModel: model })
+    : isAnthropicEndpoint(baseUrl) ? new AnthropicProvider(settings.apiKey || process.env.ANTHROPIC_API_KEY, settings.id)
+    : new OpenAICompatibleProvider({
     baseUrl,
     allowHttpEndpoint: settings.allowHttpEndpoint,
     apiKey: settings.apiKey,

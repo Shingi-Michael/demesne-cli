@@ -35,7 +35,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryOrder, foundryPage, shelfKey } from "./foundry-page.ts";
-import { newNoteStore, notesMessage as foundryNotesMessage, watchFoundryNotes } from "./foundry-notes.ts";
+import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
@@ -3936,6 +3936,80 @@ const foundryUi = { error: "" };
 /// Notes pinned to parts of a mockup (pass 233 A): waiting on the page until sent together.
 const foundryNotes = newNoteStore();
 let foundryNotesWatch: { stop(): void; paint(): void } | null = null;
+/// Waiting notes are kept by the daemon, so a restart or an update does not
+/// lose them and the model can read them (foundry_read). What was kept last, by mockup.
+const keptNotes = new Map<string, string>();
+let notesLoaded = false, notesLoading = false, notesFailedAt = 0;
+const keptText = (version: number, notes: FoundryNote[]) => JSON.stringify({ version, notes: notes.map(keptNote) });
+function keepFoundryNotes() {
+  if (notesLoaded) {
+    const now = new Map<string, { version: number; notes: FoundryNote[] }>();
+    for (const [key, notes] of foundryNotes.waiting) { const at = key.lastIndexOf(":"); now.set(key.slice(0, at), { version: Number(key.slice(at + 1)) || 1, notes }); }
+    for (const id of new Set([...keptNotes.keys(), ...now.keys()])) {
+      const next = now.get(id) ?? { version: 1, notes: [] }, text = keptText(next.version, next.notes);
+      if (keptNotes.get(id) === text) continue;
+      if (next.notes.length) keptNotes.set(id, text); else keptNotes.delete(id);
+      void api("foundry-notes-set", { id, version: next.version, notes: next.notes.map(keptNote) }).catch(() => { keptNotes.delete(id); });
+    }
+  }
+  renderComposer();
+}
+foundryNotes.changed = keepFoundryNotes;
+/// The notes kept from before (a restart, an update) come back once the app is connected.
+async function loadWaitingNotes() {
+  // A daemon that cannot say (an older one, or not up yet) is asked again a little later, not on every redraw.
+  if (notesLoaded || notesLoading || Date.now() - notesFailedAt < 15000) return;
+  notesLoading = true;
+  try {
+    const waiting = await api<{ id: string; version: number; notes: unknown[] }[]>("foundry-notes");
+    for (const item of waiting) {
+      const key = shelfKey(item.id, item.version), notes = item.notes.map(readKeptNote).filter((note): note is FoundryNote => note !== null);
+      if (!notes.length) continue;
+      keptNotes.set(item.id, keptText(item.version, notes));
+      if (!foundryNotes.waiting.has(key)) foundryNotes.waiting.set(key, notes);
+    }
+    notesLoaded = true;
+    // Their mockups' names and newest versions, for the chip in the composer.
+    if (waiting.length) await loadFoundry(); else keepFoundryNotes();
+  } catch { notesFailedAt = Date.now(); }
+  finally { notesLoading = false; }
+}
+/// Notes waiting on mockups of this chat's project: a chip in the composer, and they go with the next message.
+function ridingNotes(): string[] {
+  if (!state || !foundryNotes.waiting.size) return [];
+  const here = state.sessions.find((item) => item.id === state!.session?.id)?.workspace ?? state.workspace ?? "";
+  return [...foundryNotes.waiting.keys()].filter((key) => {
+    const mockup = foundryList?.find((item) => item.id === key.slice(0, key.lastIndexOf(":")));
+    return !!mockup && (!mockup.workspace || mockup.workspace === here);
+  });
+}
+/// The waiting notes, as words for the message they go with (and their pictures attached to it).
+/// From here on they are with the model, as if sent from Foundry.
+async function carryFoundryNotes(keys: string[]): Promise<string> {
+  if (!state?.session) return "";
+  const chat = state.sessions.find((item) => item.id === state!.session?.id)?.title || "this chat", parts: string[] = [];
+  for (const key of keys) {
+    const notes = foundryNotes.waiting.get(key), at = key.lastIndexOf(":"), id = key.slice(0, at), version = Number(key.slice(at + 1));
+    const mockup = foundryList?.find((item) => item.id === id);
+    if (!notes?.length || !mockup) continue;
+    await Promise.race([Promise.all(notes.map((note) => note.picturing)), new Promise((done) => setTimeout(done, 1500))]);
+    const pictured: number[] = [];
+    for (const [index, note] of notes.entries()) {
+      if (!note.picture || state.attachments.length >= 10) continue;
+      const sent = await api<{ id: string } | undefined>("attach", { name: `note-${index + 1}.png`, mimeType: "image/png", data: note.picture }).catch(() => undefined);
+      if (sent?.id) { pictured.push(index); attachmentPreviews.set(sent.id, `data:image/png;base64,${note.picture}`); }
+    }
+    parts.push(foundryNotesMessage({ id, title: mockup.title, version }, notes, pictured));
+    foundryNotes.waiting.delete(key);
+    foundryNotes.said.delete(key);
+    foundryNotes.working.set(key, (foundryNotes.working.get(key) ?? 0) + notes.length);
+    foundryNotes.to.set(key, { session: state.session.id, chat, queued: false });
+    foundryAsked.set(id, { key, version, ran: true, checked: false });
+  }
+  keepFoundryNotes();
+  foundryNotesWatch?.paint();
+  return parts.join("\n\n");
+}
 /// Notes that were sent, by mockup: the version they were made on, and whether their turn was seen running.
 const foundryAsked = new Map<string, { key: string; version: number; ran: boolean; checked: boolean }>();
 /// Versions that came back from notes: each outlines what changed while the page stays open.
@@ -4197,6 +4271,7 @@ async function loadFoundry() {
     foundryUi.error = "";
     foundryNotesBack();
     foundryNotesCarry();
+    keepFoundryNotes();
   } catch (error) {
     foundryList = foundryList ?? [];
     foundryVersions = foundryVersions ?? [];
@@ -4213,6 +4288,7 @@ function foundryNotesBack() {
     if (!now || now.version <= asked.version) continue;
     foundryAsked.delete(id);
     foundryNotes.working.delete(asked.key);
+    foundryNotes.to.delete(asked.key);
     foundryChanged.add(shelfKey(id, now.version));
     if (pageOpen === "foundry") foundryFocus = { id };
   }
@@ -4237,12 +4313,15 @@ function foundryNotesTick() {
   if (!foundryAsked.size || !state) return;
   // Sent, and nothing of it still waits behind another turn.
   const running = Boolean(state.activeTurnId || state.busy || state.queue.trim());
+  // Notes that waited in line behind a turn: once nothing is queued in their chat, they are being worked on.
+  for (const [key, to] of foundryNotes.to) if (to.queued && to.session === state.session?.id && !state.queue.trim()) { foundryNotes.to.set(key, { ...to, queued: false }); foundryNotesWatch?.paint(); }
   for (const [id, asked] of foundryAsked) {
     if (running || !asked.ran) continue;
     // One more read of the shelf, in case the save and the turn's end crossed.
     if (!asked.checked) { asked.checked = true; void loadFoundry(); continue; }
     foundryAsked.delete(id);
     foundryNotes.working.delete(asked.key);
+    foundryNotes.to.delete(asked.key);
     foundryNotes.said.set(asked.key, "No new version came back. The chat has the answer.");
     foundryNotesWatch?.paint();
   }
@@ -4261,6 +4340,7 @@ async function sendFoundryNotes(key: string) {
   foundryNotes.said.delete(key);
   foundryNotes.working.set(key, (foundryNotes.working.get(key) ?? 0) + notes.length);
   foundryAsked.set(id, { key, version, ran: false, checked: false });
+  keepFoundryNotes();
   foundryNotesWatch?.paint();
   const pictures: string[] = [];
   try {
@@ -4280,7 +4360,10 @@ async function sendFoundryNotes(key: string) {
       const sent = await api<{ id: string } | undefined>("attach", { name: `note-${index + 1}.png`, mimeType: "image/png", data: note.picture }).catch(() => undefined);
       if (sent?.id) { pictured.push(index); pictures.push(sent.id); attachmentPreviews.set(sent.id, `data:image/png;base64,${note.picture}`); }
     }
-    // Queued behind a turn that is still running, never steered into it.
+    // Queued behind a turn that is still running, never steered into it; the line under the mockup says where they went.
+    const session = state.session;
+    foundryNotes.to.set(key, { session: session.id, chat: state.sessions.find((item) => item.id === session.id)?.title || "the chat", queued: Boolean(state.activeTurnId || state.busy || state.queue.trim()) });
+    foundryNotesWatch?.paint();
     await api("submit", { text: foundryNotesMessage({ id, title: mockup.title, version }, notes, pictured), wait: true });
     const sent = foundryAsked.get(id);
     if (sent?.key === key) sent.ran = true;
@@ -4291,7 +4374,9 @@ async function sendFoundryNotes(key: string) {
     const left = (foundryNotes.working.get(key) ?? 0) - notes.length;
     if (left > 0) foundryNotes.working.set(key, left); else foundryNotes.working.delete(key);
     foundryNotes.waiting.set(key, [...notes, ...(foundryNotes.waiting.get(key) ?? [])]);
+    foundryNotes.to.delete(key);
     foundryNotes.said.set(key, errorWords(error));
+    keepFoundryNotes();
   }
   foundryNotesWatch?.paint();
 }
@@ -4852,6 +4937,7 @@ function composerFrame(width: number) {
     state.attachments.map((image) => image.id).join(),
     pastes.map((paste) => paste.id).join(),
     refusedFiles.map((file) => file.id).join(),
+    ridingNotes().map((key) => `${key}=${foundryNotes.waiting.get(key)?.length}=${foundryList?.find((item) => key.startsWith(`${item.id}:`))?.title}`).join(),
   ]);
   if (
     signature === composerSignature &&
@@ -4966,7 +5052,13 @@ function composerDraft(width: number) {
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
   const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
-  const chips = points + notes + [...new Set(mentions)]
+  // Notes pinned on Foundry and not sent: they go with the next message here (a click shows them).
+  const foundryChips = question ? "" : ridingNotes().map((key) => {
+    const id = key.slice(0, key.lastIndexOf(":")), mockup = foundryList?.find((item) => item.id === id), count = foundryNotes.waiting.get(key)?.length ?? 0;
+    const title = mockup ? (mockup.title.length > 32 ? `${mockup.title.slice(0, 31)}…` : mockup.title) : "a mockup";
+    return btn("foundry-open", `${count} note${count === 1 ? "" : "s"} on “${h(title)}”`, { id }, "chip notes-chip foundry-notes-chip").replace("<button ", '<button title="Pinned on Foundry. They go with your next message here. Click to see them on Foundry." ');
+  }).join("");
+  const chips = points + notes + foundryChips + [...new Set(mentions)]
     .map((path) => btn("remove-mention", `${h(path)} ×`, { path }, "chip"))
     .join("");
   if (chips !== composerChipsHTML) el("mention-chips").innerHTML = composerChipsHTML = chips;
@@ -6309,6 +6401,10 @@ async function submitText(value = editor.value, wait = false) {
     renderCards();
   }
   if (!value.startsWith("/") && !pendingQuestion() && chatPreview()) void closePreview();
+  // Notes pinned on Foundry and not sent yet go after your words, so "my comments" always reaches the model.
+  const riding = !value.startsWith("/") && !pendingQuestion() ? ridingNotes() : [];
+  const carried = riding.length ? await carryFoundryNotes(riding) : "";
+  if (carried) value = value.trim() ? `${value}\n\n${carried}` : carried;
   if (!value.trim() && !notes && !state.attachments.length) return;
   if (notes) {
     value = value.trim() ? `${notes}\n\n${value}` : notes;
@@ -7554,6 +7650,7 @@ function fillThreadLists() {
 }
 function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
+  if (!notesLoaded) void loadWaitingNotes();
   if (state?.session?.id !== next.session?.id) {
     thinkingDrag = null;
     modelLevels.clear();

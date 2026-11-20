@@ -38,6 +38,10 @@ const f = await fixture({
     const current = messages.slice(at + 1).filter((message) => message.role === "tool");
     const call = (name: string, input: unknown) => ({ type: "tool_call_delta" as const, index: 0, idDelta: `${name}-${at}-${current.length}`, nameDelta: name, argumentsDelta: JSON.stringify(input) });
     const notes = /```parts\n/.test(request), id = /\(id ([\w-]+), v\d+\)/.exec(request)?.[1];
+    if (notes && /^apply my comment/.test(request)) {
+      asked.push({ text: request, pictures: ((said as { imageArtifactIds?: unknown[] }).imageArtifactIds ?? []).length });
+      yield { type: "text_delta", delta: "I see your note on the Office heading." }; yield { type: "finish", reason: "stop" }; return;
+    }
     if (notes && /two ways/.test(request)) {
       asked.push({ text: request, pictures: ((said as { imageArtifactIds?: unknown[] }).imageArtifactIds ?? []).length });
       yield { type: "text_delta", delta: "Which one do you want?" }; yield { type: "finish", reason: "stop" }; return;
@@ -189,14 +193,16 @@ try {
   await item(1).hover({ position: { x: 4, y: 4 } });
   await page.keyboard.press("Control+Enter");
   await step(162, async () => asked.length === 1, 15000);
-  await step(163, async () => (await line.textContent()) === "Working on 2 notes…" && await pins.count() === 0);
+  // The line says where they went.
+  const chatTitle = (await f.client.getSessionState(mockup.sessionId!)).session.title;
+  await step(163, async () => (await line.textContent()) === `Working on 2 notes in “${chatTitle}”…` && await pins.count() === 0);
   // A note written while the first two are with the model waits, and moves to the version they make.
   const office = await spot(".plan:last-child h4");
   await page.mouse.click(office.x, office.y);
   await step(177, async () => await box.locator("input").isVisible());
   await page.keyboard.type("Shorter name");
   await page.keyboard.press("Enter");
-  await step(170, async () => /^Working on 2 notes…1 to change/.test((await line.textContent()) ?? "") && await pins.count() === 1);
+  await step(170, async () => /^Working on 2 notes in “.+”…1 to change/.test((await line.textContent()) ?? "") && await pins.count() === 1);
   await page.mouse.move(5, 5);
   letGo();
   assert.match(asked[0]!.text, /On “Plans page”:\n1 · Yearly 2 months free: Say save €40 instead\n♥ · “Most chosen”: Keep this tag, it reads warm\n\n```parts\n/, "the message leads with what the person said, a keep with a heart");
@@ -223,6 +229,33 @@ try {
   pictures.forEach((url, index) => writeFileSync(join(output, `foundry-pin-picture-${index + 1}.png`), Buffer.from(url.slice(url.indexOf(",") + 1), "base64")));
   console.log("PASS: nothing is outlined; a + rests by the pointer, a click pins exactly there; changes and keeps wait and go together; the new version comes back and the keeps stay with the mockup.");
 
+  // A note not sent is kept by the daemon (the model can read it), comes back after a reload,
+  // shows as a chip in the composer, and rides with whatever you write next in the chat.
+  await eventually(async () => (await f.client.foundryWaitingNotes()).waiting.some((item) => item.id === mockup.id && item.version === 2 && item.notes.length === 1));
+  await page.reload();
+  await page.locator("#composer-model").waitFor();
+  const chip = page.locator("#mention-chips .foundry-notes-chip");
+  await step(232, async () => (await chip.count()) === 1 && (await chip.textContent()) === "1 note on “Plans page”", 20000);
+  await page.locator("#mention-chips").screenshot({ path: join(output, "foundry-pin-chip.png") });
+  // The chip opens Foundry at the mockup, where the note is back on its pin.
+  await chip.click();
+  await step(236, async () => /^1 to change/.test((await item(2).locator(".fd-notes").textContent()) ?? "") && await item(2).locator(".fn-pin[data-n]").count() === 1, 20000);
+  await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
+  await step(238, async () => await page!.locator("#page").isHidden());
+  await page.locator("textarea").fill("apply my comment please");
+  await page.locator("textarea").press("Enter");
+  await step(241, async () => asked.length === 2, 15000);
+  assert.ok(asked[1]!.text.startsWith(`apply my comment please\n\nOn “Plans page”:\n1 · Office heading: Shorter name\n\n${"`".repeat(3)}parts\nNotes pinned on the Foundry mockup "Plans page" (id ${mockup.id}, v2)`), `the waiting note goes after your words: ${asked[1]!.text.slice(0, 300)}`);
+  await step(243, async () => (await chip.count()) === 0, 5000);
+  await eventually(async () => !(await f.client.foundryWaitingNotes()).waiting.some((item) => item.id === mockup.id));
+  const asking = page.locator("#conversation .request").last();
+  await step(246, async () => /apply my comment please/.test((await asking.textContent()) ?? ""));
+  // The turn's end redraws the conversation: picture the message once it has settled.
+  await eventually(async () => (await f.client.getSessionState(mockup.sessionId!)).session.turns.at(-1)?.status === "completed");
+  await page.waitForTimeout(300);
+  await asking.screenshot({ path: join(output, "foundry-pin-carried.png") });
+  console.log("PASS: a note not sent is kept, comes back after a reload, shows in the composer and goes with your next message.");
+
   // A mockup with options: the note says which option, and goes at once with the send key.
   await eventually(async () => (await f.client.getSessionState(mockup.sessionId!)).session.turns.at(-1)?.status === "completed");
   await page.waitForTimeout(300);
@@ -243,9 +276,9 @@ try {
   await both.locator(".fn-box input").waitFor();
   await page.keyboard.type("Bigger price");
   await page.keyboard.press("Control+Enter");
-  await step(220, async () => asked.length === 2, 15000);
-  assert.match(asked[1]!.text, /On “Plans page, two ways”:\n1 · Daily heading in B · Monthly first: Bigger price\n\n```parts\nNotes pinned on the Foundry mockup "Plans page, two ways"/, "the note says which option");
-  assert.equal(asked[1]!.pictures, 1);
+  await step(220, async () => asked.length === 3, 15000);
+  assert.match(asked[2]!.text, /On “Plans page, two ways”:\n1 · Daily heading in B · Monthly first: Bigger price\n\n```parts\nNotes pinned on the Foundry mockup "Plans page, two ways"/, "the note says which option");
+  assert.equal(asked[2]!.pictures, 1);
   // The model answered in words: the line under the mockup says so instead of working on.
   await step(224, async () => /^No new version came back\. The chat has the answer\.$/.test((await both.locator(".fd-notes").textContent()) ?? ""), 20000);
   assert.deepEqual(errors, []);

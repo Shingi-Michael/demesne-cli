@@ -112,7 +112,7 @@ import { Handoffs } from "./handoff.ts";
 import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
-import { captureWindowTool, windowCaptureSupported } from "./window-capture.ts";
+import { CHANGING_STEPS, captureWindowTool, windowCaptureSupported } from "./window-capture.ts";
 import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
 import { loadConfig, type LoadedConfig } from "@demesne/config";
 import { SUBAGENT_OFTEN, type AgentConfig, type HeartbeatConfig, type ImageGenerationConfig, type SubagentOften } from "@demesne/config";
@@ -372,7 +372,7 @@ export function createDaemonApp(options: {
   });
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
     tools.register(viewImageTool());
-    if (windowCaptureSupported()) tools.register(captureWindowTool());
+    if (windowCaptureSupported()) tools.register(captureWindowTool(undefined, (sessionId) => store.windowCaptures(sessionId, CHANGING_STEPS)));
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   // Pages are looked at after each save when the desktop app is there to render them.
@@ -1769,6 +1769,8 @@ export function createDaemonApp(options: {
         });
       }
 
+      // Notes pinned on Foundry and not sent yet, for every mockup.
+      if (path[0] === "v1" && path[1] === "foundry-notes" && path.length === 2 && request.method === "GET") return json({ waiting: store.waitingFoundryNotes() });
       // Foundry: artifacts the agent made, with every version kept.
       if (path[0] === "v1" && path[1] === "foundry") {
         if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts(), versions: store.listFoundryVersions() });
@@ -1806,6 +1808,13 @@ export function createDaemonApp(options: {
               return json({ data: store.setFoundryData(id, body.name, body.value ?? null) });
             }
           } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
+        }
+        // Notes pinned on this mockup and not sent yet (an empty list forgets them).
+        if (id && path.length === 4 && path[3] === "notes" && request.method === "PUT") {
+          const body = await readJson(request);
+          if (!isRecord(body) || typeof body.version !== "number" || !Array.isArray(body.notes) || !body.notes.every(isRecord)) return apiError("invalid_request", "Notes need a version and a list", 400);
+          try { store.setWaitingFoundryNotes(id, body.version, body.notes as Record<string, unknown>[]); return json({ ok: true }); }
+          catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
         }
         // Pass 240 A: a real picture a mockup shows, kept with it (the bytes by hash, in the artifact folder).
         if (id && path.length === 5 && path[3] === "shots" && request.method === "GET") {

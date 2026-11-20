@@ -426,7 +426,8 @@ function checkStart(store: DemesneStore, kind: FoundryKind | undefined, source: 
   const demesne = /<d-demesne\b/i.test(source), review = REVIEW_PAGE.test(source);
   if (/^new\b/i.test(from) && !demesne && !review) return;
   if (based || COULD_NOT.test(from) || !context.turnId || !context.sessionId) return;
-  if (seenIn(context.sessionId).length) return;
+  // A capture kept with the chat counts too, so a restart does not ask for another.
+  if (seenIn(context.sessionId).length || store.windowCaptures(context.sessionId).length) return;
   if (store.getSession(context.sessionId)?.turns.some((turn) => turn.attachments?.some((file) => file.kind !== "file"))) return;
   if (lookAsked.has(context.turnId)) return;
   lookAsked.add(context.turnId);
@@ -654,6 +655,21 @@ const likedOf = (store: DemesneStore, id: string): { liked?: string[]; liked_rul
   return liked.length ? { liked, liked_rule: LIKED_KEEP } : {};
 };
 
+/// Notes the person pinned on this mockup on Foundry and has not sent yet.
+/// Their next message carries them; until then the model can still read them,
+/// so "my comments" never points at nothing.
+export const WAITING_RULE = "The person pinned these notes on this mockup in Foundry and has not sent them yet. When they speak of their comments or notes, these are them: a note marked keep is something they like and want kept, any other is a change.";
+const waitingOf = (store: DemesneStore, id: string): { waiting_notes?: { on: string; note: string; keep?: true; version: number; selector?: string }[]; waiting_rule?: string } => {
+  const waiting = store.waitingFoundryNotes(id)[0];
+  if (!waiting) return {};
+  const text = (value: unknown, most: number) => typeof value === "string" ? value.slice(0, most) : "";
+  const notes = waiting.notes.map((note) => {
+    const part = note.part && typeof note.part === "object" ? note.part as Record<string, unknown> : {};
+    return { on: text(note.name, 80) || "the page", note: text(note.text, 600), ...(note.keep === true ? { keep: true as const } : {}), version: waiting.version, ...(text(part.selector, 400) ? { selector: text(part.selector, 400) } : {}) };
+  }).filter((note) => note.note);
+  return notes.length ? { waiting_notes: notes, waiting_rule: WAITING_RULE } : {};
+};
+
 const stageRead = (found: FoundryArtifactDetail) => {
   const stage = found.versions.find((item) => item.version === found.version)?.stage;
   return { ...(stage?.surface ? { surface: stage.surface } : {}), ...(stage?.demo ? { demo: stage.demo } : {}) };
@@ -667,7 +683,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
   return {
     definition: {
       name: "foundry_read",
-      description: "List Foundry artifacts (no id; query searches), the parts catalogue (id \"kit:parts\"), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save.",
+      description: "List Foundry artifacts (no id; query searches), the parts catalogue (id \"kit:parts\"), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save. A read also gives the notes the person pinned on it in Foundry and has not sent yet (their comments).",
       inputSchema: {
         type: "object",
         properties: { id: { type: "string" }, version: { type: "integer", minimum: 1 }, query: { type: "string" } },
@@ -687,7 +703,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
-        ...briefOf(found), ...likedOf(store, found.id), ...stageRead(found), source: found.source,
+        ...briefOf(found), ...likedOf(store, found.id), ...waitingOf(store, found.id), ...stageRead(found), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };

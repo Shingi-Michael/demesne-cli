@@ -286,6 +286,9 @@ export class DemesneStore {
     CREATE TABLE IF NOT EXISTS foundry_data (
       artifact_id TEXT PRIMARY KEY REFERENCES foundry_artifacts(id) ON DELETE CASCADE, data TEXT NOT NULL, updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS foundry_notes (
+      artifact_id TEXT PRIMARY KEY REFERENCES foundry_artifacts(id) ON DELETE CASCADE, version INTEGER NOT NULL, notes TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS foundry_shots (
       artifact_id TEXT NOT NULL REFERENCES foundry_artifacts(id) ON DELETE CASCADE, shot_id TEXT NOT NULL, descriptor TEXT NOT NULL,
       PRIMARY KEY (artifact_id, shot_id)
@@ -531,6 +534,23 @@ export class DemesneStore {
         .run(id, text, new Date().toISOString());
       return data;
     })();
+  }
+
+  /// Notes pinned on a mockup on Foundry and not sent yet: kept here so a
+  /// restart does not lose them, the model can read them (foundry_read), and
+  /// the next message carries them. One list per mockup, on the version they
+  /// were pinned on; an empty list forgets them. Up to 8 MB with the pictures around their pins.
+  waitingFoundryNotes(id?: string): { id: string; version: number; notes: Record<string, unknown>[] }[] {
+    const rows = (id ? this.database.query("SELECT artifact_id, version, notes FROM foundry_notes WHERE artifact_id = ?").all(id) : this.database.query("SELECT artifact_id, version, notes FROM foundry_notes ORDER BY updated_at").all()) as { artifact_id: string; version: number; notes: string }[];
+    return rows.flatMap((row) => { try { const notes = JSON.parse(row.notes); return Array.isArray(notes) && notes.length ? [{ id: row.artifact_id, version: row.version, notes }] : []; } catch { return []; } });
+  }
+  setWaitingFoundryNotes(id: string, version: number, notes: Record<string, unknown>[]): void {
+    if (!this.database.query("SELECT 1 FROM foundry_artifacts WHERE id = ?").get(id)) throw new NotFoundError("Foundry artifact not found");
+    if (!notes.length) { this.database.query("DELETE FROM foundry_notes WHERE artifact_id = ?").run(id); return; }
+    const text = JSON.stringify(notes.slice(0, 40));
+    if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new InvalidStateError("Those notes are too big to keep");
+    this.database.query("INSERT INTO foundry_notes(artifact_id,version,notes,updated_at) VALUES (?,?,?,?) ON CONFLICT(artifact_id) DO UPDATE SET version = excluded.version, notes = excluded.notes, updated_at = excluded.updated_at")
+      .run(id, Math.max(1, Math.floor(version)), text, new Date().toISOString());
   }
 
   /// Pass 240 A: a picture a mockup shows, kept with the mockup so it outlives

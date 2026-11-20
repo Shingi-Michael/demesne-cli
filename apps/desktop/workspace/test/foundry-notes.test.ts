@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { likes, newNoteStore, notesLine, notesMessage, partName, partWord, readPart, type FoundryNote, type NotePart } from "../foundry-notes.ts";
+import { keptNote, likes, newNoteStore, notesLine, readKeptNote, notesMessage, partName, partWord, readPart, type FoundryNote, type NotePart } from "../foundry-notes.ts";
 import { splitPastes } from "../pastes.ts";
 
 const part = (given: Partial<NotePart>): NotePart => ({ tag: "div", role: "", type: "", cls: "", label: "", text: "", heading: "", kids: 0, selector: "div", html: "<div></div>", ...given });
@@ -79,6 +79,22 @@ describe("notes on a mockup (pass 233 A, pinned where you point in pass 242 A)",
     expect(notesLine(1, 2)).toContain("Working on 2 notes…</span><button");
     expect(notesLine(0, 0, "No new version came back. <b>")).toBe('<span class="fd-quiet">No new version came back. &lt;b&gt;</span>');
     expect(notesLine(2, 0, "Not sent")).not.toContain("Not sent");
+    // Where they went, and whether they wait behind a turn running there.
+    expect(notesLine(0, 2, "", 0, { session: "s1", chat: "Plans <page>", queued: false })).toContain("<span>Working on 2 notes in “Plans &lt;page&gt;”…</span>");
+    expect(notesLine(0, 1, "", 0, { session: "s1", chat: "Plans", queued: true })).toContain("<span>1 note in line in “Plans”, behind the turn running there</span>");
+  });
+
+  test("a note kept by the daemon comes back as it was, and anything odd in it is dropped", () => {
+    const note: FoundryNote = { part: { tag: "h4", role: "", type: "", cls: "", label: "", text: "Office", heading: "", kids: 0, selector: "div > h4", html: "<h4>Office</h4>" }, name: "Office heading", text: "Shorter name", spot: { fx: 0.4, fy: 0.2 }, picture: "iVBORw0KGgo=", around: { x: 50, y: 50 }, picturing: Promise.resolve() };
+    const kept = keptNote(note);
+    expect(kept.picturing).toBeUndefined();
+    const { picturing: _, ...plain } = note;
+    expect(readKeptNote(JSON.parse(JSON.stringify(kept)))).toEqual(plain);
+    expect(readKeptNote({ ...kept, keep: true })!.keep).toBe(true);
+    expect(readKeptNote({ ...kept, text: " " })).toBeNull();
+    expect(readKeptNote({ ...kept, part: null })).toBeNull();
+    expect(readKeptNote({ ...kept, picture: "not base64!" })!.picture).toBeUndefined();
+    expect(readKeptNote({ ...kept, spot: { fx: 7, fy: -1 } })!.spot).toEqual({ fx: 1, fy: 0 });
   });
 
   test("what a frame says about a part is taken with care: the page in it was written by a model", () => {

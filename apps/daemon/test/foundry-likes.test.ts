@@ -29,3 +29,35 @@ test("keep notes pinned on a mockup come back with it on every read", async () =
     expect(store.foundryLikes("x%")).toEqual([]);
   } finally { store.close(); }
 });
+
+// Notes pinned and not sent are kept by the daemon: a restart does not lose
+// them, and the model reads them with the mockup.
+test("notes waiting on a mockup are kept and the model reads them", async () => {
+  const store = new DemesneStore(":memory:");
+  try {
+    const { session } = store.createSession("Slow Pour", "/tmp");
+    const { turn: made } = store.createTurn(session.id, "Show me the plans page");
+    const mockup = store.saveFoundryArtifact({ kind: "html", title: "Plans page", source: "<main>Plans</main>", sessionId: session.id, turnId: made.id });
+    store.startTurn(made.id); store.completeTurn(made.id);
+    const read = async () => JSON.parse(await foundryReadTool(store).execute({ id: mockup.id }, { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id } as never));
+    expect(store.waitingFoundryNotes()).toEqual([]);
+    expect((await read()).waiting_notes).toBeUndefined();
+
+    const change = { part: { tag: "h4", selector: "div > h4" }, name: "Office heading", text: "Shorter name" };
+    const keep = { part: { tag: "span", selector: "span.tag" }, name: "“Most chosen”", text: "Keep this tag", keep: true };
+    store.setWaitingFoundryNotes(mockup.id, 1, [change, keep]);
+    expect(store.waitingFoundryNotes(mockup.id)).toEqual([{ id: mockup.id, version: 1, notes: [change, keep] }]);
+    const after = await read();
+    expect(after.waiting_notes).toEqual([
+      { on: "Office heading", note: "Shorter name", version: 1, selector: "div > h4" },
+      { on: "“Most chosen”", note: "Keep this tag", keep: true, version: 1, selector: "span.tag" },
+    ]);
+    expect(after.waiting_rule).toMatch(/has not sent them yet/);
+
+    // Sent (or all taken off): nothing waits any more.
+    store.setWaitingFoundryNotes(mockup.id, 1, []);
+    expect(store.waitingFoundryNotes()).toEqual([]);
+    expect((await read()).waiting_notes).toBeUndefined();
+    expect(() => store.setWaitingFoundryNotes("nope", 1, [change])).toThrow();
+  } finally { store.close(); }
+});

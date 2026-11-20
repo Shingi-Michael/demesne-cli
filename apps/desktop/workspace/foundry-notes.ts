@@ -25,9 +25,12 @@ export interface FoundryNote { part: NotePart; name: string; text: string; keep?
 export interface NotePicture { data: string; around: { x: number; y: number } }
 /// A note being typed when the page was redrawn, so it comes back.
 export interface NoteDraft { key: string; part: NotePart; name: string; text: string; index: number; spot: NoteSpot; keep: boolean | null; option?: { index: number; name: string }; picture?: Promise<NotePicture | null> }
-/// Notes by mockup version ("id:version"): waiting to be sent, being worked on, and a quiet word when sending failed.
-export interface NoteStore { waiting: Map<string, FoundryNote[]>; working: Map<string, number>; said: Map<string, string>; draft: NoteDraft | null }
-export const newNoteStore = (): NoteStore => ({ waiting: new Map(), working: new Map(), said: new Map(), draft: null });
+/// Where sent notes went: the chat's name, and whether they wait behind a turn still running there.
+export interface NotesSentTo { session: string; chat: string; queued: boolean }
+/// Notes by mockup version ("id:version"): waiting to be sent, being worked on (and where), and a quiet word when sending failed.
+/// `changed` is told whenever the waiting notes change, so they are kept outside the window.
+export interface NoteStore { waiting: Map<string, FoundryNote[]>; working: Map<string, number>; to: Map<string, NotesSentTo>; said: Map<string, string>; draft: NoteDraft | null; changed?: () => void }
+export const newNoteStore = (): NoteStore => ({ waiting: new Map(), working: new Map(), to: new Map(), said: new Map(), draft: null });
 
 const h = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const cut = (text: string, most: number) => { const clean = text.replace(/\s+/g, " ").trim(); return clean.length > most ? `${clean.slice(0, most - 1).trimEnd()}…` : clean; };
@@ -99,6 +102,27 @@ export function notesMessage(mockup: { id: string; title: string; version: numbe
   return `On “${mockup.title}”:\n${said}\n\n${fenced(detail, "parts")}`;
 }
 
+/// A note as it is kept outside the window (the daemon): everything but the picture still being taken.
+export function keptNote(note: FoundryNote): Record<string, unknown> {
+  const { picturing: _, ...kept } = note;
+  return kept;
+}
+/// A kept note read back. It was ours, but it went through the daemon, so it is checked like anything else.
+export function readKeptNote(value: unknown): FoundryNote | null {
+  const note = value as Record<string, unknown> | null;
+  if (!note || typeof note !== "object" || typeof note.text !== "string" || !note.text.trim() || !note.part || typeof note.part !== "object") return null;
+  const raw = note.part as Record<string, unknown>;
+  const part = readPart({ ...raw, rect: { x: 0, y: 0, w: 1, h: 1 } });
+  if (!part) return null;
+  const { rect: _, ...plain } = part;
+  const spot = note.spot as { fx?: unknown; fy?: unknown } | undefined, option = note.option as { index?: unknown; name?: unknown } | undefined, around = note.around as { x?: unknown; y?: unknown } | undefined;
+  return { part: plain, name: text(note.name, 80) || partName(plain), text: note.text.slice(0, 600), ...(note.keep === true ? { keep: true } : {}),
+    ...(spot && typeof spot.fx === "number" && typeof spot.fy === "number" ? { spot: { fx: unit(spot.fx), fy: unit(spot.fy) } } : {}),
+    ...(option && typeof option.index === "number" && typeof option.name === "string" ? { option: { index: Math.max(0, Math.floor(option.index)), name: option.name.slice(0, 60) } } : {}),
+    ...(typeof note.picture === "string" && /^[A-Za-z0-9+/=]+$/.test(note.picture.slice(0, 200)) ? { picture: note.picture } : {}),
+    ...(around && typeof around.x === "number" && typeof around.y === "number" ? { around: { x: around.x, y: around.y } } : {}) };
+}
+
 const count = (n: number) => `${n} note${n === 1 ? "" : "s"}`;
 const MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
 export const SEND_KEY = MAC ? "⌘↵" : "Ctrl ↵";
@@ -106,11 +130,13 @@ const HEART = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10.2 1.9 
 
 /// The quiet line under a mockup: what waits (changes and keeps) and the key
 /// that sends it, or that notes are being worked on. Empty when there is nothing to say.
-export function notesLine(waiting: number, working: number, said = "", kept = 0): string {
+export function notesLine(waiting: number, working: number, said = "", kept = 0, to?: NotesSentTo): string {
   const changes = waiting - kept;
   const what = [changes > 0 ? `${changes} to change` : "", kept > 0 ? `${kept} to keep` : ""].filter(Boolean).join(", ");
   const send = waiting ? `<button type="button" class="fd-notes-send" data-notes-send>${what} · send <kbd>${SEND_KEY}</kbd></button>` : "";
-  if (working) return `<i class="fd-notes-work" aria-hidden="true"></i><span>Working on ${count(working)}…</span>${send}`;
+  // Where they went, and whether they wait in line behind a turn that is running there.
+  if (working && to?.queued) return `<i class="fd-notes-work" aria-hidden="true"></i><span>${count(working)} in line in “${h(cut(to.chat, 40))}”, behind the turn running there</span>${send}`;
+  if (working) return `<i class="fd-notes-work" aria-hidden="true"></i><span>Working on ${count(working)}${to ? ` in “${h(cut(to.chat, 40))}”` : ""}…</span>${send}`;
   return send || (said ? `<span class="fd-quiet">${h(said)}</span>` : "");
 }
 
@@ -253,7 +279,7 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
   }
   function paintSection(section: HTMLElement) {
     const key = keyOf(section), line = section.querySelector<HTMLElement>(":scope > .fd-notes"), waiting = store.waiting.get(key) ?? [];
-    if (line) { const html = notesLine(waiting.length, store.working.get(key) ?? 0, store.said.get(key), waiting.filter((note) => note.keep).length); if (line.innerHTML !== html) line.innerHTML = html; line.hidden = !html; }
+    if (line) { const html = notesLine(waiting.length, store.working.get(key) ?? 0, store.said.get(key), waiting.filter((note) => note.keep).length, store.to.get(key)); if (line.innerHTML !== html) line.innerHTML = html; line.hidden = !html; }
     placePins(section);
   }
 
@@ -332,10 +358,12 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
     else if (said) {
       const note: FoundryNote = { part, name, text: said, keep: liked, spot, ...(option ? { option } : {}) };
       notes.push(note);
-      note.picturing = picture?.then((taken) => { if (taken) { note.picture = taken.data; note.around = taken.around; } });
+      // Kept again once its picture is taken.
+      note.picturing = picture?.then((taken) => { if (taken) { note.picture = taken.data; note.around = taken.around; store.changed?.(); } });
     }
     if (notes.length) store.waiting.set(key, notes); else store.waiting.delete(key);
     store.said.delete(key);
+    store.changed?.();
     closeBox();
     stagesOf(section).forEach(watch);
     paintSection(section);

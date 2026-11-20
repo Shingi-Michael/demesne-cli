@@ -1589,6 +1589,9 @@ export class WorkspaceHost {
       "foundry-data",
       "foundry-data-set",
       "foundry-ask",
+      // Notes pinned on Foundry and not sent yet, kept by the daemon.
+      "foundry-notes",
+      "foundry-notes-set",
       "google-ai-cancel",
       // The sidebar's right-click menu acts on any chat or project.
       "delete-chat",
@@ -2275,6 +2278,11 @@ export class WorkspaceHost {
       return { mimeType: /^image\/(png|jpeg|webp)$/.test(found.mimeType) ? found.mimeType : "image/png", data: Buffer.from(found.data).toString("base64") };
     }
     if (method === "foundry-data") return this.client.foundryData(string(args.id, "artifact", 200));
+    if (method === "foundry-notes") return (await this.client.foundryWaitingNotes()).waiting;
+    if (method === "foundry-notes-set") {
+      if (!Array.isArray(args.notes)) throw new Error("Invalid notes");
+      return this.client.foundrySetWaitingNotes(string(args.id, "artifact", 200), Number(args.version) || 1, args.notes as Record<string, unknown>[]);
+    }
     if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);
     if (method === "foundry-ask") return this.client.foundryAsk(string(args.id, "artifact", 200), string(args.question, "question", 8000));
     if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you" });

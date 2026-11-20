@@ -265,6 +265,13 @@ export class DemesneClient {
   async foundrySetData(id: string, name: string, value: unknown): Promise<{ data: Record<string, unknown> }> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}/data`, { method: "POST", body: JSON.stringify({ name, value }) });
   }
+  /// Notes pinned on Foundry and not sent yet: all of them, and one mockup's.
+  async foundryWaitingNotes(): Promise<{ waiting: { id: string; version: number; notes: Record<string, unknown>[] }[] }> {
+    return this.request("/v1/foundry-notes");
+  }
+  async foundrySetWaitingNotes(id: string, version: number, notes: Record<string, unknown>[]): Promise<{ ok: boolean }> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/notes`, { method: "PUT", body: JSON.stringify({ version, notes }) });
+  }
   async foundryAsk(id: string, question: string): Promise<{ answer: string }> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}/ask`, { method: "POST", body: JSON.stringify({ question }) });
   }

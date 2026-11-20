@@ -191,10 +191,13 @@ export class GoogleAIConnection {
 /** Config writes normally back up the previous document, including credentials.
  * Never leave an old Google key in that backup after replacement/disconnect. */
 export function scrubGoogleBackup(path: string | null) {
+  scrubProviderBackup(path, url => url.replace(/\/$/, "") === GOOGLE_AI_URL);
+}
+export function scrubProviderBackup(path: string | null, matches: (url: string) => boolean) {
   if (!path || !existsSync(path)) return;
   const document = Bun.TOML.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   const profiles = [document.provider, ...(isRecord(document.additional_providers) ? Object.values(document.additional_providers) : [])];
-  for (const profile of profiles) if (isRecord(profile) && typeof profile.url === "string" && profile.url.replace(/\/$/, "") === GOOGLE_AI_URL) delete profile.api_key;
+  for (const profile of profiles) if (isRecord(profile) && typeof profile.url === "string" && matches(profile.url)) delete profile.api_key;
   const temporary = `${path}.google-cleanup.tmp`;
   try { writeFileSync(temporary, renderConfigDocument(document), { mode: 0o600 }); renameSync(temporary, path); }
   finally { if (existsSync(temporary)) rmSync(temporary); }

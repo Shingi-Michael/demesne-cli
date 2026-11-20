@@ -11,17 +11,18 @@ export class GoogleAIForm {
   private readonly model: HTMLSelectElement;
   private readonly remember: HTMLInputElement;
   private readonly status: HTMLElement;
-  constructor(readonly providerKey: string, private readonly request: <T>(method: string, args?: Record<string, unknown>) => Promise<T>) {
+  constructor(readonly providerKey: string, private readonly request: <T>(method: string, args?: Record<string, unknown>) => Promise<T>, private readonly anthropic = false) {
+    const service = anthropic ? "Anthropic" : "Google AI Studio";
     this.element.className = "st-google";
-    this.element.setAttribute("aria-label", "Google AI Studio connection");
+    this.element.setAttribute("aria-label", `${service} connection`);
     this.element.autocomplete = "off";
-    this.element.innerHTML = `<label>API key<input type="password" name="google-key" aria-label="Google AI Studio API key" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="4096" required></label>
+    this.element.innerHTML = `<label>API key<input type="password" name="${anthropic ? "anthropic" : "google"}-key" aria-label="${service} API key" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="4096" required></label>
       <div class="st-google-actions"><button type="submit" class="st-link">Check key</button><button type="button" class="st-link" data-google-forget>Clear / cancel</button></div>
-      <label>Chat model<select aria-label="Google chat model" disabled><option value="">Check a key to discover models</option></select></label>
-      <p class="st-hint">Checking lists models only. Testing makes two small, potentially billable model requests with a harmless test tool. Your chats and files are not sent.</p>
-      <button type="button" class="st-link" data-google-test disabled>Test &amp; forget</button>
+      <label>Chat model<select aria-label="${service} chat model" disabled><option value="">Check a key to discover models</option></select></label>
+      <p class="st-hint">${anthropic ? "Checking lists the Claude models available to your key. It does not send a chat or generate tokens." : "Checking lists models only. Testing makes two small, potentially billable model requests with a harmless test tool. Your chats and files are not sent."}</p>
+      <button type="button" class="st-link" data-google-test ${anthropic ? "hidden" : ""} disabled>Test &amp; forget</button>
       <label class="st-google-consent"><input type="checkbox">Save this key in my protected local configuration file (not encrypted)</label>
-      <p class="st-hint">Nothing is saved by default. Save &amp; connect repeats the model test, then enables only the selected model. To add a different model, manage this connection again. Vision and Google-specific features are not enabled.</p>
+      <p class="st-hint">${anthropic ? "Save &amp; connect enables the selected Claude model. Chats use Anthropic API billing." : "Nothing is saved by default. Save &amp; connect repeats the model test, then enables only the selected model. To add a different model, manage this connection again. Vision and Google-specific features are not enabled."}</p>
       <button type="button" class="st-link" data-google-save disabled>Save &amp; connect</button>
       <p class="st-hint" role="status" aria-live="polite" tabindex="-1">Enter a key here, not in chat. Clear / cancel or leaving this page clears it from this form.</p>`;
     this.keyInput = this.element.querySelector('input[type="password"]')!;
@@ -45,7 +46,7 @@ export class GoogleAIForm {
   focus() { this.keyInput.focus(); }
   clear() {
     this.generation++;
-    if (this.busy && this.operationId) void this.request("google-ai-cancel", { operationId: this.operationId }).catch(() => {});
+    if (this.busy && this.operationId) void this.request(this.anthropic ? "anthropic-cancel" : "google-ai-cancel", { operationId: this.operationId }).catch(() => {});
     this.operationId = null;
     this.busy = false;
     this.keyInput.value = "";
@@ -69,18 +70,18 @@ export class GoogleAIForm {
     const generation = ++this.generation;
     const operationId = this.operationId = [...crypto.getRandomValues(new Uint32Array(4))].map(n => n.toString(16)).join("-");
     this.busy = true;
-    this.status.textContent = action === "check" ? "Checking key and reading Google models…" : "Testing streaming and a tool round trip…";
+    this.status.textContent = action === "check" ? "Checking key and listing models…" : this.anthropic ? "Connecting to Anthropic…" : "Testing streaming and a tool round trip…";
     this.controls();
     let failed = false;
     try {
-      const result = await this.request<GoogleAICatalog & { message: string }>(`google-ai-${action}`, {
+      const result = await this.request<GoogleAICatalog & { message: string }>(`${this.anthropic ? "anthropic" : "google-ai"}-${action}`, {
         apiKey: this.keyInput.value.trim(), model: this.model.value, key: this.providerKey, operationId,
         ...(action === "save" ? { remember: this.remember.checked } : {}),
       });
       if (generation !== this.generation) return;
       if (action === "check") {
         this.model.replaceChildren(...result.models.map(model => new Option(model.id, model.id)));
-        this.status.textContent = "Key accepted. Choose a model, then Test & forget or explicitly save it. Listing does not verify quota or tool support.";
+        this.status.textContent = this.anthropic ? "Key accepted. Choose a Claude model and save to connect." : "Key accepted. Choose a model, then Test & forget or explicitly save it. Listing does not verify quota or tool support.";
       } else this.status.textContent = result.message;
     } catch (error) {
       if (generation !== this.generation) return;

@@ -411,6 +411,9 @@ function pages(view: SettingsView): Page[] {
   ] });
   out.push(agentsPage(view));
   const providerRow = (item: SettingsView["providers"]["items"][number]): SettingsRow => {
+    if (item.kind === "anthropic") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
+      control: link("anthropic-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("provider-signout", "Remove saved key", { key: item.key }, " quiet") : ""),
+      fold: view.fold === `anthropic:${item.key}` ? `<div data-anthropic-provider="${h(item.key)}"></div>` : "", keywords: "anthropic claude api key connect" };
     if (item.kind === "google") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
           control: link("google-ai-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("google-ai-disconnect", "Remove saved key", { key: item.key }, " quiet") : ""),
           fold: view.fold === `google:${item.key}` ? `<div data-google-provider="${h(item.key)}"></div>` : "", keywords: "google gemini ai studio api key test connect" };

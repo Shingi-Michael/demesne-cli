@@ -469,7 +469,7 @@ async function api<T = unknown>(
     entry.outcome = "ok";
     return result;
   } catch (error) {
-    entry.outcome = method.startsWith("google-ai-") ? "error (credential request; details omitted)" : `error: ${error instanceof Error ? error.message : String(error)}`;
+    entry.outcome = (method.startsWith("google-ai-") || method.startsWith("anthropic-")) ? "error (credential request; details omitted)" : `error: ${error instanceof Error ? error.message : String(error)}`;
     throw error;
   }
 }
@@ -4568,10 +4568,10 @@ function renderPage() {
   root.dataset.html = html;
   if (pageOpen === "today") mountReel(root);
   if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); }
-  const googleSlot = root.querySelector<HTMLElement>("[data-google-provider]");
+  const googleSlot = root.querySelector<HTMLElement>("[data-google-provider], [data-anthropic-provider]");
   if (googleSlot) {
-    const key = googleSlot.dataset.googleProvider!;
-    if (googleAIForm?.providerKey !== key) { clearGoogleAIForm(); googleAIForm = new GoogleAIForm(key, api); }
+    const key = googleSlot.dataset.anthropicProvider ?? googleSlot.dataset.googleProvider!;
+    if (googleAIForm?.providerKey !== key) { clearGoogleAIForm(); googleAIForm = new GoogleAIForm(key, api, googleSlot.dataset.anthropicProvider !== undefined); }
     googleSlot.append(googleAIForm!.element);
     if (googleFocus?.isConnected) googleFocus.focus({ preventScroll: true });
   } else clearGoogleAIForm();
@@ -6009,9 +6009,9 @@ function renderOverlay() {
         label: `${item.label}${item.active ? " ●" : ""}`,
         value: signing ? "Waiting for your browser…" : item.detail,
         group: item.kind === "local" ? "On this computer" : item.kind === "api-key" ? "API keys" : "Accounts",
-        action: item.kind === "google" ? "google-ai-open" : signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "",
+        action: item.kind === "anthropic" ? "anthropic-open" : item.kind === "google" ? "google-ai-open" : signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "",
         data: { key: item.key },
-        hint: item.kind === "google" ? "Manage key" : signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : item.status === "signed-out" ? "Sign in ↗" : "",
+        hint: item.kind === "google" || item.kind === "anthropic" ? "Manage key" : signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : item.status === "signed-out" ? "Sign in ↗" : "",
       };
     });
     overlayRows.push({ label: "Provider setup", value: state.model.provider, group: "Setup", action: "setup", data: {}, hint: "Open" });
@@ -7055,11 +7055,11 @@ async function dispatch(
   }
   if (action === "thread-open" || action === "thread-close") threadFileOpen = null;
   if (action.startsWith("thread-") || action.startsWith("threads-")) return act(() => api(action, args));
-  if (action === "google-ai-open") {
+  if (action === "google-ai-open" || action === "anthropic-open") {
     overlay = null; renderOverlay();
     if (pageOpen !== "settings") openPage("settings");
     settingsSection("providers");
-    settingsUi.fold = `google:${String(args.key)}`;
+    settingsUi.fold = `${action === "anthropic-open" ? "anthropic" : "google"}:${String(args.key)}`;
     renderPage();
     googleAIForm?.focus();
     return;

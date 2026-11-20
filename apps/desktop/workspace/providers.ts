@@ -1,5 +1,6 @@
 import { ChatGPTAuth } from "@demesne/chatgpt-auth";
-import { GOOGLE_AI_LABEL, isGoogleAI, scrubGoogleBackup } from "./google-ai.ts";
+import { isAnthropicEndpoint } from "../../../packages/providers/src/index.ts";
+import { scrubProviderBackup, GOOGLE_AI_LABEL, isGoogleAI, scrubGoogleBackup } from "./google-ai.ts";
 import { CodexAuth } from "@demesne/codex-auth";
 import { loadConfig, updateUserConfig, type ProviderConfig } from "@demesne/config";
 import { configureChatGPT, connectChatGPT } from "@demesne/setup/chatgpt-auth.ts";
@@ -16,7 +17,7 @@ export interface ProviderEntry {
   /// / "new:chatgpt" / "new:openrouter" for a provider not configured yet.
   key: string;
   label: string;
-  kind: "codex" | "chatgpt" | "openrouter" | "google" | "local" | "api-key";
+  kind: "codex" | "chatgpt" | "openrouter" | "google" | "anthropic" | "local" | "api-key";
   status: "signed-in" | "signed-out" | "local" | "key";
   detail: string;
   /// The provider serving the selected model.
@@ -66,6 +67,7 @@ export class ProviderAccounts {
           ? { key, label, kind: "chatgpt", status: "signed-in", detail: `Signed in as ${account.email ?? account.label}`, active }
           : { key, label, kind: "chatgpt", status: "signed-out", detail: "Signed out", active };
       }
+      if (isAnthropicEndpoint(settings.url)) return { key, label: settings.id ?? "Anthropic", kind: "anthropic", status: settings.apiKey ? "signed-in" : "signed-out", detail: settings.apiKey ? `Saved key · ${settings.model}` : "No saved API key", active: (settings.id ?? "Anthropic") === activeProvider };
       if (isGoogleAI(settings)) return { key, label: settings.id ?? GOOGLE_AI_LABEL, kind: "google", status: settings.apiKey ? "signed-in" : "signed-out", detail: settings.apiKey ? `API key saved locally · ${settings.model}` : "No saved API key", active };
       if (isOpenRouter(settings)) return settings.apiKey
         ? { key, label, kind: "openrouter", status: "signed-in", detail: "Signed in", active }
@@ -81,6 +83,7 @@ export class ProviderAccounts {
       entries.push({ key: "new:openrouter", label: "OpenRouter", kind: "openrouter", status: "signed-out", detail: "Not set up · hosted models", active: false });
     if (!entries.some(entry => entry.kind === "google"))
       entries.push({ key: "new:google", label: GOOGLE_AI_LABEL, kind: "google", status: "signed-out", detail: "Gemini models · test a key without saving it", active: false });
+    if (!entries.some(entry => entry.kind === "anthropic")) entries.push({ key: "new:anthropic", label: "Anthropic", kind: "anthropic", status: "signed-out", detail: "Claude models · API billing", active: false });
     return entries;
   }
 
@@ -92,6 +95,13 @@ export class ProviderAccounts {
       if (!settings.authProfile) throw new Error("This ChatGPT provider has no account.");
       const { revoked } = await this.auth().logout(settings.authProfile);
       return { label: "ChatGPT", revoked };
+    }
+    if (isAnthropicEndpoint(settings.url)) {
+      const patch = { api_key: null };
+      const { backup } = updateUserConfig(this.options.configPath, key === "provider" ? { provider: patch } : { additional_providers: { [key]: patch } });
+      const label = settings.id ?? "Anthropic";
+      try { scrubProviderBackup(backup, isAnthropicEndpoint); } catch { return { label, warning: "The old key may remain in a config backup. Revoke it at Anthropic if needed." }; }
+      return { label };
     }
     if (isGoogleAI(settings)) {
       let backup: string | null = null;

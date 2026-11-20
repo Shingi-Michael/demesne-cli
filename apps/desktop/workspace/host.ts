@@ -209,6 +209,7 @@ export class WorkspaceHost {
   providers: { items: ProviderEntry[]; signingIn: string | null; message: string | null; loading: boolean } = { items: [], signingIn: null, message: null, loading: false };
   private providerAccounts: NonNullable<WorkspaceHostOptions["providerAccounts"]> | null = null;
   private googleConnection: NonNullable<WorkspaceHostOptions["googleAI"]> | null = null;
+  private anthropicOperation?: { id: string; controller: AbortController };
   private googleOperation: string | null = null;
   private providerSignInGeneration = 0;
   /// Settings › Clean up sessions: what's worth deleting, what you ticked,
@@ -1592,7 +1593,7 @@ export class WorkspaceHost {
       // Notes pinned on Foundry and not sent yet, kept by the daemon.
       "foundry-notes",
       "foundry-notes-set",
-      "google-ai-cancel",
+      "google-ai-cancel", "anthropic-cancel",
       // The sidebar's right-click menu acts on any chat or project.
       "delete-chat",
       "reveal-project",
@@ -1701,6 +1702,23 @@ export class WorkspaceHost {
     }
     if (method.startsWith("breakage-")) return this.breakage.handle(method, args);
     if (method.startsWith("thread-") || method.startsWith("threads-")) return this.threads.handle(method, args);
+    if (method === "anthropic-cancel") {
+      if (this.anthropicOperation?.id === args.operationId) this.anthropicOperation?.controller.abort();
+      return;
+    }
+    if (method === "anthropic-check" || method === "anthropic-save") {
+      const { anthropicSettings } = await import("./anthropic-settings.ts");
+      this.anthropicOperation?.controller.abort();
+      const op = this.anthropicOperation = { id: string(args.operationId, "Anthropic operation", 100), controller: new AbortController() };
+      try {
+        const result = await anthropicSettings(this.settings.configPath, args, method === "anthropic-save", AbortSignal.any([op.controller.signal, AbortSignal.timeout(30000)]));
+        if (result.message) {
+          try { await this.applyProviderChange(result.message); }
+          catch { result.message += " Restart Demesne to finish loading the saved connection."; await this.refreshProviders(result.message); }
+        }
+        return result;
+      } finally { if (this.anthropicOperation === op) this.anthropicOperation = undefined; }
+    }
     if (["google-ai-check", "google-ai-test", "google-ai-save"].includes(method)) return this.googleAIRequest(method, args);
     if (method === "google-ai-cancel") {
       if (typeof args.operationId === "string" && args.operationId === this.googleOperation) { this.googleConnection?.cancel(); this.googleOperation = null; }
@@ -2599,6 +2617,7 @@ export class WorkspaceHost {
     this.providerSignInGeneration++;
     this.providerAccounts?.cancel();
     this.googleConnection?.cancel();
+    this.anthropicOperation?.controller.abort();
     if (this.panelWatchTimer) clearInterval(this.panelWatchTimer);
     this.breakage.stop();
     this.threads.stop();

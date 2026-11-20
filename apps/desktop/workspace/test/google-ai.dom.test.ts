@@ -7,12 +7,13 @@ const renderStart = live.indexOf("function renderPage() {"), renderEnd = live.in
 if (renderStart < 0 || renderEnd < renderStart) throw new Error("Missing production page renderer");
 const renderScript = new Bun.Transpiler({ loader: "ts" }).transformSync(`
 const GoogleAIForm = window.GoogleAIForm;
+let foundryStagesStop = null, foundryNotesWatch = null;
 let pageOpen = 'settings', state = { workspace: '/fixture', processes: [], runs: [], approvals: [], questions: [] }, googleAIForm = null, revision = 0;
 const el = id => document.getElementById(id), follow = false, stepOpen = new Set(), overlay = null, currentMode = () => 'ask';
 ${live.slice(live.indexOf("function clearGoogleAIForm()"), live.indexOf('window.addEventListener("pagehide", clearGoogleAIForm);'))}
 function renderSettingsNav() {}
 function settingsView() { return {}; }
-function settingsPage() { return '<p>Revision '+revision+'</p><div data-google-provider="new:google"></div>'; }
+function settingsPage() { return '<p>Revision '+revision+'</p>'+(window.anthropic ? '<div data-anthropic-provider="new:anthropic"></div>' : '<div data-google-provider="new:google"></div>'); }
 ${live.slice(live.indexOf("const recentRequests:"), live.indexOf("function notice("))}
 ${live.slice(renderStart, renderEnd)}
 ${live.slice(live.indexOf("window.demesneInspect ="), live.indexOf("const stateReceiver ="))}
@@ -42,6 +43,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Google key form DOM", ()
         if (method === "google-ai-cancel") return;
         if (w.delay) await new Promise(resolve => { w.resolve = resolve; });
         if (w.failure) throw new Error(`Failed with ${args.apiKey}`);
+        if (method === "anthropic-check") return { models: [{id:"claude-test"}] };
         if (method === "google-ai-check") return { models: [{ id: "gemini-test", contextWindow: 32768, maxOutputTokens: 8192 }] };
         return { message: method === "google-ai-test" ? "Test passed; key not saved." : "Connected." };
       };
@@ -97,6 +99,21 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Google key form DOM", ()
     expect((await calls()).at(-1)).toMatchObject({ method: "google-ai-save", args: { remember: true, model: "gemini-test", key: "new:google" } });
     expect(await password().inputValue()).toBe("");
     expect(await page.getByRole("checkbox").isChecked()).toBe(false);
+  });
+
+  test("Anthropic key check, model selection, consent and save", async () => {
+    await page.evaluate(() => { (window as any).anthropic = true; (window as any).fixture.render(); });
+    const key = page.getByLabel("Anthropic API key", {exact:true});
+    await key.fill("fixture-key");
+    await page.getByRole("button", {name:"Check key"}).click();
+    await page.getByText("Key accepted. Choose a Claude model and save to connect.").waitFor();
+    expect(await page.getByRole("combobox").inputValue()).toBe("claude-test");
+    const save = page.getByRole("button", {name:"Save & connect"});
+    expect(await save.isDisabled()).toBe(true);
+    await page.getByRole("checkbox").check(); await save.click();
+    await page.getByText("Connected.", {exact:true}).waitFor();
+    expect((await calls()).at(-1)).toMatchObject({method:"anthropic-save", args:{remember:true,model:"claude-test",key:"new:anthropic"}});
+    expect(await key.inputValue()).toBe("");
   });
 
   test("editing a checked key invalidates the selected models and consent", async () => {

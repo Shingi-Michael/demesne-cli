@@ -1,5 +1,9 @@
 # Direct Anthropic API access
 
+In the desktop app, open **Settings → Accounts → Anthropic → Add key**. Paste the key, choose **Check key**, select a Claude model, agree to save the key locally, then choose **Save & connect**. Select that model in the chat model picker. Use **Manage** to replace the key and **Remove saved key** to forget it locally without revoking it at Anthropic.
+
+### Optional manual setup
+
 Set `ANTHROPIC_API_KEY` in the environment of the Demesne daemon, then add this section to your user TOML config and reload or restart the daemon. A desktop app launched from Finder may not inherit your terminal environment; alternatively set `api_key` in the private user config, never in a shared project. This uses Anthropic API billing, not a Claude Code subscription or OpenRouter balance.
 
 ```toml

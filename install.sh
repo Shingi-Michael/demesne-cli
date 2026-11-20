@@ -312,6 +312,25 @@ EOF
   fi
 }
 
+# Re-signs the app's Bun backends ad hoc when their signature is missing or
+# stale, then the app so its seal matches. Signed builds are left alone.
+sign_macos_backend() {
+  has codesign || return 0
+  signed=0
+  for file in demesne-host demesne-desktop-host demesned; do
+    path="$1/Contents/Resources/backend/$file"
+    [ -f "$path" ] || continue
+    if ! codesign --verify --strict "$path" 2>/dev/null; then
+      codesign --force --sign - "$path" >/dev/null 2>&1 || die "could not sign $path"
+      signed=1
+    fi
+  done
+  if [ "$signed" = 1 ]; then
+    codesign --force --sign - "$1" >/dev/null 2>&1 || die "could not sign $1"
+    say "signed the backend for this Mac"
+  fi
+}
+
 install_macos() {
   [ "$(uname -m)" = arm64 ] || [ "$FROM_SOURCE" = 1 ] \
     || die "prebuilt macOS builds are Apple silicon only; try --source"
@@ -330,6 +349,9 @@ install_macos() {
   mv "$app" "$MAC_APP"
   # Preview builds are unsigned; clear the download quarantine so they open.
   xattr -dr com.apple.quarantine "$MAC_APP" 2>/dev/null || true
+  # Older releases carry backends whose signature no longer matches them,
+  # which Apple silicon kills at launch (SIGKILL). Sign those ad hoc.
+  sign_macos_backend "$MAC_APP"
   if [ "$IS_UPGRADE" = 1 ]; then
     say "updated $MAC_APP"
   else

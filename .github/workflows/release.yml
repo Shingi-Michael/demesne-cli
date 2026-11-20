@@ -157,6 +157,10 @@ jobs:
         run: |
           app=apps/desktop/release/mac-arm64/Demesne.app
           for file in demesne-host demesne-desktop-host demesned; do test -x "$app/Contents/Resources/backend/$file"; done
+          # A backend whose signature doesn't match is killed at launch on
+          # Apple silicon; refuse to ship one.
+          for file in demesne-host demesne-desktop-host demesned; do codesign --verify --strict "$app/Contents/Resources/backend/$file"; done
+          codesign --verify "$app"
           test -d "$app/Contents/Resources/backend/node_modules/sharp"
           ditto -c -k --keepParent "$app" "${{ matrix.artifact }}"
           # Compatibility for saved copies of the old installer.

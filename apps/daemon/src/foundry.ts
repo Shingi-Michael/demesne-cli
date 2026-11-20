@@ -426,7 +426,8 @@ function checkStart(store: DemesneStore, kind: FoundryKind | undefined, source: 
   const demesne = /<d-demesne\b/i.test(source), review = REVIEW_PAGE.test(source);
   if (/^new\b/i.test(from) && !demesne && !review) return;
   if (based || COULD_NOT.test(from) || !context.turnId || !context.sessionId) return;
-  if (seenIn(context.sessionId).length) return;
+  // A capture kept with the chat counts too, so a restart does not ask for another.
+  if (seenIn(context.sessionId).length || store.windowCaptures(context.sessionId).length) return;
   if (store.getSession(context.sessionId)?.turns.some((turn) => turn.attachments?.some((file) => file.kind !== "file"))) return;
   if (lookAsked.has(context.turnId)) return;
   lookAsked.add(context.turnId);

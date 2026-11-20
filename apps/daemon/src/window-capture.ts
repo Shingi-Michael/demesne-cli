@@ -24,7 +24,14 @@ const MODEL_TEXT = 20_000;
 const OWN = ["demesne", "electron"];
 const describe = (windows: ShotWindow[]) => JSON.stringify(windows.slice(0, 40).map(({ id, app, title }) => ({ windowId: id, application: app, title })));
 
-export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindowCapture): AgentTool {
+/// A window capture the chat already has (storage windowCaptures).
+export interface EarlierCapture { turnId: string; app: string; title: string; picture: string; changedSince: boolean }
+/// Steps that can change what a window shows, so a capture after one is new.
+export const CHANGING_STEPS = ["edit_file", "write_file", "delete_path", "move_path", "run_command", "open", "ask_user", "foundry_save", "foundry_edit"] as const;
+/// Your window is captured at most this often in one turn (Mike, 2026-11-20: once per screen, then reuse).
+export const CAPTURES_PER_TURN = 2;
+
+export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindowCapture, earlier?: (sessionId: string) => EarlierCapture[]): AgentTool {
   async function execute(input: unknown, context: ToolContext): Promise<string | StructuredToolResult> {
     const id = isRecord(input) ? input.windowId : undefined;
     if (!isRecord(input) || Object.keys(input).some((key) => !["application", "title", "windowId"].includes(key))
@@ -51,6 +58,12 @@ export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindow
       }
       window = matches[0]!;
     }
+    // Once per screen, then reuse: the same window again in this turn, with
+    // nothing done since that could change it, is the picture already here.
+    const before = earlier && context.sessionId && context.turnId ? earlier(context.sessionId).filter((one) => one.turnId === context.turnId) : [];
+    const same = before.findLast((one) => one.app === window.app && one.title === window.title && !one.changedSince);
+    if (same) return `Not captured again: this turn already has ${window.app} — ${window.title} (image artifact ${same.picture}) and nothing that could change it ran since. Use that picture.`;
+    if (before.length >= CAPTURES_PER_TURN) throw new Error(`[limit] Windows were captured ${CAPTURES_PER_TURN} times this turn (image artifacts ${before.map((one) => one.picture).join(", ")}). Hint: use those pictures and answer with what you found`);
     const shot = await deps.capture(window, signal);
     signal.throwIfAborted();
     const text = shot.text ? `\n\nText in the window${shot.text.length > MODEL_TEXT ? " (first part)" : ""}:\n${shot.text.slice(0, MODEL_TEXT)}` : shot.textNote ? `\n(${shot.textNote})` : "";
@@ -63,7 +76,7 @@ export function captureWindowTool(deps: WindowCaptureDependencies = nativeWindow
       images: [{ data: shot.png, mimeType: "image/png", filename: WINDOW_CAPTURE_FILE, ...(viewport && viewport.deviceScaleFactor > 0 && viewport.deviceScaleFactor <= 8 ? { viewport } : {}) }] };
   }
   return {
-    definition: { name: "capture_window", description: "Capture a visible desktop window as a picture, with the window's text where the system shares it. With no input it takes the window the user is in (besides Demesne): use it when the user says to look at their screen or window. Demesne is a native desktop app: to see Demesne itself use application Demesne; do not search web-server ports for it. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",
+    definition: { name: "capture_window", description: "Capture a visible desktop window as a picture, with the window's text where the system shares it. A capture already in this chat is the screen: capture again only when the person asks, or after you changed what it shows (at most twice a turn). With no input it takes the window the user is in (besides Demesne): use it when the user says to look at their screen or window. Demesne is a native desktop app: to see Demesne itself use application Demesne; do not search web-server ports for it. If several windows match, returns window IDs to select explicitly; never captures the whole desktop.",
       inputSchema: { type: "object", properties: { application: { type: "string", description: "Application name, e.g. Safari. Omit for the window the user is in." }, title: { type: "string", description: "Exact window title, case-insensitive. Omit to list ambiguous windows." }, windowId: { type: ["integer", "string"], description: "A window id from an earlier listing." } }, additionalProperties: false } },
     permission: () => ({ kind: "execute", summary: "Capture a desktop window" }),
     execute: async () => { throw new Error("capture_window requires artifact-aware execution"); },

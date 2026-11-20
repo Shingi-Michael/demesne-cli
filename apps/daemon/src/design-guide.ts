@@ -40,7 +40,7 @@ export const DESIGN_RULES: readonly string[] = [
 
 /// How Demesne itself looks, for a mockup of Demesne (docs/interface-design.md).
 export const DEMESNE_LOOK = "Something that exists (the person's app, site or screen, Demesne included) is mocked from the real thing, never from memory. "
-  + "Look first: capture_window its window, or read its real stylesheet and that screen's markup in the project; a picture the person attached counts. "
+  + "Look first, once: a capture or picture already in this chat counts; otherwise capture_window its window, or read its real stylesheet and that screen's markup in the project. "
   + "Then draw that screen as it is today, with its real colours, type sizes, spacing, radii and words, and change only what the ask is about. "
   + "Show it as options on one page: \"Today\" first, exactly as it is, then the change, so the change is the only difference. It has failed if it does not read as their app with one thing changed, however good it looks. "
   + "Demesne itself: capture_window with application Demesne, then build on <d-demesne> with views for its tabs and chats: it is drawn with the app's own markup and styles, so change only the piece the ask is about (foundry_read id \"kit:parts\" names its pieces); "
@@ -54,7 +54,7 @@ export const DEMESNE_LOOK = "Something that exists (the person's app, site or sc
 export const REVIEW_HOW = "Asked to look at something that exists and show what needs work (or to redesign it with no piece named): review before you draw. "
   + "Critique the real screen as you do your own pages, rate each problem, and keep the two or three parts that most need work, most important first (one only if nothing else comes close). "
   + "A part is the smallest piece that holds the problem (a bar, a card, a row), never the whole page. "
-  + "Start from a real picture (capture_window, the browser's, or an attached one; else ask for a screenshot). "
+  + "Start from a real picture (one in this chat, else capture_window, the browser's, or an attached one; else ask for a screenshot). "
   + "Save one <d-review> page (foundry_read id \"kit:parts\"): the picture with those pieces boxed, then each cut from it as \"Today\" beside two or three options and your pick, and one plain line on what is wrong. "
   + "Redraw nothing else. A named piece skips the ranking.";
 

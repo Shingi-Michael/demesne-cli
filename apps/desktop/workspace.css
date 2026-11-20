@@ -3047,7 +3047,7 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .sidebar-face.working::after { background: conic-gradient(from var(--spin), transparent 0 30%, color-mix(in srgb, var(--acc) 30%, transparent) 55%, var(--acc)); }
 .sidebar-face.acc::after { background: var(--blossom, #f2b6c8); }
 @media (prefers-reduced-motion: no-preference) {
-  :is(.project-face.ring-working, .sidebar-face.working)::after, .sidebar-session-mark.working { animation: face-spin 1.6s linear infinite; }
+  :is(.project-face.ring-working, .sidebar-face.working)::after { animation: face-spin 1.6s linear infinite; }
 }
 
 /* Settings facelift (take two): each page has its own tone (--page), a soft light behind the title,
@@ -3165,14 +3165,9 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .bar-tab:is(.t-warn, .t-acc):not(.on) .bar-tab-name { font-weight: 500; }
 .bar-tab .sidebar-session-mark.warn::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--t1); }
 .bar-tab .sidebar-session-mark.bad::before { content: "×"; position: static; width: auto; height: auto; background: none; transform: none; color: var(--t2); font-size: 14px; line-height: 1; }
-.bar-tab .sidebar-session-mark.working::before { content: ""; box-sizing: border-box; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--t1) 16%, transparent); border-top-color: color-mix(in srgb, var(--t1) 75%, transparent); }
-.bar-tab.t-working::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 1.5px; border-radius: 1px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--t1) 55%, transparent), transparent); background-size: 200% 100%; }
-@media (prefers-reduced-motion: no-preference) {
-  .bar-tab .sidebar-session-mark.working::before { animation: bar-turn 1.2s linear infinite; }
-  .bar-tab.t-working::after { animation: bar-sweep 1.8s linear infinite; }
-}
-@keyframes bar-turn { to { transform: rotate(360deg); } }
-@keyframes bar-sweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+/* A working chat's tab stays still (2026-11-20, Mike: the turning dot and
+   the light along its foot "should go"); the sidebar shows the work. */
+.bar-tab .sidebar-session-mark.working::before { content: none; }
 
 /* A pinned tab: a small square with its project's letter, first in the row. */
 .bar-tab.pinned { flex: none; width: 32px; min-width: 32px; max-width: 32px; }
@@ -3180,7 +3175,6 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .bar-tab.pinned > button[role="tab"] { justify-content: center; padding: 0; gap: 0; }
 .bar-tab.pinned .sidebar-session-mark { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; }
 .bar-tab.pinned .sidebar-session-mark:not(.warn) { display: none; }
-.bar-tab.pinned.t-working::after { left: 6px; right: 6px; }
 /* Pins have their own row, which never scrolls; a hairline with a 6px gap on each side ends it. */
 #workspace-pins { flex: none; display: flex; align-items: flex-end; gap: 6px; height: 100%; }
 #workspace-pins:empty { display: none; }
@@ -3247,3 +3241,8 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 #desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-toggle { height: 26px; padding: 0 6px 0 10px; color: var(--t4); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 #desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-toggle:hover { color: var(--t2); }
 #desktop-sidebar .sidebar-group-block[data-group="plain"] .sidebar-group-count { font-size: 11px; color: var(--t4); }
+
+/* A working chat's row in the sidebar keeps a still blue dot instead of a
+   turning, breathing arc (2026-11-20, Mike: "this spinner should go"). The
+   project's ring still turns, so the work shows once, not on every row. */
+#desktop-sidebar .sidebar-session-mark.working { width: 6px; height: 6px; margin: 0 5px; border-radius: 50%; background: var(--acc); box-shadow: none; -webkit-mask: none; mask: none; animation: none; }

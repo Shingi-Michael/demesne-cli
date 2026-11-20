@@ -21,7 +21,7 @@ const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
   section: "general", query: "", mac: true, glass: true, desktop: true, home: info.home, info, error: "", fold: "",
   general: { openOn: "home", awake: true },
   notify: { wait: true, error: true, drive: true, done: false, social: true },
-  appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral" },
+  appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral", activityBorder: true },
   archived: [], usage: [], modelWords: (model) => model.id,
   permissions: { mode: "ask", asks: { thisWeek: 12, lastWeek: 31 } },
   drive: { project: "demesne-cli", auto: { on: true, quietMinutes: 20, perDay: 3, usedToday: 1 } },
@@ -196,6 +196,15 @@ test("Glass shows where the window is glass (the Mac, Hyprland), Ink only for De
   expect(settingsPage(view({ section: "appearance", mac: false, glass: false }))).not.toContain("data-glass");
   expect(settingsPage(view({ section: "appearance", mac: false, glass: true }))).toContain("data-glass");
   expect(settingsPage(view({ section: "appearance", appearance: { ...view().appearance, theme: "custom-sunset" } }))).not.toContain("st-inks");
+});
+
+test("Activity border switch reflects its local preference and toggles the next value", () => {
+  for (const activityBorder of [true, false]) {
+    const html = settingsPage(view({ section: "appearance", appearance: { ...view().appearance, activityBorder } }));
+    const control = html.match(/<button[^>]*aria-label="Activity border"[^>]*>/)?.[0];
+    expect(control).toContain(`aria-checked="${activityBorder}"`);
+    expect(control).toContain(`&quot;value&quot;:${!activityBorder}`);
+  }
 });
 
 test("Appearance offers an opt-in external System palette and a separate saved path",()=>{

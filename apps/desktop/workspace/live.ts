@@ -1737,7 +1737,7 @@ function approvalWords(tool: WorkspaceApproval) {
 }
 function applyRim(rim: Rim) {
   const app = el("app");
-  for (const kind of ["work", "wait", "fail"]) app.classList.toggle(`rim-${kind}`, rim?.kind === kind);
+  for (const kind of ["work", "wait", "fail"]) app.classList.toggle(`rim-${kind}`, rim?.kind === kind && (kind !== "work" || activityBorder));
 }
 // Looking at the window (a click or a key) settles a failure's red dash.
 for (const type of ["pointerdown", "keydown"] as const)
@@ -3582,6 +3582,8 @@ function updatesSetting(): { on: boolean; line: string } | undefined {
 }
 try { if (localStorage.getItem("demesne-open-on") === "last") openOn = "last"; if (localStorage.getItem("demesne-awake") === "off") keepAwake = false; } catch {}
 /// Settings › Appearance › Glass and Ink, kept on this device.
+let activityBorder = true;
+try { activityBorder = localStorage.getItem("demesne-activity-border") !== "off"; } catch {}
 let glassLevel = (window as { demesneDesktop?: { glassSharp?: boolean } }).demesneDesktop?.glassSharp ? GLASS_SHARP_DEFAULT : GLASS_DEFAULT, inkName: Ink = "neutral";
 try {
   const saved = Number(localStorage.getItem("demesne-glass"));
@@ -3637,7 +3639,7 @@ function settingsView(): SettingsView {
       const option = s.themeOptions.find((item) => item.name === name);
       return { name, label: option?.label ?? name, light: option ? isLightTheme(name) : undefined,
         colors: option?.colors ? { bg: option.colors.ink, surface: option.colors.surface, accent: option.colors.electric, text: option.colors.paper } : undefined };
-    }), canUndo: s.themeCanUndo, systemSource: s.systemThemeSource, zoom: zoomLevel, glass: glassLevel, ink: inkName },
+    }), canUndo: s.themeCanUndo, systemSource: s.systemThemeSource, zoom: zoomLevel, glass: glassLevel, ink: inkName, activityBorder },
     archived: archivedChats,
     usage: usageScores,
     modelWords,
@@ -5926,6 +5928,11 @@ async function dispatch(
   }
   if (action === "settings-local") {
     if (args.key === "openOn") { openOn = args.value === "last" ? "last" : "home"; try { localStorage.setItem("demesne-open-on", openOn); } catch {} }
+    if (args.key === "activityBorder" && typeof args.value === "boolean") {
+      activityBorder = args.value;
+      try { localStorage.setItem("demesne-activity-border", activityBorder ? "on" : "off"); } catch {}
+      renderStatus();
+    }
     if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }
     if (args.key === "updates") { const next = await api<AppUpdate>("desktop-update", { action: args.value === true ? "on" : "off" }).catch(() => null); if (next) appUpdate = next; }
     if (args.key === "awake") { keepAwake = args.value === true; try { localStorage.setItem("demesne-awake", keepAwake ? "on" : "off"); } catch {} renderAwake(); }

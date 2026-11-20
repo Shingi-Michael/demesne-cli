@@ -555,6 +555,26 @@ export class DemesneStore {
 
   /// Pass 240 A: a picture a mockup shows, kept with the mockup so it outlives
   /// the chat it was taken in (the bytes stay in the artifact folder, by hash).
+  /// The windows a chat captured (capture_window), oldest first, kept with the chat so a
+  /// restart forgets none: for each, its turn, the window, its picture, and whether a
+  /// later step of that turn could have changed what it shows (one of `changing`).
+  windowCaptures(sessionId: string, changing: readonly string[] = []): { turnId: string; app: string; title: string; picture: string; changedSince: boolean }[] {
+    const names = ["capture_window", ...changing];
+    const rows = this.database.query(`SELECT tool_calls.turn_id AS turn_id, tool_calls.name AS name, CASE WHEN tool_calls.name = 'capture_window' THEN tool_calls.result_text END AS result_text
+      FROM tool_calls JOIN turns ON turns.id = tool_calls.turn_id
+      WHERE turns.session_id = ? AND tool_calls.status = 'completed' AND tool_calls.name IN (${names.map(() => "?").join(",")})
+      ORDER BY turns.created_at, tool_calls.rowid`).all(sessionId, ...names) as { turn_id: string; name: string; result_text: string | null }[];
+    const captures: { turnId: string; app: string; title: string; picture: string; changedSince: boolean }[] = [];
+    for (const row of rows) {
+      if (row.name !== "capture_window") { for (const capture of captures) if (capture.turnId === row.turn_id) capture.changedSince = true; continue; }
+      const message = windowCaptureMetadata(row.result_text ?? "").message;
+      if (typeof message !== "string") continue;
+      const { app, title, picture } = JSON.parse(message) as { app: string; title: string; picture: { id: string } };
+      captures.push({ turnId: row.turn_id, app, title, picture: picture.id, changedSince: false });
+    }
+    return captures;
+  }
+
   keepFoundryShot(id: string, image: ImageArtifact): void {
     this.database.query("INSERT INTO foundry_shots(artifact_id,shot_id,descriptor) VALUES (?,?,?) ON CONFLICT(artifact_id,shot_id) DO NOTHING").run(id, image.id, JSON.stringify(image));
   }

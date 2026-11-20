@@ -185,7 +185,7 @@ export interface SettingsView {
   fold: string;
   general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string; check: { title: string; line: string; tone: "" | "bad"; can: boolean } } };
   notify: Record<NotifyKind, boolean>;
-  appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; systemSource?: {enabled:boolean;path:string;error?:string} | null };
+  appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; activityBorder: boolean; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
   usage: ModelScore[] | null;
   modelWords: (model: { id: string; displayName?: string }) => string;
@@ -355,6 +355,7 @@ function pages(view: SettingsView): Page[] {
       { title: "Theme", line: `${themeLabel}. The palette for the whole app, picked from the cards above`, keywords: "colour color dark light palette theme" },
       ...(view.desktop && view.glass ? [{ title: "Glass", line: "How much of the desktop shows through the window", control: `<label class="st-range">Clear<input type="range" min="0" max="100" step="1" value="${view.appearance.glass}" data-glass aria-label="Glass">Solid</label>`, keywords: "glass transparent translucent blur vibrancy opacity" }] : []),
       ...(/^demesne(-light)?$/.test(view.appearance.theme) ? [{ title: "Ink", line: "The colour every grey is made from, and the accent with it", control: `<span class="st-inks" role="group" aria-label="Ink">${INKS.map(([id, label, swatch]) => `<button type="button" class="${view.appearance.ink === id ? "on" : ""}" style="--swatch:${swatch}" title="${label}" aria-label="${label}" aria-pressed="${view.appearance.ink === id}" data-action="settings-local" data-args="${h(JSON.stringify({ key: "ink", value: id }))}"></button>`).join("")}</span>`, keywords: "ink tint hue colour color accent warm cool" }] : []),
+      { title: "Activity border", line: "Show the moving blue border while a reply or check is running", control: toggle(view.appearance.activityBorder, "settings-local", { key: "activityBorder", value: !view.appearance.activityBorder }, "Activity border"), keywords: "blue edge rim animation" },
       ...(view.desktop ? [{ title: "Text size", line: "The size of everything in the window", control: segments(([["Small", 0.9], ["Default", 1], ["Large", 1.1]] as [string, number][]).map(([label, zoom]) => [label, view.appearance.zoom === zoom, "settings-set", { method: "desktop-zoom", args: { zoom } }]), "Text size"), keywords: "zoom font scale" }] : []),
     ] },
   ] });

@@ -3160,24 +3160,33 @@ const elapsed = (since: string) => {
 };
 /** Text deltas keep the response shell, tool rows and finished Markdown blocks.
  * Structural transitions (tools, fold/unfold, receipts) rebuild only the shell
- * and move the existing Markdown nodes into it. */
+ * and move the existing Markdown nodes into it. Reasoning has no transcript
+ * row: only the working line consumes it. */
 function patchStream(
   saved: NonNullable<ReturnType<typeof runNodes.get>>,
   run: WorkspaceRun,
-): boolean {
+): "working-line" | "patched" | "rebuild" {
   const before = saved.run;
   if (
     !before ||
     before.status !== run.status ||
     before.content !== run.content ||
-    before.entries.length !== run.entries.length ||
+    before.entries.length > run.entries.length ||
     before.receipt !== run.receipt
   )
-    return false;
+    return "rebuild";
+  let reasoning = false, visible = false;
   for (let i = 0; i < run.entries.length; i++) {
-    const entry = run.entries[i]!,
-      previous = before.entries[i]!;
+    const entry = run.entries[i]!, previous = before.entries[i];
     if (entry === previous) continue;
+    // A thought may first appear at the tail, or grow at its existing slot.
+    // Never skip a change in visible entry order or a completed turn's receipt.
+    if (run.status === "running" && entry.type === "reasoning" && (!previous || (previous.type === "reasoning" && entry.id === previous.id))) {
+      reasoning = true;
+      continue;
+    }
+    visible = true;
+    if (!previous) return "rebuild";
     if (draftOnly(entry, previous) || runningRowOnly(entry, previous, run.id)) continue;
     if (
       entry.type !== "assistant" ||
@@ -3188,15 +3197,16 @@ function patchStream(
       entry.receipt !== previous.receipt ||
       !saved.views.has(entry.id)
     )
-      return false;
+      return "rebuild";
   }
+  if (reasoning && !visible) return "working-line";
   for (let i = 0; i < run.entries.length; i++) {
     const entry = run.entries[i]!;
     if (entry !== before.entries[i] && entry.type === "assistant")
       saved.views.get(entry.id)!.update(splitNextPrompt(entry.raw).text, run.status === "running");
-    else if (entry !== before.entries[i] && entry.type === "tool" && !patchDraftRow(saved.content, run, entry)) return false;
+    else if (entry !== before.entries[i] && entry.type === "tool" && !patchDraftRow(saved.content, run, entry)) return "rebuild";
   }
-  return true;
+  return "patched";
 }
 /// A step the model is still writing changes with every few characters;
 /// only its words change, so the turn isn't rebuilt (which flickered).
@@ -3458,7 +3468,8 @@ function renderConversation() {
     if (root.children[position] !== saved.node) root.insertBefore(saved.node, root.children[position] ?? null);
     position++;
     if (saved.signature === signature && saved.run === run) continue;
-    if (saved.signature !== signature || !patchStream(saved, run)) {
+    const update = saved.signature === signature ? patchStream(saved, run) : "rebuild";
+    if (update === "rebuild") {
       const template = document.createElement("template");
       template.innerHTML = runHTML(run, index);
       const retainedMarkdown: Array<[HTMLElement, HTMLElement]> = [];
@@ -3497,7 +3508,8 @@ function renderConversation() {
     saved.signature = signature;
     saved.run = run;
     saved.index = index;
-    changed = true;
+    // Thinking alone didn't change the transcript or the open checklist's scroll.
+    if (update !== "working-line") changed = true;
   }
   for (const [id, saved] of runNodes)
     if (!ids.has(id)) {

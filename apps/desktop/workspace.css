@@ -1695,15 +1695,22 @@ html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notc
 /* The rim says the state (pass 74 B): the panel's edge carries the chat's
    state. Work: a blue light runs along it. Wait: a still amber arc on top.
    A failed check or turn: a short red dash until you touch the window. */
-@property --rim-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
 #desktop-shell > .live-app::after { content: ""; position: absolute; inset: 0; z-index: 30; border-radius: inherit; padding: 1.5px; pointer-events: none; opacity: 0; transition: opacity 220ms var(--ease, ease);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-#desktop-shell > .live-app.rim-work::after { opacity: 1; background: conic-gradient(from var(--rim-a), transparent 0deg, color-mix(in srgb, var(--acc) 25%, transparent) 22deg, var(--acc) 40deg, color-mix(in srgb, var(--acc) 25%, transparent) 58deg, transparent 80deg, transparent 360deg); }
+/* The running light is a sheet that turns behind the rim's cut-out. Only its
+   transform changes, so the window composes it and nothing is painted again:
+   a gradient whose angle moved repainted the whole panel on every frame, and
+   on a see-through window that showed as the chat flickering. */
+#desktop-shell > .live-app > .rim-light { position: absolute; inset: 0; z-index: 30; border-radius: inherit; padding: 1.5px; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity 220ms var(--ease, ease); container-type: size;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+#desktop-shell > .live-app:not(.rim-work) > .rim-light > i { display: none; }
+#desktop-shell > .live-app.rim-work > .rim-light { opacity: 1; }
+.rim-light > i { position: absolute; left: 50%; top: 50%; width: hypot(100cqw, 100cqh); aspect-ratio: 1; transform: translate(-50%, -50%) rotate(300deg); will-change: transform;
+  background: conic-gradient(transparent 0deg, color-mix(in srgb, var(--acc) 25%, transparent) 22deg, var(--acc) 40deg, color-mix(in srgb, var(--acc) 25%, transparent) 58deg, transparent 80deg, transparent 360deg); }
 #desktop-shell > .live-app.rim-wait::after { opacity: 1; background: conic-gradient(from -50deg, color-mix(in srgb, var(--warn) 90%, transparent) 0deg, var(--warn) 50deg, color-mix(in srgb, var(--warn) 90%, transparent) 100deg, color-mix(in srgb, var(--warn) 22%, transparent) 130deg, color-mix(in srgb, var(--warn) 22%, transparent) 330deg, color-mix(in srgb, var(--warn) 90%, transparent) 360deg); }
 #desktop-shell > .live-app.rim-fail::after { opacity: 1; background: conic-gradient(from -9deg, var(--bad) 0deg, var(--bad) 18deg, transparent 19deg, transparent 360deg); }
-@media (prefers-reduced-motion: no-preference) { #desktop-shell > .live-app.rim-work::after { animation: rim-run 3.2s linear infinite; } }
-@media (prefers-reduced-motion: reduce) { #desktop-shell > .live-app.rim-work::after { --rim-a: 300deg; } }
-@keyframes rim-run { to { --rim-a: 360deg; } }
+@media (prefers-reduced-motion: no-preference) { .rim-work > .rim-light > i { animation: rim-turn 3.2s linear infinite; } }
+@keyframes rim-turn { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
 @keyframes live-breathe { 50% { opacity: 0.35; } }
 
 /* Joined tabs: the active chat meets its panel, rather than floating above

@@ -48,7 +48,7 @@ import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, partsLabel, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
 import { fitImage } from "./fit-image.ts";
-import { chatPile, pileHTML, showPile } from "./shot-pile.ts";
+import { chatPile, pileHTML, showPile, stepPicture, stepShotHTML, type PileShot } from "./shot-pile.ts";
 import { chatRoutines, routinesCardHTML, routineTarget, ROUTINE_TOOL, ROUTINE_VERBS, ROUTINES_CARD } from "./routine-card.ts";
 import { chatShown, latestShown, shownCardHTML, SHOWN_CARD, type Shown } from "./shown-card.ts";
 import { fileChipHTML, isPicture, MAX_FILE_BYTES, refusal, sizeWord } from "./file-chips.ts";
@@ -1597,7 +1597,8 @@ function renderCards() {
   const where = whereCard({ root, branch: workspace?.gitBranch, ahead: workspace?.gitAhead, behind: workspace?.gitBehind, uncommitted: s.files.filter((file) => file.status).length, model: housed ? { id: housed.model, displayName: housed.name, provider: "run by Demesne" } : s.model, reasoning: housed ? null : s.reasoning, capacity: c.capacity, connection: s.connection, server: s.server });
   const showWhere = Boolean(root) || where.state !== "";
   // Screenshots waiting to go with your next message keep their own card;
-  // everything the chat has seen piles into one (pass 202 A).
+  // the pictures of the turn that is running pile into one (pass 202 A), and
+  // the pile goes when the answer is done (pass 247 A).
   const shots = chatShots();
   const seenRuns = s.runs.filter((run) => !rewoundBy(run));
   // What the chat opened or showed (pass 210 A): the newest in its own card,
@@ -1607,17 +1608,18 @@ function renderCards() {
   const shownNow = latestShown(allShown, shownClosed);
   // Routines this chat made, as it last left them.
   const madeRoutines = chatRoutines(seenRuns);
-  const pile = chatPile(seenRuns, new Set([...pileHidden(s.session?.id ?? ""), ...(shownNow?.picture ? [shownNow.picture.id] : [])]));
+  const pile = chatPile(seenRuns.filter(active), new Set(shownNow?.picture ? [shownNow.picture.id] : []));
+  const pileGoing = pileLeaving(s.session?.id ?? "", pile);
   const filePreview = chatPreview();
   // What you keep with the chat (pass 204), and which the last answer used.
   const sources = s.sources ?? [], dragging = sourceView.dragging && Boolean(s.session);
   const sourcesUsed = usedSources(sources, seenRuns.length ? tools(seenRuns.at(-1)!) : []);
-  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !filePreview && !shownNow && !madeRoutines.length) return hide();
+  if (!showWhere && !sources.length && !dragging && !files.length && !previews.length && !showContext && !planHalfUsed && !here.length && !servers.length && !shots.length && !pile.length && !pileGoing.length && !filePreview && !shownNow && !madeRoutines.length) return hide();
   app.classList.add("cards-on");
   app.classList.toggle("cards-wide", Boolean(filePreview?.wide) || Boolean(shownNow && shownBig));
   app.classList.toggle("cards-context", showContext || planHalfUsed);
   aside.hidden = false;
-  const signature = JSON.stringify([c, chatCacheOf?.cache, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide], madeRoutines]);
+  const signature = JSON.stringify([c, chatCacheOf?.cache, planHalfUsed && limits, planHalfUsed && Math.floor(Date.now() / 60_000), plan?.parts, plan?.budgetStatus, s.activeTurnId ? 1 : 0, plan?.estimatedMessageTokens, plan?.estimatedToolDefinitionTokens, plan?.reserves.totalTokens, files, here, previews.map((command) => command.serves), servers, Boolean(s.activeTurnId), [...cardsOpen], showWhere && where, sources, [...sourcesUsed], dragging, sourceView.field, sourceView.error, sourceView.fresh, shots.map((shot) => [shot.id, shot.big]), pile.map((shot) => shot.id), pileGoing.length, shownNow && [shownNow.id, shownBig, shownNow.picture && Boolean(pileSrc(shownNow.picture.id))], filePreview && [filePreview.path, filePreview.data?.modifiedAt, filePreview.error, filePreview.wide, filePreview.sheet, filePreview.slide], madeRoutines]);
   if (signature === cardsSignature) return;
   cardsSignature = signature;
   const row = (icon: string, label: string, right = "", title = "") => `<div class="card-row"${title ? ` title="${h(title)}"` : ""}>${icon}<span class="card-label">${label}</span>${right ? `<span class="card-right">${right}</span>` : ""}</div>`;
@@ -1653,8 +1655,9 @@ function renderCards() {
       servers.map((server) => row(`<span class="card-dot ${server.state}" aria-hidden="true"></span>`, h(server.name), server.state === "ready" ? `${server.tools} tool${server.tools === 1 ? "" : "s"}` : server.state === "failed" ? "Didn’t start" : "Starting…")).join("")));
   const routinesCard = routinesCardHTML(madeRoutines, cardsOpen.has(ROUTINES_CARD));
   if (routinesCard) out.push(routinesCard);
-  // Every screenshot the chat has seen, in one pile.
+  // The running turn's screenshots, in one pile; it lifts away once the answer is done.
   if (pile.length) out.push(`<section class="card pile" data-card="pile">${pileHTML(pile, pileSrc, pileLanding(s.session?.id ?? "", pile.at(-1)?.id))}</section>`);
+  else if (pileGoing.length) out.push(`<section class="card pile leaving" data-card="pile">${pileHTML(pileGoing, pileSrc, undefined, true)}</section>`);
   // Screenshots still to send come last, in the order they were taken.
   for (const shot of shots) out.push(shotCardHTML(shot));
   // What the chat opened or showed, then a file you opened, come last (pass 188 A).
@@ -2336,17 +2339,17 @@ function waitStep(run: WorkspaceRun, tool: ToolEntry) {
   return btn("tool", `${stepIcon(tool)}<span class="verb">${h(row.verb)}</span><code class="target">${row.target}</code><span class="sp"></span><small class="meta">${row.meta}</small>`,
     { runId: run.id, id: tool.id }, `tool-row wait-row ${row.tone}`) + row.tail;
 }
-/// Pictures removed from a chat's pile (pass 202 A), kept per chat.
-const PILE_HIDDEN = "demesne-pile-hidden";
-function pileHidden(sessionId: string): Set<string> {
-  try { return new Set((JSON.parse(localStorage.getItem(PILE_HIDDEN) ?? "{}") as Record<string, string[]>)[sessionId] ?? []); } catch { return new Set(); }
-}
-function hideFromPile(sessionId: string, id: string) {
-  try {
-    const all = JSON.parse(localStorage.getItem(PILE_HIDDEN) ?? "{}") as Record<string, string[]>;
-    all[sessionId] = [...new Set([...(all[sessionId] ?? []), id])].slice(-200);
-    localStorage.setItem(PILE_HIDDEN, JSON.stringify(all));
-  } catch { /* storage is off: it comes back next time */ }
+/// The pile belongs to the turn that is running (pass 247 A). When the answer
+/// is done it lifts away: these are its pictures while it goes, then none.
+const PILE_LEAVES_MS = 900;
+let pileUp: { sessionId: string; shots: PileShot[]; leftAt: number } | null = null;
+function pileLeaving(sessionId: string, pile: readonly PileShot[]): PileShot[] {
+  if (pile.length) { pileUp = { sessionId, shots: [...pile], leftAt: 0 }; return []; }
+  if (!pileUp || pileUp.sessionId !== sessionId) { pileUp = null; return []; }
+  if (!pileUp.leftAt) { pileUp.leftAt = Date.now(); setTimeout(renderCards, PILE_LEAVES_MS + 40); }
+  if (Date.now() - pileUp.leftAt < PILE_LEAVES_MS) return pileUp.shots;
+  pileUp = null;
+  return [];
 }
 /// The newest picture each chat's pile showed: a new one drops on top.
 /// It stays marked a moment, so a redraw doesn't cut its drop short.
@@ -2543,7 +2546,19 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   const last = isAgentStep(tool) && tool.state === "running" && !open ? tool.trace?.at(-1)?.text.replace(/^[^·]+ · /, "") : undefined;
   const nowLine = last ? `<div class="agent-now">${h(nowWords(last))}</div>` : "";
   const card = tool.handoff && tool.state !== "running" ? handoffCard(tool.handoff) : "";
-  return (back || made ? `<div class="step-line">${row}${made}${back}</div>` : row) + nowLine + tree + card + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
+  // A window the chat captured stays as a small picture on its step, once the
+  // answer is done and the pile on the right has gone (pass 247 A).
+  const taken = active(run) ? null : stepPicture(tool);
+  const shot = taken ? stepShotHTML(taken, lookPicture) : "";
+  return (back || made || shot ? `<div class="step-line${shot ? " shot-line" : ""}">${row}${shot}${made}${back}</div>` : row) + nowLine + tree + card + (hasFileEdit(tool) ? (open ? fileEditSlot(tool) : "") : open && canFold ? stepFold(run, tool) : "");
+}
+/// The pictures a finished turn's steps took, small beside its step count
+/// while the steps are folded away (pass 247 A): the newest three, then how
+/// many more. Unfolded, each is on its own step.
+function receiptShots(run: WorkspaceRun) {
+  const taken = chatPile([run]).filter((shot) => shot.by === "chat");
+  if (!taken.length) return "";
+  return `<span class="receipt-shots">${taken.slice(-3).map((shot) => stepShotHTML(shot, lookPicture)).join("")}${taken.length > 3 ? `<span class="receipt-more">+${taken.length - 3}</span>` : ""}</span>`;
 }
 const hasFileEdit = (tool: ToolEntry) => tool.phase === "change" && tool.state === "done" && Boolean(tool.changes?.length);
 const fileEditSlot = (tool: ToolEntry) => `<div data-file-edit="${h(tool.toolCallId)}"></div>`;
@@ -2962,7 +2977,7 @@ function runHTML(run: WorkspaceRun, index: number) {
       files ? btn("review-turn", `${files === 1 ? "1 file changed" : `${files} files changed`} ${counts(total)}${CHEVRON}`, { id: run.id }, `receipt-files${reviewOpen.has(run.id) ? " open" : ""}`).replace("<button ", `<button aria-expanded="${reviewOpen.has(run.id)}" title="${h(paths.join("\n"))}" `) : "",
       checks.length ? `<span class="receipt-checks ${passed ? "success" : failed ? "danger" : ""}" title="${h(checks.map((check) => check.detail ?? check.name).join("\n"))}">${passed ? "checks passed" : failed ? "checks failed" : stopped ? "checks stopped" : "checks unknown"}</span>` : "",
       run.status === "completed" && (steps || thought)
-        ? btn("toggle-steps", fold ? (steps ? `${steps} step${steps === 1 ? "" : "s"}` : "thinking") : "hide steps", { id: run.id }, "receipt-steps")
+        ? btn("toggle-steps", fold ? (steps ? `${steps} step${steps === 1 ? "" : "s"}` : "thinking") : "hide steps", { id: run.id }, "receipt-steps") + (fold ? receiptShots(run) : "")
         : "",
       receipt?.mode === "Plan" || run.planOnly ? "plan" : "",
       mailReply(run),
@@ -7297,13 +7312,13 @@ async function dispatch(
   if (action === "pile-open") {
     const s = state;
     if (!s?.session) return;
-    const sessionId = s.session.id;
-    const pile = chatPile(s.runs.filter((run) => !rewoundBy(run)), pileHidden(sessionId));
-    if (pile.length) showPile(pile, Number(args.index) || 0, pileSrc, (id) => { hideFromPile(sessionId, id); renderCards(); });
+    const pile = chatPile(s.runs.filter((run) => !rewoundBy(run) && active(run)));
+    if (pile.length) showPile(pile, Math.min(Number(args.index) || 0, pile.length - 1), pileSrc);
     return;
   }
   if (action === "look-picture") {
-    const src = lookPictures.get(String(args.id));
+    // Kept here, or still on the page from when it was drawn.
+    const src = lookPictures.get(String(args.id)) ?? document.querySelector<HTMLImageElement>(`img[data-picture="${CSS.escape(String(args.id))}"][src]`)?.src;
     if (src) showPicture(src, String(args.caption ?? ""));
     return;
   }

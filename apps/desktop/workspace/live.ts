@@ -1601,7 +1601,11 @@ function renderBrowserSplit() {
   const aside = el("browser-split"), app = el("app");
   const s = state;
   if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; return; }
-  if (split.session !== s.session.id) Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], visits: [], still: null, ringAt: 0 });
+  if (split.session !== s.session.id) {
+    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], visits: [], still: null, ringAt: 0 });
+    // Another chat's page does not stay up while this one's first picture comes.
+    splitDrawn = splitWanted = ""; const old = aside.querySelector<HTMLCanvasElement>(".bs-page"); if (old) old.hidden = true;
+  }
   const run = s.runs.find((one) => one.id === s.activeTurnId && active(one));
   const next = splitOpen(split, run);
   split.open = next.open; split.openedTurn = next.openedTurn;
@@ -1666,14 +1670,41 @@ function renderSplitPages(aside: HTMLElement) {
   row.hidden = !html;
 }
 /// Shows the picture on the page: the live one, or an earlier page you picked.
+/// The picture is drawn on a canvas, and only once it is ready: the last one stays up meanwhile.
+/// (An <img> whose src changes ten times a second goes blank between pictures, which flickers.)
+let splitDrawing = "", splitWanted = "", splitDrawn = "";
 function showSplitPicture(aside: HTMLElement) {
-  const img = aside.querySelector<HTMLImageElement>(".bs-page"), src = split.still?.src ?? split.frame?.src;
-  if (!img || !src) return;
-  if (img.getAttribute("src") !== src) img.src = src;
-  img.hidden = false;
-  if (split.frame && !split.still) img.style.width = split.actual ? `${split.frame.width}px` : "";
-  else img.style.width = "";
-  aside.querySelector<HTMLElement>(".bs-wait")?.remove();
+  const page = aside.querySelector<HTMLCanvasElement>(".bs-page"), src = split.still?.src ?? split.frame?.src;
+  if (!page || !src) return;
+  if (split.frame && !split.still) page.style.width = split.actual ? `${split.frame.width}px` : "";
+  else page.style.width = "";
+  if (src === splitDrawn) return;
+  splitWanted = src;
+  if (splitDrawing) return;
+  const draw = async (): Promise<void> => {
+    const now = splitWanted;
+    splitDrawing = now;
+    try {
+      const image = new Image();
+      image.src = now;
+      await image.decode();
+      if (page.width !== image.naturalWidth || page.height !== image.naturalHeight) {
+        // A new size clears a canvas: draw on a spare one first, so the swap is one step.
+        const spare = document.createElement("canvas");
+        spare.width = image.naturalWidth; spare.height = image.naturalHeight;
+        spare.getContext("2d")!.drawImage(image, 0, 0);
+        page.width = spare.width; page.height = spare.height;
+        page.getContext("2d")!.drawImage(spare, 0, 0);
+      } else page.getContext("2d")!.drawImage(image, 0, 0);
+      splitDrawn = now;
+      page.hidden = false;
+      aside.querySelector<HTMLElement>(".bs-wait")?.remove();
+    } catch { /* a picture that would not decode: the last one stays */ }
+    splitDrawing = "";
+    // Newer ones came meanwhile: only the newest is drawn.
+    if (splitWanted !== now && splitWanted !== splitDrawn) return draw();
+  };
+  void draw();
 }
 /// A soft ring where the model last clicked or typed, fading out.
 function showSplitRing(aside: HTMLElement, pointer: { x: number; y: number; ago: number } | undefined) {
@@ -1694,9 +1725,9 @@ function buildBrowserSplit(aside: HTMLElement) {
     + `<div class="bs-head"><i class="bs-light"></i><span class="bs-nav" hidden><button type="button" class="bs-icon" data-go="back" aria-label="Back" title="Back">${BS_ICONS.back}</button><button type="button" class="bs-icon" data-go="forward" aria-label="Forward" title="Forward">${BS_ICONS.forward}</button><button type="button" class="bs-icon" data-go="reload" aria-label="Reload" title="Reload">${BS_ICONS.reload}</button></span>`
     + `<input class="bs-url" readonly spellcheck="false" aria-label="Address"><button type="button" class="bs-zoom"></button><button type="button" class="bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close">×</button></div>`
     + `<div class="bs-tabs" hidden></div>`
-    + `<div class="bs-view"><div class="bs-stage"><img class="bs-page" alt="" draggable="false" decoding="async" hidden><i class="bs-ring" hidden></i></div><span class="bs-wait">Waiting for the page…</span></div>`
+    + `<div class="bs-view"><div class="bs-stage"><canvas class="bs-page" aria-hidden="true" hidden></canvas><i class="bs-ring" hidden></i></div><span class="bs-wait">Waiting for the page…</span></div>`
     + `<div class="bs-pages" hidden></div><div class="bs-foot"></div>`;
-  const view = aside.querySelector<HTMLElement>(".bs-view")!, img = aside.querySelector<HTMLImageElement>(".bs-page")!;
+  const view = aside.querySelector<HTMLElement>(".bs-view")!, img = aside.querySelector<HTMLCanvasElement>(".bs-page")!;
   const yours = splitYours;
   const send = (events: unknown[]) => { if (events.length) void api("browser-input", { events }).catch(() => {}); };
   const at = (event: MouseEvent) => pagePoint(event.clientX, event.clientY, img.getBoundingClientRect(), split.frame!);

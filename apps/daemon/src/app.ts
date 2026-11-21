@@ -383,7 +383,7 @@ export function createDaemonApp(options: {
   // Search the web and read pages: in every chat, projectless ones too.
   if (options.web !== false) { tools.register(webSearchTool()); tools.register(webFetchTool()); }
   // "Always …": a standing rule, saved to the project's DEMESNE.md.
-  tools.register(rememberTool());
+  tools.register(rememberTool((id) => { const found = store.getFoundryArtifact(id); return found ? { title: found.title, source: found.source } : null; }));
   // "Every morning, check my PRs": a routine made from the chat, in its project.
   let routinesRef: Routines | undefined;
   tools.register(routineTool(() => routinesRef, (context) => {

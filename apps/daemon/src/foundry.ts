@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
@@ -48,6 +48,7 @@ Anywhere:
 - <d-chart type="line|area|bar|donut" values="4,6,5,8" labels="Mon,Tue,Wed,Thu" height="200"> in --accent.
 - <d-stat label="This week" value="32.4 km" delta="+12%">.
 - <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: on the Foundry page each option gets its own stage, named on the line above it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
+- <d-styles recommended="Clean counter"><d-style name="Clean counter" made="Inter throughout · 8px corners · hairlines" vars="${STYLE_NEEDS.map((name) => `${name}:…`).join("; ")}"></d-style>…</d-styles> a range of styles, for when they ask for styles or looks: write the page ONCE on those variables (the kit already is: --paper background, --ink text, --accent the one thing to press, --font body type, --radius corners; --head is the heading type), then two or three styles, each a name, one plain line on what it is made of, and its values (add your own variables, the same set in every style). Foundry draws the page in each: a row of small ones, then each at full size under its name, colours and that line. The styles must be told apart at a glance: different paper, type and corners, not one look three times. No <d-compare> on such a page. Typefaces a machine has: Inter and JetBrains Mono (the kit's), Georgia, Times New Roman, Helvetica, Arial, Courier New, system-ui, ui-serif, ui-rounded. When the project has a look already (its Style in the design guide, or the real thing you looked at), that look is one of the styles, named for what it is. What they taught you about words and order holds in every style; what they taught you about colour and type holds only in the style that is theirs today. When they choose one, keep it: remember {design: true, style_of: "<this mockup's id>", rule: "<style name>"}.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
 A review of something that exists ("look at this and show me what needs work"), one page:
 - <d-review><section data-today><d-shot src="IMAGE_ID" marks="12,40,1416,52 | 0,92,260,808"></d-shot></section><section data-part="Top bar" why="Three tabs, the Drive pill and the menu compete in one row."><d-compare recommended="Fewer"><section data-option="Today"><d-shot src="IMAGE_ID" box="12,40,1416,52"></d-shot></section><section data-option="Fewer things">…</section><section data-option="Two rows">…</section></d-compare></section>…</d-review>. A review starts from a real picture: capture_window (application "Demesne" for Demesne itself), the browser's picture, or a picture the person attached; IMAGE_ID is the image artifact id it gave. marks: one box per part, in order, x,y,w,h in the picture's own pixels (its size is in the capture's result); Foundry outlines and numbers them, names each part and option, and puts your pick beside Today. Each part's Today is that piece cut from the picture (<d-shot box>), shown at its own size; only the options are drawn. Two or three parts (one only when nothing else comes close), each the smallest piece that holds the problem, with Today and two or three options that show that piece alone (<d-crop> cuts it out of a drawn window). why is one plain line on what is wrong. Write <d-review> and every <section> as plain markup in the page, never from a script (a script may fill or change what is inside a section). Write no headings, numbers or captions yourself. Its why needs only starts_from: each part's own why says the rest.
@@ -209,6 +210,8 @@ function checkOptions(kind: string | undefined, source: string) {
   if (kind !== undefined && kind !== "html") return;
   // A review (pass 223 A) holds up to three parts, each with its own Today, options and pick.
   if (REVIEW_PAGE.test(source)) { const problem = reviewProblem(source); if (problem) throw new Error(problem); return; }
+  // A range of styles (pass 246 A): one page, two or three styles a person tells apart, and a pick.
+  if (STYLES_PAGE.test(source)) { const problem = stylesProblem(source); if (problem) throw new Error(problem); return; }
   // "Today", the screen as it is now, is the comparison and not one of the three.
   const count = (source.match(/\bdata-option\s*=/g)?.length ?? 0) - (/\bdata-option\s*=\s*["']today\b/i.test(source) ? 1 : 0);
   if (count > MAX_OPTIONS) throw new Error(`[too_many_options] This page has ${count} options; at most ${MAX_OPTIONS}. Hint: keep the best ${MAX_OPTIONS}, recommended first`);
@@ -433,6 +436,11 @@ function checkTaste(store: DemesneStore, kind: FoundryKind | undefined, id: stri
     + "Hint: make the page follow each one that applies, then save again with why.followed naming those in a few words each (\"none\" when none apply), and say in your answer which you followed");
 }
 
+/// A page of styles (pass 246 A): the answer names them, and the pick becomes the project's style.
+export const STYLES_ANSWER = "Name each style in your answer in a few words, and say which you would pick and why.";
+export const stylesKeep = (id: string) => `When they choose a style, keep it as the project's style: remember {design: true, style_of: "${id}", rule: "<style name>"}.`;
+const stylesSaid = (source: string, id: string) => STYLES_PAGE.test(source) ? ` ${STYLES_ANSWER} ${stylesKeep(id)}` : "";
+
 /// The page shows a "Your taste" line for what it followed; the answer says it too, in a sentence.
 export const TASTE_ANSWER = "It follows their taste from earlier mockups: say which of their likes in one sentence of your answer.";
 const tasteSaid = (why: FoundryWhy) => why.followed && !NO_TASTE.test(why.followed) ? ` ${TASTE_ANSWER}` : "";
@@ -543,7 +551,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       } catch (error) { conflict(error); }
       for (const shot of shots) store.keepFoundryShot(saved.id, shot);
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? reviewSaid(input.source, true) : why ? ` ${WHY_ANSWER}${tasteSaid(why)}` : ""}` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? reviewSaid(input.source, true) : why ? ` ${WHY_ANSWER}${tasteSaid(why)}` : ""}${stylesSaid(input.source, saved.id)}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -649,7 +657,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       } catch (error) { conflict(error); }
       for (const shot of shots) store.keepFoundryShot(saved.id, shot);
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? reviewSaid(source, false) : why ? ` ${WHY_ANSWER}${tasteSaid(why)}` : ""}` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? reviewSaid(source, false) : why ? ` ${WHY_ANSWER}${tasteSaid(why)}` : ""}${stylesSaid(source, saved.id)}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -744,7 +752,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
-        ...briefOf(found), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), source: found.source,
+        ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };

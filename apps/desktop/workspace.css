@@ -1880,6 +1880,15 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-opt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 18px 0 8px; color: var(--t3); font-size: 12.5px; }
 .fd-opt:first-of-type { margin-top: 4px; }
 .fd-opt b { color: var(--t1); font-weight: 500; font-size: 13px; }
+/* Pass 246 A, a range of styles: each style's colours as small dots on its line, and one row of the same page in each style, small, above the full-size stages. */
+.fd-sw { display: inline-flex; gap: 4px; align-self: center; }
+.fd-sw i { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--t1) 24%, transparent); }
+.fd-glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 12px; margin: 10px 0 6px; }
+.fd-glance figure { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.fd-glance figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; color: var(--t3); font-size: 12.5px; }
+.fd-glance figcaption b { color: var(--t1); font-weight: 500; }
+.fd-mini { position: relative; overflow: hidden; height: calc(var(--oh) * var(--k, .3)); border-radius: var(--r); background: #fff; box-shadow: 0 0 0 1px var(--hair); }
+.fd-mini-frame { position: absolute; left: 0; top: 0; width: var(--ow); height: var(--oh); border: 0; background: #fff; transform: scale(var(--k, .3)); transform-origin: 0 0; pointer-events: none; }
 .fd-doc { max-width: 760px; padding: 28px 32px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair); color: var(--t1); }
 .fd-here .fd-stage, .fd-here .fd-doc { box-shadow: 0 0 0 2px color-mix(in srgb, var(--t1) 40%, transparent), 0 18px 40px -22px rgba(0, 0, 0, .6); }
 /* Pass 242 A: notes on a mockup, pinned where you point. Nothing is outlined:

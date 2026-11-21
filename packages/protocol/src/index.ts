@@ -1228,6 +1228,7 @@ export * from "./thread-note.ts";
 export * from "./foundry-try.ts";
 export * from "./foundry-stage.ts";
 export * from "./foundry-built.ts";
+export * from "./foundry-styles.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 

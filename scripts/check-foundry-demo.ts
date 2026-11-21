@@ -18,6 +18,19 @@ const pinPage = `<!doctype html><html><head><meta charset="utf-8">${style}</head
 const optionsPage = `<!doctype html><html><head><meta charset="utf-8">${style}<script src="foundry://kit/parts.js"></script></head><body><d-compare recommended="A"><section data-option="A · Pin on hover" note="quiet">${list()}</section><section data-option="B · Pin always showing">${list("alw")}</section></d-compare>${script}</body></html>`;
 const demo = [{ hover: "Drive picks", say: "Point at a chat and its pin shows" }, { click: "Pin Drive picks", say: "Click the pin" }, { wait: 300, say: "It moves up to Pinned" }];
 
+// Pass 246 A, a range of styles: one checkout page, written once on the kit's values, in three styles.
+const styleOf = (name: string, made: string, vars: string) => `<d-style name="${name}" made="${made}" vars="${vars}"></d-style>`;
+const stylesPage = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="foundry://kit/base.css"><script src="foundry://kit/parts.js"></script><style>
+body{padding:28px 32px}.sub{color:var(--muted);margin:0 0 20px}.g{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;align-items:start}.plans{display:flex;flex-direction:column;gap:10px}
+.row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:14px 16px;border-radius:var(--radius-lg);background:var(--tone);box-shadow:inset 0 0 0 1px var(--hair)}.row.on{box-shadow:inset 0 0 0 2px var(--accent)}
+.row small{display:block;color:var(--muted)}.row strong,.sum strong{font-family:var(--head)}.sum{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:var(--radius-lg);background:var(--tone);box-shadow:inset 0 0 0 1px var(--hair)}.sum strong{font-size:var(--text-lg)}
+</style></head><body><d-styles recommended="Clean counter">`
+  + styleOf("Clean counter", "Inter throughout · 8px corners · hairlines", "--paper:#ffffff; --ink:#111417; --accent:#1f6f4a; --head:Inter,sans-serif; --font:Inter,sans-serif; --radius:8px")
+  + styleOf("Roastery label", "Mono headings, Inter under them · square corners", "--paper:#1d1613; --ink:#f3e9da; --accent:#e0a93b; --head:'JetBrains Mono',monospace; --font:Inter,sans-serif; --radius:2px")
+  + styleOf("Warm paper", "Georgia and Inter · round corners · the look today", "--paper:#fbf7f2; --ink:#2a211b; --accent:#b9643c; --head:Georgia,serif; --font:Inter,sans-serif; --radius:14px")
+  + `</d-styles><h1>Checkout</h1><p class="sub">Daily · two bags a month, any roast</p><div class="g"><div class="plans"><div class="row on"><span><b>Yearly</b><small>€200 a year · save €40</small></span><strong>€200</strong></div>`
+  + `<div class="row"><span><b>Monthly</b><small>€20 a month</small></span><strong>€20</strong></div></div><div class="sum"><small>Due today</small><strong>€200</strong><button class="primary">Pay €200</button></div></div></body></html>`;
+
 const f = await fixture({
   providerId: "fixture", modelId: "foundry-demo",
   async listModels() { return [{ id: "foundry-demo", provider: "fixture", contextWindow: 262144 }]; },
@@ -27,6 +40,14 @@ const f = await fixture({
     const done = messages.slice(at + 1).some((message) => message.role === "tool");
     if (done) { yield { type: "text_delta", delta: "Here it is." }; yield { type: "finish", reason: "stop" }; return; }
     const options = /options/i.test(request);
+    if (/styles/i.test(request)) {
+      yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
+        title: "Checkout page, three styles", kind: "html", description: "One checkout in three styles.",
+        why: { direction: "One checkout in three styles. Only the style changes.", look_at: "The price and the Pay button in each.", starts_from: "new" },
+        source: stylesPage, surface: { frame: "browser", width: 760, height: 380, title: "slowpour.example/checkout" } }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
     yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
       title: options ? "Pin a chat, two ways" : "Pin a chat", kind: "html", description: "Pinning a chat from the sidebar.", note: "First take",
       why: { direction: "Quiet.", look_at: "The pin.", starts_from: "new" },
@@ -113,6 +134,54 @@ try {
   await both.screenshot({ path: join(output, "foundry-options.png") });
   assert.deepEqual(errors, []);
   console.log("PASS: options get a stage each, named above it, with nothing drawn inside.");
+
+  // Pass 246 A: a page of styles is drawn once per style. A row of small ones to compare, then each at full size under its name, its colours and what it is made of.
+  await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
+  await idle(); await page.waitForTimeout(300);
+  await editor.fill("/foundry the checkout page in a few styles"); await editor.press("Enter");
+  await chips.filter({ hasText: "Checkout page, three styles" }).waitFor();
+  const range = (await f.client.foundryList()).artifacts.find((found) => found.title === "Checkout page, three styles")!;
+  await chips.filter({ hasText: "Checkout page, three styles" }).click();
+  const styled = page.locator(`#page [data-fd="${range.id}:1"]`);
+  await step(120, async () => await styled.locator(".fd-opt").count() === 3);
+  assert.deepEqual(await styled.locator(".fd-opt b").allTextContents(), ["Clean counter", "Roastery label", "Warm paper"]);
+  assert.equal(await styled.locator(".fd-opt .fd-rec-pill").count(), 1, "one pick, in words");
+  assert.equal(await styled.locator(".fd-opt").first().locator(".fd-rec-pill").count(), 1);
+  assert.deepEqual(await styled.locator(".fd-opt").evaluateAll((heads) => heads.map((head) => head.querySelectorAll(".fd-sw i").length)), [3, 3, 3], "each style shows its colours");
+  assert.equal(await styled.locator(".fd-opt").nth(1).locator(".fd-sw i").first().evaluate((dot) => getComputedStyle(dot).backgroundColor), "rgb(29, 22, 19)", "paper first");
+  assert.equal(await styled.locator(".fd-opt").nth(2).locator("span").last().textContent(), "Georgia and Inter · round corners · the look today", "and what it is made of");
+  assert.equal(await styled.locator(".fd-stage").count(), 3, "a stage per style");
+  // The row of small ones: the same page in each style, scaled to the room, taking no pointer.
+  assert.equal(await styled.locator(".fd-glance").count(), 1);
+  assert.deepEqual(await styled.locator(".fd-glance figcaption b").allTextContents(), ["Clean counter", "Roastery label", "Warm paper"]);
+  assert.deepEqual(await styled.locator(".fd-mini-frame").evaluateAll((frames) => frames.map((frame) => /&option=(\d)$/.exec(frame.getAttribute("src")!)?.[1])), ["0", "1", "2"]);
+  const small = await styled.locator(".fd-mini").first().evaluate((mini) => { const frame = mini.querySelector("iframe")!; return { k: Number(getComputedStyle(mini).getPropertyValue("--k")), wide: mini.clientWidth, drawn: Math.round(frame.getBoundingClientRect().width), pointer: getComputedStyle(frame).pointerEvents }; });
+  assert.ok(small.k > 0.1 && small.k < 0.6, `scaled down (${small.k})`);
+  assert.ok(Math.abs(small.drawn - small.wide) <= 1, "each small one fills its place");
+  assert.equal(small.pointer, "none");
+  assert.ok(await styled.evaluate((item) => item.querySelector(".fd-glance")!.compareDocumentPosition(item.querySelector(".fd-opt")!) & Node.DOCUMENT_POSITION_FOLLOWING), "the row comes first");
+  // Each stage is the one page in its style: the values are set on its root, the kit follows, nothing is drawn in it.
+  const styleFrame = (n: number) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${range.id}?v=1`) && (n ? found.url().endsWith(`&option=${n}`) : !found.url().includes("option=")))!;
+  await step(135, async () => [0, 1, 2].every((n) => !!styleFrame(n)));
+  const look = (n: number) => styleFrame(n).evaluate(() => ({ style: document.documentElement.dataset.style, paper: getComputedStyle(document.body).backgroundColor, head: getComputedStyle(document.querySelector("h1")!).fontFamily, button: getComputedStyle(document.querySelector("button")!).backgroundColor, on: getComputedStyle(document.querySelector("button")!).color, corner: getComputedStyle(document.querySelector("button")!).borderRadius, drawn: getComputedStyle(document.querySelector("d-styles")!).display, words: document.body.innerText.replace(/\s+/g, " ").trim() }));
+  await step(137, async () => (await look(1)).style === "Roastery label");
+  const [clean, label, paper] = [await look(0), await look(1), await look(2)];
+  assert.deepEqual([clean.style, label.style, paper.style], ["Clean counter", "Roastery label", "Warm paper"]);
+  assert.deepEqual([clean.paper, label.paper, paper.paper], ["rgb(255, 255, 255)", "rgb(29, 22, 19)", "rgb(251, 247, 242)"]);
+  assert.match(label.head, /JetBrains Mono/); assert.match(paper.head, /Georgia/);
+  assert.deepEqual([clean.button, label.button], ["rgb(31, 111, 74)", "rgb(224, 169, 59)"]);
+  assert.deepEqual([clean.on, label.on], ["rgb(255, 255, 255)", "rgb(17, 17, 17)"], "the words on the accent are light or dark as it needs");
+  assert.deepEqual([clean.corner, label.corner, paper.corner], ["8px", "2px", "14px"]);
+  assert.equal(label.drawn, "none", "the styles themselves draw nothing");
+  assert.equal(clean.words, label.words, "the same words in every style");
+  await styled.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: join(output, "foundry-styles.png") });
+  await styled.locator(".fd-opt").nth(1).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: join(output, "foundry-styles-2.png") });
+  assert.deepEqual(errors, []);
+  console.log("PASS: a range of styles is one page drawn in each: a row to compare, then a stage per style with its colours and what it is made of.");
 } finally {
   await desktop?.close().catch(() => {});
   await f.close();

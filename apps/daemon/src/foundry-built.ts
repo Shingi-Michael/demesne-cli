@@ -13,7 +13,7 @@
 /// look's rings stay beside the fixed result. The record is a page Demesne
 /// writes (protocol foundry-built.ts) and nobody edits.
 import type { DemesneStore } from "@demesne/storage";
-import { BUILT_LOOKS, builtMatches, builtOf, builtPage, builtVerdict, isRecord, isToday, MAX_BUILT_DIFFERENCES, optionNames, pickOption, shotBox,
+import { BUILT_LOOKS, builtMatches, builtOf, builtPage, builtVerdict, isRecord, isToday, MAX_BUILT_DIFFERENCES, optionNames, pickOption, shotBox, STYLES_PAGE,
   type BuiltDifference, type BuiltRecord, type FoundryStage, type ImageArtifact } from "@demesne/protocol";
 import { ingestImage, readArtifact, type ImageOutput, type StructuredToolResult } from "./artifacts.ts";
 import { FOUNDRY_LOOK_PREFIX, type FoundryLook } from "./foundry-look.ts";
@@ -186,7 +186,7 @@ export function foundryBuiltTool(store: DemesneStore, look?: FoundryLook, state:
       if (pick) store.keepFoundryShot(saved.id, pick);
       bump(state.looks, key, seen + 1);
       const last = seen + 1 >= BUILT_LOOKS;
-      const next = matches ? `It matches your pick: answer, and say it was built like the mockup.${tasteOfBuild(mockup.title, option)}`
+      const next = matches ? `It matches your pick: answer, and say it was built like the mockup.${STYLES_PAGE.test(mockup.source) && option ? ` They chose the style “${option}” to build: keep it as the project's style with remember {design: true, style_of: "${mockup.id}", rule: "${option}"}, unless it already is.` : tasteOfBuild(mockup.title, option)}`
         : last ? "That was the last look this turn: answer, naming what still differs and why."
         : `Fix what differs in the code, look at the result again, and call ${FOUNDRY_BUILT} with the new picture.`;
       // The pick, once a turn, so the model checks its list against it.

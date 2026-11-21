@@ -39,6 +39,8 @@ const FRAME_WIDTH = 1280;
 /// offscreen page draws is copied whole (twice the pixels each way on a Retina screen), so 60 a second
 /// on a tab nobody sees was most of the browser's cost.
 const WATCHED_FPS = 12, UNWATCHED_FPS = 10;
+/// While the page is yours it has to feel like a browser: it draws and sends pictures three times as often.
+const HELD_FPS = 30, HELD_FRAME_MS = 33;
 /// A tab is watched for this long after the desktop last asked for a picture.
 const WATCH_MS = 4000;
 /// A chat's tab is closed after this long untouched.
@@ -73,7 +75,7 @@ function siteOf(url: string): string | null {
 
 /// One hidden tab. A chat has one or more; the model acts on the active one.
 interface Tab { win: BrowserWindow; chat: Chat; n: number; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; downloaded: string[];
-  framed: number; frameTimer?: ReturnType<typeof setTimeout>; pointer?: { x: number; y: number; at: number }; requests: Seen[]; popup?: boolean; sized?: boolean;
+  framed: number; frameTimer?: ReturnType<typeof setTimeout>; pointer?: { x: number; y: number; at: number }; requests: Seen[]; popup?: boolean; sized?: boolean; fps?: number;
   /// The page is streaming its pictures (CDP screencast), and the newest one, to send again with news.
   casting?: boolean; last?: { jpeg: string; ratio: number } }
 /// A chat's browser: its tabs, which one is active, and whether the person has it.
@@ -142,7 +144,7 @@ export function runBrowserHost() {
   /// The tab each page belongs to, for the handlers its session shares with other chats of the project.
   const byContents = new Map<number, Tab>();
   /// Chats the desktop is showing, until when, and how tall it shows them.
-  const watched = new Map<string, number>(), aspects = new Map<string, number>();
+  const watched = new Map<string, number>(), aspects = new Map<string, number>(), boxes = new Map<string, { width: number; dpr: number }>();
   /// The sessions kept on disk, by partition, so their cookies are written out before the host goes.
   const keptSessions = new Map<string, Session>();
   const sessionCookies = (partition: string) => join(profile, "session-cookies", `${partition.replace(/[^\w-]/g, "_")}.json`);
@@ -166,32 +168,39 @@ export function runBrowserHost() {
   /// A picture of a watched tab, sent as an event the daemon keeps for the desktop. `ratio` is its height over its width.
   const sendFrame = (tab: Tab, jpeg: string, ratio: number) => {
     if (!isWatched(tab)) return;
-    const view = TRY_WIDTHS[tab.width];
+    const view = { width: tab.win.getContentSize()[0] || TRY_WIDTHS[tab.width].width };
     tab.framed = Date.now();
     tab.last = { jpeg, ratio };
     const contents = tab.win.webContents;
-    write({ event: "frame", chat: tab.chat.id, jpeg, width: view.width, height: Math.round(view.width * ratio),
+    write({ event: "frame", chat: tab.chat.id, at: Date.now(), jpeg, width: view.width, height: Math.round(view.width * ratio),
       url: contents.getURL(), title: contents.getTitle(), handover: tab.chat.held, tabs: tabList(tab.chat),
       ...(tab.pointer ? { pointer: { x: tab.pointer.x, y: tab.pointer.y, ago: Date.now() - tab.pointer.at } } : {}),
       back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward() });
   };
   /// The page streams its own pictures while watched: Chromium draws them small and as JPEG itself, off
   /// this process, and sends the next only once the last is taken, so a busy page can't pile them up.
+  const frameMs = (tab: Tab) => tab.chat.held ? HELD_FRAME_MS : FRAME_MS;
+  /// How often a tab draws follows who is looking: nobody, someone watching, or someone using it.
+  const pace = (tab: Tab) => {
+    if (tab.win.isDestroyed()) return;
+    const fps = !tab.casting ? UNWATCHED_FPS : tab.chat.held ? HELD_FPS : WATCHED_FPS;
+    if (tab.fps !== fps) { tab.fps = fps; tab.win.webContents.setFrameRate(fps); }
+  };
   const startCast = (tab: Tab) => {
     if (tab.casting || tab.win.isDestroyed()) return;
     const contents = tab.win.webContents;
     if (!contents.debugger.isAttached()) return;
     tab.casting = true;
-    contents.setFrameRate(WATCHED_FPS);
+    pace(tab);
     const view = TRY_WIDTHS[tab.width];
-    void contents.debugger.sendCommand("Page.startScreencast", { format: "jpeg", quality: 72, maxWidth: Math.min(FRAME_WIDTH, view.width), maxHeight: view.width * 3 })
+    void contents.debugger.sendCommand("Page.startScreencast", { format: "jpeg", quality: 72, maxWidth: 3200, maxHeight: 6400 })
       .catch(() => { tab.casting = false; });
   };
   const stopCast = (tab: Tab) => {
     if (!tab.casting) return;
     tab.casting = false;
     if (tab.win.isDestroyed()) return;
-    tab.win.webContents.setFrameRate(UNWATCHED_FPS);
+    pace(tab); fit(tab);
     void tab.win.webContents.debugger.sendCommand("Page.stopScreencast").catch(() => {});
   };
   /// One streamed picture: sent on, and taken (so the next can come) no sooner than FRAME_MS later.
@@ -202,10 +211,10 @@ export function runBrowserHost() {
     clearTimeout(tab.frameTimer); tab.frameTimer = undefined;
     // Chromium sends a few ahead of the takes: only the newest goes on, one each FRAME_MS.
     tab.last = { jpeg: String(params.data ?? ""), ratio };
-    const wait = FRAME_MS - (Date.now() - tab.framed);
+    const wait = frameMs(tab) - (Date.now() - tab.framed);
     if (wait <= 0) sendFrame(tab, tab.last.jpeg, ratio);
     else tab.frameTimer = setTimeout(() => { tab.frameTimer = undefined; if (tab.last) sendFrame(tab, tab.last.jpeg, tab.last.ratio); }, wait);
-    setTimeout(take, FRAME_MS);
+    setTimeout(take, frameMs(tab) - 8);
   };
   /// Pictures flow for the tab on show, and news (who has it, its tabs, where it pointed) reaches the
   /// desktop even when the page itself did not change.
@@ -214,6 +223,7 @@ export function runBrowserHost() {
     for (const one of tab.chat.tabs.values()) if (one !== tab) stopCast(one);
     if (!isWatched(tab)) { stopCast(tab); return; }
     startCast(tab);
+    pace(tab);
     if (tab.frameTimer) return;
     tab.frameTimer = setTimeout(() => {
       tab.frameTimer = undefined;
@@ -241,12 +251,16 @@ export function runBrowserHost() {
     }, () => {});
   };
   /// The page's height follows the split's shape; its width stays the model's.
+  /// While you watch a desktop-width tab it is as wide as the split shows it,
+  /// so the page lays itself out for the room it has and nothing is shrunk. Nobody watching: the
+  /// model's own width again.
   const fit = (tab: Tab) => {
-    const aspect = aspects.get(tab.chat.id);
-    if (!aspect || tab.win.isDestroyed()) return;
-    const view = TRY_WIDTHS[tab.width], [, height] = tab.win.getContentSize();
-    const wanted = Math.round(Math.max(view.height * 0.75, Math.min(view.width * 3, view.width * aspect)));
-    if (Math.abs(wanted - (height ?? 0)) > 24) { tab.win.setContentSize(view.width, wanted); sizePopup(tab); }
+    if (tab.win.isDestroyed()) return;
+    const view = TRY_WIDTHS[tab.width], [width, height] = tab.win.getContentSize();
+    const on = isWatched(tab), aspect = on ? aspects.get(tab.chat.id) : undefined, box = on && tab.width === "desktop" && !tab.popup ? boxes.get(tab.chat.id) : undefined;
+    const wide = box ? Math.round(Math.max(360, Math.min(1600, box.width))) : view.width;
+    const tall = aspect ? Math.round(Math.max(box ? 300 : view.height * 0.75, Math.min(wide * 3, wide * aspect))) : view.height;
+    if (Math.abs(wide - (width ?? 0)) > 2 || Math.abs(tall - (height ?? 0)) > 24) { tab.win.setContentSize(wide, tall); sizePopup(tab); }
   };
   /// A window a page opened comes up offscreen with no viewport (an Electron quirk): it takes no clicks and
   /// draws nothing until its size is set through the debugger.
@@ -362,7 +376,7 @@ export function runBrowserHost() {
       if (chat.active === tab.n) { chat.active = [...chat.tabs.keys()].at(-1) ?? 0; frameSoon(activeTab(chat)); }
     });
     // Nobody watches a new tab yet: it draws sparingly until someone does.
-    contents.setFrameRate(UNWATCHED_FPS);
+    tab.fps = UNWATCHED_FPS; contents.setFrameRate(UNWATCHED_FPS);
     // Where this tab may go: around this computer while it is here, the sites the person approved, and anywhere public while the person has it.
     const allowed = (url: string) => {
       if (localAddress(url)) return tab.local;
@@ -633,6 +647,8 @@ export function runBrowserHost() {
         if (typeof command.dark === "boolean") { const want = command.dark ? "dark" : "light"; if (nativeTheme.themeSource !== want) nativeTheme.themeSource = want; }
         const aspect = Number(command.aspect);
         if (Number.isFinite(aspect) && aspect > 0) aspects.set(id, aspect);
+        const wide = Number(command.width), dpr = Number(command.dpr);
+        if (Number.isFinite(wide) && wide > 0) boxes.set(id, { width: wide, dpr: Number.isFinite(dpr) && dpr > 0 ? dpr : 1 });
         const tab = activeTab(chat);
         if (tab && !tab.win.isDestroyed()) { fit(tab); tab.framed = 0; frameSoon(tab); }
         answer(command.id, { watching: Boolean(tab && !tab.win.isDestroyed()) });

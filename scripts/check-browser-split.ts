@@ -90,7 +90,8 @@ try {
   await win.screenshot({ path: join(output, "yours.png") });
   // Click the email field where it is on the picture, then type, Tab to Sign in, and press Space.
   const img = split.locator(".bs-page"), imgBox = (await img.boundingBox())!;
-  const pageWidth = 1280;
+  // The page is laid out at the width the split shows it, so a spot on the page is the same spot on the picture.
+  const pageWidth = imgBox.width;
   await win.mouse.click(imgBox.x + (56 + 200) / pageWidth * imgBox.width, imgBox.y + 150 / pageWidth * imgBox.width);
   await win.keyboard.type("ada@slowpour.test", { delay: 15 });
   await win.keyboard.press("Tab");
@@ -137,15 +138,9 @@ try {
   await win.waitForFunction(() => !/earlier page/.test(document.querySelector("#browser-split .bs-words")?.textContent ?? ""));
   await split.locator('[data-go="back"]').click();
   await win.waitForFunction(() => /\/admin$/.test((document.querySelector<HTMLInputElement>("#browser-split .bs-url"))?.value ?? ""), undefined, { timeout: 10000 });
-  // The page's own size, to read small text; then fitted again.
-  await split.locator(".bs-zoom").click();
-  assert.equal(await img.evaluate((one) => (one as HTMLElement).style.width), "1280px");
-  await win.screenshot({ path: join(output, "actual-size.png") });
-  await split.locator(".bs-zoom").click();
-  assert.equal(await img.evaluate((one) => (one as HTMLElement).style.width), "");
   await split.locator(".bs-back", { hasText: "Hand back" }).click();
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
-  console.log("PASS: you can take the page, type an address, go back, look at earlier pages, see it at its own size, and hand it back.");
+  console.log("PASS: you can take the page, type an address, go back, look at earlier pages, and hand it back.");
   await split.locator(".bs-close").click();
   await split.waitFor({ state: "hidden" });
   assert.equal(await win.locator("#app.browser-split-on").count(), 0, "the chat has the window back");

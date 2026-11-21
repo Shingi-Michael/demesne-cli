@@ -1587,7 +1587,6 @@ const split = {
   still: null as null | { seq: number; src: string; url: string },
   ringAt: 0,
   pumping: false, width: (() => { try { return Number(localStorage.getItem("demesne-browser-split")) || 0; } catch { return 0; } })(),
-  actual: (() => { try { return localStorage.getItem("demesne-browser-zoom") === "actual"; } catch { return false; } })(),
 };
 const BROWSER_SPLIT_LABEL = "The chat’s browser";
 const BS_ICONS = {
@@ -1624,7 +1623,6 @@ function renderBrowserSplit() {
   const yours = splitYours();
   aside.classList.toggle("yours", yours);
   aside.classList.toggle("done", !run);
-  aside.classList.toggle("actual", split.actual);
   aside.querySelector<HTMLElement>(".bs-light")!.className = `bs-light ${foot.tone}`;
   renderSplitHead(aside, yours);
   renderSplitTabs(aside, yours);
@@ -1651,9 +1649,6 @@ function renderSplitHead(aside: HTMLElement, yours: boolean) {
   const shown = split.still ? split.still.url : split.frame?.url ?? "";
   if (document.activeElement !== url) url.value = yours ? shown : shown.replace(/^https?:\/\//, "");
   url.title = split.frame?.title ?? "";
-  const zoom = aside.querySelector<HTMLButtonElement>(".bs-zoom")!;
-  zoom.textContent = split.actual ? "100%" : "Fit";
-  zoom.title = split.actual ? "Shown at the page’s own size. Click to fit the side." : "Fitted to the side. Click for the page’s own size.";
 }
 /// One chip per tab, when the chat's browser has more than one. While the page is yours, a chip switches to it.
 function renderSplitTabs(aside: HTMLElement, yours: boolean) {
@@ -1677,8 +1672,9 @@ let splitDrawing = "", splitWanted = "", splitDrawn = "";
 function showSplitPicture(aside: HTMLElement) {
   const page = aside.querySelector<HTMLCanvasElement>(".bs-page"), src = split.still?.src ?? split.frame?.src;
   if (!page || !src) return;
-  if (split.frame && !split.still) page.style.width = split.actual ? `${split.frame.width}px` : "";
-  else page.style.width = "";
+  // The page is as wide as the split, so it shows at its own size. A phone-width page keeps its width, in the middle.
+  const room = aside.querySelector<HTMLElement>(".bs-view")?.clientWidth ?? 0;
+  page.style.width = split.frame && !split.still && split.frame.width < room - 24 ? `${split.frame.width}px` : "";
   if (src === splitDrawn) return;
   splitWanted = src;
   if (splitDrawing) return;
@@ -1724,7 +1720,7 @@ function buildBrowserSplit(aside: HTMLElement) {
   aside.setAttribute("aria-label", BROWSER_SPLIT_LABEL);
   aside.innerHTML = `<div class="bs-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize"></div>`
     + `<div class="bs-head"><i class="bs-light"></i><span class="bs-nav" hidden><button type="button" class="bs-icon" data-go="back" aria-label="Back" title="Back">${BS_ICONS.back}</button><button type="button" class="bs-icon" data-go="forward" aria-label="Forward" title="Forward">${BS_ICONS.forward}</button><button type="button" class="bs-icon" data-go="reload" aria-label="Reload" title="Reload">${BS_ICONS.reload}</button></span>`
-    + `<input class="bs-url" readonly spellcheck="false" aria-label="Address"><button type="button" class="bs-zoom"></button><button type="button" class="bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close">×</button></div>`
+    + `<input class="bs-url" readonly spellcheck="false" aria-label="Address"><button type="button" class="bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close">×</button></div>`
     + `<div class="bs-tabs" hidden></div>`
     + `<div class="bs-view"><div class="bs-stage"><canvas class="bs-page" aria-hidden="true" hidden></canvas><i class="bs-ring" hidden></i></div><span class="bs-wait">Waiting for the page…</span></div>`
     + `<div class="bs-pages" hidden></div><div class="bs-foot"></div>`;
@@ -1788,12 +1784,6 @@ function buildBrowserSplit(aside: HTMLElement) {
       showSplitPicture(aside); renderBrowserSplit();
     } catch (error) { notice(error instanceof Error ? error.message : String(error)); }
   });
-  // Fitted to the side, or at the page's own size (readable, scrolls sideways).
-  aside.querySelector<HTMLElement>(".bs-zoom")!.addEventListener("click", () => {
-    split.actual = !split.actual;
-    try { localStorage.setItem("demesne-browser-zoom", split.actual ? "actual" : "fit"); } catch {}
-    showSplitPicture(aside); renderBrowserSplit();
-  });
   // The line between chat and browser moves either way; the width is kept.
   const grip = aside.querySelector<HTMLElement>(".bs-grip")!;
   grip.addEventListener("pointerdown", (event) => {
@@ -1823,9 +1813,9 @@ async function pumpBrowserFrames() {
       let got: Got | null = null;
       // The view's shape, so the page is drawn as tall as the split shows it.
       const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
-      const aspect = view && view.clientWidth > 0 && !split.actual ? view.clientHeight / view.clientWidth : undefined;
+      const aspect = view && view.clientWidth > 0 ? view.clientHeight / view.clientWidth : undefined;
       const askedAt = Date.now();
-      try { got = await api("browser-frame", { after: split.seq, ...(aspect ? { aspect } : {}), dark: document.documentElement.dataset.appearance !== "light" }); } catch { await new Promise((resolve) => setTimeout(resolve, 1000)); continue; }
+      try { got = await api("browser-frame", { after: split.seq, ...(aspect ? { aspect } : {}), dark: document.documentElement.dataset.appearance !== "light", ...(view && view.clientWidth > 0 ? { width: view.clientWidth, dpr: devicePixelRatio || 1 } : {}) }); } catch { await new Promise((resolve) => setTimeout(resolve, 1000)); continue; }
       if (split.session !== session || !got) continue;
       const aside = el("browser-split");
       let redraw = false;
@@ -1835,6 +1825,7 @@ async function pumpBrowserFrames() {
       const visits = Array.isArray(got.visits) ? got.visits : [];
       if (visits.map((one) => one.seq).join() !== split.visits.map((one) => one.seq).join()) { split.visits = visits; redraw = true; }
       if (got.src && Number(got.seq) > split.seq) {
+        (window as unknown as { __at?: number }).__at = Number((got as { at?: number }).at) || 0;
         split.seq = Number(got.seq);
         const first = !split.frame, before = split.frame;
         split.frame = { src: got.src, width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward) };
@@ -1845,7 +1836,8 @@ async function pumpBrowserFrames() {
         if (first || before?.url !== split.frame.url || before?.title !== split.frame.title || before?.back !== split.frame.back || before?.forward !== split.frame.forward) redraw = true;
       }
       if (redraw) renderBrowserSplit();
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      // While the page is yours the next picture is asked for at once; watching can breathe.
+      if (!split.held) await new Promise((resolve) => setTimeout(resolve, 60));
     }
   } finally { split.pumping = false; }
 }

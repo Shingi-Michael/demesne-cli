@@ -35,12 +35,12 @@ export type BrowserDriver = (chat: string, command: Record<string, unknown>, sig
 
 /// The newest picture of a chat's tab, for the split screen.
 export interface BrowserFrame { seq: number; jpeg: string; width: number; height: number; url: string; title: string; handover: boolean;
-  tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean }
+  tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; /** When the browser sent it (its clock), to measure the way to the screen. */ at?: number }
 /// A page the chat's browser went to, kept small, to step back through.
 export interface BrowserVisit { seq: number; url: string; title: string; tab: number; jpeg: string }
 /// A driver you can also watch: pictures arrive as the tab repaints, and a small one of each page it went to.
 export interface WatchableBrowser {
-  frame(chat: string, after: number, signal: AbortSignal, aspect?: number, dark?: boolean): Promise<BrowserFrame | null>;
+  frame(chat: string, after: number, signal: AbortSignal, aspect?: number, dark?: boolean, box?: { width: number; dpr: number }): Promise<BrowserFrame | null>;
   visits?(chat: string): BrowserVisit[];
 }
 /// Pages kept per chat to step back through.
@@ -118,6 +118,7 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
   const frames = new Map<string, BrowserFrame>(), frameWaiters = new Map<string, Set<() => void>>(), told = new Map<string, number>(), shape = new Map<string, number>();
   const visits = new Map<string, BrowserVisit[]>();
   let scheme: boolean | undefined;
+  const boxes = new Map<string, { width: number; dpr: number }>();
   const drop = () => { for (const resolve of waiting.values()) resolve(null); waiting.clear(); child = null; };
   const start = () => {
     const env = { ...process.env };
@@ -141,7 +142,7 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
                 frames.set(reply.chat, { seq: ++seq, jpeg: reply.jpeg, width: Number(reply.width) || 1280, height: Number(reply.height) || 800, url: String(reply.url ?? ""), title: String(reply.title ?? ""), handover: reply.handover === true,
                   ...(Array.isArray(reply.tabs) ? { tabs: (reply.tabs as Record<string, unknown>[]).slice(0, 8).map((one) => ({ n: Number(one.n) || 0, url: String(one.url ?? ""), title: String(one.title ?? ""), ...(one.active === true ? { active: true } : {}) })) } : {}),
                   ...(reply.pointer && typeof reply.pointer === "object" ? { pointer: { x: Number((reply.pointer as Record<string, unknown>).x) || 0, y: Number((reply.pointer as Record<string, unknown>).y) || 0, ago: Number((reply.pointer as Record<string, unknown>).ago) || 0 } } : {}),
-                  back: reply.back === true, forward: reply.forward === true });
+                  back: reply.back === true, forward: reply.forward === true, ...(typeof reply.at === "number" ? { at: reply.at } : {}) });
                 // A page it reached while watched, before its own small picture came: the live one stands in.
                 const list = visits.get(reply.chat) ?? [], url = String(reply.url ?? "");
                 if (url && url !== "about:blank" && list.at(-1)?.url !== url) {
@@ -183,14 +184,17 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
     try { const stdin = running.stdin as import("bun").FileSink; stdin.write(`${JSON.stringify({ ...body, id, chat })}\n`); stdin.flush(); } catch { finish(null); }
   })) as BrowserDriver & WatchableBrowser & { close(): void };
   // The newest picture after `after`, waiting a little for one; the host is told someone is watching.
-  driver.frame = async (chat, after, signal, aspect, dark) => {
+  driver.frame = async (chat, after, signal, aspect, dark, box) => {
+    // The split's own width and sharpness, so the page is laid out for the room it is shown in.
+    const resized = Boolean(box && (Math.abs(box.width - (boxes.get(chat)?.width ?? 0)) > 8 || box.dpr !== boxes.get(chat)?.dpr));
+    if (box && resized) boxes.set(chat, box);
     // Pages follow the app: dark when Demesne is dark, light when it is light.
     const turned = dark !== undefined && dark !== scheme;
     if (turned) scheme = dark;
-    if (turned || Date.now() - (told.get(chat) ?? 0) > WATCH_EVERY_MS || (aspect && Math.abs(aspect - (shape.get(chat) ?? 0)) > 0.02)) {
+    if (turned || resized || Date.now() - (told.get(chat) ?? 0) > WATCH_EVERY_MS || (aspect && Math.abs(aspect - (shape.get(chat) ?? 0)) > 0.02)) {
       told.set(chat, Date.now());
       if (aspect) shape.set(chat, aspect);
-      if (child) void driver(chat, { action: "watch", ...(shape.get(chat) ? { aspect: shape.get(chat) } : {}), ...(scheme === undefined ? {} : { dark: scheme }) }, signal);
+      if (child) void driver(chat, { action: "watch", ...(shape.get(chat) ? { aspect: shape.get(chat) } : {}), ...(scheme === undefined ? {} : { dark: scheme }), ...(boxes.get(chat) ?? {}) }, signal);
     }
     const have = frames.get(chat);
     if (have && have.seq > after) return have;

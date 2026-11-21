@@ -200,14 +200,14 @@ interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: 
 /// A version's why, kept as JSON text; '' when it has none.
 const whyText = (why: FoundryWhy | null | undefined) => {
   const direction = why?.direction?.trim().slice(0, 300) ?? "", look = why?.look?.trim().slice(0, 300) ?? "", dropped = why?.dropped?.trim().slice(0, 300) ?? "";
-  const from = why?.from?.trim().slice(0, 300) ?? "";
-  return direction || look || dropped || from ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}) }) : "";
+  const from = why?.from?.trim().slice(0, 300) ?? "", followed = why?.followed?.trim().slice(0, 300) ?? "";
+  return direction || look || dropped || from ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}), ...(followed ? { followed } : {}) }) : "";
 };
 const parseWhy = (text: string | null | undefined): FoundryWhy | null => {
   if (!text) return null;
   try {
     const value = JSON.parse(text) as Partial<FoundryWhy>;
-    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? ""), ...(value.from ? { from: String(value.from) } : {}) };
+    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? ""), ...(value.from ? { from: String(value.from) } : {}), ...(value.followed ? { followed: String(value.followed) } : {}) };
   } catch { return null; }
 };
 
@@ -555,6 +555,31 @@ export class DemesneStore {
 
   /// Pass 240 A: a picture a mockup shows, kept with the mockup so it outlives
   /// the chat it was taken in (the bytes stay in the artifact folder, by hash).
+  /// Changes the person asked for on OTHER mockups of the same project, newest first
+  /// (pass 245 A): the numbered lines of the notes they sent from Foundry. A change asked
+  /// for again on another mockup is their taste, so the model is shown these beside the new notes.
+  foundryChangesElsewhere(id: string, limit = 10): { on: string; note: string }[] {
+    const home = this.database.query("SELECT workspace FROM foundry_artifacts WHERE id = ?").get(id) as { workspace: string | null } | null;
+    if (!home) return [];
+    const others = new Set((this.database.query("SELECT id FROM foundry_artifacts WHERE id != ? AND workspace IS ?").all(id, home.workspace) as { id: string }[]).map((row) => row.id));
+    if (!others.size) return [];
+    const rows = this.database.query("SELECT content FROM turns WHERE content LIKE '%Notes pinned on the Foundry mockup \"%' ORDER BY created_at DESC, rowid DESC LIMIT 60").all() as { content: string }[];
+    const found: { on: string; note: string }[] = [];
+    for (const row of rows) {
+      // A message can carry notes on several mockups, each with its own fence.
+      for (const part of row.content.split(/(?=^On “[^\n]*”:$)/m)) {
+        const from = /\(id ([\w-]+), v\d+\)/.exec(part)?.[1], on = /^On “([^\n]*)”:$/m.exec(part)?.[1];
+        if (!from || !on || !others.has(from)) continue;
+        for (const line of part.replace(/(^|\n)```parts\n[\s\S]*$/, "").split("\n")) {
+          const note = /^\d+ · (.+)$/.exec(line.trim())?.[1]?.replace(/\s+/g, " ").trim().slice(0, 240);
+          if (note && !found.some((one) => one.on === on && one.note === note)) found.push({ on: on.slice(0, 120), note });
+          if (found.length >= limit) return found;
+        }
+      }
+    }
+    return found;
+  }
+
   /// Whether a chat ever looked at the person's running app (look_at_page), kept with the chat.
   lookedAtPage(sessionId: string): boolean {
     return this.database.query("SELECT 1 FROM tool_calls JOIN turns ON turns.id = tool_calls.turn_id WHERE turns.session_id = ? AND tool_calls.name = 'look_at_page' AND tool_calls.status = 'completed' LIMIT 1").get(sessionId) !== null;

@@ -93,6 +93,9 @@ const pictureOf = async (store: DemesneStore, image: ImageArtifact): Promise<Ima
   try { return { data: await readArtifact(store, image, false), mimeType: image.mimeType, filename: image.filename === PICK_FILE ? PICK_FILE : `${FOUNDRY_LOOK_PREFIX}built.png` }; } catch { return null; }
 };
 
+/// Pass 245 A: what they chose to build is taste that carries over to later mockups here.
+const tasteOfBuild = (title: string, option: string | null | undefined) => ` ${option ? `They chose “${option}” to build` : "They had this one built"}: if that says something general about their taste here, keep it as one short rule with remember {design: true, learned_from: "${option ? "picked on" : "built from"} ${title.slice(0, 60)}"}, unless their design guide already says it.`;
+
 export function foundryBuiltTool(store: DemesneStore, look?: FoundryLook, state: BuiltState = newState()): AgentTool {
   return {
     definition: {
@@ -183,7 +186,7 @@ export function foundryBuiltTool(store: DemesneStore, look?: FoundryLook, state:
       if (pick) store.keepFoundryShot(saved.id, pick);
       bump(state.looks, key, seen + 1);
       const last = seen + 1 >= BUILT_LOOKS;
-      const next = matches ? "It matches your pick: answer, and say it was built like the mockup."
+      const next = matches ? `It matches your pick: answer, and say it was built like the mockup.${tasteOfBuild(mockup.title, option)}`
         : last ? "That was the last look this turn: answer, naming what still differs and why."
         : `Fix what differs in the code, look at the result again, and call ${FOUNDRY_BUILT} with the new picture.`;
       // The pick, once a turn, so the model checks its list against it.

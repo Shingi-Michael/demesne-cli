@@ -13,6 +13,7 @@ import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
 import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
+import { learnedIn } from "./design-guide.ts";
 import { called, rewriteCalled } from "./tool-search.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
@@ -372,6 +373,7 @@ const WHY_SCHEMA = {
     look_at: { type: "string", maxLength: 300, description: "What leads." },
     dropped: { type: "string", maxLength: 300, description: "What you left out, and why." },
     starts_from: { type: "string", maxLength: 300, description: "New mockups: the real thing you looked at (window, files), or \"new\"." },
+    followed: { type: "string", maxLength: 300, description: "Which of their learned likes (design guide) this follows, a few words each; \"none\" when none apply." },
   },
   required: ["direction", "look_at"],
   additionalProperties: false,
@@ -383,8 +385,8 @@ function whyOf(value: unknown): FoundryWhy | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new Error("[invalid_input] why is an object: {direction, look_at, dropped}");
   const text = (key: string) => typeof value[key] === "string" ? (value[key] as string).trim().slice(0, 300) : "";
-  const from = text("starts_from");
-  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped"), ...(from ? { from } : {}) };
+  const from = text("starts_from"), followed = text("followed");
+  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped"), ...(from ? { from } : {}), ...(followed ? { followed } : {}) };
   return why.direction || why.look || why.dropped ? why : undefined;
 }
 
@@ -409,6 +411,31 @@ function checkWhy(store: DemesneStore, kind: FoundryKind | undefined, id: string
   }
   throw new Error("[invalid_input] Say why it looks this way: why {direction, look_at, dropped}. Hint: a sentence each; direction is who it is for and the mood, look_at is what leads, dropped is what you left out");
 }
+
+/// Pass 245 A, taste that carries over: when the project's design guide holds
+/// lines learned from the person's notes, a new version says which of them it
+/// follows (why.followed, or "none"), so the page shows it and the model has
+/// looked at them. Asked once per ask; a fix of this ask's own version is not asked.
+const tasteAsked = new Set<string>();
+export const NO_TASTE = /^none\b/i;
+function checkTaste(store: DemesneStore, kind: FoundryKind | undefined, id: string | undefined, why: FoundryWhy | undefined, context: ToolContext) {
+  if (kind !== "html" && kind !== "svg") return;
+  if (why?.followed || !context.turnId) return;
+  if (id) {
+    const found = store.getFoundryArtifact(id);
+    if (found?.versions.find((item) => item.version === found.version)?.turnId === context.turnId) return;
+  }
+  const learned = learnedIn(context.workspaceRoot);
+  if (!learned.length || tasteAsked.has(context.turnId)) return;
+  tasteAsked.add(context.turnId);
+  if (tasteAsked.size > 300) tasteAsked.delete(tasteAsked.values().next().value!);
+  throw new Error(`[taste] This person's design guide holds ${learned.length} ${learned.length === 1 ? "line" : "lines"} learned from their notes on earlier mockups here:\n${learned.map((line) => `- ${line}`).join("\n")}\n`
+    + "Hint: make the page follow each one that applies, then save again with why.followed naming those in a few words each (\"none\" when none apply), and say in your answer which you followed");
+}
+
+/// The page shows a "Your taste" line for what it followed; the answer says it too, in a sentence.
+export const TASTE_ANSWER = "It follows their taste from earlier mockups: say which of their likes in one sentence of your answer.";
+const tasteSaid = (why: FoundryWhy) => why.followed && !NO_TASTE.test(why.followed) ? ` ${TASTE_ANSWER}` : "";
 
 /// A new mockup of something that exists starts from the real thing, not
 /// from memory: it says what it starts from, and when that is something real
@@ -499,6 +526,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const why = whyFor(input.why, input.source);
       if (!(why && REVIEW_PAGE.test(input.source))) checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
       if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
+      if (!REVIEW_PAGE.test(input.source)) checkTaste(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, why, context);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
       const { stage: given, dropped } = stageWithPage(input);
       const stage = reviewStage(given, input.source);
@@ -515,7 +543,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       } catch (error) { conflict(error); }
       for (const shot of shots) store.keepFoundryShot(saved.id, shot);
       return JSON.stringify({ ...savedResult(saved),
-        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? reviewSaid(input.source, true) : why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version}. Its preview appears automatically in this chat and is kept in Foundry.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source: input.source, id: saved.id })}${REVIEW_PAGE.test(input.source) ? reviewSaid(input.source, true) : why ? ` ${WHY_ANSWER}${tasteSaid(why)}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -605,6 +633,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       checkOptions(current.kind, source);
       const why = whyFor(input.why, source);
       if (!(why && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, why);
+      if (!REVIEW_PAGE.test(source)) checkTaste(store, current.kind, input.id, why, context);
       checkCritique(input.id, context.turnId, input.critique);
       const { stage: given, dropped } = stageWithPage(input);
       const stage = given?.surface ? reviewStage(given, source) : given;
@@ -620,7 +649,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       } catch (error) { conflict(error); }
       for (const shot of shots) store.keepFoundryShot(saved.id, shot);
       return JSON.stringify({ ...savedResult(saved), edits: edits.length,
-        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? reviewSaid(source, false) : why ? ` ${WHY_ANSWER}` : ""}` });
+        message: `Saved as version ${saved.version} with ${edits.length} edit${edits.length === 1 ? "" : "s"}. The preview in this chat updates by itself.${dropped || stageSaid(savedResult(saved).demo ? { demo: savedResult(saved).demo } : null, { kind: saved.kind, source, id: saved.id })}${REVIEW_PAGE.test(source) ? reviewSaid(source, false) : why ? ` ${WHY_ANSWER}${tasteSaid(why)}` : ""}` });
     },
   };
   if (look) tool.executeWithArtifacts = async (input, context) => lookAfter(store, look, looks, await tool.execute(input, context), context);
@@ -644,7 +673,7 @@ export function briefOf(found: FoundryArtifactDetail): { brief?: Record<string, 
   if (!kept.length) return {};
   return { brief: kept.map(({ version, ask, why }) => ({ version, ...(ask ? { asked: ask.slice(0, 300) } : {}),
     ...(why?.direction ? { direction: why.direction } : {}), ...(why?.look ? { look_at: why.look } : {}),
-    ...(why?.dropped ? { dropped: why.dropped } : {}), ...(why?.from ? { starts_from: why.from } : {}) })), keep: BRIEF_KEEP };
+    ...(why?.dropped ? { dropped: why.dropped } : {}), ...(why?.from ? { starts_from: why.from } : {}), ...(why?.followed && !NO_TASTE.test(why.followed) ? { followed: why.followed } : {}) })), keep: BRIEF_KEEP };
 }
 
 /// Pass 242 A: what the person pinned as liked on this mockup, kept across
@@ -653,6 +682,18 @@ export const LIKED_KEEP = "The person said they like these: keep each as it is u
 const likedOf = (store: DemesneStore, id: string): { liked?: string[]; liked_rule?: string } => {
   const liked = store.foundryLikes(id);
   return liked.length ? { liked, liked_rule: LIKED_KEEP } : {};
+};
+
+/// Pass 245 A: what teaches Foundry this person's taste. What they like on this
+/// mockup, and the changes they asked for on other mockups of the project: a
+/// change that comes back is taste too. The model words the rule; the design
+/// guide keeps it (remember with learned_from).
+export const TASTE_RULE = "Their taste carries over to later mockups in this project. Each thing they like here (liked), and each change in the notes you are handling now that asks for the same kind of thing as one in changes_elsewhere, is taste: "
+  + "keep it as one short general rule with remember {design: true, learned_from}, where learned_from is \"♥ on <mockup>\" or \"noted twice: <mockup>, <mockup>\", unless their design guide already says it. "
+  + "A note that goes against a learned line replaces it (replaces: some of its words). A change asked once, about one place, is not taste.";
+const tasteOf = (store: DemesneStore, id: string, liked: boolean): { changes_elsewhere?: { on: string; note: string }[]; taste_rule?: string } => {
+  const elsewhere = store.foundryChangesElsewhere(id);
+  return elsewhere.length || liked ? { ...(elsewhere.length ? { changes_elsewhere: elsewhere } : {}), taste_rule: TASTE_RULE } : {};
 };
 
 /// Notes the person pinned on this mockup on Foundry and has not sent yet.
@@ -703,7 +744,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
-        ...briefOf(found), ...likedOf(store, found.id), ...waitingOf(store, found.id), ...stageRead(found), source: found.source,
+        ...briefOf(found), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), source: found.source,
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };

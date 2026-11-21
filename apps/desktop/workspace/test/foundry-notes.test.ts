@@ -53,7 +53,7 @@ describe("notes on a mockup (pass 233 A, pinned where you point in pass 242 A)",
     expect(said).toEqual({ kind: "text", text: "On “Ledger invoices”:\n1 · Save button: Make it green\n♥ · “Most chosen”: Keep this tag, it reads warm\n2 · Tabs in B · Tabs on top: Drop the last one" });
     expect(detail?.kind).toBe("parts");
     expect(detail!.text.split("\n")).toEqual([
-      'Notes pinned on the Foundry mockup "Ledger invoices" (id a1, v3). Change only the parts with numbered notes, each as its note says; the ♥ note is what the person likes, so keep that exactly as it is, and leave everything else exactly as it is: foundry_read it, then one foundry_edit. The attached pictures show the place around pins 1, ♥ as the person saw them, in that order.',
+      'Notes pinned on the Foundry mockup "Ledger invoices" (id a1, v3). Change only the parts with numbered notes, each as its note says; the ♥ note is what the person likes, so keep that exactly as it is, and leave everything else exactly as it is: foundry_read it, then one foundry_edit. What they like is their taste too: when a ♥ note says something general, keep it as one short rule with remember {design: true, learned_from: \"♥ on Ledger invoices\"}, unless their design guide already says it. The attached pictures show the place around pins 1, ♥ as the person saw them, in that order.',
       "1. change, Save button: Make it green", "   selector `form > button.primary`, pinned 25% across and 50% down it", '   <button class="primary">Save</button>',
       "♥. keep, “Most chosen”: Keep this tag, it reads warm", "   selector `span.tag`, pinned 60% across and 10% down it", "   in its picture the pin is 50% across and 41% down", '   <span class="tag">Most chosen</span>',
       "2. change, Tabs in B · Tabs on top: Drop the last one", "   selector `nav.tabs`", '   <nav class="tabs">…</nav>',
@@ -66,6 +66,9 @@ describe("notes on a mockup (pass 233 A, pinned where you point in pass 242 A)",
     expect(page).toContain("selector `html`, pinned 50% across and 2% down the page\n```");
     // Only keeps: nothing to change, and no new version.
     expect(notesMessage({ id: "a1", title: "x", version: 1 }, [tag])).toContain("Nothing to change: the person marked what they like. Keep this as it is in every later version, make no new version now");
+    // Pass 245 A: what they like is taste to keep for later mockups; a message with changes only says nothing of it.
+    expect(notesMessage({ id: "a1", title: "Plans page", version: 1 }, [tag])).toContain('keep it as one short rule with remember {design: true, learned_from: "♥ on Plans page"}');
+    expect(notesMessage({ id: "a1", title: "Plans page", version: 1 }, [save])).not.toContain("learned_from");
     expect(notesMessage({ id: "a1", title: "x", version: 1 }, [])).toBe("");
   });
 

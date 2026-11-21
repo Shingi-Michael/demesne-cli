@@ -132,7 +132,9 @@ export function foundryPage(view: FoundryView) {
     const words = artifact.description ? `<p class="fd-desc">${h(artifact.description)}</p>` : "";
     // Pass 218 A: why this version looks the way it does, three quiet lines.
     const why = version.why;
-    const reasons = why ? ([["Direction", why.direction], ["Look at", why.look], ["Dropped", why.dropped]] as const).filter(([, text]) => text) : [];
+    // Pass 245 A: a fourth line when the version follows what the person liked on earlier mockups here.
+    const taste = why?.followed && !/^none\b/i.test(why.followed) ? why.followed : "";
+    const reasons = why ? ([["Direction", why.direction], ["Look at", why.look], ["Dropped", why.dropped], ["Your taste", taste]] as const).filter(([, text]) => text) : [];
     const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
     const body = artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`

@@ -92,8 +92,10 @@ export function notesMessage(mockup: { id: string; title: string; version: numbe
   const asked = changes
     ? `Change only ${many ? "the parts with numbered notes, each" : "the part with the numbered note,"} as its note says${kept ? `; the ${KEEP_MARK} ${kept > 1 ? "notes are" : "note is"} what the person likes, so keep ${kept > 1 ? "those" : "that"} exactly as ${kept > 1 ? "they are" : "it is"}` : ""}, and leave everything else exactly as it is: foundry_read it, then one foundry_edit.`
     : `Nothing to change: the person marked what they like. Keep ${kept > 1 ? "these" : "this"} as ${kept > 1 ? "they are" : "it is"} in every later version, make no new version now, and say so in one line.`;
+  // Pass 245 A: what they like is taste that carries over to later mockups of the project.
+  const taste = kept ? ` What they like is their taste too: when a ${KEEP_MARK} note says something general, keep it as one short rule with remember {design: true, learned_from: "${KEEP_MARK} on ${mockup.title}"}, unless their design guide already says it.` : "";
   const pictures = pictured.length ? ` The attached picture${pictured.length > 1 ? "s show" : " shows"} the place around ${pictured.length > 1 ? "pins" : "pin"} ${pictured.map((index) => marks[index]).join(", ")} as the person saw ${pictured.length > 1 ? "them" : "it"}, in that order.` : "";
-  const detail = [`Notes pinned on the Foundry mockup "${mockup.title}" (id ${mockup.id}, v${mockup.version}). ${asked}${pictures}`,
+  const detail = [`Notes pinned on the Foundry mockup "${mockup.title}" (id ${mockup.id}, v${mockup.version}). ${asked}${taste}${pictures}`,
     ...notes.map((note, index) => {
       const spot = note.spot ? `, pinned ${percent(note.spot.fx)} across and ${percent(note.spot.fy)} down ${note.part.selector === PAGE_SELECTOR ? "the page" : "it"}` : "";
       const around = note.around && pictured.includes(index) ? `\n   in its picture the pin is ${Math.round(note.around.x)}% across and ${Math.round(note.around.y)}% down` : "";

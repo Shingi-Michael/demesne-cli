@@ -103,6 +103,8 @@ test("foundry_built shows the pick beside the build, then records each look on o
     const next = JSON.parse((await run(tool, { id: mockup.id, option: "Monthly", picture: third, where: "localhost:5173/pricing", differences: [] }, again)).text);
     expect(next).toMatchObject({ id: one.id, version: 2, option: "Monthly first", verdict: "matches" });
     expect(asked.at(-1)).toEqual({ option: 1 });
+    // Pass 245 A: what they chose to build is taste to keep for later mockups here.
+    expect(next.message).toMatch(/They chose “Monthly first” to build[\s\S]*learned_from: "picked on /);
   } finally { store.close(); }
 });
 

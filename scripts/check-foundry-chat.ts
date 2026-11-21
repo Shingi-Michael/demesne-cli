@@ -49,7 +49,7 @@ const f = await fixture({
       assert(tools.some(tool => tool.name === "foundry_edit"));
       const read = JSON.parse(current[0]!.content ?? "{}") as { version: number };
       yield call("foundry_edit", { id: previous.id, base_version: read.version, note: "Blue",
-        why: { direction: "Same page, cooler.", look_at: "The blue badge.", starts_from: "new" }, edits: [{ find: "#285b48", replace: "#3158ba" }] });
+        why: { direction: "Same page, cooler.", look_at: "The blue badge.", starts_from: "new", followed: "One accent colour, on the badge only" }, edits: [{ find: "#285b48", replace: "#3158ba" }] });
       yield { type: "finish", reason: "tool_calls" }; return;
     }
     if (!current.length) {
@@ -189,6 +189,10 @@ try {
   assert.deepEqual(order, [`${artifact.id}:2`, `${artifact.id}:1`], "every version, newest first");
   assert.equal(await item(artifact.id, 2).locator(".fd-ver b").textContent(), "v2 · Blue");
   assert.equal(await item(artifact.id, 2).locator(".fd-why dd").first().textContent(), "Same page, cooler.", "each version says its own why");
+  // Pass 245 A: a version that follows what the person liked on earlier mockups says so in a fourth line; one that does not has none.
+  assert.equal(await item(artifact.id, 2).locator(".fd-why dt").last().textContent(), "Your taste");
+  assert.equal(await item(artifact.id, 2).locator(".fd-why dd").last().textContent(), "One accent colour, on the badge only", "the version says which likes it followed");
+  assert.equal(await item(artifact.id, 1).locator(".fd-why dt").count(), 2, "no taste line where nothing was followed");
   // Pass 219 A: each version quotes the ask that made it.
   assert.equal(await item(artifact.id, 2).locator(".fd-ask q").textContent(), "Make it blue", "the ask is quoted");
   await item(artifact.id, 2).screenshot({ path: join(output, "foundry-why.png") });

@@ -1336,6 +1336,8 @@ export interface FoundryWhy {
   dropped: string;
   /// What a new mockup started from: the real thing the chat looked at, or "new".
   from?: string;
+  /// Which of the person's learned likes this version follows (pass 245 A), in a few words each.
+  followed?: string;
 }
 
 export interface FoundryVersion {

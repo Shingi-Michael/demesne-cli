@@ -118,6 +118,8 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
   const frames = new Map<string, BrowserFrame>(), frameWaiters = new Map<string, Set<() => void>>(), told = new Map<string, number>(), shape = new Map<string, number>();
   const visits = new Map<string, BrowserVisit[]>();
   let scheme: boolean | undefined;
+  /// How sharp the screen showing the split is, once a split has said: new tabs draw that sharp.
+  let screen: number | undefined;
   const boxes = new Map<string, { width: number; dpr: number }>();
   const drop = () => { for (const resolve of waiting.values()) resolve(null); waiting.clear(); child = null; };
   const start = () => {
@@ -181,13 +183,14 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
     const timer = setTimeout(stop, COMMAND_TIMEOUT_MS);
     signal.addEventListener("abort", stop, { once: true });
     waiting.set(id, finish);
-    try { const stdin = running.stdin as import("bun").FileSink; stdin.write(`${JSON.stringify({ ...body, id, chat })}\n`); stdin.flush(); } catch { finish(null); }
+    try { const stdin = running.stdin as import("bun").FileSink; stdin.write(`${JSON.stringify({ ...body, ...(body.action === "open" && screen ? { dpr: screen } : {}), id, chat })}\n`); stdin.flush(); } catch { finish(null); }
   })) as BrowserDriver & WatchableBrowser & { close(): void };
   // The newest picture after `after`, waiting a little for one; the host is told someone is watching.
   driver.frame = async (chat, after, signal, aspect, dark, box) => {
     // The split's own width and sharpness, so the page is laid out for the room it is shown in.
     const resized = Boolean(box && (Math.abs(box.width - (boxes.get(chat)?.width ?? 0)) > 8 || box.dpr !== boxes.get(chat)?.dpr));
     if (box && resized) boxes.set(chat, box);
+    if (box) screen = box.dpr;
     // Pages follow the app: dark when Demesne is dark, light when it is light.
     const turned = dark !== undefined && dark !== scheme;
     if (turned) scheme = dark;

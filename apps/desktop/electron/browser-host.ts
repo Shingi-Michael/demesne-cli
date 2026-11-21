@@ -79,7 +79,7 @@ interface Tab { win: BrowserWindow; chat: Chat; n: number; width: "desktop" | "p
   /// The page is streaming its pictures (CDP screencast), and the newest one, to send again with news.
   casting?: boolean; last?: { jpeg: string; ratio: number } }
 /// A chat's browser: its tabs, which one is active, and whether the person has it.
-interface Chat { id: string; tabs: Map<number, Tab>; active: number; next: number; held: boolean; queue: Promise<unknown>; used: number; profile: unknown; downloads: string | null }
+interface Chat { /** How sharp its tabs draw: device pixels per page pixel (2 on a Retina screen). Fixed when a tab is made. */ sharp: number; id: string; tabs: Map<number, Tab>; active: number; next: number; held: boolean; queue: Promise<unknown>; used: number; profile: unknown; downloads: string | null }
 /// A request this computer's page made, for the model to read the answer of.
 interface Seen { id: string; n: number; method: string; url: string; status: number; type: string; mime: string; finished: boolean }
 
@@ -122,6 +122,13 @@ export function browserPartition(chat: string, profile: unknown, kept: boolean):
 type Command = Record<string, unknown> & { id?: unknown; chat?: unknown; action?: unknown };
 type Found = { found: boolean; gone?: boolean; hidden?: boolean; names?: string[]; x: number; y: number; many: number; what: string; covered: string | null; disabled: boolean };
 
+/// How sharp a hidden page draws: as sharp as the screen the split is on (1 to 2 device pixels per page
+/// pixel), so text in the split is crisp. Not told yet: a Mac's screen is Retina, others are taken as plain.
+const sharpness = (dpr: unknown) => {
+  const told = Number(dpr);
+  if (!Number.isFinite(told) || told <= 0) return Number(process.env.DEMESNE_BROWSER_SHARP) >= 1 ? Math.min(2, Number(process.env.DEMESNE_BROWSER_SHARP)) : process.platform === "darwin" ? 2 : 1;
+  return told >= 1.75 ? 2 : told >= 1.25 ? 1.5 : 1;
+};
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /// How many tabs a chat may have, requests kept per tab, and how big a download may be.
 const MAX_TABS = 6, MAX_SEEN = 40, MAX_DOWNLOAD = 50 * 1024 * 1024;
@@ -193,7 +200,7 @@ export function runBrowserHost() {
     tab.casting = true;
     pace(tab);
     const view = TRY_WIDTHS[tab.width];
-    void contents.debugger.sendCommand("Page.startScreencast", { format: "jpeg", quality: 72, maxWidth: 3200, maxHeight: 6400 })
+    void contents.debugger.sendCommand("Page.startScreencast", { format: "jpeg", quality: tab.chat.sharp > 1 ? 55 : 72, maxWidth: 3200, maxHeight: 6400 })
       .catch(() => { tab.casting = false; });
   };
   const stopCast = (tab: Tab) => {
@@ -232,7 +239,7 @@ export function runBrowserHost() {
       // No stream (the debugger is taken): a still picture instead.
       void tab.win.webContents.capturePage().then((image) => {
         if (image.isEmpty()) return;
-        const size = image.getSize(), small = size.width > FRAME_WIDTH ? image.resize({ width: FRAME_WIDTH, quality: "good" }) : image;
+        const size = image.getSize(), small = size.width > FRAME_WIDTH * 2 ? image.resize({ width: FRAME_WIDTH * 2, quality: "good" }) : image;
         sendFrame(tab, small.toJPEG(76).toString("base64"), size.height / Math.max(1, size.width));
       }, () => {});
     }, Math.max(FRAME_MS, 250 - (Date.now() - tab.framed)));
@@ -272,7 +279,7 @@ export function runBrowserHost() {
       if (tab.win.isDestroyed()) return;
       const [width, height] = tab.win.getContentSize();
       const inner = await contents.executeJavaScript("innerWidth").catch(() => -1) as number;
-      if (inner === 0 || tab.sized) { tab.sized = true; await contents.debugger.sendCommand("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: tab.width === "phone" }).catch(() => {}); }
+      if (inner === 0 || tab.sized) { tab.sized = true; await contents.debugger.sendCommand("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: tab.chat.sharp, mobile: tab.width === "phone" }).catch(() => {}); }
     };
     if (contents.isLoading() || !contents.getURL()) contents.once("dom-ready", () => void size()); else void size();
   };
@@ -362,7 +369,7 @@ export function runBrowserHost() {
   function addTab(chat: Chat, width: "desktop" | "phone", session: Session | null, given?: BrowserWindow): Tab {
     const view = TRY_WIDTHS[width];
     const win = given ?? new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
-      webPreferences: { session: session!, offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+      webPreferences: { session: session!, offscreen: chat.sharp > 1 ? { deviceScaleFactor: chat.sharp } : true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
     if (given) win.setContentSize(view.width, view.height);
     const tab: Tab = { win, chat, n: chat.next++, width, sites: new Set(activeTab(chat)?.sites ?? []), local: true, errors: [], failed: [], blocked: [], downloaded: [], framed: 0, requests: [] };
     const contents = win.webContents;
@@ -405,7 +412,7 @@ export function runBrowserHost() {
       if (url && url !== "about:blank" && !allowed(url)) { blocked(url); return { action: "deny" }; }
       if (chat.tabs.size >= MAX_TABS) { if (tab.blocked.length < 4) tab.blocked.push(`${url.slice(0, 200)} was not opened: this chat already has ${MAX_TABS} tabs; close one`); return { action: "deny" }; }
       return { action: "allow", overrideBrowserWindowOptions: { show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
-        webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } } };
+        webPreferences: { offscreen: chat.sharp > 1 ? { deviceScaleFactor: chat.sharp } : true, sandbox: true, contextIsolation: true, nodeIntegration: false } } };
     });
     contents.on("did-create-window", (child) => { const opened = addTab(chat, tab.width, null, child); opened.popup = true; sizePopup(opened); frameSoon(activeTab(chat)); });
     contents.on("console-message", (event) => { if (tab.local && event.level === "error" && tab.errors.length < 8) tab.errors.push(event.message.slice(0, 200)); });
@@ -674,10 +681,12 @@ export function runBrowserHost() {
       if (command.action === "close") { for (const tab of chat?.tabs.values() ?? []) tab.win.destroy(); chats.delete(id); answer(command.id, { closed: true }); return; }
       if (!chat) {
         if (command.action !== "open") { answer(command.id, { error: "No page is open yet: start with action open." }); return; }
-        chat = { id, tabs: new Map(), active: 0, next: 1, held: false, queue: Promise.resolve(), used: Date.now(), profile: command.profile, downloads: typeof command.downloads === "string" && command.downloads ? command.downloads : null };
+        chat = { sharp: sharpness(command.dpr), id, tabs: new Map(), active: 0, next: 1, held: false, queue: Promise.resolve(), used: Date.now(), profile: command.profile, downloads: typeof command.downloads === "string" && command.downloads ? command.downloads : null };
         chats.set(id, chat);
       }
       if (command.action === "open" && typeof command.downloads === "string" && command.downloads) chat.downloads = command.downloads;
+      // The screen it is shown on, once known, decides how sharp its next tabs draw.
+      if (command.action === "open" && command.dpr !== undefined) chat.sharp = sharpness(command.dpr);
       const mine = chat;
       mine.used = Date.now();
       // One command at a time in a chat's browser, in the order they came.

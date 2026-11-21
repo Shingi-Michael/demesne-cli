@@ -88,6 +88,18 @@ test("each version says why it looks the way it does, quietly under the descript
   expect(html.indexOf("fd-why")).toBeLessThan(html.indexOf("fd-ver"));
 });
 
+test("a version that follows what you liked before says so in a fourth quiet line (pass 245 A)", () => {
+  const page = (followed: string) => foundryPage({
+    list: [{ ...artifact("a1", "Checkout page"), description: "The last step." }],
+    versions: [{ artifactId: "a1", version: 1, createdAt: today, sessionId: null, note: "", why: { direction: "Warm paper.", look: "The total.", dropped: "A coupon box.", followed } }],
+    error: "",
+    chatTitle: () => null,
+  });
+  expect(page("Serif headings; one accent, on Pay only")).toContain("<dt>Dropped</dt><dd>A coupon box.</dd><dt>Your taste</dt><dd>Serif headings; one accent, on Pay only</dd></dl>");
+  // Nothing learned applied: no line, never an empty one.
+  for (const none of ["none", "None apply here.", ""]) expect(page(none)).not.toContain("Your taste");
+});
+
 test("a version quotes the ask that made it, and says which merged pull request built it (pass 219 A)", () => {
   const prOpened = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10).toISOString();
   const later = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11).toISOString();

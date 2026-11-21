@@ -302,7 +302,7 @@ const verb = (tool: ToolEntry) =>
     search_files: "Search",
     web_search: "Searched the web",
     web_fetch: "Read",
-    remember: tool.input.design === true ? "Design rule kept" : "Remembered",
+    remember: tool.input.design === true ? tool.input.forget === true ? "Taste forgotten" : (typeof tool.input.learned_from === "string" && tool.input.learned_from.trim() ? "Taste learned" : "Design rule kept") : "Remembered",
     run_tests: "Ran tests",
     routine: ROUTINE_VERBS[String(tool.input.action)] ?? "Routines",
     update_plan: "Planned",

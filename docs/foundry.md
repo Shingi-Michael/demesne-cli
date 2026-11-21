@@ -144,6 +144,32 @@ On the Foundry page the why sits under the description as three quiet lines, one
 
 `foundry_save` and `foundry_edit` take it as `why: {direction, look_at, dropped}`. A save that makes a new page version without it is turned back with a hint. The model fixing its own page in the same ask (after a look or a try) keeps the why it already gave. A later ask is a new version, so it says what changed and why. `foundry_edit` with only `id` and `why` sets the why of the latest version without making a new one. Versions saved before this, and the ready kinds, have none. It is stored per version in the `why` column of `foundry_versions`.
 
+## Taste that carries over
+
+What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.
+
+- **What counts.** A ♥ keep counts at once, and so does a pick you had built. A change counts when the same kind of note comes on a second mockup of the project: "less orange" on the Plans page and "too orange" on the Gift page is taste, one of them alone is a fix to one page.
+- **Where it is kept.** Each one becomes a short line in the project's design guide, `.demesne/design.md`, under "Learned from your notes", and each line says where it came from:
+
+  ```markdown
+  ## Learned from your notes
+
+  Foundry adds these from what you keep, pick and ask for twice on mockups here. Edit or delete any line.
+
+  - Serif headings on warm paper (♥ on Plans page)
+  - One accent colour, on the main button only (noted twice: Plans page, Gift page)
+  - Prices set in the body face, never bold (picked on Plans page)
+  ```
+
+  It is the same file your own rules live in, so every Foundry page reads it. (In a chat with no project the lines go to your own guide, `~/.demesne/design.md`.) At most twelve lines: past that the oldest goes. A newer note that goes against a line takes its place. To drop one, say "forget that one" in a chat, or delete the line in the file.
+- **What you see.** A new mockup that follows some of them gets a fourth quiet why line, "Your taste", naming which, and the answer in the chat says it in a sentence. In the chat the step reads "Taste learned" when a line is added.
+
+How it works. The model words the rule; the daemon keeps it. Reading a mockup (`foundry_read`) hands back what you liked on it and the changes you asked for on the project's other mockups (`changes_elsewhere`, from `foundryChangesElsewhere` in `packages/storage/src/index.ts`), and notes with a ♥ and a build that matches its pick (`foundry_built`) say the same. The model keeps a line with `remember {design: true, learned_from}`, which never asks because it only records your own notes (`replaces` names the older line a newer note overrules; `forget: true` drops one). `withLearnedRule` in `apps/daemon/src/design-guide.ts` writes the section. When the guide holds learned lines, a new `html` or `svg` version says which it follows in `why.followed` ("none" when none apply); a save without it is turned back once with the lines listed.
+
+Read about it:
+- [How Claude remembers your project, Claude Code docs](https://code.claude.com/docs/en/memory): preferences kept as plain lines in a project file that every later session reads. The learned lines work the same way.
+- [I Like, I Wish, I Wonder, SessionLab](https://www.sessionlab.com/methods/i-like-i-wish-i-wonder): what someone likes is feedback as much as what they want changed, which is why a keep counts at once.
+
 ## A critic before you see it
 
 After a page is saved, Foundry renders it off screen once, at 1280 pixels wide (a phone screen, surface `phone`, at 390 instead), and the model gets the picture back ([foundry-look.ts](../apps/daemon/src/foundry-look.ts)). Besides layout faults, the look now carries the page's **design numbers** against targets, each tied to the design guide rule it checks:

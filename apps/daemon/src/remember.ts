@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "@demesne/protocol";
-import { saveDesignRule } from "./design-guide.ts";
+import { forgetLearnedRule, saveDesignRule, saveLearnedRule } from "./design-guide.ts";
 import { INSTRUCTION_FILE_NAMES } from "./instructions.ts";
 import { toolError, type AgentTool } from "./tools.ts";
 
@@ -45,12 +45,18 @@ export function rememberTool(): AgentTool {
       description: "Save a standing rule the user gives for this project (\"always…\", \"never…\", \"from now on…\", \"remember that…\") to the project's DEMESNE.md, so every later chat here follows it. One short line, in the user's words. Not for facts about the task at hand, and not for things the code or git history already shows. A rule about how mockups and pages should look (colours, type, spacing, layout, what never to draw) takes design: true and goes to the design guide (.demesne/design.md) that every Foundry page follows.",
       inputSchema: {
         type: "object",
-        properties: { rule: { type: "string", minLength: 1, maxLength: RULE_MAX }, design: { type: "boolean", description: "True for a rule about how things should look." } },
+        properties: { rule: { type: "string", minLength: 1, maxLength: RULE_MAX }, design: { type: "boolean", description: "True for a rule about how things should look." },
+          learned_from: { type: "string", maxLength: 120, description: "With design: taste you learned from their Foundry notes or picks, not said as a rule. Where it came from: \"♥ on Plans page\", \"picked on Plans page\", \"noted twice: Plans page, Gift page\"." },
+          replaces: { type: "string", maxLength: 120, description: "With learned_from: words of an older learned line this one replaces." },
+          forget: { type: "boolean", description: "With design: the person asked to forget a learned line; rule is some of its words." } },
         required: ["rule"],
         additionalProperties: false,
       },
     },
     permission(input) {
+      // Taste learned from the person's own notes is Foundry's bookkeeping, like a save: it never asks.
+      // Forgetting one is the person's own ask, and only ever takes a learned line away.
+      if (isRecord(input) && input.design === true && (input.forget === true || (typeof input.learned_from === "string" && input.learned_from.trim()))) return null;
       const rule = isRecord(input) && typeof input.rule === "string" ? input.rule : "";
       return { kind: "write", summary: `${isRecord(input) && input.design === true ? "Design rule" : "Remember"}: ${rule.slice(0, 100)}` };
     },
@@ -59,6 +65,15 @@ export function rememberTool(): AgentTool {
       const rule = input.rule.replace(/\s+/g, " ").trim().replace(/^[-*]\s+/, "");
       if (!rule) throw toolError("MISSING_RULE", "the rule is empty", "pass the rule as one short line");
       if (rule.length > RULE_MAX) throw toolError("RULE_TOO_LONG", `the rule is over ${RULE_MAX} characters`, "say it in one short line");
+      if (input.design === true && input.forget === true) {
+        const gone = forgetLearnedRule(context.workspaceRoot, rule);
+        return JSON.stringify(gone.forgotten ? { path: gone.path, forgotten: true, note: "Forgotten: later mockups no longer follow it." } : { path: gone.path, forgotten: false, learned: gone.left, note: "No learned line holds those words. Use words from one of these lines." });
+      }
+      const from = typeof input.learned_from === "string" ? input.learned_from.replace(/[\s()]+/g, " ").trim().slice(0, 120) : "";
+      if (input.design === true && from) {
+        const kept = saveLearnedRule(context.workspaceRoot, rule.slice(0, 200), from, typeof input.replaces === "string" ? input.replaces : "");
+        return JSON.stringify(kept.saved ? { ...kept, rule, learned: true, note: "Learned: later mockups here start from it. No need to tell the person more than a few words." } : { ...kept, learned: true, note: "The design guide already says this." });
+      }
       if (input.design === true) {
         const kept = saveDesignRule(context.workspaceRoot, rule);
         return JSON.stringify(kept.saved ? { ...kept, rule, note: "In the design guide: it holds from the next mockup on." } : { ...kept, note: "Already in the design guide." });

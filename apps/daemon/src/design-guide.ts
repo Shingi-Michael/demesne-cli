@@ -109,7 +109,91 @@ export function designGuideBlock(guides: readonly DesignGuide[], where = DESIGN_
     + (theirs
       ? `\nThe person's own design rules. They win over every rule above where the two differ, and they are not suggestions:\n\n${theirs}\n`
       : "")
-    + `\nWhen the person gives a lasting rule about how things should look ("never…", "always…", "I don't like…" said as a standing preference), keep it with the remember tool and design: true: it is added to ${where} and holds for every later mockup. A one-off ask about this page is not a rule.`;
+    + `\nWhen the person gives a lasting rule about how things should look ("never…", "always…", "I don't like…" said as a standing preference), keep it with the remember tool and design: true: it is added to ${where} and holds for every later mockup. A one-off ask about this page is not a rule.`
+    + (guides.some((guide) => learnedRules(guide.content).length) ? `\n${LEARNED_HOW}` : "");
+}
+
+/// Pass 245 A, taste that carries over: what the person kept, picked and
+/// asked for twice on this project's mockups, kept as short lines in its
+/// design guide under this heading, so the next mockup starts from them.
+export const LEARNED_HEADING = "## Learned from your notes";
+const LEARNED_INTRO = "Foundry adds these from what you keep, pick and ask for twice on mockups here. Edit or delete any line.";
+/// Twelve lines a project: past that the oldest goes.
+export const LEARNED_MAX = 12;
+export const LEARNED_HOW = `Lines under "${LEARNED_HEADING.slice(3)}" are this person's taste from earlier mockups here: follow each one that applies, and name the ones a page follows in why.followed. When they say to forget one, remember {design: true, forget: true, rule: some of its words}.`;
+
+const sectionOf = (lines: string[], heading: string): { start: number; end: number } | null => {
+  const start = lines.findIndex((text) => text.trim() === heading);
+  if (start === -1) return null;
+  let end = start + 1;
+  while (end < lines.length && !/^#{1,2}\s/.test(lines[end]!)) end++;
+  return { start, end };
+};
+/// A learned line without its bullet and without where it came from.
+const ruleOf = (line: string) => line.trim().replace(/^[-*]\s+/, "").replace(/\s+\([^()]*\)$/, "").trim();
+const same = (a: string, b: string) => a.replace(/[.\s]+$/, "").toLowerCase() === b.replace(/[.\s]+$/, "").toLowerCase();
+
+/// The learned lines of a guide, oldest first, as they are written (with where each came from).
+export function learnedRules(content: string): string[] {
+  const lines = content.split("\n"), section = sectionOf(lines, LEARNED_HEADING);
+  if (!section) return [];
+  return lines.slice(section.start + 1, section.end).filter((text) => /^\s*[-*]\s+\S/.test(text)).map((text) => text.trim().replace(/^[-*]\s+/, ""));
+}
+
+/// The guide with a learned line added under its heading (file and heading
+/// made when missing): `rule (from)`. A line that says the same is left as it
+/// is; `replaces` names an older line (some of its words) this one takes the
+/// place of; past twelve the oldest goes. Unchanged when nothing changes.
+export function withLearnedRule(content: string, rule: string, from: string, replaces = ""): string {
+  const line = `- ${rule}${from ? ` (${from})` : ""}`;
+  const block = `${LEARNED_HEADING}\n\n${LEARNED_INTRO}\n\n${line}\n`;
+  if (!content.trim()) return `# Design guide\n\n${block}`;
+  const lines = content.split("\n"), section = sectionOf(lines, LEARNED_HEADING);
+  if (!section) return `${content.replace(/\s+$/, "")}\n\n${block}`;
+  const bullets = () => { const at: number[] = []; for (let i = section.start + 1; i < section.end; i++) if (/^\s*[-*]\s+\S/.test(lines[i]!)) at.push(i); return at; };
+  const old = replaces.trim().toLowerCase();
+  const replaced = old ? bullets().find((index) => ruleOf(lines[index]!).toLowerCase().includes(old)) : undefined;
+  if (bullets().some((index) => index !== replaced && same(ruleOf(lines[index]!), rule))) return content;
+  if (replaced !== undefined) lines[replaced] = line;
+  else {
+    let at = section.end;
+    while (at > section.start + 1 && !lines[at - 1]!.trim()) at--;
+    lines.splice(at, 0, ...(at === section.start + 1 ? ["", line] : [line]));
+    section.end += at === section.start + 1 ? 2 : 1;
+    for (let over = bullets(); over.length > LEARNED_MAX; over = bullets()) { lines.splice(over[0]!, 1); section.end--; }
+  }
+  return lines.join("\n");
+}
+
+/// The guide without the learned line that holds `words` (the newest such line). Unchanged when none does.
+export function withoutLearnedRule(content: string, words: string): string {
+  const lines = content.split("\n"), section = sectionOf(lines, LEARNED_HEADING), wanted = words.replace(/[.\s]+$/, "").trim().toLowerCase();
+  if (!section || !wanted) return content;
+  for (let index = section.end - 1; index > section.start; index--) {
+    if (!/^\s*[-*]\s+\S/.test(lines[index]!) || !lines[index]!.toLowerCase().includes(wanted)) continue;
+    lines.splice(index, 1);
+    return lines.join("\n");
+  }
+  return content;
+}
+
+/// The learned lines of the guide in a chat's folder (the project's, or the person's own outside a project).
+export function learnedIn(workspaceRoot: string): string[] {
+  const name = DESIGN_GUIDE_FILES.find((file) => existsSync(join(workspaceRoot, file)));
+  if (!name) return [];
+  try { return learnedRules(readFileSync(join(workspaceRoot, name), "utf8")); } catch { return []; }
+}
+
+/// Adds a learned line to the guide of the chat's folder.
+export function saveLearnedRule(workspaceRoot: string, rule: string, from: string, replaces = ""): { path: string; saved: boolean } {
+  const name = DESIGN_GUIDE_FILES.find((file) => existsSync(join(workspaceRoot, file))) ?? DESIGN_GUIDE_FILES[0];
+  const path = join(workspaceRoot, name);
+  const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const after = withLearnedRule(before, rule, from, replaces);
+  if (after === before) return { path: name, saved: false };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, after, "utf8");
+  return { path: name, saved: true };
 }
 
 /// The guide file with `rule` added under "## Rules" (the file and the
@@ -144,3 +228,13 @@ export function saveDesignRule(workspaceRoot: string, rule: string): { path: str
 
 /// Test hook: forget what was read.
 export function clearDesignGuideCache(): void { cache.clear(); }
+
+/// Drops a learned line the person asked to forget. `left` is what is still learned.
+export function forgetLearnedRule(workspaceRoot: string, words: string): { path: string; forgotten: boolean; left: string[] } {
+  const name = DESIGN_GUIDE_FILES.find((file) => existsSync(join(workspaceRoot, file))) ?? DESIGN_GUIDE_FILES[0];
+  const path = join(workspaceRoot, name);
+  const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const after = withoutLearnedRule(before, words);
+  if (after !== before) writeFileSync(path, after, "utf8");
+  return { path: name, forgotten: after !== before, left: learnedRules(after) };
+}

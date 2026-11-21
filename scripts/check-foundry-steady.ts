@@ -18,7 +18,7 @@ const f = await fixture({
   async *stream(messages) {
     const user = String(messages.findLast(m => m.role === "user")?.content);
     const done = messages.slice(messages.findLastIndex(m => m.role === "user") + 1).filter(m => m.role === "tool").length;
-    if (user === prompt && !done) {
+    if (user.startsWith(prompt) && !done) {
       for (const word of "I'll mock it in Foundry so you can try it.".split(" ")) { await Bun.sleep(60); yield { type: "text_delta", delta: `${word} ` }; }
       const step = Math.ceil(args.length / PIECES);
       for (let i = 0; i < args.length; i += step) {

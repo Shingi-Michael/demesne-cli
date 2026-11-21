@@ -158,7 +158,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-thread { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 3px 10px 3px 28px; border-radius: 8px; color: var(--t3); font-size: 12.5px; text-align: left; }
 .sidebar-thread:hover { color: var(--t2); box-shadow: inset 0 0 0 1px var(--hair); }
 .sidebar-thread.on { color: var(--t1); background: var(--tone); }
-.sidebar-thread .th-ring { width: 13px; height: 13px; flex: none; }
+.sidebar-thread .th-light { width: 6px; height: 6px; margin: 0 3px; --glow: 3px; }
 .sidebar-row-actions { position: absolute; top: 50%; right: 5px; display: flex; gap: 1px; margin-top: -11px; opacity: 0; pointer-events: none; transition: opacity 140ms var(--ease); }
 .sidebar-row-actions button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 8px; color: var(--t3); }
 .sidebar-row-actions button:hover { color: var(--t1); background: var(--tone2); }
@@ -2138,10 +2138,11 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .file-edit .fe-status { flex: 1 1 170px; min-width: 0; color: var(--t3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .file-edit .fe-replay { border-color: var(--hair); color: var(--t2); margin-left: auto; }
 
-/* Threads (pass 232): one ribbon at the top of the chat that started them.
-   It is the checklist's ribbon (.plan-ribbon): a bar that says how every
-   live thread stands, one fine segment each; opened, one line per thread
-   over the chat, sorted by what needs you. There is no split and no pane. */
+/* Threads (pass 232, drawn as lights since pass 246 C): one ribbon at the
+   top of the chat that started them. Folded it is a small glass pill: one
+   steady light per live thread and how they stand in words. Opened it is one
+   sheet with no outline, a line per thread over the chat, sorted by what
+   needs you. Nothing turns and nothing shimmers. There is no split and no pane. */
 #threads-ribbon[hidden] { display: none; }
 /* The stage's padding is not part of what a sticky bar sticks to, so the bar is pulled up over it. */
 .desktop #threads-ribbon { position: sticky; top: -28px; z-index: 4; box-sizing: border-box; height: 58px; max-width: 780px; margin: -28px auto 2px; }
@@ -2151,26 +2152,28 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop #threads-ribbon .plan-ribbon.tr { position: absolute; left: 32px; right: 0; top: 6px; margin: 0; padding: 0; }
 .desktop .live-app.has-threads #conversation .plan-ribbon:not(.ended) { top: 30px; }
 @media (max-width: 1150px) { .desktop .live-app.has-threads #conversation .plan-ribbon:not(.ended) { top: 36px; } }
-.desktop .tr .pr-card { background: color-mix(in srgb, var(--surface2) 94%, var(--ink)); }
+.desktop .tr .pr-card { border-radius: 18px; background: color-mix(in srgb, var(--surface2) 94%, var(--ink)); box-shadow: 0 12px 28px -18px rgb(0 0 0 / 0.5); }
+/* Folded, the card is only as wide as its words; the list inside does not widen it. */
+.desktop .tr:not(.open) .pr-card { width: fit-content; border-radius: 17px; }
+.desktop .tr:not(.open) .pr-fold { width: 0; min-width: 100%; }
 .desktop .tr .pr-card:hover { background: color-mix(in srgb, var(--surface3) 96%, var(--ink)); }
-.desktop .tr.open .pr-card { background: color-mix(in srgb, var(--surface2) 98%, var(--ink)); box-shadow: inset 0 0 0 1px var(--hair), 0 26px 50px -22px rgb(0 0 0 / 0.8); }
-.desktop .tr .pr-bar { padding: 8px 14px 10px; }
-.desktop .tr:is(.still, .asks) .pr-name { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--t1); animation: none; }
-.desktop .tr.asks .pr-name { color: var(--warn); }
-.desktop .tr .pr-segs i.y { background: var(--warn); }
-.desktop .tr .pr-segs i.r { background: var(--bad); }
-.desktop .tr .pr-segs i.p { background: var(--tone2); }
-.desktop .tr .pr-list { max-height: calc(100vh - 262px); overflow: hidden auto; padding: 0 6px 6px; box-shadow: inset 0 1px 0 var(--hair); }
+.desktop .tr.open .pr-card { background: color-mix(in srgb, var(--surface2) 98%, var(--ink)); box-shadow: 0 26px 50px -22px rgb(0 0 0 / 0.8); }
+.desktop .tr .pr-bar { padding: 7px 14px 7px 10px; }
+.tr-lights { grid-column: 1; display: inline-flex; align-items: center; margin-right: 8px; }
+.tr-lights .th-light { margin: 0 3px; }
+/* The bar's words stand still (the checklist's shimmer is not for threads), amber when a thread needs you. */
+.desktop .plan-ribbon.tr:not(.ended) .pr-name { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--t1); animation: none; }
+.desktop .plan-ribbon.tr.asks:not(.ended) .pr-name { color: var(--warn); }
+.desktop .tr .pr-list { max-height: calc(100vh - 262px); overflow: hidden auto; padding: 0 6px 8px; }
 .desktop .tr .pr-fold > div { min-height: 0; overflow: hidden; }
 
 /* One line per thread: ring, name, plain words, its minutes, and the one next step. */
 .tr-item { flex: none; display: flex; flex-direction: column; }
-.tr-item:first-child { margin-top: 6px; }
+.tr-item:first-child { margin-top: 2px; }
 .tr-head { display: flex; align-items: center; }
-.tr-row { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; align-items: center; gap: 11px; height: 32px; padding: 0 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: background 150ms var(--ease); }
+.tr-row { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 6px; border-radius: 10px; cursor: pointer; white-space: nowrap; transition: background 150ms var(--ease); }
 .tr-row:hover, .tr-item.open .tr-row { background: var(--tone); }
 .tr-row:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-.tr-row .th-ring { width: 15px; height: 15px; flex: none; }
 .tr-name { flex: 0 1 auto; min-width: 72px; overflow: hidden; text-overflow: ellipsis; color: var(--t1); font-size: 13.5px; }
 .tr-words { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 :is(.tr-words, .tr-peek, .tr-foot) .plus { color: var(--ok); } :is(.tr-words, .tr-peek, .tr-foot) .minus { color: var(--bad); }
@@ -2181,17 +2184,18 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .tr-chev { flex: none; width: 12px; height: 12px; fill: none; stroke: var(--t4); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 150ms, transform 220ms var(--ease); }
 .tr-row:hover .tr-chev, .tr-item.open .tr-chev { opacity: 1; }
 .tr-item.open .tr-chev { transform: rotate(90deg); }
-.tr-next { all: unset; flex: none; height: 24px; padding: 0 10px 0 6px; color: var(--acc); font-size: 12.5px; cursor: pointer; }
-.tr-next:hover { text-decoration: underline; }
-.tr-next:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; border-radius: 6px; }
+/* The one next step, as a soft pill in the state's colour. */
+.tr-next { all: unset; flex: none; height: 24px; margin: 0 4px 0 8px; padding: 0 11px; border-radius: 12px; background: color-mix(in srgb, var(--c, var(--t1)) 14%, transparent); color: var(--c, var(--t1)); font-size: 12.5px; font-weight: 500; line-height: 24px; cursor: pointer; transition: background-color 140ms var(--ease); }
+.tr-next:hover { background: color-mix(in srgb, var(--c, var(--t1)) 22%, transparent); }
+.tr-next:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
 .tr-next:disabled { opacity: .6; cursor: default; }
-.tr-next.you { color: var(--warn); }
+.tr-next.you { --c: var(--warn); } .tr-next.ready { --c: var(--ok); }
 /* An open ready line has Merge in what it shows; the word at its end steps aside. */
 .tr-item.open.ready .tr-next, .tr-item.open.prop .tr-next, .tr-item.open.failed .tr-next { display: none; }
 
 /* What an open line shows, hung on the fine rule the steps use: its last
    words and steps, or what it changed. */
-.tr-peek { margin: 2px 8px 10px 15px; padding: 2px 0 2px 19px; border-left: 1px solid var(--hair2); display: flex; flex-direction: column; gap: 6px; }
+.tr-peek { margin: 0 10px 12px 29px; display: flex; flex-direction: column; gap: 6px; }
 .tr-say { margin: 0; color: var(--t2); font-size: 13px; line-height: 20px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .tr-peek .steps { margin: 0; padding: 0; border: 0; pointer-events: none; }
 .tr-peek .steps::before { display: none; }
@@ -2204,46 +2208,55 @@ div.tr-file, .tr-file:disabled { cursor: default; }
 .tr-file .chev { flex: none; width: 11px; height: 11px; fill: none; stroke: var(--t4); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 200ms var(--ease); }
 .tr-file[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .tr-file .counts { flex: none; margin-left: auto; font: 12px Inter, sans-serif; font-variant-numeric: tabular-nums; }
-.tr-diff { margin: 2px 0 6px; padding: 7px 0; border-radius: 8px; background: rgb(0 0 0 / 0.24); font: 12px/19px "JetBrains Mono", monospace; max-height: 260px; overflow: auto; scrollbar-width: thin; }
+.tr-diff { margin: 2px 0 6px; padding: 9px 0; border-radius: 12px; background: var(--tone); font: 12px/19px "JetBrains Mono", monospace; max-height: 260px; overflow: auto; scrollbar-width: thin; }
 .tr-diff div { padding: 0 12px; white-space: pre; color: var(--t3); min-width: max-content; }
-.tr-diff .a { background: color-mix(in srgb, var(--ok) 11%, transparent); color: color-mix(in srgb, var(--ok) 45%, var(--t1)); }
-.tr-diff .d { background: color-mix(in srgb, var(--bad) 11%, transparent); color: color-mix(in srgb, var(--bad) 45%, var(--t1)); }
+.tr-diff .a { color: color-mix(in srgb, var(--ok) 70%, var(--t1)); }
+.tr-diff .d { color: color-mix(in srgb, var(--bad) 70%, var(--t1)); }
 .tr-diff .h { color: var(--t4); }
 .tr-more { color: var(--t4); font-size: 12px; }
-.tr-note { display: flex; align-items: center; gap: 14px; margin-top: 2px; color: var(--t4); font-size: 12px; }
-.tr-note > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-note { display: flex; align-items: center; gap: 8px; margin-top: 4px; color: var(--t4); font-size: 12px; }
+.tr-why { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-note .sp, .tr-foot .sp { flex: 1; }
-.tr-link { all: unset; cursor: pointer; color: var(--t3); font-size: 12px; white-space: nowrap; }
+.tr-link { all: unset; cursor: pointer; padding: 0 6px; color: var(--t3); font-size: 12px; white-space: nowrap; }
+.tr-link.soft { height: 26px; padding: 0 12px; border-radius: 13px; background: var(--tone2); color: var(--t2); font-size: 12.5px; line-height: 26px; }
+.tr-link.soft:hover { background: color-mix(in srgb, var(--t1) 11%, transparent); }
 .tr-link:hover { color: var(--t1); }
 .tr-link:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
 .tr-link.armed { color: var(--bad); }
 .tr-link:disabled { opacity: .6; cursor: default; }
-.tr-go { all: unset; cursor: pointer; height: 26px; padding: 0 13px; border-radius: 8px; background: var(--acc); color: #0b1220; font-size: 12.5px; font-weight: 500; line-height: 26px; white-space: nowrap; }
+.tr-go { all: unset; cursor: pointer; height: 26px; padding: 0 14px; border-radius: 13px; background: color-mix(in srgb, var(--t1) 13%, transparent); color: var(--t1); font-size: 12.5px; font-weight: 500; line-height: 26px; white-space: nowrap; }
+.tr-go.ok { background: var(--ok); color: #0b1a12; }
 .tr-go:hover { filter: brightness(1.08); }
 .tr-go:focus-visible { outline: 2px solid var(--t1); outline-offset: 2px; }
 .tr-go:disabled { opacity: .6; cursor: default; }
 /* Under the lines, only once every live thread is ready. */
-.tr-foot { flex: none; display: flex; align-items: center; gap: 12px; margin: 4px 8px; padding: 9px 0 3px; border-top: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tr-foot { flex: none; display: flex; align-items: center; gap: 12px; margin: 4px 8px 0 12px; padding: 4px 0 0; color: var(--t3); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Under the reply that started threads: one quiet line of what it started. */
 .tr-begun:empty { display: none; }
 .tr-begun { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 4px 0 2px 32px; color: var(--t4); font-size: 12.5px; }
-.tr-begun button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; color: var(--t3); }
+.tr-begun button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: var(--t3); }
 .tr-begun button:hover { color: var(--t1); }
 .tr-begun button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
-.tr-begun .th-ring { width: 13px; height: 13px; }
 
 /* A question from a thread comes to the chat that started it, and says who asks. */
-.ask-from { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; color: var(--t3); font-size: 12px; }
-.ask-from .th-ring { width: 13px; height: 13px; }
-.ask-from b { color: var(--t2); font-weight: 500; }
+.ask-from { display: flex; align-items: center; gap: 5px; margin: 0 0 4px; color: var(--warn); font-size: 12px; }
+.ask-from b { font-weight: 500; }
+/* A thread's question rests on soft glass with no outline: its light and name on top, its answers as plain rows. */
+.desktop .ask-card.threaded { isolation: isolate; padding: 12px 16px 14px; }
+.desktop .ask-card.threaded::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: 18px; background: color-mix(in srgb, var(--t1) 6%, transparent); pointer-events: none; }
+.desktop #question .ask-card.threaded { padding-left: 48px; }
+.desktop #question .ask-card.threaded::before { left: 32px; }
+.desktop .ask-card.threaded .ask-q i { display: none; }
+.desktop .ask-card.threaded .ask-choices { gap: 2px; border-radius: 0; box-shadow: none; overflow: visible; margin: 0 -8px; }
+.desktop .ask-card.threaded .ask-choice { min-height: 40px; padding: 4px 8px; border-radius: 10px; box-shadow: none; }
 @keyframes ask-nudge { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 35%, transparent); } }
 @media (prefers-reduced-motion: no-preference) { .ask-card.nudge { animation: ask-nudge 700ms var(--ease); border-radius: 12px; } }
+@media (prefers-reduced-motion: no-preference) { .ask-card.threaded.nudge { animation: none; } .ask-card.threaded.nudge::before { animation: ask-nudge 700ms var(--ease); } }
 
-/* A thread's own chat is a chat like any other: a tab with its ring, and
+/* A thread's own chat is a chat like any other: a tab with its light, and
    one quiet line at its top that says whose thread it is. */
-.tab-ring { display: inline-flex; flex: none; margin-right: 1px; }
-.tab-ring .th-ring { width: 13px; height: 13px; }
+.tab-light { display: inline-flex; flex: none; margin-right: 1px; }
 .tr-brief { align-self: stretch; margin: 0 0 8px; padding-bottom: 14px; border-bottom: 1px solid var(--hair); color: var(--t3); font-size: 12.5px; line-height: 20px; }
 .tr-brief b { color: var(--t2); font-weight: 500; }
 .tr-brief code { padding: 1px 6px; border-radius: 5px; background: var(--tone2); color: var(--t2); font: 11.5px "JetBrains Mono", monospace; }
@@ -2251,16 +2264,11 @@ div.tr-file, .tr-file:disabled { cursor: default; }
 .tr-brief button:hover { color: var(--t1); text-decoration: underline; }
 .tr-brief button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
 
-.th-ring { width: 18px; height: 18px; fill: none; stroke-width: 2.2; }
-.th-ring .bg { stroke: var(--hair2); }
-/* The ring fills from the top, and a working one turns about its own centre. */
-.th-ring .fg { stroke: var(--acc); stroke-linecap: round; transform-origin: 9px 9px; transform: rotate(-90deg); transition: stroke-dashoffset 400ms ease-out; }
-.th-ring.you .fg { stroke: var(--warn); } .th-ring.ready .fg { stroke: var(--ok); } .th-ring.failed .fg { stroke: var(--bad); }
-.th-ring.waits .bg, .th-ring.prop .bg { stroke-dasharray: 2.6 3.2; stroke: var(--t4); }
-.th-ring.prop .fg { display: none; }
-.th-ring.ok { stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-@media (prefers-reduced-motion: no-preference) { .th-ring.work .fg { animation: th-turn 2.4s linear infinite; } }
-@keyframes th-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+/* A thread's light: a steady dot with a faint glow. It never moves. */
+.th-light { --c: var(--acc); --glow: 3.5px; flex: none; display: inline-block; box-sizing: border-box; width: 7px; height: 7px; margin: 0 4px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 var(--glow) color-mix(in srgb, var(--c) 20%, transparent), 0 0 9px 1px color-mix(in srgb, var(--c) 32%, transparent); }
+.th-light.you { --c: var(--warn); } .th-light.ready { --c: var(--ok); } .th-light.failed { --c: var(--bad); }
+.th-light:is(.prop, .waits) { background: none; box-shadow: inset 0 0 0 1.5px var(--t4); }
+svg.th-light.ok { width: 15px; height: 15px; margin: 0; border-radius: 0; background: none; box-shadow: none; fill: none; stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 @media (prefers-reduced-motion: reduce) { .tr-row, .tr-chev, .tr-file .chev { transition: none; } }
 
 /* Above the composer: what a merge or a delete just did. */
@@ -2271,11 +2279,9 @@ div.tr-file, .tr-file:disabled { cursor: default; }
 
 /* A thread reporting back: one quiet line in the orchestrator's chat. */
 .desktop .request.thread-report { background: none; box-shadow: none; padding: 0; max-width: none; align-self: stretch; display: flex; align-items: center; }
-.tr-line { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--t3); font-size: 12px; }
+.tr-line { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--t3); font-size: 12px; }
 .tr-line b { color: var(--t2); font-weight: 500; }
 .tr-line:hover b { color: var(--t1); }
-.tr-mark { color: var(--ok); display: inline-flex; } .tr-mark .ico { width: 14px; height: 14px; }
-.thread-report.failed .tr-mark { color: var(--bad); }
 .thread-report .request-meta { margin-left: auto; }
 
 /* Drive lives at the foot of the sidebar, above you and Settings (pass 132 C):

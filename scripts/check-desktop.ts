@@ -1862,7 +1862,8 @@ try {
   await ribbon.locator(".pr-bar").click();
   await until(() => threadLines.count().then(count => count === 3), "the bar opens to one line per live thread");
   assert.deepEqual(await ribbon.locator(".tr-name").allInnerTexts(), ["Write the farewell", "Write the notes", "Write the greeting"], "what needs you is on top, then ready, then working");
-  assert.deepEqual(await ribbon.locator(".pr-segs i").evaluateAll(nodes => nodes.map(node => node.className)), ["y", "d", "n"], "one segment per thread");
+  assert.deepEqual(await ribbon.locator(".tr-lights .th-light").evaluateAll(nodes => nodes.map(node => node.className)), ["th-light you", "th-light ready", "th-light work"], "one light per thread");
+  assert.equal(await page.locator(".th-light").evaluateAll(nodes => nodes.filter(node => getComputedStyle(node).animationName !== "none").length), 0, "no thread light moves");
   assert.equal(await ribbon.locator(".tr-item.you .tr-next").innerText(), "Answer");
   assert.equal(await ribbon.locator(".tr-item.ready .tr-next").innerText(), "Merge");
   assert.equal(await ribbon.locator(".tr-item.work .tr-next").count(), 0, "a working thread's line ends in its minutes, not a button");
@@ -1902,7 +1903,7 @@ try {
   // A thread's full chat is a chat like any other: a tab with its ring, and one quiet line that says whose thread it is.
   const tabsBefore = await page.locator("#workspace-tabs .bar-tab").count();
   const closeThreadTab = async () => {
-    const tab = page.locator("#workspace-tabs .bar-tab:has(.tab-ring)").first();
+    const tab = page.locator("#workspace-tabs .bar-tab:has(.tab-light)").first();
     await tab.hover();
     await tab.locator(".bar-tab-close").click();
     await until(() => page.locator("#workspace-tabs .bar-tab").count().then(count => count === tabsBefore), "the thread's tab closes like any tab");
@@ -1913,7 +1914,7 @@ try {
   await until(() => brief.isVisible(), "the thread's chat opens on its brief, not its prompt", 20_000);
   assert.match((await brief.innerText()).replace(/\s+/g, " "), /^A thread of .+ · Add threads-b\.md with a Hello heading\. · Only touches threads-b\.md$/);
   await until(() => ribbon.isHidden(), "a thread's own chat has no ribbon");
-  await until(() => page.locator("#workspace-tabs .bar-tab.on .tab-ring").count().then(count => count === 1), "its tab carries its ring");
+  await until(() => page.locator("#workspace-tabs .bar-tab.on .tab-light .th-light").count().then(count => count === 1), "its tab carries its light");
   assert.equal(await page.locator("#workspace-tabs .bar-tab").count(), tabsBefore + 1, "it is one more tab in the one row of tabs");
   await textIncludes("Waiting on the gate before writing the greeting.");
   assert(await page.locator("#composer textarea").isVisible(), "with the chat's own composer");
@@ -1953,7 +1954,7 @@ try {
   // Merged threads leave the ribbon; the reply's line stays as the record.
   await until(() => ribbon.isHidden(), "no live thread, no ribbon", 20_000);
   await until(() => begun.innerText().then(text => text.startsWith("Merged")), "the reply's line says they are merged");
-  assert.equal(await begun.locator(".th-ring.ok").count(), 2, "each merged thread's ring is a tick");
+  assert.equal(await begun.locator(".th-light.ok").count(), 2, "each merged thread's light is a tick");
   await capture("17-threads-merged");
   await begun.locator("button").first().click();
   await until(() => page.locator("#conversation .tr-brief").isVisible(), "a merged thread's name opens its chat", 20_000);

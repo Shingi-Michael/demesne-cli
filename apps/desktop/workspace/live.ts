@@ -15,7 +15,7 @@ import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
-import { ring as threadRing, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
+import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountSakura, type Sakura } from "./sakura.ts";
@@ -810,7 +810,7 @@ function renderSidebar() {
   // A chat Drive runs on its own branch (a worktree) joins the list with a
   // branch mark; its branch is in the tooltip.
   const branches = new Map([state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job?.sessionId)).map((job) => [job.sessionId!, job.branch] as const));
-  // A live thread's chat has its row under its orchestrator, with its ring: not a second row among the chats.
+  // A live thread's chat has its row under its orchestrator, with its light: not a second row among the chats.
   const threadChats = new Set(state.threads.list.flatMap((fix) => fix.sessionId && fix.status !== "applied" && fix.status !== "discarded" ? [fix.sessionId] : []));
   const sessions = state.sessions.filter(item => !deletedSessions.has(item.id) && !threadChats.has(item.id));
   const prs = sessions.filter((item) => item.prUrl).map((item) => `${item.id}=${item.prUrl}`).join(",");
@@ -940,11 +940,11 @@ function renderSidebar() {
     return `<div class="sidebar-housed${agentsOpen ? " open" : ""}" role="group" aria-label="Agents"><div class="sidebar-label sidebar-housed-label"><span>Agents</span>${todayLink}</div>${head}<div class="sidebar-agents-rows"${agentsOpen ? "" : " hidden"}>${rows}</div></div>`;
   };
   // An orchestrator's threads hang under its row (pass 211 A), each with its
-  // ring; a row opens that thread's own chat, a chat like any other (pass
+  // light; a row opens that thread's own chat, a chat like any other (pass
   // 232). A merged thread leaves the sidebar as it leaves the ribbon.
   const threadLines = (id: string) => {
     const mine = state!.threads.list.filter((fix) => fix.from === id && fix.status !== "discarded" && fix.status !== "applied");
-    return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-jump", `${threadRing(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id, chat: fix.sessionId, go: "chat" }, `sidebar-thread${fix.sessionId && fix.sessionId === state!.session?.id && !pageOpen ? " on" : ""}`)).join("")}</div>` : "";
+    return mine.length ? `<div class="sidebar-threads" role="group" aria-label="Threads">${mine.map((fix) => btn("thread-jump", `${threadLight(fix)}<span class="sidebar-session-name">${h(fix.title)}</span>`, { id: fix.id, chat: fix.sessionId, go: "chat" }, `sidebar-thread${fix.sessionId && fix.sessionId === state!.session?.id && !pageOpen ? " on" : ""}`)).join("")}</div>` : "";
   };
   const groupRows = (key: string, items: typeof sessions, nested: (item: typeof sessions[number]) => boolean = () => false, right: (item: typeof sessions[number]) => string = () => "") => {
     const limit = query || expandedProjectChats.has(key) ? Infinity : SIDEBAR_ROWS;
@@ -2088,9 +2088,9 @@ function renderTabs() {
   const tones = shown.map((id) => chatTone(byId.get(id)!));
   // The open chat's own time moves with every streamed word; its tab has no
   // glance to key by it, so it doesn't redraw the strip.
-  // A thread's own chat is a tab like any other; its ring says how the thread stands (pass 232).
+  // A thread's own chat is a tab like any other; its light says how the thread stands (pass 232, pass 246 C).
   const threadOf = (id: string) => state!.threads.list.find((fix) => fix.sessionId === id);
-  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, tabs.pinned, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words, shown.map((id) => { const fix = threadOf(id); return fix ? threadRing(fix) : ""; })]);
+  const signature = JSON.stringify([shown.map((id) => [id, byId.get(id)!.title, chatOpen && id === current!.id ? "" : byId.get(id)!.updatedAt]), tones, tabs.pinned, chatOpen && current!.id, here, call?.id, call?.title, rimNow?.words, shown.map((id) => { const fix = threadOf(id); return fix ? threadLight(fix) : ""; })]);
   if (signature === tabsSignature) return;
   renderRailChats(shown.map((id, index) => ({ item: byId.get(id)!, tone: tones[index]!, on: chatOpen && id === current!.id })));
   tabsSignature = signature;
@@ -2107,7 +2107,7 @@ function renderTabs() {
       : `<span class="bar-tab-words"><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span><span class="bar-tab-sub" aria-hidden="true">${h(sub)}</span></span>`;
     // The close slot is always kept, so a name never moves when × shows.
     const close = pinned ? "" : btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `);
-    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-ring" aria-hidden="true">${threadRing(thread)}</span>` : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
+    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-light" aria-hidden="true">${threadLight(thread)}</span>` : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
@@ -5250,8 +5250,8 @@ function questionCard(question: WorkspaceQuestion): string {
       !choices.length && !interview ? btn("question-skip", "Let it decide", { id }, "ask-link") : "",
       question.open ? btn("question-dismiss", "Dismiss", { id }, "ask-link") : ""].filter(Boolean);
   const asker = question.thread && state?.threads.list.find((fix) => fix.id === question.thread!.id);
-  const from = question.thread ? `<div class="ask-from">${asker ? threadRing(asker) : ""}<span><b>${h(question.thread.title)}</b> asks</span></div>` : "";
-  return `<div class="ask-card${question.open ? " open" : ""}" data-question="${h(id)}">${from}${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<div class="ask-q"><i aria-hidden="true"></i><p class="ask-text">${words}</p>${total > 1 ? `<span class="ask-n">${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${rows}${foot.length ? `<div class="ask-foot">${foot.join("")}</div>` : ""}</div>`;
+  const from = question.thread ? `<div class="ask-from">${asker ? threadLight(asker) : ""}<span><b>${h(question.thread.title)}</b> asks</span></div>` : "";
+  return `<div class="ask-card${question.open ? " open" : ""}${question.thread ? " threaded" : ""}" data-question="${h(id)}">${from}${trail ? `<ol class="ask-trail">${trail}</ol>` : ""}<div class="ask-q"><i aria-hidden="true"></i><p class="ask-text">${words}</p>${total > 1 ? `<span class="ask-n">${Math.min(index + 1, total)} of ${total}</span>` : ""}</div>${rows}${foot.length ? `<div class="ask-foot">${foot.join("")}</div>` : ""}</div>`;
 }
 function renderQuestion() {
   if (!state) return;
@@ -7642,7 +7642,7 @@ function drawThreadsRibbon(host: HTMLElement, html: string) {
   old.className = next.className;
   const oldBar = old.querySelector(".pr-bar")!, bar = next.querySelector(".pr-bar")!;
   for (const name of ["aria-expanded", "aria-label"]) oldBar.setAttribute(name, bar.getAttribute(name) ?? "");
-  for (const part of [".pr-name", ".pr-ct", ".pr-segs"]) { const from = oldBar.querySelector(part)!, to = bar.querySelector(part)!; if (from.innerHTML !== to.innerHTML) from.innerHTML = to.innerHTML; }
+  for (const part of [".pr-name", ".pr-ct", ".tr-lights"]) { const from = oldBar.querySelector(part)!, to = bar.querySelector(part)!; if (from.innerHTML !== to.innerHTML) from.innerHTML = to.innerHTML; }
   old.querySelector(".pr-fold")!.toggleAttribute("inert", next.querySelector(".pr-fold")!.hasAttribute("inert"));
   const oldList = old.querySelector<HTMLElement>(".pr-list")!, list = next.querySelector<HTMLElement>(".pr-list")!;
   const key = (node: Element) => (node as HTMLElement).dataset.thread ?? node.className;

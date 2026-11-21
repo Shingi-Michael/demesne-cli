@@ -71,3 +71,16 @@ test("a capture kept with the chat counts as looking first, even after a restart
     expect(store.listFoundryArtifacts().length).toBe(1);
   } finally { store.close(); }
 });
+
+test("a look at the person's running app, kept with the chat, counts as looking first too", async () => {
+  const { store, session, turn } = chat();
+  try {
+    expect(store.lookedAtPage(session.id)).toBe(false);
+    turn("check my plans page").step("look_at_page", "{}");
+    expect(store.lookedAtPage(session.id)).toBe(true);
+    const later = turn("now mock a calmer one");
+    await foundrySaveTool(store).execute({ title: "Calmer plans", kind: "html", description: "The plans page, calmer.", source: "<!doctype html><title>x</title><main>Plans</main>",
+      why: { direction: "Calm.", look_at: "The cards.", starts_from: "the plans page on localhost" } }, { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: later.id });
+    expect(store.listFoundryArtifacts().length).toBe(1);
+  } finally { store.close(); }
+});

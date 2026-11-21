@@ -1580,7 +1580,7 @@ const split = {
   session: "", open: false, openedTurn: null as string | null, closedTurn: null as string | null, closedAsk: null as string | null,
   seq: 0, frame: null as null | SplitFrame,
   /// Who holds the page: the model asked ("model"), you took it ("person"), or nobody.
-  held: null as null | "model" | "person", heldAt: 0,
+  held: null as null | "model" | "person", heldAt: 0, handedAsk: "",
   tabs: [] as SplitTab[], visits: [] as SplitVisit[],
   /// An earlier page on show instead of the live one.
   still: null as null | { seq: number; src: string; url: string },
@@ -1612,7 +1612,7 @@ function renderBrowserSplit() {
   const total = el("workspace").clientWidth || innerWidth;
   aside.style.width = `${splitWidth(split.width || Math.round(total * 0.48), total)}px`;
   const ask = handOverAsk(run), last = browserSteps(run).at(-1);
-  if (ask && !split.held) split.held = "model";
+  if (ask && !split.held && split.handedAsk !== ask.toolCallId) split.held = "model";
   const took = split.held === "person" && !ask;
   const working = run && last && last.state === "running" && !ask ? `${verb(last as unknown as ToolEntry)} ${stepTarget(last as unknown as ToolEntry)}`.trim() : null;
   const foot = split.still ? { tone: "" as const, words: "An earlier page, as it looked then." } : splitFoot(ask, took ? null : working, Boolean(split.frame), took);
@@ -1694,7 +1694,7 @@ function buildBrowserSplit(aside: HTMLElement) {
     + `<div class="bs-head"><i class="bs-light"></i><span class="bs-nav" hidden><button type="button" class="bs-icon" data-go="back" aria-label="Back" title="Back">${BS_ICONS.back}</button><button type="button" class="bs-icon" data-go="forward" aria-label="Forward" title="Forward">${BS_ICONS.forward}</button><button type="button" class="bs-icon" data-go="reload" aria-label="Reload" title="Reload">${BS_ICONS.reload}</button></span>`
     + `<input class="bs-url" readonly spellcheck="false" aria-label="Address"><button type="button" class="bs-zoom"></button><button type="button" class="bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close">×</button></div>`
     + `<div class="bs-tabs" hidden></div>`
-    + `<div class="bs-view"><div class="bs-stage"><img class="bs-page" alt="" draggable="false" hidden><i class="bs-ring" hidden></i></div><span class="bs-wait">Waiting for the page…</span></div>`
+    + `<div class="bs-view"><div class="bs-stage"><img class="bs-page" alt="" draggable="false" decoding="async" hidden><i class="bs-ring" hidden></i></div><span class="bs-wait">Waiting for the page…</span></div>`
     + `<div class="bs-pages" hidden></div><div class="bs-foot"></div>`;
   const view = aside.querySelector<HTMLElement>(".bs-view")!, img = aside.querySelector<HTMLImageElement>(".bs-page")!;
   const yours = splitYours;
@@ -7177,7 +7177,7 @@ async function dispatch(
     renderCards();
     return;
   }
-  if (action === "browser-hand-back") { await api("browser-hand-back", {}); split.held = null; split.heldAt = Date.now(); renderCards(); return; }
+  if (action === "browser-hand-back") { await api("browser-hand-back", {}); split.handedAsk = handOverAsk(state?.runs.find((one) => one.id === state?.activeTurnId))?.toolCallId ?? ""; split.held = null; split.heldAt = Date.now(); renderCards(); return; }
   // You take the page without being asked: the model's browser steps wait for you.
   if (action === "browser-take") { await api("browser-take", {}); split.held = "person"; split.heldAt = Date.now(); split.still = null; renderCards(); el("browser-split").querySelector<HTMLElement>(".bs-view")?.focus({ preventScroll: true }); return; }
   if (action === "browser-live") { split.still = null; const aside = el("browser-split"); showSplitPicture(aside); renderCards(); return; }

@@ -304,12 +304,16 @@ if (!lookJob) void app.whenReady().then(async () => {
     window.on("maximize", () => simpleFullScreen(true, "green button"));
   }
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
-  let readied = false;
+  let readied = false, opened = false;
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
     if (method === "desktop-ready") {
+      // On the Mac the app opens in full screen, already at its size when it
+      // first shows, rather than showing the small window and growing.
+      if (process.platform === "darwin" && !opened) simpleFullScreen(true, "launch");
+      opened = true;
       window?.show(); window?.focus(); launchToFront();
       if (startup.length && !readied) {
         startupMark("shown");

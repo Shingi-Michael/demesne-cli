@@ -17,11 +17,12 @@ const electronBin = process.env.DEMESNE_ELECTRON ?? join(root, "node_modules/ele
 const hostCommand = [electronBin, join(root, "apps/desktop/build/app"), ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])];
 
 // The app the model checks: a checkout, and an admin that wants a sign-in.
-const page = (title: string, body: string) => new Response(`<!doctype html><title>${title}</title><body style="margin:0;font:18px Georgia,serif;background:#fbf7f2;color:#2a211b"><main style="padding:48px 56px">${body}</main></body>`, { headers: { "Content-Type": "text/html" } });
+const page = (title: string, body: string) => new Response(`<!doctype html><meta charset="utf-8"><title>${title}</title><body style="margin:0;font:18px Georgia,serif;background:#fbf7f2;color:#2a211b"><main style="padding:48px 56px">${body}</main></body>`, { headers: { "Content-Type": "text/html" } });
 const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
   const url = new URL(request.url);
   if (url.pathname === "/admin") return page("Sign in", `<h1 style="font:600 30px system-ui">Sign in to Slow Pour admin</h1><p><input id="email" placeholder="Email" style="font:20px system-ui;padding:12px;width:420px;border:1px solid #ccc;border-radius:8px"></p><button id="go" style="font:600 18px system-ui;padding:12px 40px;border:0;border-radius:10px;background:#111417;color:#fff">Sign in</button><p id="said"></p>
     <script>go.onclick = () => { said.textContent = "Signed in as " + email.value; document.title = "Orders"; document.querySelector("h1").textContent = "Orders"; };</script>`);
+  if (url.pathname === "/cart") return page("Cart", `<h1 style="font:600 30px system-ui">Cart</h1><p>One yearly plan, £96.</p>`);
   return new Response("not here", { status: 404 });
 } });
 const base = `http://localhost:${site.port}`;
@@ -45,7 +46,11 @@ const f = await fixture({
       yield { type: "finish", reason: "tool_calls" }; return;
     }
     const last = JSON.stringify(messages.at(-1)?.content ?? "");
-    assert.match(last, /handed the page back/, "the model hears the page came back");
+    if (steps === 2) {
+      assert.match(last, /handed the page back/, "the model hears the page came back");
+      yield { type: "tool_call_delta" as const, index: 0, idDelta: `click-${at}`, nameDelta: "browser", argumentsDelta: JSON.stringify({ action: "click", ref: "Sign in" }) };
+      yield { type: "finish", reason: "tool_calls" }; return;
+    }
     await gate;
     yield { type: "text_delta", delta: /Orders/.test(last) ? "Signed in. Order #1042 is at the top of Orders." : "The sign-in did not go through." };
     yield { type: "finish", reason: "stop" };
@@ -71,7 +76,8 @@ try {
   const split = win.locator("#browser-split");
   await split.waitFor();
   await win.waitForFunction(() => (document.querySelector<HTMLImageElement>("#browser-split .bs-page")?.naturalWidth ?? 0) > 300);
-  assert.match(await split.locator(".bs-url").innerText(), /localhost:\d+\/admin/);
+  assert.match(await split.locator(".bs-url").inputValue(), /localhost:\d+\/admin/);
+  assert.equal(await split.locator(".bs-url").getAttribute("readonly"), "", "the address is the model's while it browses");
   assert(await win.locator("#app.browser-split-on").count(), "the window is split");
   const box = await split.boundingBox(), chat = await win.locator("#main").boundingBox();
   assert(box && chat && box.width > 500 && chat.width > 380, `chat ${chat?.width}px, browser ${box?.width}px`);
@@ -96,6 +102,13 @@ try {
   await split.locator(".bs-back").click();
   console.log("PASS: a hand-over asks under the page, and your click and keys reach the page.");
 
+  // Handed back, the model clicks: a soft ring shows where.
+  await win.waitForFunction(() => { const ring = document.querySelector<HTMLElement>("#browser-split .bs-ring"); return Boolean(ring && !ring.hidden && ring.classList.contains("on")); }, undefined, { timeout: 10000 });
+  const ring = (await split.locator(".bs-ring").boundingBox())!, picture = (await img.boundingBox())!;
+  assert(ring.x > picture.x && ring.y > picture.y && ring.x < picture.x + picture.width / 2, `the ring is on the Sign in button, at ${Math.round(ring.x - picture.x)},${Math.round(ring.y - picture.y)}`);
+  await win.screenshot({ path: join(output, "ring.png") });
+  console.log("PASS: where the model clicks shows as a ring on the page.");
+
   // Handed back: the model reads the page again and answers; the page stays until ×.
   release();
   await win.locator("#conversation .turn").filter({ hasText: "Order #1042 is at the top of Orders" }).waitFor();
@@ -105,6 +118,34 @@ try {
   await win.mouse.move(400, 700);
   await win.waitForTimeout(400);
   await win.screenshot({ path: join(output, "done.png") });
+
+  // You take it yourself: the address is yours to type, back and forward work, and the pages it went to stay to look back at.
+  await split.locator(".bs-take").click();
+  await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
+  assert.match(await split.locator(".bs-words").innerText(), /The page is yours/);
+  assert.equal(await split.locator(".bs-url").getAttribute("readonly"), null, "the address is yours to type");
+  await split.locator(".bs-url").fill("localhost:" + site.port + "/cart");
+  await split.locator(".bs-url").press("Enter");
+  await win.waitForFunction(() => /\/cart$/.test((document.querySelector<HTMLInputElement>("#browser-split .bs-url"))?.value ?? ""), undefined, { timeout: 10000 });
+  await split.locator('[data-go="back"]:not([disabled])').waitFor();
+  await split.locator(".bs-visit").first().waitFor();
+  await win.waitForTimeout(400);
+  await win.screenshot({ path: join(output, "taken.png") });
+  await split.locator(".bs-visit").first().click();
+  await win.waitForFunction(() => /earlier page/.test(document.querySelector("#browser-split .bs-words")?.textContent ?? ""));
+  await split.locator(".bs-back", { hasText: "Back to live" }).click();
+  await win.waitForFunction(() => !/earlier page/.test(document.querySelector("#browser-split .bs-words")?.textContent ?? ""));
+  await split.locator('[data-go="back"]').click();
+  await win.waitForFunction(() => /\/admin$/.test((document.querySelector<HTMLInputElement>("#browser-split .bs-url"))?.value ?? ""), undefined, { timeout: 10000 });
+  // The page's own size, to read small text; then fitted again.
+  await split.locator(".bs-zoom").click();
+  assert.equal(await img.evaluate((one) => (one as HTMLImageElement).style.width), "1280px");
+  await win.screenshot({ path: join(output, "actual-size.png") });
+  await split.locator(".bs-zoom").click();
+  assert.equal(await img.evaluate((one) => (one as HTMLImageElement).style.width), "");
+  await split.locator(".bs-back", { hasText: "Hand back" }).click();
+  await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
+  console.log("PASS: you can take the page, type an address, go back, look at earlier pages, see it at its own size, and hand it back.");
   await split.locator(".bs-close").click();
   await split.waitFor({ state: "hidden" });
   assert.equal(await win.locator("#app.browser-split-on").count(), 0, "the chat has the window back");

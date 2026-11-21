@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { handOverAsk, keyInputs, pagePoint, splitFoot, splitOpen, splitWidth } from "../browser-split.ts";
+import { earlierPages, handOverAsk, keyInputs, pagePoint, ringSpot, splitFoot, splitOpen, splitWidth, tabName } from "../browser-split.ts";
 
 // Pass 248 D: the chat's browser beside the chat. When it opens, where a click
 // lands on the page, and which keys reach a page that is yours.
@@ -55,4 +55,22 @@ test("the line under the page says what is happening, and what is asked of you",
   expect(splitFoot({ reason: "Sign in to the admin" }, null, true)).toEqual({ tone: "ask", words: "Sign in to the admin, then hand it back. The model can't see what you type." });
   expect(splitFoot(null, "Clicked “Pay”", true)).toEqual({ tone: "now", words: "Clicked “Pay”" });
   expect(splitFoot(null, null, true).tone).toBe("");
+  // A page you took yourself: the model waits for you.
+  expect(splitFoot(null, "Clicked “Pay”", true, true)).toEqual({ tone: "ask", words: "The page is yours. The model waits until you hand it back." });
+});
+
+test("a ring shows where the model clicked, only while fresh", () => {
+  const page = { width: 1280, height: 800 };
+  expect(ringSpot({ x: 640, y: 200, ago: 100 }, page)).toEqual({ left: 50, top: 25 });
+  expect(ringSpot({ x: 9000, y: -4, ago: 0 }, page)).toEqual({ left: 100, top: 0 });
+  expect(ringSpot({ x: 640, y: 200, ago: 5000 }, page)).toBeNull();
+  expect(ringSpot(undefined, page)).toBeNull();
+});
+
+test("tab chips are named by title, else by site; earlier pages leave out the one on show", () => {
+  expect(tabName({ n: 1, url: "https://accounts.example/o/auth", title: "" })).toBe("accounts.example");
+  expect(tabName({ n: 2, url: "x", title: "Sign in with your account to continue shopping" })).toBe("Sign in with your account t…");
+  const visits = [1, 2, 3].map((seq) => ({ seq, url: `https://shop.example/${seq}`, title: "", tab: 1 }));
+  expect(earlierPages(visits, "https://shop.example/3").map((one) => one.seq)).toEqual([1, 2]);
+  expect(earlierPages(visits, "https://shop.example/1").map((one) => one.seq)).toEqual([1, 2, 3]);
 });

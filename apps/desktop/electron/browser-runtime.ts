@@ -57,6 +57,29 @@ export const BROWSER_RUNTIME = String.raw`(() => {
   window.alert = (message) => { dialogs.push("alert: " + cut(message, 120)); };
   window.confirm = (message) => { dialogs.push("confirm (answered OK): " + cut(message, 120)); return true; };
   window.prompt = (message) => { dialogs.push("prompt (left empty): " + cut(message, 120)); return null; };
-  window.__demesneBrowser = { outline, locate, text, dialogs: () => dialogs.splice(0) };
+  // The file field an upload goes to: the control itself, one inside it or named by its label, else the page's only one.
+  function markFile(n) {
+    document.querySelectorAll("[data-demesne-upload]").forEach((el) => el.removeAttribute("data-demesne-upload"));
+    const el = n === null || n === undefined || n === "" ? null : byNumber.get(Number(n))?.deref();
+    const isFile = (one) => one && one.tagName === "INPUT" && one.type === "file";
+    let field = isFile(el) ? el : el && (el.querySelector && el.querySelector("input[type=file]") || (el.htmlFor && document.getElementById(el.htmlFor)) || (el.closest && el.closest("label")?.querySelector("input[type=file]")));
+    if (!isFile(field)) { const all = [...document.querySelectorAll("input[type=file]")]; field = all.length === 1 || !el ? all[0] : null; }
+    if (!isFile(field)) return { ok: false, said: el ? "there is no file field there" : "the page has no file field" };
+    field.setAttribute("data-demesne-upload", "1");
+    return { ok: true, what: "file field " + JSON.stringify(cut(name(field) || field.getAttribute("name") || "", 40)), multiple: field.multiple === true };
+  }
+  // How a control is drawn: its box and the styles that decide where and how it shows.
+  const STYLES = ["display", "position", "top", "left", "z-index", "width", "height", "margin", "padding", "border", "box-sizing", "color", "background-color", "font-family", "font-size", "font-weight", "line-height", "text-align", "opacity", "visibility", "overflow", "transform", "flex-direction", "justify-content", "align-items", "gap", "grid-template-columns", "cursor", "pointer-events"];
+  function inspect(n) {
+    const el = byNumber.get(Number(n))?.deref();
+    if (!el || !el.isConnected) return { found: false };
+    const r = el.getBoundingClientRect(), css = getComputedStyle(el), styles = {};
+    for (const key of STYLES) { const value = css.getPropertyValue(key); if (value && value !== "normal" && value !== "auto" && value !== "none" && value !== "0px" && value !== "static") styles[key] = value; }
+    const parent = el.parentElement ? getComputedStyle(el.parentElement) : null;
+    return { found: true, what: role(el) + ' "' + cut(name(el), 40) + '"', tag: el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + (el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).slice(0, 3).join(".") : ""),
+      box: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }, styles,
+      ...(parent ? { parent: { display: parent.display, ...(parent.display.includes("flex") ? { "flex-direction": parent.flexDirection, "align-items": parent.alignItems, "justify-content": parent.justifyContent } : {}) } } : {}) };
+  }
+  window.__demesneBrowser = { outline, locate, text, markFile, inspect, dialogs: () => dialogs.splice(0) };
   return true;
 })()`;

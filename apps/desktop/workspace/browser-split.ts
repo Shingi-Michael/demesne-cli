@@ -64,9 +64,33 @@ export function keyInputs(event: KeyLike): KeyInput[] {
 export const SPLIT_MIN = 360, CHAT_MIN = 380;
 export const splitWidth = (wanted: number, total: number) => Math.round(Math.max(SPLIT_MIN, Math.min(Math.max(SPLIT_MIN, total - CHAT_MIN), wanted)));
 
-/// The line under the page.
-export function splitFoot(ask: { reason: string } | null, working: string | null, hasPage: boolean): { tone: "ask" | "now" | ""; words: string } {
+/// The line under the page. `took` is true while you hold a page the model did not ask for.
+export function splitFoot(ask: { reason: string } | null, working: string | null, hasPage: boolean, took = false): { tone: "ask" | "now" | ""; words: string } {
   if (ask) return { tone: "ask", words: `${ask.reason}, then hand it back. The model can't see what you type.` };
+  if (took) return { tone: "ask", words: "The page is yours. The model waits until you hand it back." };
   if (working) return { tone: "now", words: working };
   return { tone: "", words: hasPage ? "The model is done with this page. Look at it, or close it with ×." : "The page shows here once the model opens one." };
+}
+
+/// Where the model last clicked or typed, as a share of the page, while it is fresh.
+export const RING_MS = 1600;
+export function ringSpot(pointer: { x: number; y: number; ago: number } | undefined, page: { width: number; height: number }): { left: number; top: number } | null {
+  if (!pointer || pointer.ago > RING_MS || page.width <= 0 || page.height <= 0) return null;
+  const share = (value: number, of: number) => Math.round(Math.max(0, Math.min(1, value / of)) * 10000) / 100;
+  return { left: share(pointer.x, page.width), top: share(pointer.y, page.height) };
+}
+
+export interface SplitTab { n: number; url: string; title: string; active?: boolean }
+/// A tab's short name for its chip: its title, else its site.
+export function tabName(tab: SplitTab): string {
+  const title = tab.title.trim();
+  if (title) return title.length > 28 ? `${title.slice(0, 27)}…` : title;
+  try { return new URL(tab.url).host || tab.url; } catch { return tab.url || `Tab ${tab.n}`; }
+}
+
+export interface SplitVisit { seq: number; url: string; title: string; tab: number }
+/// The pages to step back through: newest last, the page on show now left out.
+export function earlierPages(visits: readonly SplitVisit[], now: string): SplitVisit[] {
+  const kept = visits.filter((visit, index) => !(index === visits.length - 1 && visit.url === now));
+  return kept.slice(-8);
 }

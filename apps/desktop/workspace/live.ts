@@ -14,6 +14,7 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
+import { browserSteps, handOverAsk, keyInputs, pagePoint, splitFoot, splitOpen, splitWidth } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
@@ -333,7 +334,7 @@ const verb = (tool: ToolEntry) =>
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
 /// The model's own browser, as the step rows name what it did there.
 const BROWSER_VERBS: Record<string, string> = { open: "Opened", read: "Read the page", text: "Read the page", click: "Clicked", type: "Typed", key: "Pressed", scroll: "Scrolled", hover: "Pointed at",
-  back: "Went back", forward: "Went forward", reload: "Reloaded", wait: "Waited", picture: "Looked at the page", close: "Closed its browser" };
+  back: "Went back", forward: "Went forward", reload: "Reloaded", wait: "Waited", picture: "Looked at the page", hand_over: "Handed you the page", close: "Closed its browser" };
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: WorkspaceRun) =>
@@ -1571,7 +1572,126 @@ function card(name: keyof typeof CARD_ICON, line: string, right: string, body: s
   const open = cardsOpen.has(name);
   return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
 }
+// The chat's browser, beside the chat (pass 248 D) ---------------------------
+
+/// The split's own state: which chat, whether it is open, what you closed, the newest picture.
+const split = {
+  session: "", open: false, openedTurn: null as string | null, closedTurn: null as string | null, closedAsk: null as string | null,
+  seq: 0, frame: null as null | { src: string; width: number; height: number; url: string; title: string },
+  pumping: false, width: (() => { try { return Number(localStorage.getItem("demesne-browser-split")) || 0; } catch { return 0; } })(),
+};
+const BROWSER_SPLIT_LABEL = "The chat’s browser";
+/// Draws the split, or takes it away. Called with the cards, on every change of the chat.
+function renderBrowserSplit() {
+  const aside = el("browser-split"), app = el("app");
+  const s = state;
+  if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; return; }
+  if (split.session !== s.session.id) Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null });
+  const run = s.runs.find((one) => one.id === s.activeTurnId && active(one));
+  const next = splitOpen(split, run);
+  split.open = next.open; split.openedTurn = next.openedTurn;
+  app.classList.toggle("browser-split-on", split.open);
+  aside.hidden = !split.open;
+  if (!split.open) return;
+  if (!aside.firstElementChild) buildBrowserSplit(aside);
+  const total = el("workspace").clientWidth || innerWidth;
+  aside.style.width = `${splitWidth(split.width || Math.round(total * 0.48), total)}px`;
+  const ask = handOverAsk(run), last = browserSteps(run).at(-1);
+  const working = run && last && last.state === "running" && !ask ? `${verb(last as unknown as ToolEntry)} ${stepTarget(last as unknown as ToolEntry)}`.trim() : null;
+  const foot = splitFoot(ask, working, Boolean(split.frame));
+  aside.classList.toggle("yours", Boolean(ask));
+  aside.classList.toggle("done", !run);
+  aside.querySelector<HTMLElement>(".bs-light")!.className = `bs-light ${foot.tone}`;
+  aside.querySelector<HTMLElement>(".bs-url")!.textContent = split.frame ? split.frame.url.replace(/^https?:\/\//, "") : "";
+  aside.querySelector<HTMLElement>(".bs-url")!.title = split.frame?.title ?? "";
+  const footNode = aside.querySelector<HTMLElement>(".bs-foot")!;
+  const footHTML = `<span class="bs-words ${foot.tone}">${h(foot.words)}</span>${ask ? btn("browser-hand-back", "Hand back", {}, "bs-back") : ""}`;
+  if (footNode.dataset.html !== footHTML) { footNode.innerHTML = footHTML; footNode.dataset.html = footHTML; }
+  const view = aside.querySelector<HTMLElement>(".bs-view")!;
+  view.tabIndex = ask ? 0 : -1;
+  view.setAttribute("aria-label", ask ? `The page is yours: ${ask.reason}` : "The page the model is on");
+  void pumpBrowserFrames();
+}
+function buildBrowserSplit(aside: HTMLElement) {
+  aside.setAttribute("aria-label", BROWSER_SPLIT_LABEL);
+  aside.innerHTML = `<div class="bs-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize"></div><div class="bs-head"><i class="bs-light"></i><span class="bs-url"></span><button type="button" class="bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close">×</button></div><div class="bs-view"><img class="bs-page" alt="" draggable="false" hidden><span class="bs-wait">Waiting for the page…</span></div><div class="bs-foot"></div>`;
+  const view = aside.querySelector<HTMLElement>(".bs-view")!, img = aside.querySelector<HTMLImageElement>(".bs-page")!;
+  // Your input reaches the page only while the model has handed it to you.
+  const yours = () => aside.classList.contains("yours") && split.frame;
+  const send = (events: unknown[]) => { if (events.length) void api("browser-input", { events }).catch(() => {}); };
+  const at = (event: MouseEvent) => pagePoint(event.clientX, event.clientY, img.getBoundingClientRect(), split.frame!);
+  const BUTTONS = ["left", "middle", "right"] as const;
+  let moved = 0;
+  img.addEventListener("mousedown", (event) => { if (!yours()) return; event.preventDefault(); view.focus({ preventScroll: true }); send([{ type: "mouseDown", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
+  img.addEventListener("mouseup", (event) => { if (!yours()) return; send([{ type: "mouseUp", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
+  img.addEventListener("mousemove", (event) => { if (!yours() || Date.now() - moved < 60) return; moved = Date.now(); send([{ type: "mouseMove", ...at(event) }]); });
+  img.addEventListener("contextmenu", (event) => { if (yours()) event.preventDefault(); });
+  view.addEventListener("wheel", (event) => {
+    if (!yours()) return;
+    event.preventDefault();
+    send([{ type: "mouseWheel", ...at(event), deltaX: -event.deltaX, deltaY: -event.deltaY }]);
+  }, { passive: false });
+  view.addEventListener("keydown", (event) => {
+    if (!yours() || event.isComposing) return;
+    const events = keyInputs(event);
+    if (!events.length) return;
+    event.preventDefault();
+    send(events);
+  });
+  view.addEventListener("paste", (event) => {
+    if (!yours()) return;
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    event.preventDefault();
+    if (text) send([{ type: "text", text: text.slice(0, 4000) }]);
+  });
+  // The line between chat and browser moves either way; the width is kept.
+  const grip = aside.querySelector<HTMLElement>(".bs-grip")!;
+  grip.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    grip.setPointerCapture(event.pointerId);
+    aside.classList.add("resizing");
+    const right = el("workspace").getBoundingClientRect().right, total = el("workspace").clientWidth;
+    const move = (e: PointerEvent) => { split.width = splitWidth(right - e.clientX, total); aside.style.width = `${split.width}px`; };
+    const up = () => {
+      grip.removeEventListener("pointermove", move); aside.classList.remove("resizing");
+      try { localStorage.setItem("demesne-browser-split", String(split.width)); } catch {}
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up, { once: true });
+    grip.addEventListener("pointercancel", up, { once: true });
+  });
+}
+/// Asks for newer pictures while the split shows; the daemon waits a moment for one.
+async function pumpBrowserFrames() {
+  if (split.pumping) return;
+  split.pumping = true;
+  try {
+    while (split.open && state?.session?.id === split.session && !pageOpen) {
+      if (document.visibilityState !== "visible") { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
+      const session = split.session;
+      let got: { seq?: number; src?: string; width?: number; height?: number; url?: string; title?: string } | null = null;
+      // The view's shape, so the page is drawn as tall as the split shows it.
+      const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
+      const aspect = view && view.clientWidth > 0 ? view.clientHeight / view.clientWidth : undefined;
+      try { got = await api("browser-frame", { after: split.seq, ...(aspect ? { aspect } : {}) }); } catch { await new Promise((resolve) => setTimeout(resolve, 1000)); continue; }
+      if (split.session !== session) continue;
+      if (got?.src && Number(got.seq) > split.seq) {
+        split.seq = Number(got.seq);
+        const first = !split.frame;
+        split.frame = { src: got.src, width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? "") };
+        const aside = el("browser-split"), img = aside.querySelector<HTMLImageElement>(".bs-page");
+        if (img) { img.src = got.src; img.hidden = false; aside.querySelector<HTMLElement>(".bs-wait")?.remove(); }
+        const url = aside.querySelector<HTMLElement>(".bs-url");
+        if (url) { url.textContent = split.frame.url.replace(/^https?:\/\//, ""); url.title = split.frame.title; }
+        if (first) renderBrowserSplit();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+  } finally { split.pumping = false; }
+}
+
 function renderCards() {
+  renderBrowserSplit();
   // A page in place of the chat (Settings, Customize…) hides the chat's cards.
   const aside = el("cards"), app = el("app");
   const hide = () => { app.classList.remove("cards-on", "cards-context"); aside.hidden = true; cardsSignature = ""; };
@@ -2509,7 +2629,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}`, open = hasFileEdit(tool) ? fileEditsOpen.has(key) : stepOpen.has(key), canFold = foldable(tool);
   const now = tool.state === "running" || tool.drafting, served = serving(tool)?.serves;
   const cli = cliAgent(tool);
-  const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.waiting
+  const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.name === "browser" && tool.input.action === "hand_over" && now ? `<span class="amber">waiting for you</span>` : tool.waiting
     ? `<span class="amber">${tool.name === "ask_user" || state?.questions.some((q) => q.toolCallId === tool.toolCallId) ? "waiting for your answer" : "waiting for you"}</span>`
     : tool.phase === "change"
       ? tool.drafting ? "writing…" : tool.state === "done" ? counts(totals(run, tool)) : `<span class="${tone(tool.state)}">${h(tool.state)}</span>`
@@ -6923,6 +7043,19 @@ async function dispatch(
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
     return;
   }
+  if (action === "browser-split-close") {
+    const run = state?.runs.find((one) => one.id === state?.activeTurnId);
+    split.open = false; split.closedTurn = run?.id ?? split.openedTurn; split.closedAsk = handOverAsk(run)?.toolCallId ?? null;
+    renderCards();
+    return;
+  }
+  if (action === "browser-hand-back") { await api("browser-hand-back", {}); return; }
+  // A browser step opens the split again.
+  if (action === "tool") {
+    const step = state?.runs.find((run) => run.id === args.runId)?.entries.find((entry) => entry.id === args.id);
+    if (step?.type === "tool" && step.name === "browser") { split.open = true; split.closedTurn = null; renderCards(); }
+    return;
+  }
   if (action === "card-fold") {
     const name = String(args.name);
     if (cardsOpen.has(name)) cardsOpen.delete(name); else cardsOpen.add(name);
@@ -7226,6 +7359,7 @@ async function dispatch(
   if (action === "step") {
     const key = `${args.runId}:${args.id}`;
     const edit = state!.runs.find(run => run.id === args.runId)?.entries.find(entry => entry.id === args.id);
+    if (edit?.type === "tool" && edit.name === "browser" && !split.open) { split.open = true; split.closedTurn = null; renderCards(); }
     if (edit?.type === "tool" && hasFileEdit(edit)) fileEditsOpen.has(key) ? fileEditsOpen.delete(key) : fileEditsOpen.add(key);
     else stepOpen.has(key) ? stepOpen.delete(key) : stepOpen.add(key);
     follow = false;

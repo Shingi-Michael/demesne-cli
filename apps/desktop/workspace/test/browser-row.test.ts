@@ -11,3 +11,7 @@ test("a browser step names the control the model used by number", () => {
   expect(browserTarget({ input: { action: "back" }, message: JSON.stringify({ title: "Sign in", changed: "went to /" }) })).toBe("Sign in");
   expect(browserTarget({ input: { action: "wait", for: "Saved" }, detail: "for “Saved”", message: JSON.stringify({ did: "“Saved” is on the page" }) })).toBe("for “Saved”");
 });
+
+test("a hand-over step says what the model asked of you", () => {
+  expect(browserTarget({ input: { action: "hand_over", reason: "Sign in to the admin" } })).toBe("Sign in to the admin");
+});

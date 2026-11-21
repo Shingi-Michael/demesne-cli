@@ -19,7 +19,7 @@ import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } fro
 import { foundryBuiltTool } from "./foundry-built.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
-import { browserTool, electronBrowser, type BrowserDriver } from "./browser.ts";
+import { BrowserHandovers, browserTool, electronBrowser, type BrowserDriver, type WatchableBrowser } from "./browser.ts";
 import { openTool, showTool } from "./open-show.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
@@ -226,7 +226,7 @@ export function createDaemonApp(options: {
   /// Opens the app being built for look_at_page (tests pass a fake; the daemon uses the desktop app).
   pageLook?: PageLook;
   /// The model's own browser (tests pass a fake; the daemon uses the desktop app). False turns it off.
-  browser?: BrowserDriver | false;
+  browser?: (BrowserDriver & Partial<WatchableBrowser>) | false;
   /// The engine's clock (evals step it to make the prompt cache go cold).
   now?: () => Date;
   /// The open and show tools (pass 210 A); on unless false.
@@ -409,9 +409,11 @@ export function createDaemonApp(options: {
   // Seeing the app being built: the same hidden window, opened on a local address.
   const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
   if (pageLook) tools.register(lookAtPageTool(pageLook));
-  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith) : null;
+  // Its sign-ins are kept per project, beside the database (pass 248 D).
+  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith, join(dirname(options.databasePath), "browser-profile")) : null;
   const browser = options.browser === false ? null : options.browser ?? ownBrowser;
-  if (browser) tools.register(browserTool(browser));
+  const handovers = new BrowserHandovers();
+  if (browser) tools.register(browserTool(browser, undefined, undefined, handovers));
   // Open it behind Demesne, and show it on the right (pass 210 A).
   if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index
@@ -1697,6 +1699,27 @@ export function createDaemonApp(options: {
         const context = { store, folders: options.assistantFolders ?? {}, trusted: (root: string) => workspaceTrust.isTrusted(root) };
         if (path.length === 6) return json({ documents: listSourceDocuments(context, path[2]!, turn.id) });
         if (path[7] === "content") return sourceDocumentResponse(context, path[2]!, turn.id, path[6]!, url.searchParams.get("revision"));
+      }
+
+      // The chat's browser, beside it (pass 248 D): its newest picture, your input while it is yours, and handing it back.
+      if (path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "browser") {
+        const chat = path[2]!;
+        if (!store.getSession(chat)) return apiError("not_found", "Session not found", 404);
+        if (request.method === "GET" && path[4] === "frame") {
+          const after = Number(url.searchParams.get("after") ?? 0) || 0;
+          const aspect = Number(url.searchParams.get("aspect"));
+          const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined) : null;
+          const asked = handovers.asked(chat);
+          return json(frame ? { ...frame, ...(asked ? { asked } : {}) } : { seq: 0, ...(asked ? { asked } : {}) });
+        }
+        if (request.method === "POST" && path[4] === "input") {
+          if (!browser || !handovers.asked(chat)) return apiError("invalid_state", "The page is not yours right now", 409);
+          const body = await readJson(request);
+          const events = isRecord(body) && Array.isArray(body.events) ? body.events.slice(0, 40) : [];
+          const reply = await browser(chat, { action: "input", events }, request.signal);
+          return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", typeof reply?.error === "string" ? reply.error : "The browser did not answer", 409);
+        }
+        if (request.method === "POST" && path[4] === "hand-back") return json({ handedBack: handovers.handBack(chat) });
       }
 
       if (request.method === "PATCH" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

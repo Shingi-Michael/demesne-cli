@@ -3654,14 +3654,12 @@ function awayApproval(sessionId: string, ask: Extract<AwayAsk, { kind: "permissi
     + `</div>`;
 }
 function renderHero() {
-  if (!state) return;
-  const review = reviewJobs(),
-    next = state.driveNext,
-    user = document.body.dataset.user ?? "",
-    branch = state.session?.workspace?.gitBranch ?? "",
-    hour = new Date().getHours(),
-    running = worktreeRun().fix,
-    plain = isPlain();
+  if (!state || inSession() || pageOpen) return;
+  const now = new Date(), hour = now.getHours(), plain = isPlain();
+  const when = `${now.toLocaleDateString(undefined, { weekday: "long" })} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`;
+  const user = document.body.dataset.user ?? "";
+  const slot = el("composer-slot"), home = el("hero-composer");
+  if (slot.parentElement !== home) home.append(slot);
   const here = plain ? [] : state.sessions.filter((session) => session.workspace === state!.workspace && session.id !== state!.session?.id);
   if (!plain) loadHomeRoutines();
   const waiting = here.filter((session) => session.waiting);
@@ -3671,7 +3669,10 @@ function renderHero() {
     .flatMap((routine) => routine.runs.filter((run) => leftAt != null && Date.parse(run.at) > leftAt!).map((run) => ({ title: state!.sessions.find((session) => session.id === run.sessionId)?.title || routine.text, at: run.at, sessionId: run.sessionId })))
     .filter((run) => !waiting.some((session) => session.id === run.sessionId))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-  const sentences = plain ? [] : awaySentences({
+  const busy = here.filter((session) => !session.waiting && (session.status === "running" || session.status === "queued") && !ran.some((run) => run.sessionId === session.id));
+  // An idle Home needs no status paragraph. Decisions come before typing;
+  // actual background news and the way back to a chat come after it.
+  const sentences = waiting.length || busy.length || ran.length ? awaySentences({
     now: Date.now(),
     leftAt,
     // Drive isn't on Home: its state and ideas live at the sidebar's foot,
@@ -3679,42 +3680,32 @@ function renderHero() {
     branches: [],
     running: null,
     waiting: waiting.map((session) => ({ sessionId: session.id, title: chatTitle(session.id), ask: session.ask })),
-    busy: here.filter((session) => !session.waiting && (session.status === "running" || session.status === "queued") && !ran.some((run) => run.sessionId === session.id)).map((session) => ({ sessionId: session.id, title: chatTitle(session.id) })),
+    busy: busy.map((session) => ({ sessionId: session.id, title: chatTitle(session.id) })),
     routines: ran,
     ideas: 0,
     asks: state.asks,
-    shown: { branches: reviewShown, drive: driveShown, ideas: ideasShown, ask: awayAskShown },
-  });
+    shown: { branches: false, drive: false, ideas: false, ask: awayAskShown },
+  }) : [];
   // Back to the chat you were last in, with the last thing you asked there.
   const last = [...here].filter((session) => session.turns > 0).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
   const asked = waiting.find((session) => session.id === awayAskShown)?.ask;
-  const signature = JSON.stringify([plain, state.workspace, sentences, review.map((job) => [job.id, job.status, job.diff, job.summary, job.checks]), running && [running.id, running.activity], state.breakage.busy, state.breakage.message, [...detailsOpen].filter((key) => key.startsWith("branch:")), next.proposals, next.loading, ideasShown && next.generatedAt && age(next.generatedAt), user, branch, hour, asked, last && [last.id, last.title, last.lastAsk, age(last.updatedAt)]]);
+  const pickTitle = last && chatTitle(last.id);
+  const signature = JSON.stringify([when, user, sentences, asked, last && [last.id, pickTitle, last.lastAsk, age(last.updatedAt)]]);
   if (signature === heroSignature) return;
   heroSignature = signature;
-  const composer = el("composer-slot");
-  composer.remove();
-  const name = state.workspace.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || state.workspace;
-  const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
-    when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
-    where = branch ? `${h(name)} on ${h(branch)}` : h(name);
-  // One paragraph: what happened while you were away, what needs you first.
-  // Each underlined phrase unfolds that thing right under it.
-  const paragraph = sentences.length ? `<p class="away">${sentences.map((sentence) => sentence.map(awayPart).join("")).join(" ")}</p>` : "";
-  const folds = [
-    asked?.kind === "permission" ? awayApproval(awayAskShown!, asked) : "",
-  ].filter(Boolean);
-  const fold = (folds.length ? `<div class="away-fold">${folds.join("")}</div>` : "") + branchNote();
+  el("home-when").textContent = when;
+  el("home-greeting").textContent = `What are we building${user ? `, ${user}` : ""}?`;
+  const paragraph = (lines: AwayPart[][]) => lines.length ? `<p class="away">${lines.map(sentence => sentence.map(awayPart).join("")).join(" ")}</p>` : "";
+  const fold = asked?.kind === "permission" ? `<div class="away-fold">${awayApproval(awayAskShown!, asked)}</div>` : "";
   const pick = last
-    ? btn("select-session", `<span class="pick-word">Pick up</span><b>${h(chatTitle(last.id))}</b>${last.lastAsk ? `<q>${h(last.lastAsk)}</q>` : ""}<span class="pick-age">${h(age(last.updatedAt))}</span><span class="pick-go" aria-hidden="true">›</span>`, { id: last.id }, "hero-pick")
+    ? btn("select-session", `<span class="pick-word">Pick up</span><b>${h(pickTitle!)}</b>${last.lastAsk ? `<q>${h(last.lastAsk)}</q>` : ""}<span class="pick-age">${h(age(last.updatedAt))}</span><span class="pick-go" aria-hidden="true">›</span>`, { id: last.id }, "hero-pick")
     : "";
-  // Just a chat: the time of day and the greeting; the project's news comes
-  // back once a project is picked.
-  el("hero").innerHTML = plain
-    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
-    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${fold}${pick}</div><div id="hero-composer"></div>`;
-  el("hero-composer").append(composer);
-  // Home grew or lost lines (ideas unfolded, a branch to review): the
-  // blossom ends above the greeting again, so no text sits on the boughs.
+  const attention = el("home-attention"), after = el("home-after");
+  attention.innerHTML = waiting.length ? paragraph(sentences.slice(0, 1)) + fold : "";
+  attention.hidden = !attention.childElementCount;
+  after.innerHTML = paragraph(sentences.slice(waiting.length ? 1 : 0)) + pick;
+  after.hidden = !after.childElementCount;
+  // Refit the blossom above the greeting, not behind the text.
   if (sakura && !document.getElementById("sakura")?.hidden) sakura.refit();
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
@@ -5019,7 +5010,7 @@ function composerFrame(width: number) {
       ? "Steer it while it works…"
       : threadsProposedHere() ? "Change the split in your own words…"
       : suggestion ? `${suggestion}   Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
-    : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…");
+    : isPlain() ? "Ask anything…" : "Ask about this project…");
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||

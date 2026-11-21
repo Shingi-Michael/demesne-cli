@@ -478,8 +478,12 @@ let sessionId = "";
 try {
   await open(false, true);
   await capture("01-start");
-  // Home: the greeting, then one paragraph of what happened (nothing yet), no map.
-  await until(() => page.locator(".intro p.away").innerText().then(text => text.length > 0), "Home says what happened while you were away");
+  // An idle project opens prompt-first, even if Drive has ideas for it.
+  await page.getByPlaceholder("Ask about this project…").waitFor();
+  assert.match(await page.locator("#home-when").innerText(), /^\S+ (morning|afternoon|evening|night)$/);
+  assert.equal(await page.locator("#home-when + h1").count(), 1, "time is directly above the greeting");
+  assert.equal(await page.locator("#hero .away, #hero .hero-eyebrow svg").count(), 0, "no idle summary or decorative label");
+  assert(await page.locator("#hero .intro + #hero-composer textarea").isVisible(), "the shared composer follows the greeting");
   assert.equal(await page.locator(".hero-map, .land").count(), 0, "the map is gone");
   await type(thinkingPrompt);
   // Thinking is never shown: no row, no trace, only the working line.
@@ -555,6 +559,7 @@ try {
   await click("new-session");
   await until(async () => (await page.locator("#composer-where").textContent())?.startsWith("Just a chat") ?? false, "a new chat is Just a chat");
   assert.equal(await page.locator(".intro p.away").count(), 0, "Just a chat has no project news");
+  assert(await page.getByPlaceholder("Ask anything…").isVisible(), "plain Home retains its own prompt");
   await click("where-toggle");
   await capture("02b-where");
   await click("where-pick", { path: f.workspace });
@@ -570,7 +575,7 @@ try {
   assert((await homeApproval.innerText()).includes("hello.ts"), "the row names the file");
   await capture("02-home-away");
   // Pick up goes back to the last chat, with the last thing you asked there.
-  assert((await page.locator(".hero-pick").innerText()).includes("Pick up"), "Pick up names the last chat");
+  assert((await page.locator("#hero-composer + #home-after .hero-pick").innerText()).includes("Pick up"), "Pick up stays available after the composer");
   await homeApproval.locator('[data-action="away-permission"]', { hasText: "Allow" }).click();
   await until(() => homeApproval.count().then(count => count === 0), "Allow folds the row");
   await page.locator(".hero-pick").click();

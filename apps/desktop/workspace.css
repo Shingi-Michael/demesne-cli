@@ -230,8 +230,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    message box, so the box keeps its size when you send. */
 .desktop .hero { width: 748px; max-width: 100%; gap: 18px; }
 .desktop .live-app.start .intro { gap: 6px; }
-.hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t2); font-size: 12.5px; line-height: 18px; }
-.hero-eyebrow .ico { color: var(--t3); }
+.hero-eyebrow { color: var(--t2); font-size: 12px; line-height: 16px; }
+#hero [hidden] { display: none; }
 .desktop .live-app.start .intro h1 { font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
 .desktop .live-app.start .intro p { font-size: 13.5px; line-height: 1.6; color: var(--t3); }
 .desktop .intro strong { color: var(--t2); font-weight: 500; }

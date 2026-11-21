@@ -83,6 +83,7 @@ import { GoogleAIForm } from "./google-ai-form.ts";
 import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
 import { updateCheckLine, type AppUpdate } from "./release-line.ts";
 import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-icons.ts";
+import { MemoryPill } from "./memory-pill.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -7926,6 +7927,12 @@ function threadPeek(): ThreadsLook["peek"] {
     return { of: open, say: words.length > 260 ? `${words.slice(0, 259).trimEnd()}…` : words, steps };
   });
 }
+/// The silver pill above the composer when a turn kept something in memory (pass 255).
+const memoryPill = new MemoryPill(() => document.getElementById("composer-slot"), (session, line) => api("memory-forget", { session, scope: line.scope, text: line.text }));
+function renderMemoryPill() {
+  const here = state && inSession(state) && !pageOpen && !inAssistant() ? state.session?.id ?? null : null;
+  memoryPill.sync(here, here ? state!.runs : []);
+}
 function renderThreads() {
   if (!state) return;
   const view = state.threads, mine = inSession(state) && !pageOpen && state.session?.id === view.from;
@@ -8049,6 +8056,7 @@ function renderState(next: Snapshot) {
   renderStatus();
   renderConversation();
   renderThreads();
+  renderMemoryPill();
   // The assistant's chat has its own empty look.
   el("conversation").classList.toggle("assistant", inAssistant());
   renderComposer();

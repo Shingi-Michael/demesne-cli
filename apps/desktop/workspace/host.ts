@@ -2265,6 +2265,7 @@ export class WorkspaceHost {
     if (method === "socials-profile") return (await this.client.socialProfile(string(args.agent, "agent", 40))).profile;
     if (method === "socials-model") return (await this.client.setAgentModel(string(args.agent, "agent", 40), args.model ? string(args.model, "model", 80) : null, args.effort ? string(args.effort, "thinking level", 10) : null)).runs;
     if (method === "socials-remember") return (await this.client.socialRemember(string(args.agent, "agent", 40), string(args.text, "memory", 140))).remembers;
+    if (method === "memory-forget") return await this.client.forgetMemory(string(args.session, "session", 200), args.scope === "you" ? "you" : "project", string(args.text, "memory", 400));
     if (method === "socials-forget") return (await this.client.socialForget(string(args.agent, "agent", 40), string(args.id, "memory", 80))).remembers;
     if (method === "socials-share") return (await this.client.sharePost(typeof args.text === "string" ? args.text.slice(0, 1000) : "", typeof args.image === "string" && args.image ? args.image : null)).post;
     if (method === "socials-comment") return (await this.client.commentOnPost(string(args.id, "post", 200), string(args.text, "comment", 1000))).post;

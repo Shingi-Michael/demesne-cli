@@ -1,7 +1,8 @@
 /** Screenshots that land in a card (pass 187 A) against the real Electron app
  * on X11: a browser window in front, Ctrl+Alt+Space, and the window glides
  * into a card after the last card; the next message takes the picture and
- * it joins the chat's pile (pass 202 A). Also takes the window directly with
+ * it is on the pile while the answer is written (pass 202 A), then the pile
+ * leaves (pass 247 A). Also takes the window directly with
  * packages/screen, as the model's capture_window does.
  * Needs an X display with a window manager (openbox) plus xprop, xwininfo,
  * xdotool and ImageMagick's import:
@@ -22,12 +23,15 @@ const sh = async (...args: string[]) => { const child = Bun.spawn(args, { stdout
 const failures: string[] = [];
 const expect = (ok: boolean, what: string) => { if (!ok) failures.push(what); console.log(ok ? "ok  " : "FAIL", what); };
 let lastAsk = "";
+// The second answer waits here, so the pile can be looked at while its turn runs.
+let hold: Promise<void> | null = null, release = () => {};
 const f = await fixture({
   providerId: "test", modelId: "vision-model", contextCapacity: 200000, maxOutputTokens: 4096,
   async listModels() { return [{ id: "vision-model", provider: "test", contextWindow: 200000 }]; },
   async *stream(messages: ProviderMessage[]): AsyncGenerator<ProviderStreamEvent> {
     lastAsk = JSON.stringify(messages.at(-1));
-    yield { type: "text_delta", delta: lastAsk.includes("here it is") ? "I see it: Save is in the footer now." : "Can you show me where it is now?" };
+    if (hold && lastAsk.includes("and again")) await hold;
+    yield { type: "text_delta", delta: lastAsk.includes("and again") ? "Still in the footer." : lastAsk.includes("here it is") ? "I see it: Save is in the footer now." : "Can you show me where it is now?" };
     yield { type: "finish", reason: "stop" };
   },
 });
@@ -96,25 +100,28 @@ try {
   await page.mouse.move(10, 10);
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(output, "sent.png") });
-  // Sent, it joins the chat's pile (pass 202 A), and stays.
+  // The answer is done, so nothing is left on the right (pass 247 A); the picture is in your message.
   const pile = page.locator("#cards .card.pile");
-  await pile.waitFor({ timeout: 10_000 });
-  expect(await pile.locator(".pile-shot").count() === 1 && await pile.locator(".pile-n").count() === 0, "the sent screenshot is on the chat's pile");
-  expect((await pile.innerText()).trim() === "", "the pile is just the picture, no words");
-  await page.waitForFunction(() => (document.querySelector<HTMLImageElement>("#cards .pile-shot")?.naturalWidth ?? 0) > 300, null, { timeout: 10_000 }).then(() => expect(true, "the pile shows its picture"), () => expect(false, "the pile shows its picture"));
-  // A second one lands on top.
-  await sh("xdotool", "windowactivate", "--sync", browserWindow);
-  await page.waitForTimeout(400);
-  await sh("xdotool", "key", "--clearmodifiers", "ctrl+alt+space");
-  await page.locator("#cards .card.shot").first().waitFor({ timeout: 20_000 });
-  await page.waitForTimeout(1600);
+  await pile.waitFor({ state: "detached", timeout: 5_000 }).then(() => expect(true, "no pile once the answer is done"), () => expect(false, "no pile once the answer is done"));
+  expect(await page.locator("#conversation .request-att img").count() === 1, "the sent screenshot is in your message");
+  // Two more, sent with an ask whose answer takes a while: they pile up while it runs.
+  for (const n of [1, 2]) {
+    await sh("xdotool", "windowactivate", "--sync", browserWindow);
+    await page.waitForTimeout(400);
+    await sh("xdotool", "key", "--clearmodifiers", "ctrl+alt+space");
+    await page.locator("#cards .card.shot").nth(n - 1).waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(1600);
+  }
+  hold = new Promise<void>((done) => { release = done; });
   await editor.click();
   await page.keyboard.type("and again, here it is");
   await page.keyboard.press("Enter");
   await page.locator("#cards .pile-n", { hasText: "2" }).waitFor({ timeout: 20_000 });
-  expect(await page.locator("#cards .pile-shot.landing").count() === 1, "the new one drops onto the pile");
+  expect(await page.locator("#cards .card.shot").count() === 0, "the cards go once they're sent");
+  expect((await pile.innerText()).trim() === "2", "the pile is just the pictures and their count, no words");
+  await page.waitForFunction(() => (document.querySelector<HTMLImageElement>("#cards .pile-shot")?.naturalWidth ?? 0) > 300, null, { timeout: 10_000 }).then(() => expect(true, "the pile shows its pictures"), () => expect(false, "the pile shows its pictures"));
   await page.waitForTimeout(1300);
-  expect(await pile.locator(".pile-shot").count() === 2, "two screenshots on the pile");
+  expect(await pile.locator(".pile-shot").count() === 2, "two screenshots on the pile while the turn runs");
   const rest = await page.locator("#cards .pile-shot").last().boundingBox();
   await page.locator("#cards .pile-stack").hover();
   await page.waitForTimeout(900);
@@ -127,15 +134,16 @@ try {
   expect((await view.locator(".pile-nav").innerText()).includes("2 of 2"), "a click opens the newest, full size");
   await page.keyboard.press("ArrowLeft");
   expect((await view.locator(".pile-nav").innerText()).includes("1 of 2"), "the arrow keys flip through");
+  expect(await view.locator(".pile-remove").count() === 0, "nothing to remove: the pile goes by itself");
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(output, "pile-view.png") });
-  await view.locator(".pile-remove").click();
-  await page.waitForTimeout(300);
-  expect(await view.locator(".pile-nav").count() === 0, "Remove takes it off the pile");
   await page.keyboard.press("Escape");
   expect(await page.locator(".pile-view").count() === 0, "Escape closes it");
-  await page.waitForTimeout(300);
-  expect(await pile.locator(".pile-shot").count() === 1, "the pile has one left");
+  // The answer comes, and the pile lifts away.
+  release();
+  await page.getByText("Still in the footer.").first().waitFor({ timeout: 20_000 });
+  await pile.waitFor({ state: "detached", timeout: 5_000 }).then(() => expect(true, "the pile leaves when the answer is done"), () => expect(false, "the pile leaves when the answer is done"));
+  expect(await page.locator("#conversation .request-att img").count() === 3, "all three screenshots are in your messages");
   await page.mouse.move(10, 10);
   await page.waitForTimeout(600);
   await page.screenshot({ path: join(output, "pile.png") });
@@ -143,6 +151,7 @@ try {
   failures.push(String(error));
   console.log("FAIL", error);
 } finally {
+  release();
   await app.close();
   await other.close();
   f.server.stop?.(true);

@@ -25,7 +25,7 @@ function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string
 export async function fixture(
   processor?: TurnProcessor,
   // `root` and `workspaceName` give screenshots a readable project path.
-  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string; agentCli?: import("../../../daemon/src/agent-cli.ts").AgentCliOptions; socials?: boolean; images?: { url: string; model: string }; seed?: (dataDir: string) => void } = {},
+  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string; agentCli?: import("../../../daemon/src/agent-cli.ts").AgentCliOptions; socials?: boolean; images?: { url: string; model: string }; seed?: (dataDir: string) => void; windowCapture?: import("../../../daemon/src/window-capture.ts").WindowCaptureDependencies } = {},
 ) {
   if (options.root) mkdirSync(options.root);
   const root = realpathSync(
@@ -55,6 +55,7 @@ export async function fixture(
       ...(options.agentCli ? { agentCli: options.agentCli } : { agentCli: { which: () => null } }),
       ...(options.socials ? { socials: true } : {}),
       ...(options.images ? { images: options.images } : {}),
+      ...(options.windowCapture ? { windowCapture: options.windowCapture } : {}),
       processor: processor ?? {
         providerId: "test",
         modelId: "qwen3.8-27b",

@@ -922,6 +922,11 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes src-glow { 0%, 40% { color: var(--blossom); } }
 .desktop #cards .card.pile { display: flex; flex-direction: column; gap: 12px; padding: 8px 10px 4px; margin-top: 6px; opacity: .78; transition: opacity 500ms var(--ease); }
 .desktop #cards .card.pile:is(:hover, :focus-within) { opacity: 1; background: none; }
+/* The answer is done: the pile lifts away (pass 247 A). */
+.desktop #cards .card.pile.leaving { pointer-events: none; animation: pile-leave 800ms ease-in forwards; }
+.desktop #cards .card.pile.leaving .pile-stack { cursor: default; }
+@keyframes pile-leave { to { opacity: 0; transform: translateY(-10px) scale(.96); } }
+@media (prefers-reduced-motion: reduce) { .desktop #cards .card.pile.leaving { animation: none; opacity: 0; } }
 .desktop #cards .pile-stack { position: relative; display: block; width: 100%; height: 178px; padding: 0; border: 0; background: none; cursor: zoom-in; }
 .desktop #cards .pile-shot { position: absolute; left: calc(50% - 100px); top: 14px; width: 200px; height: 140px; object-fit: cover; object-position: top left; border-radius: 9px; background: var(--tone2); box-shadow: 0 0 0 1px rgba(0, 0, 0, .3), 0 10px 24px -10px rgba(0, 0, 0, .8); transform: var(--rest); transform-origin: 50% 50%; }
 .desktop #cards .pile-stack:is(:hover, :focus-visible) .pile-shot { transform: var(--fan); }
@@ -936,7 +941,6 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .pile-view figure img { max-width: min(1100px, 100%); max-height: calc(100vh - 200px); border-radius: 10px; background: #fff; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
 .pile-view figcaption { color: rgba(255, 255, 255, .7); font-size: 12.5px; text-align: center; }
 .pile-view button { font: inherit; cursor: pointer; }
-.pile-view .pile-remove { padding: 0; border: 0; background: none; color: #f2b6c8; }
 .pile-view .pile-nav { display: flex; align-items: center; gap: 14px; color: rgba(255, 255, 255, .78); font-size: 13px; font-variant-numeric: tabular-nums; }
 .pile-view .pile-nav button { width: 30px; height: 30px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: #fff; font-size: 16px; }
 .pile-view .pile-strip { display: flex; gap: 6px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
@@ -1192,6 +1196,17 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .step-line { position: relative; }
 .desktop .step-rewind { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 0; border-radius: var(--r-sm); background: var(--tone2, var(--tone)); color: var(--acc); font-size: 12px; opacity: 0; pointer-events: none; }
 .desktop .step-rewind .ico { width: 12px; height: 12px; }
+/* The small picture a step took (pass 247 A): it sits at the end of its line. */
+.desktop .step-line.shot-line { display: flex; align-items: center; gap: 8px; }
+.desktop .step-line.shot-line > .tool-row { flex: 1; min-width: 0; width: auto; }
+.desktop .step-shot { flex: none; height: 24px; padding: 0; border: 0; border-radius: 5px; overflow: hidden; background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); cursor: zoom-in; }
+.desktop .step-shot img { display: block; height: 24px; min-width: 30px; max-width: 44px; object-fit: cover; object-position: top left; }
+.desktop .step-shot:is(:hover, :focus-visible) { box-shadow: 0 0 0 1px var(--acc); }
+.desktop .step-line.shot-line .step-rewind { right: 56px; }
+/* Folded steps: the turn's pictures sit beside its step count. */
+.desktop .turn-receipt .receipt-shots { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; vertical-align: middle; }
+.desktop .turn-receipt .receipt-shots .step-shot, .desktop .turn-receipt .receipt-shots .step-shot img { height: 20px; }
+.desktop .turn-receipt .receipt-more { color: var(--t4); font-size: 11.5px; }
 .desktop .step-line:hover .step-rewind, .desktop .step-rewind:focus-visible { opacity: 1; pointer-events: auto; }
 .desktop .step-line:hover .tool-row .meta { visibility: hidden; }
 .desktop .rewind-line { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 2px; font-size: 12.5px; line-height: 19px; color: var(--t3); }

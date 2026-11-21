@@ -112,7 +112,7 @@ import { Handoffs } from "./handoff.ts";
 import { AGENT_MODEL_PREFIX, AgentCli, agentIdOf, type AgentCliOptions, type AgentId } from "./agent-cli.ts";
 import { HeartbeatBridge, HeartbeatClient, heartbeatEnabled, heartbeatSocketPath, heartbeatTool } from "./heartbeat.ts";
 import { imageGenerationTool } from "./image-generation.ts";
-import { CHANGING_STEPS, captureWindowTool, windowCaptureSupported } from "./window-capture.ts";
+import { CHANGING_STEPS, captureWindowTool, windowCaptureSupported, type WindowCaptureDependencies } from "./window-capture.ts";
 import { workspaceFileChanges, workspaceFileInfo } from "./workspace-file-info.ts";
 import { loadConfig, type LoadedConfig } from "@demesne/config";
 import { SUBAGENT_OFTEN, type AgentConfig, type HeartbeatConfig, type ImageGenerationConfig, type SubagentOften } from "@demesne/config";
@@ -187,6 +187,8 @@ export function createDaemonApp(options: {
   heartbeat?: HeartbeatConfig;
   /// How agent tools are found and started (tests swap in fakes).
   agentCli?: AgentCliOptions;
+  /// A stand-in for the system's window capture, so a check can run where windows can't be pictured.
+  windowCapture?: WindowCaptureDependencies;
   /// Folders outside any project that the assistant may read, by name.
   assistantFolders?: Record<string, string>;
   /// The assistant's own folder, with its DEMESNE.md: its one chat lives there.
@@ -372,7 +374,7 @@ export function createDaemonApp(options: {
   });
   if (options.providerVision || options.images?.model || Object.keys(options.mcpServers ?? {}).length) {
     tools.register(viewImageTool());
-    if (windowCaptureSupported()) tools.register(captureWindowTool(undefined, (sessionId) => store.windowCaptures(sessionId, CHANGING_STEPS)));
+    if (options.windowCapture || windowCaptureSupported()) tools.register(captureWindowTool(options.windowCapture, (sessionId) => store.windowCaptures(sessionId, CHANGING_STEPS)));
   }
   if (options.images?.url && options.images.model) tools.register(imageGenerationTool(options.images, store));
   // Pages are looked at after each save when the desktop app is there to render them.

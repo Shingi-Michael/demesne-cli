@@ -83,6 +83,14 @@ Vision hydration selects the last two to four retained image IDs in tool message
 
 Compiled daemons load native image dependencies beside the real executable, outside Bun's embedded filesystem. Keep `dist/node_modules` with `demesned`; building only the executable and omitting those codecs is incomplete packaging.
 
+## Screenshots in the chat window
+
+Pictures leave the right side once they have done their job. While a turn runs, its pictures (the ones you sent with it and the ones the chat takes with `capture_window`, `open`, `show` or `look_at_page`) stack on one pile card on the right, newest on top; hover fans it out and a click flips through them. When the answer is done the pile lifts away. Nothing is lost: a picture you sent stays in your message, and a picture the chat took stays as a small picture beside the turn's step count, and on the step that took it once the steps are unfolded. A click opens it full size. A screenshot you took and have not sent keeps its own card until you send it, and what the chat shows you on purpose keeps its card until you close it.
+
+The pile is drawn from the running turn only (`chatPile` in `apps/desktop/workspace/shot-pile.ts`, called from `renderCards`), so nothing is stored about what was shown or removed. `bun scripts/check-shot-leaves.ts` checks it in the real app with a stand-in window capture.
+
+Read about it: [Progressive Disclosure, Nielsen Norman Group](https://www.nngroup.com/articles/progressive-disclosure/) on showing what is needed now and keeping the rest one step away.
+
 ## Verification
 
 ```sh

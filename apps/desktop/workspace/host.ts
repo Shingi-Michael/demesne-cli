@@ -2281,6 +2281,14 @@ export class WorkspaceHost {
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
     if (method === "foundry-shelf") return await this.client.foundryList();
+    // The chat's browser in the split (pass 248 D): its newest picture, your input while it is yours, handing it back.
+    if (method === "browser-frame") {
+      const frame = await this.client.browserFrame(String(args.sessionId), Number(args.after) || 0, Number(args.aspect) || undefined);
+      const { jpeg, ...rest } = frame;
+      return { ...rest, ...(typeof jpeg === "string" && jpeg ? { src: `data:image/jpeg;base64,${jpeg}` } : {}) };
+    }
+    if (method === "browser-input") return this.client.browserInput(String(args.sessionId), Array.isArray(args.events) ? args.events.slice(0, 40) : []);
+    if (method === "browser-hand-back") return this.client.browserHandBack(String(args.sessionId));
     // A picture a tool took this chat (look_at_page), for its step in the turn.
     if (method === "tool-picture") {
       const id = string(args.id, "picture", 64);

@@ -433,6 +433,17 @@ export class DemesneClient {
   async openAgent(agent: string, workspacePath: string): Promise<{ session: { id: string }; address: string | null }> {
     return this.request("/v1/agents/open", { method: "POST", body: JSON.stringify({ agent, workspacePath }) });
   }
+  /// The chat's browser, beside it (pass 248 D): the newest picture after `after` (waits up to 1.5 s for one).
+  async browserFrame(sessionId: string, after: number, aspect?: number): Promise<{ seq: number; jpeg?: string; width?: number; height?: number; url?: string; title?: string; handover?: boolean; asked?: string }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/frame?after=${Math.max(0, Math.floor(after))}${aspect ? `&aspect=${aspect.toFixed(3)}` : ""}`);
+  }
+  /// Your clicks and keys on a page the model handed you.
+  async browserInput(sessionId: string, events: unknown[]): Promise<{ ok: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/input`, { method: "POST", body: JSON.stringify({ events }) });
+  }
+  async browserHandBack(sessionId: string): Promise<{ handedBack: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/hand-back`, { method: "POST", body: "{}" });
+  }
   async commands(sessionId:string,output="all"):Promise<CommandsResponse>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands?output=${encodeURIComponent(output)}`);}
   async stopCommand(sessionId:string,id:string):Promise<{stopping:boolean}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/stop`,{method:"POST",body:"{}"});}
   async rerunCommand(sessionId:string,id:string):Promise<{id:string}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/rerun`,{method:"POST",body:"{}"});}

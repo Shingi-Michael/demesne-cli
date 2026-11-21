@@ -10,8 +10,13 @@
 /// once the daemon names it (the person approved it), and the tab then stays
 /// on its approved sites; a public page can't reach this computer or its
 /// network, download, or ask for the camera.
-import { app, BrowserWindow, session as sessions } from "electron";
-import { mkdtempSync, rmSync } from "node:fs";
+/// You can watch it (pass 248 D): while the desktop shows a chat's browser,
+/// the tab sends small pictures of itself as it repaints. When the model hands
+/// it over (a sign-in), your clicks and keys reach the page until you hand it
+/// back. With a profile folder, a project's cookies are kept on disk, so a
+/// sign-in you do once is still there next time.
+import { app, BrowserWindow, session as sessions, type NativeImage, type Session } from "electron";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -20,6 +25,13 @@ import { wentTo } from "./foundry-look.ts";
 import { changed, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint } from "./foundry-try.ts";
 
 export const BROWSER_HOST_FLAG = "--browser-host";
+/// `--browser-profile=<folder>`: where projects' sign-ins are kept between runs.
+export const BROWSER_PROFILE_FLAG = "--browser-profile=";
+/// A picture of a watched tab at most this often, and no wider than this.
+const FRAME_MS = 200;
+const FRAME_WIDTH = 1280;
+/// A tab is watched for this long after the desktop last asked for a picture.
+const WATCH_MS = 4000;
 /// A chat's tab is closed after this long untouched.
 const IDLE_MS = 20 * 60_000;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -50,30 +62,135 @@ function siteOf(url: string): string | null {
   try { const parsed = new URL(url); return /^https?:$/.test(parsed.protocol) && !localAddress(url) ? parsed.hostname.toLowerCase().replace(/^www\./, "") : null; } catch { return null; }
 }
 
-interface Tab { win: BrowserWindow; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; used: number; queue: Promise<unknown> }
+interface Tab { win: BrowserWindow; chat: string; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; used: number; queue: Promise<unknown>; handover: boolean; framed: number; frameTimer?: ReturnType<typeof setTimeout> }
+
+/// One event you make on a page you were handed, as the desktop sends it.
+/// Page coordinates are CSS pixels of the tab.
+export type HandInput =
+  | { type: "mouseDown" | "mouseUp" | "mouseMove"; x: number; y: number; button?: "left" | "right" | "middle"; clickCount?: number }
+  | { type: "mouseWheel"; x: number; y: number; deltaX: number; deltaY: number }
+  | { type: "keyDown" | "keyUp" | "char"; keyCode: string; modifiers?: string[] }
+  | { type: "text"; text: string };
+
+const MOUSE = new Set(["mouseDown", "mouseUp", "mouseMove"]);
+const MODIFIERS = new Set(["shift", "control", "alt", "meta", "command", "cmd"]);
+/// What the desktop sent, made safe to hand to the page: known kinds, numbers in range, short text.
+export function handInput(value: unknown): HandInput | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const event = value as Record<string, unknown>, type = String(event.type);
+  const at = (n: unknown) => Number.isFinite(Number(n)) ? Math.max(-10, Math.min(20_000, Math.round(Number(n)))) : null;
+  if (MOUSE.has(type) || type === "mouseWheel") {
+    const x = at(event.x), y = at(event.y);
+    if (x === null || y === null) return null;
+    if (type === "mouseWheel") return { type, x, y, deltaX: Math.max(-4000, Math.min(4000, Number(event.deltaX) || 0)), deltaY: Math.max(-4000, Math.min(4000, Number(event.deltaY) || 0)) };
+    const button = event.button === "right" || event.button === "middle" ? event.button : "left";
+    return { type: type as "mouseDown", x, y, button, clickCount: Math.max(1, Math.min(3, Math.round(Number(event.clickCount) || 1))) };
+  }
+  if (type === "keyDown" || type === "keyUp" || type === "char") {
+    const keyCode = typeof event.keyCode === "string" ? event.keyCode : "";
+    if (!keyCode || keyCode.length > 24) return null;
+    const modifiers = Array.isArray(event.modifiers) ? event.modifiers.filter((m): m is string => typeof m === "string" && MODIFIERS.has(m.toLowerCase())).map((m) => m.toLowerCase()) : [];
+    return { type, keyCode, ...(modifiers.length ? { modifiers } : {}) };
+  }
+  if (type === "text" && typeof event.text === "string" && event.text.length <= 4000) return { type, text: event.text };
+  return null;
+}
+
+/// The partition a chat's tab lives in: the project's, kept on disk, when there is a profile folder; else the chat's own, in memory.
+export function browserPartition(chat: string, profile: unknown, kept: boolean): string {
+  return kept && typeof profile === "string" && /^[a-f0-9]{8,64}$/.test(profile) ? `persist:browser-${profile}` : `browser-${chat}`;
+}
 type Command = Record<string, unknown> & { id?: unknown; chat?: unknown; action?: unknown };
 type Found = { found: boolean; gone?: boolean; hidden?: boolean; names?: string[]; x: number; y: number; many: number; what: string; covered: string | null; disabled: boolean };
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function runBrowserHost() {
-  const profile = mkdtempSync(join(tmpdir(), "demesne-browser-"));
+  const keptAt = process.argv.find((arg) => arg.startsWith(BROWSER_PROFILE_FLAG))?.slice(BROWSER_PROFILE_FLAG.length) ?? "";
+  const kept = Boolean(keptAt);
+  if (kept) mkdirSync(keptAt, { recursive: true });
+  const profile = kept ? keptAt : mkdtempSync(join(tmpdir(), "demesne-browser-"));
   app.setPath("userData", profile);
   app.commandLine.appendSwitch("force-device-scale-factor", "1");
   if (process.platform === "darwin") app.setActivationPolicy("accessory");
   app.dock?.hide();
   app.on("window-all-closed", () => {});
   const tabs = new Map<string, Tab>();
-  const quit = () => { for (const tab of tabs.values()) tab.win.destroy(); try { rmSync(profile, { recursive: true, force: true }); } catch {} app.exit(0); };
-  const answer = (id: unknown, result: Record<string, unknown>) => process.stdout.write(JSON.stringify({ id, ...result }) + "\n");
+  /// The tab each page belongs to, for the handlers its session shares with other chats of the project.
+  const byContents = new Map<number, Tab>();
+  /// Chats the desktop is showing, until when.
+  const watched = new Map<string, number>();
+  /// The sessions kept on disk, so their cookies are written out before the host goes.
+  const keptSessions = new Set<Session>();
+  const quit = async () => {
+    for (const tab of tabs.values()) tab.win.destroy();
+    await Promise.race([Promise.all([...keptSessions].map((one) => one.cookies.flushStore().catch(() => {}))), settle(1000)]);
+    if (!kept) try { rmSync(profile, { recursive: true, force: true }); } catch {}
+    app.exit(0);
+  };
+  const write = (line: Record<string, unknown>) => process.stdout.write(JSON.stringify(line) + "\n");
+  const answer = (id: unknown, result: Record<string, unknown>) => write({ id, ...result });
 
-  function open(chat: string, width: "desktop" | "phone"): Tab {
+  /// A picture of a watched tab, sent as an event the daemon keeps for the desktop.
+  const sendFrame = (tab: Tab, image: NativeImage) => {
+    if (tab.win.isDestroyed() || (watched.get(tab.chat) ?? 0) < Date.now() || image.isEmpty()) return;
+    const view = TRY_WIDTHS[tab.width], size = image.getSize();
+    const small = size.width > FRAME_WIDTH ? image.resize({ width: FRAME_WIDTH, quality: "good" }) : image;
+    tab.framed = Date.now();
+    const contents = tab.win.webContents;
+    write({ event: "frame", chat: tab.chat, jpeg: small.toJPEG(76).toString("base64"), width: view.width, height: Math.round(view.width * size.height / Math.max(1, size.width)),
+      url: contents.getURL(), title: contents.getTitle(), handover: tab.handover });
+  };
+  const frameSoon = (tab: Tab) => {
+    if (tab.frameTimer || (watched.get(tab.chat) ?? 0) < Date.now()) return;
+    const wait = Math.max(0, FRAME_MS - (Date.now() - tab.framed));
+    tab.frameTimer = setTimeout(() => {
+      tab.frameTimer = undefined;
+      if (tab.win.isDestroyed()) return;
+      void tab.win.webContents.capturePage().then((image) => sendFrame(tab, image), () => {});
+    }, wait);
+  };
+
+  /// What a session's pages may do. Set once per session: chats of one project share it.
+  const prepared = new WeakSet<Session>();
+  function prepare(session: Session) {
+    if (prepared.has(session)) return;
+    prepared.add(session);
+    const tabOf = (id: number | undefined) => id === undefined ? undefined : byContents.get(id);
+    // A public page can't reach this computer or its network, download, or ask for the camera and the like.
+    session.webRequest.onBeforeRequest((details, callback) => {
+      const tab = tabOf(details.webContentsId);
+      let host = ""; try { host = new URL(details.url).hostname; } catch {}
+      callback({ cancel: Boolean(tab && !tab.local) && details.resourceType !== "mainFrame" && /^(https?|wss?):/.test(details.url) && privateHost(host) });
+    });
+    session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    session.removeAllListeners("will-download");
+    session.on("will-download", (event, item, contents) => { event.preventDefault(); const tab = tabOf(contents?.id); if (tab && tab.blocked.length < 4) tab.blocked.push(`${item.getFilename().slice(0, 80)} was not downloaded: the browser saves no files`); });
+    session.webRequest.onCompleted((details) => {
+      const tab = tabOf(details.webContentsId);
+      if (tab?.local && details.statusCode >= 400 && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.statusCode}`);
+    });
+    session.webRequest.onErrorOccurred((details) => {
+      const tab = tabOf(details.webContentsId);
+      if (tab?.local && details.error !== "net::ERR_ABORTED" && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.error.replace(/^net::/, "")}`);
+    });
+  }
+
+  function open(chat: string, width: "desktop" | "phone", profileKey: unknown): Tab {
     const view = TRY_WIDTHS[width];
+    // The project's cookies, kept on disk, when there is a profile folder; else the chat's own, in memory.
+    const partition = browserPartition(chat, profileKey, kept);
+    const session = sessions.fromPartition(partition);
+    if (partition.startsWith("persist:")) keptSessions.add(session);
+    prepare(session);
     const win = new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
-      // Its own cookies and storage per chat, kept in memory for as long as the host lives.
-      webPreferences: { session: sessions.fromPartition(`browser-${chat}`), offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
-    const tab: Tab = { win, width, sites: new Set(), local: true, errors: [], failed: [], blocked: [], used: Date.now(), queue: Promise.resolve() };
+      webPreferences: { session, offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    const tab: Tab = { win, chat, width, sites: new Set(), local: true, errors: [], failed: [], blocked: [], used: Date.now(), queue: Promise.resolve(), handover: false, framed: 0 };
     const contents = win.webContents;
+    byContents.set(contents.id, tab);
+    win.on("closed", () => { byContents.delete(contents.id); clearTimeout(tab.frameTimer); });
+    // Repaints become pictures while someone is watching.
+    contents.on("paint", () => frameSoon(tab));
     // Where this tab may go by itself: around this computer while it is here, and around the sites the person approved.
     const allowed = (url: string) => {
       if (localAddress(url)) return tab.local;
@@ -85,14 +202,6 @@ export function runBrowserHost() {
     contents.on("did-navigate", (_event, url) => { tab.local = localAddress(url); });
     // Sites see an ordinary browser, not the app's name.
     contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|demesne[\w-]*)\/\S+/gi, ""));
-    // A public page can't reach this computer or its network, download, or ask for the camera and the like.
-    contents.session.webRequest.onBeforeRequest((details, callback) => {
-      let host = ""; try { host = new URL(details.url).hostname; } catch {}
-      callback({ cancel: !tab.local && details.resourceType !== "mainFrame" && /^(https?|wss?):/.test(details.url) && privateHost(host) });
-    });
-    contents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-    contents.session.removeAllListeners("will-download");
-    contents.session.on("will-download", (event, item) => { event.preventDefault(); if (tab.blocked.length < 4) tab.blocked.push(`${item.getFilename().slice(0, 80)} was not downloaded: the browser saves no files`); });
     contents.on("will-navigate", (event, url) => refuse(event, url));
     contents.on("will-redirect", (event, url) => refuse(event, url));
     // A link that wants a new window opens in this tab instead: there is one tab per chat.
@@ -102,12 +211,6 @@ export function runBrowserHost() {
       return { action: "deny" };
     });
     contents.on("console-message", (event) => { if (tab.local && event.level === "error" && tab.errors.length < 8) tab.errors.push(event.message.slice(0, 200)); });
-    contents.session.webRequest.onCompleted((details) => {
-      if (tab.local && details.statusCode >= 400 && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.statusCode}`);
-    });
-    contents.session.webRequest.onErrorOccurred((details) => {
-      if (tab.local && details.error !== "net::ERR_ABORTED" && tab.failed.length < 8) tab.failed.push(`${details.method} ${shortUrl(details.url)} → ${details.error.replace(/^net::/, "")}`);
-    });
     tabs.set(chat, tab);
     return tab;
   }
@@ -149,6 +252,15 @@ export function runBrowserHost() {
       return page(true);
     }
     if (contents.getURL() === "" || contents.getURL() === "about:blank") return { error: "No page is open yet: start with action open." };
+    // Handed to the person (a sign-in) and back. Back, the model reads the page again: it saw nothing in between.
+    if (action === "handover") {
+      tab.handover = command.on === true;
+      frameSoon(tab);
+      if (tab.handover) { contents.focus(); return { url: contents.getURL(), title: contents.getTitle(), handover: true }; }
+      tab.local = localAddress(contents.getURL());
+      tab.errors.length = tab.failed.length = 0;
+      return page(true);
+    }
     await loaded();
     if (action === "read") return page(true);
     if (action === "text") {
@@ -230,17 +342,48 @@ export function runBrowserHost() {
       const chat = String(command.chat ?? ""), width = command.width === "phone" ? "phone" as const : "desktop" as const;
       if (!chat) { answer(command.id, { error: "chat is required" }); return; }
       let tab = tabs.get(chat);
+      // Someone is showing this chat's browser: send pictures for a few seconds more, starting now.
+      if (command.action === "watch") {
+        watched.set(chat, Date.now() + WATCH_MS);
+        // The page is as tall as the split shows it, so the picture fills it; its width stays the model's.
+        const aspect = Number(command.aspect);
+        if (tab && !tab.win.isDestroyed() && Number.isFinite(aspect) && aspect > 0) {
+          const view = TRY_WIDTHS[tab.width], [, height] = tab.win.getContentSize();
+          const wanted = Math.round(Math.max(view.height * 0.75, Math.min(view.width * 3, view.width * aspect)));
+          if (Math.abs(wanted - (height ?? 0)) > 24) tab.win.setContentSize(view.width, wanted);
+        }
+        if (tab && !tab.win.isDestroyed()) { tab.framed = 0; frameSoon(tab); }
+        answer(command.id, { watching: Boolean(tab && !tab.win.isDestroyed()) });
+        return;
+      }
+      // Your clicks and keys, only while the model has handed you the page. Not queued: the hand-over waits in the queue.
+      if (command.action === "input") {
+        if (!tab || tab.win.isDestroyed() || !tab.handover) { answer(command.id, { error: "The page is not yours right now." }); return; }
+        const contents = tab.win.webContents, events = Array.isArray(command.events) ? command.events.slice(0, 40) : [];
+        contents.focus();
+        for (const raw of events) {
+          const event = handInput(raw);
+          if (!event) continue;
+          if (event.type === "text") void contents.insertText(event.text);
+          else contents.sendInputEvent(event as Parameters<typeof contents.sendInputEvent>[0]);
+        }
+        tab.used = Date.now();
+        frameSoon(tab);
+        answer(command.id, { ok: true });
+        return;
+      }
       if (command.action === "close") { tab?.win.destroy(); tabs.delete(chat); answer(command.id, { closed: true }); return; }
       if (tab && command.action === "open" && command.width !== undefined && tab.width !== width) { tab.win.destroy(); tab = undefined; }
-      if (!tab || tab.win.isDestroyed()) tab = open(chat, width);
+      if (!tab || tab.win.isDestroyed()) tab = open(chat, width, command.profile);
       const mine = tab;
       mine.used = Date.now();
       // One command at a time in a tab, in the order they came.
       mine.queue = mine.queue.then(() => run(mine, command)).then((result) => answer(command.id, result), (error) => answer(command.id, { error: error instanceof Error ? error.message : String(error) }));
     });
     // The daemon closing our input (or going away) is the end of the browser.
-    lines.on("close", quit);
-    setInterval(() => { for (const [chat, tab] of tabs) if (Date.now() - tab.used > IDLE_MS) { tab.win.destroy(); tabs.delete(chat); } }, 60_000).unref();
+    lines.on("close", () => { void quit(); });
+    // A tab handed to you is not closed under you.
+    setInterval(() => { for (const [chat, tab] of tabs) if (!tab.handover && Date.now() - tab.used > IDLE_MS) { tab.win.destroy(); tabs.delete(chat); } }, 60_000).unref();
     answer("ready", { ready: true });
   });
 }

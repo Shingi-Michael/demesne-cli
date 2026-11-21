@@ -4,8 +4,10 @@
 // `bun scripts/prepare-desktop.ts` (Linux needs a display:
 // xvfb-run -a bun scripts/check-browser.ts).
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { browserTool, electronBrowser } from "../apps/daemon/src/browser.ts";
+import { BrowserHandovers, browserTool, electronBrowser } from "../apps/daemon/src/browser.ts";
 
 const root = resolve(import.meta.dir, "..");
 const electron = process.env.DEMESNE_ELECTRON ?? join(root, "node_modules/electron/dist", process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron");
@@ -20,7 +22,7 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
   if (url.pathname === "/") return page("Sign in", `<h1>Sign in</h1><label>Name <input id="name" placeholder="Your name"></label><button id="go">Sign in</button><p id="said"></p>
     <a href="/list">The list</a> <a href="https://example.com/">Elsewhere</a> <button id="boom">Break</button> <button id="ask">Ask</button>
     <script>
-      go.onclick = () => { document.cookie = "who=" + encodeURIComponent(document.getElementById("name").value) + "; path=/"; said.textContent = "Signed in as " + document.getElementById("name").value; };
+      go.onclick = () => { document.cookie = "who=" + encodeURIComponent(document.getElementById("name").value) + "; path=/; max-age=86400"; said.textContent = "Signed in as " + document.getElementById("name").value; };
       boom.onclick = () => { console.error("it broke on purpose"); fetch("/missing"); };
       ask.onclick = () => { if (confirm("Really?")) said.textContent = "Asked and answered"; };
     </script>`);
@@ -151,5 +153,72 @@ try {
   // Closed is closed: the next call has to open again.
   await call({ action: "close" }, "chat-b");
   await assert.rejects(call({ action: "read" }, "chat-b"), /No page is open yet/);
+
+  // Pass 248 D: you can watch it. Asking for a picture starts them coming, small JPEGs of the page as it is.
+  const watching = new AbortController();
+  const firstFrame = await drive.frame("chat-a", 0, watching.signal) ?? await drive.frame("chat-a", 0, watching.signal);
+  assert(firstFrame, "a watched tab sends a picture");
+  assert.equal(Buffer.from(firstFrame.jpeg, "base64").subarray(0, 2).toString("hex"), "ffd8", "it is a JPEG");
+  assert.equal(firstFrame.width, 1280);
+  assert.equal(firstFrame.url, `${base}/`);
+  // A change on the page sends a newer one.
+  await call({ action: "type", ref: "Name", text: "Bo", clear: true });
+  const newer = await drive.frame("chat-a", firstFrame.seq, watching.signal);
+  assert(newer && newer.seq > firstFrame.seq, "a repaint sends a newer picture");
   console.log(`check-browser passed in ${Date.now() - started}ms`);
-} finally { drive.close(); server.stop(true); }
+} finally { drive.close(); }
+
+// Pass 248 D: handed over, and kept. A project's chats share its sign-ins, which
+// are still there after the browser starts again; the person's typing reaches
+// the page only while it is theirs.
+const kept = mkdtempSync(join(tmpdir(), "demesne-browser-kept-"));
+try {
+  const started = Date.now();
+  const handovers = new BrowserHandovers();
+  let keptDrive = electronBrowser(command, kept);
+  const keptCall = async (input: Record<string, unknown>, chat: string, workspaceRoot: string | null = root) => {
+    const tool = browserTool(keptDrive, new Map(), async () => ["93.184.215.14"], handovers);
+    const result = await tool.executeWithArtifacts!(input, { sessionId: chat, turnId: "t1", workspaceRoot, signal: new AbortController().signal } as never) as { text: string };
+    return JSON.parse(result.text) as Record<string, any>;
+  };
+  await keptCall({ action: "open", url: `${base}/` }, "chat-k1");
+  // Not yours yet: input is refused.
+  assert.match(String((await keptDrive("chat-k1", { action: "input", events: [{ type: "text", text: "x" }] }, new AbortController().signal))?.error), /not yours/);
+  // The model hands it over; you click into the field, type, and press Sign in; then hand it back.
+  const going = keptCall({ action: "hand_over", reason: "Sign in" }, "chat-k1");
+  while (!handovers.asked("chat-k1")) await new Promise((resolve) => setTimeout(resolve, 20));
+  const input = (events: unknown[]) => keptDrive("chat-k1", { action: "input", events }, new AbortController().signal);
+  const watch = new AbortController();
+  const picture = await keptDrive.frame("chat-k1", 0, watch.signal) ?? await keptDrive.frame("chat-k1", 0, watch.signal);
+  assert(picture?.handover, "the picture says the page is yours");
+  // A click on an empty spot, then Tab into the name field, type, Tab to Sign in, and Space to press it.
+  const key = (keyCode: string, char?: string) => [{ type: "keyDown", keyCode }, ...(char ? [{ type: "char", keyCode: char }] : []), { type: "keyUp", keyCode }];
+  assert.equal((await input([{ type: "mouseDown", x: 1200, y: 700 }, { type: "mouseUp", x: 1200, y: 700 }]))?.ok, true);
+  await input(key("Tab"));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal((await input([{ type: "text", text: "Ada" }]))?.ok, true);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await input([...key("Tab"), ...key("Space", " ")]);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(handovers.handBack("chat-k1"), true);
+  const back = await going;
+  assert.match(String(back.handed_back), /did not see what they typed/);
+  assert.match(back.outline.join("\n"), /textbox "Name"  value "Ada"/, "what you typed reached the page");
+  assert.match((await keptCall({ action: "text" }, "chat-k1")).text, /Signed in as Ada/, "your click on Sign in reached the page");
+  // After the hand-back the page is the model's again.
+  assert.match(String((await input([{ type: "text", text: "x" }]))?.error), /not yours/);
+  // Another chat of the project is signed in too.
+  await keptCall({ action: "open", url: `${base}/list` }, "chat-k2");
+  assert.match((await keptCall({ action: "text" }, "chat-k2")).text, /Hello Ada/, "the project's chats share its sign-in");
+  // A chat outside any project is not.
+  await keptCall({ action: "open", url: `${base}/list` }, "chat-plain", null);
+  assert.match((await keptCall({ action: "text" }, "chat-plain", null)).text, /Hello nobody/);
+  // The browser starts again: the sign-in is still there.
+  keptDrive.close();
+  await new Promise((resolve) => setTimeout(resolve, 1800));
+  keptDrive = electronBrowser(command, kept);
+  await keptCall({ action: "open", url: `${base}/list` }, "chat-k3");
+  assert.match((await keptCall({ action: "text" }, "chat-k3")).text, /Hello Ada/, "a sign-in lasts after a restart");
+  keptDrive.close();
+  console.log(`check-browser hand-over and kept sign-ins passed in ${Date.now() - started}ms`);
+} finally { server.stop(true); setTimeout(() => { try { rmSync(kept, { recursive: true, force: true }); } catch {} }, 1600); }

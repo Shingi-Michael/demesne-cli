@@ -1,6 +1,6 @@
 /// What a chat has looked at of the real thing, so a mockup of something
 /// that exists starts from it and not from memory: a window capture, a page
-/// in the browser, a picture, or the project's own interface files. Kept
+/// in the browser, the person's app looked at while it runs, a picture, or the project's own interface files. Kept
 /// per chat while the daemon runs; a mockup's first save checks it
 /// (foundry.ts checkStart).
 import { isRecord } from "@demesne/protocol";
@@ -30,6 +30,8 @@ export function noteSeen(sessionId: string | undefined, name: string, input: unk
   if (!sessionId) return;
   if (name === "capture_window") { if (result.startsWith("Captured window")) add(sessionId, "a window capture"); return; }
   if (name === "browser") { add(sessionId, "a page in the browser"); return; }
+  // The person's own app, running: looked at through its local server or file.
+  if (name === "look_at_page") { add(sessionId, "the running page"); return; }
   if (name === "view_image") { add(sessionId, "a picture"); return; }
   for (const path of paths(name, input)) if (UI_FILE.test(path)) add(sessionId, path);
 }

@@ -615,16 +615,19 @@ describe("a mockup of something that exists starts from it", () => {
 
   test("a capture, an interface file or saying it could not look all pass", async () => {
     const store = new DemesneStore(":memory:");
-    const a = make(store), b = make(store), c = make(store), d = make(store);
+    const a = make(store), b = make(store), c = make(store), d = make(store), e = make(store);
     noteSeen(a.session.id, "capture_window", {}, "Captured window 4: Demesne — Demesne");
+    // The person's own web app, looked at while it runs, is the real thing too.
+    noteSeen(e.session.id, "look_at_page", { url: "http://localhost:5173/plans" }, "{}");
     noteSeen(b.session.id, "read_file", { path: "src/settings.css" }, "…");
     noteSeen(d.session.id, "read_file", { path: "README.md" }, "…");
     const save = foundrySaveTool(store);
     await save.execute(input("a capture of Settings"), a.context);
     await save.execute(input("src/settings.css"), b.context);
     await save.execute(input("could not look: no window to capture"), c.context);
+    await save.execute(input("the plans page on localhost"), e.context);
     await expect(save.execute(input("the Settings window"), d.context)).rejects.toThrow(/look_first/);
-    expect(store.listFoundryArtifacts().length).toBe(3);
+    expect(store.listFoundryArtifacts().length).toBe(4);
   });
 
   test("Today is the comparison, not one of the three options", async () => {

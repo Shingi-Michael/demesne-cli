@@ -555,6 +555,11 @@ export class DemesneStore {
 
   /// Pass 240 A: a picture a mockup shows, kept with the mockup so it outlives
   /// the chat it was taken in (the bytes stay in the artifact folder, by hash).
+  /// Whether a chat ever looked at the person's running app (look_at_page), kept with the chat.
+  lookedAtPage(sessionId: string): boolean {
+    return this.database.query("SELECT 1 FROM tool_calls JOIN turns ON turns.id = tool_calls.turn_id WHERE turns.session_id = ? AND tool_calls.name = 'look_at_page' AND tool_calls.status = 'completed' LIMIT 1").get(sessionId) !== null;
+  }
+
   /// The windows a chat captured (capture_window), oldest first, kept with the chat so a
   /// restart forgets none: for each, its turn, the window, its picture, and whether a
   /// later step of that turn could have changed what it shows (one of `changing`).

@@ -32,6 +32,7 @@ d-phone{display:inline-block}
 .dp-status{display:flex;justify-content:space-between;align-items:center;height:44px;padding:0 26px;flex:none;font-size:14px;font-weight:600;color:var(--ink)}
 .dp-status b{width:110px;height:30px;border-radius:20px;background:#111}
 .dp-screen>.dp-body{overflow:auto}
+d-styles{display:none}
 d-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:24px;align-items:start}
 d-compare>*{min-width:0;display:flex;flex-direction:column;gap:12px}
 .dp-opt{display:flex;align-items:baseline;gap:8px;font-weight:600;font-size:14px}
@@ -284,6 +285,54 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
       head.innerHTML = esc(name) + (rec && name.indexOf(rec) === 0 ? "<em>recommended</em>" : "") + (option.getAttribute("note") ? "<span>" + esc(option.getAttribute("note")) + "</span>" : "");
       option.prepend(head); option.removeAttribute("title");
     });
+  });
+
+  /// A range of styles (pass 246 A): the page is written once, on variables,
+  /// and <d-styles recommended="Name"> holds two or three
+  /// <d-style name made vars="--paper:#fff; --ink:#111; …">. The page is
+  /// drawn in one of them (?option=N, else the recommended one, else the
+  /// first): its values are set on the page's root, over the kit's own.
+  /// Nothing is drawn here. On Foundry's long page the names, what each is
+  /// made of and its colours go to the Foundry page, which gives every style
+  /// a stage of its own, like options.
+  var COLOUR = /^(#[0-9a-f]{3,8}|(?:rgb|hsl|oklch|oklab|lab|lch|color)a?\([^()]*\))$/i;
+  function styleVars(text) {
+    var vars = [];
+    String(text || "").split(";").forEach(function (part) {
+      var match = /^\s*(--[a-z0-9-]{1,40})\s*:\s*([^{}<>]{1,200})$/i.exec(part);
+      if (!match || /url\s*\(|expression\s*\(|@import/i.test(match[2])) return;
+      var name = match[1].toLowerCase(), value = match[2].replace(/\s+/g, " ").trim();
+      if (value && !vars.some(function (known) { return known[0] === name; })) vars.push([name, value]);
+    });
+    return vars.slice(0, 40);
+  }
+  /// Whether a colour is a dark one, as the browser reads it.
+  function isDark(colour) {
+    var probe = doc.createElement("i"); probe.style.color = colour; doc.documentElement.appendChild(probe);
+    var rgb = (getComputedStyle(probe).color.match(/[\d.]+/g) || []).map(Number); probe.remove();
+    return rgb.length >= 3 && (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255 < 0.5;
+  }
+  define("d-styles", function (el) {
+    var styles = Array.prototype.filter.call(el.children, function (style) { return style.tagName === "D-STYLE" && style.getAttribute("name"); }).slice(0, 3);
+    if (!styles.length) return;
+    var rec = (el.getAttribute("recommended") || "").toLowerCase();
+    var names = styles.map(function (style) { return style.getAttribute("name"); });
+    var best = rec ? names.findIndex(function (name) { return name.toLowerCase().indexOf(rec) === 0; }) : -1;
+    var shown = ONE ? Math.min(Number(ONE[1]), styles.length - 1) : best < 0 ? 0 : best;
+    var all = styles.map(function (style) { return styleVars(style.getAttribute("vars")); });
+    var root = doc.documentElement, has = {};
+    all[shown].forEach(function (pair) { root.style.setProperty(pair[0], pair[1]); has[pair[0]] = pair[1]; });
+    // What the kit works out when a style does not say: the text on the accent, the larger corner, light or dark controls.
+    if (has["--accent"] && !has["--on-accent"]) root.style.setProperty("--on-accent", isDark(has["--accent"]) ? "#ffffff" : "#111111");
+    if (has["--radius"] && !has["--radius-lg"]) root.style.setProperty("--radius-lg", "calc(" + has["--radius"] + " * 1.5)");
+    if (has["--paper"]) root.style.colorScheme = isDark(has["--paper"]) ? "dark" : "light";
+    root.setAttribute("data-style", names[shown]);
+    var colours = function (vars) {
+      var value = function (name) { var found = vars.find(function (pair) { return pair[0] === name; }); return found ? found[1] : ""; };
+      var first = ["--paper", "--ink", "--accent"].map(value), rest = vars.filter(function (pair) { return ["--paper", "--ink", "--accent"].indexOf(pair[0]) < 0; }).map(function (pair) { return pair[1]; });
+      return first.concat(rest).filter(function (colour, i, list) { return COLOUR.test(colour) && list.indexOf(colour) === i; }).slice(0, 5);
+    };
+    if (STACK && !ONE) try { parent.postMessage({ demesne: "options", styles: true, shown: shown, rec: best, options: names.map(function (name, i) { return { name: name, note: styles[i].getAttribute("made") || "", colors: colours(all[i]) }; }) }, "*"); } catch (error) {}
   });
 
   function stage(el, rec) {

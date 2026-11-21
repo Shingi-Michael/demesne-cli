@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isRecord } from "@demesne/protocol";
-import { forgetLearnedRule, saveDesignRule, saveLearnedRule } from "./design-guide.ts";
+import { isRecord, pickOption, styleLines, stylesOf } from "@demesne/protocol";
+import { forgetLearnedRule, saveDesignRule, saveLearnedRule, saveStyle } from "./design-guide.ts";
 import { INSTRUCTION_FILE_NAMES } from "./instructions.ts";
 import { toolError, type AgentTool } from "./tools.ts";
 
@@ -38,7 +38,10 @@ export function withRule(content: string, rule: string): string {
   return lines.join("\n");
 }
 
-export function rememberTool(): AgentTool {
+/// A Foundry mockup by id, for keeping the style the person picked from it (pass 246 A).
+export type MockupReader = (id: string) => { title: string; source: string } | null;
+
+export function rememberTool(mockup?: MockupReader): AgentTool {
   return {
     definition: {
       name: "remember",
@@ -48,7 +51,8 @@ export function rememberTool(): AgentTool {
         properties: { rule: { type: "string", minLength: 1, maxLength: RULE_MAX }, design: { type: "boolean", description: "True for a rule about how things should look." },
           learned_from: { type: "string", maxLength: 120, description: "With design: taste you learned from their Foundry notes or picks, not said as a rule. Where it came from: \"♥ on Plans page\", \"picked on Plans page\", \"noted twice: Plans page, Gift page\"." },
           replaces: { type: "string", maxLength: 120, description: "With learned_from: words of an older learned line this one replaces." },
-          forget: { type: "boolean", description: "With design: the person asked to forget a learned line; rule is some of its words." } },
+          forget: { type: "boolean", description: "With design: the person asked to forget a learned line; rule is some of its words." },
+          style_of: { type: "string", maxLength: 80, description: "With design: the id of a Foundry page of styles the person picked a style from; rule is that style's name. Keeps it as the project's style." } },
         required: ["rule"],
         additionalProperties: false,
       },
@@ -56,7 +60,7 @@ export function rememberTool(): AgentTool {
     permission(input) {
       // Taste learned from the person's own notes is Foundry's bookkeeping, like a save: it never asks.
       // Forgetting one is the person's own ask, and only ever takes a learned line away.
-      if (isRecord(input) && input.design === true && (input.forget === true || (typeof input.learned_from === "string" && input.learned_from.trim()))) return null;
+      if (isRecord(input) && input.design === true && (input.forget === true || (typeof input.learned_from === "string" && input.learned_from.trim()) || (typeof input.style_of === "string" && input.style_of.trim()))) return null;
       const rule = isRecord(input) && typeof input.rule === "string" ? input.rule : "";
       return { kind: "write", summary: `${isRecord(input) && input.design === true ? "Design rule" : "Remember"}: ${rule.slice(0, 100)}` };
     },
@@ -65,6 +69,17 @@ export function rememberTool(): AgentTool {
       const rule = input.rule.replace(/\s+/g, " ").trim().replace(/^[-*]\s+/, "");
       if (!rule) throw toolError("MISSING_RULE", "the rule is empty", "pass the rule as one short line");
       if (rule.length > RULE_MAX) throw toolError("RULE_TOO_LONG", `the rule is over ${RULE_MAX} characters`, "say it in one short line");
+      // The style they picked from a page of styles: its values are read from the page, never retyped.
+      if (input.design === true && typeof input.style_of === "string" && input.style_of.trim()) {
+        const found = mockup?.(input.style_of.trim());
+        const styles = found ? stylesOf(found.source)?.styles ?? [] : [];
+        if (!found || !styles.length) throw toolError("NO_STYLES", `no Foundry page of styles has the id ${input.style_of.trim()}`, "pass the id of the mockup that showed the styles (foundry_read lists them)");
+        const at = pickOption(styles.map((style) => style.name), rule);
+        if (at < 0) throw toolError("NO_SUCH_STYLE", `“${found.title}” has no style called ${rule}`, `its styles are ${styles.map((style) => style.name).join(", ")}; pass one of those names as rule`);
+        const style = styles[at]!;
+        const kept = saveStyle(context.workspaceRoot, style.name, `picked on ${found.title.slice(0, 60)}`, styleLines(style));
+        return JSON.stringify({ ...kept, style: style.name, note: kept.saved ? "It is the project's style now: later mockups here are drawn in it. Tell the person in a few words." : "It already is the project's style." });
+      }
       if (input.design === true && input.forget === true) {
         const gone = forgetLearnedRule(context.workspaceRoot, rule);
         return JSON.stringify(gone.forgotten ? { path: gone.path, forgotten: true, note: "Forgotten: later mockups no longer follow it." } : { path: gone.path, forgotten: false, learned: gone.left, note: "No learned line holds those words. Use words from one of these lines." });

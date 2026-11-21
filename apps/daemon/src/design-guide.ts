@@ -31,7 +31,7 @@ export const DESIGN_RULES: readonly string[] = [
   "Real content, never lorem ipsum: believable names, numbers and dates.",
   "A mockup is the working thing at real size, not a poster of it: no headline or notes above it, it fills the page, and the controls the ask is about work (tabs go somewhere, inputs take typing); the rest are drawn and may stay still.",
   "It reads and works from about 620px wide up, with no sideways scroll; write no phone layout unless the ask is a phone screen. Text has 4.5:1 contrast on what is behind it (3:1 from 24px up); on a phone screen anything to tap is at least 44px each way.",
-  "Offer options: unless the ask fixes one exact thing (\"make this button blue\"), show two or three genuinely different directions (never more than three), each named, in one <d-compare> with recommended set on the one you would pick; say in the chat which and why.",
+  "Offer options: unless the ask fixes one exact thing (\"make this button blue\"), show two or three genuinely different directions (never more than three), each named, in one <d-compare> with recommended on your pick; say in the chat which and why. Asked for styles or looks, or a first page with no look to start from: one page in <d-styles> instead (kit:parts).",
   "Motion with anime.js: things arrive once (300 to 600ms, staggered), respond fast (140 to 220ms), nothing loops; none under prefers-reduced-motion: reduce.",
   "Avoid stock AI looks: purple-on-white gradients, glassmorphism, emoji bullets, a generic hero over three cards.",
   "Every state it can be in is designed, not only the happy one: a control has hover, pressed, focused and disabled; a list or a screen has empty, loading and error. Show the ones the ask touches, reached by using the page; never a state switcher in it.",
@@ -110,7 +110,45 @@ export function designGuideBlock(guides: readonly DesignGuide[], where = DESIGN_
       ? `\nThe person's own design rules. They win over every rule above where the two differ, and they are not suggestions:\n\n${theirs}\n`
       : "")
     + `\nWhen the person gives a lasting rule about how things should look ("never…", "always…", "I don't like…" said as a standing preference), keep it with the remember tool and design: true: it is added to ${where} and holds for every later mockup. A one-off ask about this page is not a rule.`
-    + (guides.some((guide) => learnedRules(guide.content).length) ? `\n${LEARNED_HOW}` : "");
+    + (guides.some((guide) => learnedRules(guide.content).length) ? `\n${LEARNED_HOW}` : "")
+    + (guides.some((guide) => pickedStyle(guide.content)) ? `\n${STYLE_HOW}` : "");
+}
+
+/// Pass 246 A, a range of styles: the style the person picked from a page of
+/// styles is kept in the project's design guide under this heading, one per
+/// project, so every later mockup there is drawn in it.
+export const STYLE_HEADING = "## Style";
+export const STYLE_HOW = `Under "${STYLE_HEADING.slice(3)}" is the look they picked for this project: draw new pages in its values (set them on :root) and name it in why.followed, unless they ask for other styles; then it is one of the styles you show.`;
+
+/// The name of the style a guide holds, or "" when it holds none.
+export function pickedStyle(content: string): string {
+  const lines = content.split("\n"), section = sectionOf(lines, STYLE_HEADING);
+  if (!section) return "";
+  const first = lines.slice(section.start + 1, section.end).find((text) => text.trim());
+  return first ? first.trim().replace(/\s+\([^()]*\)\.?.*$/, "").replace(/[.\s]+$/, "") : "";
+}
+
+/// The guide with its Style section set to this style (made at the end when
+/// missing; the one before it is replaced, since a project has one style).
+export function withStyle(content: string, name: string, from: string, styleLines: readonly string[]): string {
+  const block = [STYLE_HEADING, "", `${name}${from ? ` (${from})` : ""}. Foundry draws new mockups here in it. Edit any line, or pick another style to replace it.`, "", ...styleLines];
+  if (!content.trim()) return `# Design guide\n\n${block.join("\n")}\n`;
+  const lines = content.split("\n"), section = sectionOf(lines, STYLE_HEADING);
+  if (!section) return `${content.replace(/\s+$/, "")}\n\n${block.join("\n")}\n`;
+  const rest = lines.slice(section.end);
+  return [...lines.slice(0, section.start), ...block, ...(rest.length ? ["", ...rest] : [""])].join("\n");
+}
+
+/// Keeps a picked style in the guide of the chat's folder.
+export function saveStyle(workspaceRoot: string, name: string, from: string, styleLines: readonly string[]): { path: string; saved: boolean } {
+  const file = DESIGN_GUIDE_FILES.find((known) => existsSync(join(workspaceRoot, known))) ?? DESIGN_GUIDE_FILES[0];
+  const path = join(workspaceRoot, file);
+  const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const after = withStyle(before, name, from, styleLines);
+  if (after === before) return { path: file, saved: false };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, after, "utf8");
+  return { path: file, saved: true };
 }
 
 /// Pass 245 A, taste that carries over: what the person kept, picked and

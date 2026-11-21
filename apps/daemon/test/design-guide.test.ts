@@ -39,7 +39,9 @@ test("Demesne's rules are numbered, and say what the old paragraph said", () => 
   expect(block).toContain("never the whole page");
   // Pass 240 A: a review starts from a real picture (about 100 characters more).
   expect(block).toContain("Start from a real picture");
-  expect(block.length).toBeLessThan(5900);
+  // Pass 246 A: when to offer a range of styles instead of options (about 100 characters more).
+  expect(block).toContain("one page in <d-styles> instead");
+  expect(block.length).toBeLessThan(6000);
 });
 
 test("your guide for every chat and the project's are both read, the project's last", () => {

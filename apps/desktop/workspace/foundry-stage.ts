@@ -6,6 +6,8 @@
 /// leave, it starts again from a fresh page. Nothing here adds a control:
 /// the demo's words go on the quiet line under the stage.
 
+import { isStyleColour } from "@demesne/protocol";
+
 const STEADY = 1800, AGAIN = 1400;
 const h = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
@@ -21,6 +23,28 @@ export const YOURS = "Yours now. It plays again a moment after you leave.";
 /// How much a surface shrinks to fit the width it has: never larger than real size.
 export function fitScale(available: number, width: number) {
   return width > 0 && available > 0 ? Math.min(1, available / width) : 1;
+}
+
+/// One option of a mockup, as its page reports it. A style (pass 246 A) also has its colours.
+export interface StageOption { name: string; note: string; colors?: string[] }
+
+/// The line above an option's stage: its name, the pick in words, and what it
+/// says about itself. A style shows its colours as small dots before that.
+export function optionHead(option: StageOption, pick: boolean) {
+  const dots = option.colors?.length ? `<span class="fd-sw" aria-hidden="true">${option.colors.map((colour) => `<i style="background:${h(colour)}"></i>`).join("")}</span>` : "";
+  return `<div class="fd-opt"><b>${h(option.name)}</b>${pick ? '<span class="fd-rec-pill">recommended</span>' : ""}${dots}${option.note ? `<span>${h(option.note)}</span>` : ""}</div>`;
+}
+
+/// At most this much of a tall page shows in the row of small ones: three quarters of its width.
+const GLANCE_TALL = 0.75;
+/// Pass 246 A, styles at a glance: one row of the same page in each style,
+/// small, so they can be compared without scrolling between three full
+/// screens. Only to look at: nothing in it takes the pointer.
+export function glanceRow(src: string, title: string, options: readonly StageOption[], rec: number, width: number, height: number) {
+  const shown = Math.min(height, Math.round(width * GLANCE_TALL));
+  return `<div class="fd-glance" data-ow="${width}" data-oh="${shown}" role="group" aria-label="The styles side by side">${options.map((option, index) =>
+    `<figure><div class="fd-mini" style="--ow:${width}px;--oh:${shown}px"><iframe class="fd-mini-frame" src="${h(`${src}&option=${index}`)}" loading="lazy" tabindex="-1" aria-hidden="true" sandbox="allow-scripts" referrerpolicy="no-referrer" title="${h(`${title}, ${option.name}, small`)}"></iframe></div>`
+    + `<figcaption><b>${h(option.name)}</b>${index === rec ? '<span class="fd-rec-pill">recommended</span>' : ""}</figcaption></figure>`).join("")}</div>`;
 }
 
 export function watchFoundryStages(root: HTMLElement): () => void {
@@ -101,12 +125,28 @@ export function watchFoundryStages(root: HTMLElement): () => void {
     stage.addEventListener("pointerleave", leave);
   }
 
+  /// The small ones keep the page's own width and are scaled to the room each has.
+  function fitGlance(row: HTMLElement) {
+    const width = Number(row.dataset.ow) || 0;
+    for (const mini of row.querySelectorAll<HTMLElement>(".fd-mini")) mini.style.setProperty("--k", String(width > 0 && mini.clientWidth > 0 ? mini.clientWidth / width : 1));
+  }
+  const glances = () => [...root.querySelectorAll<HTMLElement>(".fd-glance")];
+
   /// Options get a stage each: the one the page shows first, then the rest.
-  function split(stage: HTMLElement, options: { name: string; note: string }[], shown: number, rec: number) {
+  /// Styles (pass 246 A) get the row of small ones above them first.
+  function split(stage: HTMLElement, options: StageOption[], shown: number, rec: number, styles = false) {
     if (stage.dataset.split !== undefined || options.length < 2) return;
     stage.dataset.split = String(shown);
-    const head = (option: { name: string; note: string }, index: number) =>
-      `<div class="fd-opt"><b>${h(option.name)}</b>${index === rec ? '<span class="fd-rec-pill">recommended</span>' : ""}${option.note ? `<span>${h(option.note)}</span>` : ""}</div>`;
+    const head = (option: StageOption, index: number) => optionHead(option, index === rec);
+    const first = frameOf(stage);
+    if (styles && first) {
+      const surfaced = stage.classList.contains("fd-s") && !stage.classList.contains("fd-fluid");
+      const width = surfaced ? Number(stage.dataset.ow) || 0 : Math.round(first.clientWidth), height = surfaced ? (Number(stage.dataset.oh) || 0) - (Number(stage.dataset.bar) || 0) : Math.round(first.clientHeight);
+      if (width > 0 && height > 0) {
+        stage.insertAdjacentHTML("beforebegin", glanceRow((first.getAttribute("src") ?? "").replace("&first=1", ""), first.title, options, rec, width, height));
+        fitGlance(stage.previousElementSibling as HTMLElement);
+      }
+    }
     stage.insertAdjacentHTML("beforebegin", head(options[shown]!, shown));
     let after: Element = lineOf(stage) ?? stage;
     options.forEach((option, index) => {
@@ -136,12 +176,20 @@ export function watchFoundryStages(root: HTMLElement): () => void {
       const height = Math.max(120, Math.min(6000, Math.round(data.height))) + (Number(stage.dataset.bar) || 0);
       stage.dataset.oh = String(height);
       stage.querySelector<HTMLElement>(".fd-fit")?.style.setProperty("--oh", `${height}px`);
+      // The row of small ones above the first style follows the page's real height, up to its cap.
+      const row = stage.previousElementSibling?.previousElementSibling;
+      if (row instanceof HTMLElement && row.classList.contains("fd-glance")) {
+        const shown = Math.min(height - (Number(stage.dataset.bar) || 0), Math.round((Number(row.dataset.ow) || 0) * GLANCE_TALL));
+        if (shown > 0) for (const mini of row.querySelectorAll<HTMLElement>(".fd-mini")) mini.style.setProperty("--oh", `${shown}px`);
+      }
       return;
     }
     if (data.demesne === "options" && Array.isArray(data.options)) {
-      const options = (data.options as unknown[]).filter((item): item is { name: string; note: string } => !!item && typeof (item as { name?: unknown }).name === "string")
-        .slice(0, 3).map((item) => ({ name: item.name.slice(0, 120), note: typeof item.note === "string" ? item.note.slice(0, 200) : "" }));
-      split(stage, options, Number(data.shown) || 0, typeof data.rec === "number" ? data.rec : -1);
+      const options = (data.options as unknown[]).filter((item): item is { name: string; note: string; colors?: unknown } => !!item && typeof (item as { name?: unknown }).name === "string")
+        .slice(0, 3).map((item): StageOption => ({ name: item.name.slice(0, 120), note: typeof item.note === "string" ? item.note.slice(0, 200) : "",
+          // The colours come from the page, so only plain colour values are drawn.
+          ...(Array.isArray(item.colors) ? { colors: item.colors.filter(isStyleColour).slice(0, 5) } : {}) }));
+      split(stage, options, Number(data.shown) || 0, typeof data.rec === "number" ? data.rec : -1, data.styles === true);
       return;
     }
     if (data.demesne !== "demo") return;
@@ -153,7 +201,7 @@ export function watchFoundryStages(root: HTMLElement): () => void {
     else if (data.state === "lost") { state.lost = true; if (line) line.innerHTML = ""; }
   };
   window.addEventListener("message", heard);
-  const resized = new ResizeObserver(() => stages().forEach(fit));
+  const resized = new ResizeObserver(() => { stages().forEach(fit); glances().forEach(fitGlance); });
   resized.observe(root);
   stages().forEach(watch);
   return () => { window.removeEventListener("message", heard); seen.disconnect(); resized.disconnect(); };

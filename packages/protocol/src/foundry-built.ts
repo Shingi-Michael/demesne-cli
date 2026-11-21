@@ -6,6 +6,8 @@
 /// the real result, the differences ringed and numbered, and which were fixed.
 /// Demesne writes that page from the record; the model never writes it.
 
+import { styleNames } from "./foundry-styles.ts";
+
 /// A record page, as Demesne writes it.
 export const BUILT_PAGE = /<d-built\b/i;
 /// At most this many differences a look names, biggest first; the rest are counted.
@@ -113,6 +115,9 @@ export const isToday = (name: string) => /^today\b/i.test(name);
 export function optionNames(source: string): string[] {
   const body = source.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
   if (/<d-review\b/i.test(body)) return [];
+  // A page of styles (pass 246 A): each style is an option, drawn alone the same way.
+  const styles = styleNames(source);
+  if (styles.length) return styles;
   return [...body.matchAll(/\bdata-option\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map((match) => (match[1] ?? match[2] ?? "").trim())
     .filter(Boolean);
 }

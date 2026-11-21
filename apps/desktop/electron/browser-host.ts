@@ -20,7 +20,7 @@
 /// For the model's own work on this computer's pages it can read what the
 /// server answered and how a control is styled, upload a project file and
 /// download into the project.
-import { app, BrowserWindow, session as sessions, type Cookie, type NativeImage, type Session, type WebContents } from "electron";
+import { app, BrowserWindow, nativeTheme, session as sessions, type Cookie, type NativeImage, type Session, type WebContents } from "electron";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -629,6 +629,8 @@ export function runBrowserHost() {
       // Someone is showing this chat's browser: send pictures for a few seconds more, starting now.
       if (command.action === "watch") {
         watched.set(id, Date.now() + WATCH_MS);
+        // Pages follow the app's own light or dark (prefers-color-scheme), not the computer's.
+        if (typeof command.dark === "boolean") { const want = command.dark ? "dark" : "light"; if (nativeTheme.themeSource !== want) nativeTheme.themeSource = want; }
         const aspect = Number(command.aspect);
         if (Number.isFinite(aspect) && aspect > 0) aspects.set(id, aspect);
         const tab = activeTab(chat);

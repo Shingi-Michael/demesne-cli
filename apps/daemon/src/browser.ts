@@ -40,7 +40,7 @@ export interface BrowserFrame { seq: number; jpeg: string; width: number; height
 export interface BrowserVisit { seq: number; url: string; title: string; tab: number; jpeg: string }
 /// A driver you can also watch: pictures arrive as the tab repaints, and a small one of each page it went to.
 export interface WatchableBrowser {
-  frame(chat: string, after: number, signal: AbortSignal, aspect?: number): Promise<BrowserFrame | null>;
+  frame(chat: string, after: number, signal: AbortSignal, aspect?: number, dark?: boolean): Promise<BrowserFrame | null>;
   visits?(chat: string): BrowserVisit[];
 }
 /// Pages kept per chat to step back through.
@@ -117,6 +117,7 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
   const waiting = new Map<number, (reply: Record<string, unknown> | null) => void>();
   const frames = new Map<string, BrowserFrame>(), frameWaiters = new Map<string, Set<() => void>>(), told = new Map<string, number>(), shape = new Map<string, number>();
   const visits = new Map<string, BrowserVisit[]>();
+  let scheme: boolean | undefined;
   const drop = () => { for (const resolve of waiting.values()) resolve(null); waiting.clear(); child = null; };
   const start = () => {
     const env = { ...process.env };
@@ -182,11 +183,14 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
     try { const stdin = running.stdin as import("bun").FileSink; stdin.write(`${JSON.stringify({ ...body, id, chat })}\n`); stdin.flush(); } catch { finish(null); }
   })) as BrowserDriver & WatchableBrowser & { close(): void };
   // The newest picture after `after`, waiting a little for one; the host is told someone is watching.
-  driver.frame = async (chat, after, signal, aspect) => {
-    if (Date.now() - (told.get(chat) ?? 0) > WATCH_EVERY_MS || (aspect && Math.abs(aspect - (shape.get(chat) ?? 0)) > 0.02)) {
+  driver.frame = async (chat, after, signal, aspect, dark) => {
+    // Pages follow the app: dark when Demesne is dark, light when it is light.
+    const turned = dark !== undefined && dark !== scheme;
+    if (turned) scheme = dark;
+    if (turned || Date.now() - (told.get(chat) ?? 0) > WATCH_EVERY_MS || (aspect && Math.abs(aspect - (shape.get(chat) ?? 0)) > 0.02)) {
       told.set(chat, Date.now());
       if (aspect) shape.set(chat, aspect);
-      if (child) void driver(chat, { action: "watch", ...(shape.get(chat) ? { aspect: shape.get(chat) } : {}) }, signal);
+      if (child) void driver(chat, { action: "watch", ...(shape.get(chat) ? { aspect: shape.get(chat) } : {}), ...(scheme === undefined ? {} : { dark: scheme }) }, signal);
     }
     const have = frames.get(chat);
     if (have && have.seq > after) return have;

@@ -1825,7 +1825,7 @@ async function pumpBrowserFrames() {
       const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
       const aspect = view && view.clientWidth > 0 && !split.actual ? view.clientHeight / view.clientWidth : undefined;
       const askedAt = Date.now();
-      try { got = await api("browser-frame", { after: split.seq, ...(aspect ? { aspect } : {}) }); } catch { await new Promise((resolve) => setTimeout(resolve, 1000)); continue; }
+      try { got = await api("browser-frame", { after: split.seq, ...(aspect ? { aspect } : {}), dark: document.documentElement.dataset.appearance !== "light" }); } catch { await new Promise((resolve) => setTimeout(resolve, 1000)); continue; }
       if (split.session !== session || !got) continue;
       const aside = el("browser-split");
       let redraw = false;

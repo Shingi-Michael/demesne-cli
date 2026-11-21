@@ -436,9 +436,9 @@ export class DemesneClient {
     return this.request("/v1/agents/open", { method: "POST", body: JSON.stringify({ agent, workspacePath }) });
   }
   /// The chat's browser, beside it (pass 248 D): the newest picture after `after` (waits up to 1.5 s for one).
-  async browserFrame(sessionId: string, after: number, aspect?: number): Promise<{ seq: number; jpeg?: string; width?: number; height?: number; url?: string; title?: string; handover?: boolean; asked?: string; held?: "model" | "person";
+  async browserFrame(sessionId: string, after: number, aspect?: number, dark?: boolean): Promise<{ seq: number; jpeg?: string; width?: number; height?: number; url?: string; title?: string; handover?: boolean; asked?: string; held?: "model" | "person";
     tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; visits?: { seq: number; url: string; title: string; tab: number }[] }> {
-    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/frame?after=${Math.max(0, Math.floor(after))}${aspect ? `&aspect=${aspect.toFixed(3)}` : ""}`);
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/frame?after=${Math.max(0, Math.floor(after))}${aspect ? `&aspect=${aspect.toFixed(3)}` : ""}${dark === undefined ? "" : `&dark=${dark ? 1 : 0}`}`);
   }
   /// Your clicks and keys on a page the model handed you.
   async browserInput(sessionId: string, events: unknown[]): Promise<{ ok: boolean }> {

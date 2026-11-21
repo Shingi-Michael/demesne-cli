@@ -423,6 +423,8 @@ export class DemesneClient {
   /// Pick the model an agent runs on (null: its tool's default), and Codex's thinking level.
   async setAgentModel(agent: string, model: string | null, effort: string | null): Promise<{ runs: AgentRunsOn }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/model`, { method: "POST", body: JSON.stringify({ model, effort }) }); }
   async socialRemember(agent: string, text: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember`, { method: "POST", body: JSON.stringify({ text }) }); }
+  /// Drops a line Demesne's memory just kept (the Undo on the memory pill).
+  async forgetMemory(session: string, scope: "you" | "project", text: string): Promise<{ forgotten: boolean; text?: string; left: string[] }> { return this.request("/v1/memory/forget", { method: "POST", body: JSON.stringify({ session, scope, text }) }); }
   async socialForget(agent: string, id: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember/${encodeURIComponent(id)}`, { method: "DELETE" }); }
   /// The weekly checkups, newest first.
   async socialCheckups(): Promise<{ checkups: SocialCheckup[] }> { return this.request("/v1/socials/checkups"); }

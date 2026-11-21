@@ -11,6 +11,7 @@ import { useSkillTool } from "./skills.ts";
 import { assertPublic, webFetchTool, webSearchTool } from "./web.ts";
 import { fileText, linkTitle, MAX_COPY_BYTES, SourceError, SourceStore } from "./sources.ts";
 import { rememberTool } from "./remember.ts";
+import { forgetMemory, memoryFile, scopeFor } from "./memory.ts";
 import { routineTool } from "./routine-tool.ts";
 import { runTestsTool } from "./test-run.ts";
 import { updatePlanTool } from "./plan.ts";
@@ -1418,6 +1419,14 @@ export function createDaemonApp(options: {
         try { agentCli.choose(agent, model, effort); }
         catch (error) { return apiError("bad_request", error instanceof Error ? error.message : "Can't pick that model", 400); }
         return json({ runs: agentCli.runsOn(agent, await codexPlan(agent)) });
+      }
+      // Undo on the memory pill (pass 254): drop a line the model just kept.
+      if (url.pathname === "/v1/memory/forget" && request.method === "POST") {
+        const body = await readJson(request) as { session?: unknown; scope?: unknown; text?: unknown };
+        if ((body.scope !== "you" && body.scope !== "project") || typeof body.text !== "string" || !body.text.trim()) return apiError("bad_request", "Say which line to forget", 400);
+        const root = typeof body.session === "string" ? store.getSession(body.session)?.workspace?.root : undefined;
+        const scope = scopeFor(body.scope, root);
+        return json(forgetMemory(memoryFile(scope, root), scope, body.text));
       }
       // What an agent remembers about you: add a line, or forget one (pass 142 B).
       const rememberMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)\/remember(?:\/([^/]+))?$/);

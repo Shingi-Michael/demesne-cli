@@ -12,6 +12,7 @@ These guides describe the current implementation. They were last audited on **20
 | [Configuration](configuration.md) | File precedence, providers, limits, environment variables |
 | [Authentication](authentication.md) | Codex plan, ChatGPT accounts, OpenRouter, API keys, credential ownership |
 | [Desktop app](desktop.md) | The Electron window: layout, development, bundles, lifecycle |
+| [Memory](memory.md) | What the model learns about you and each project, the silver pill, and how chats read it |
 | [Foundry](foundry.md) | Mockups and pages the model makes, and the design guide they follow |
 | [Subagents and concurrency](subagents.md) | Routing, read-only tools, provider slots, Qwen sizing |
 | [Agent Drive](agent-drive.md) | NEXT, missions, project memory, check-ins, loop protection |

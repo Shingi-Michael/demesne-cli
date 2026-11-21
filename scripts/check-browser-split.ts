@@ -75,7 +75,7 @@ try {
   // The model opens the page: the window splits, and the page shows live on the right.
   const split = win.locator("#browser-split");
   await split.waitFor();
-  await win.waitForFunction(() => (document.querySelector<HTMLImageElement>("#browser-split .bs-page")?.naturalWidth ?? 0) > 300);
+  await win.waitForFunction(() => (document.querySelector<HTMLCanvasElement>("#browser-split .bs-page")?.width ?? 0) > 400);
   assert.match(await split.locator(".bs-url").inputValue(), /localhost:\d+\/admin/);
   assert(await win.locator("#app.browser-split-on").count(), "the window is split");
   const box = await split.boundingBox(), chat = await win.locator("#main").boundingBox();
@@ -139,10 +139,10 @@ try {
   await win.waitForFunction(() => /\/admin$/.test((document.querySelector<HTMLInputElement>("#browser-split .bs-url"))?.value ?? ""), undefined, { timeout: 10000 });
   // The page's own size, to read small text; then fitted again.
   await split.locator(".bs-zoom").click();
-  assert.equal(await img.evaluate((one) => (one as HTMLImageElement).style.width), "1280px");
+  assert.equal(await img.evaluate((one) => (one as HTMLElement).style.width), "1280px");
   await win.screenshot({ path: join(output, "actual-size.png") });
   await split.locator(".bs-zoom").click();
-  assert.equal(await img.evaluate((one) => (one as HTMLImageElement).style.width), "");
+  assert.equal(await img.evaluate((one) => (one as HTMLElement).style.width), "");
   await split.locator(".bs-back", { hasText: "Hand back" }).click();
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
   console.log("PASS: you can take the page, type an address, go back, look at earlier pages, see it at its own size, and hand it back.");

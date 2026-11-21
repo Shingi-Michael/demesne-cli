@@ -33,8 +33,12 @@ export const BROWSER_HOST_FLAG = "--browser-host";
 /// `--browser-profile=<folder>`: where projects' sign-ins are kept between runs.
 export const BROWSER_PROFILE_FLAG = "--browser-profile=";
 /// A picture of a watched tab at most this often, and no wider than this.
-const FRAME_MS = 200;
+const FRAME_MS = 100;
 const FRAME_WIDTH = 1280;
+/// How often a hidden page draws: smooth while you watch it, sparing while nobody does. Each frame an
+/// offscreen page draws is copied whole (twice the pixels each way on a Retina screen), so 60 a second
+/// on a tab nobody sees was most of the browser's cost.
+const WATCHED_FPS = 12, UNWATCHED_FPS = 10;
 /// A tab is watched for this long after the desktop last asked for a picture.
 const WATCH_MS = 4000;
 /// A chat's tab is closed after this long untouched.
@@ -69,7 +73,9 @@ function siteOf(url: string): string | null {
 
 /// One hidden tab. A chat has one or more; the model acts on the active one.
 interface Tab { win: BrowserWindow; chat: Chat; n: number; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; downloaded: string[];
-  framed: number; frameTimer?: ReturnType<typeof setTimeout>; pointer?: { x: number; y: number; at: number }; requests: Seen[]; popup?: boolean; sized?: boolean }
+  framed: number; frameTimer?: ReturnType<typeof setTimeout>; pointer?: { x: number; y: number; at: number }; requests: Seen[]; popup?: boolean; sized?: boolean;
+  /// The page is streaming its pictures (CDP screencast), and the newest one, to send again with news.
+  casting?: boolean; last?: { jpeg: string; ratio: number } }
 /// A chat's browser: its tabs, which one is active, and whether the person has it.
 interface Chat { id: string; tabs: Map<number, Tab>; active: number; next: number; held: boolean; queue: Promise<unknown>; used: number; profile: unknown; downloads: string | null }
 /// A request this computer's page made, for the model to read the answer of.
@@ -156,27 +162,73 @@ export function runBrowserHost() {
   const activeTab = (chat: Chat | undefined) => chat ? chat.tabs.get(chat.active) : undefined;
   const tabList = (chat: Chat) => [...chat.tabs.values()].map((tab) => ({ n: tab.n, url: tab.win.isDestroyed() ? "" : tab.win.webContents.getURL(), title: tab.win.isDestroyed() ? "" : tab.win.webContents.getTitle(), ...(tab.n === chat.active ? { active: true } : {}) }));
 
-  /// A picture of a watched tab, sent as an event the daemon keeps for the desktop.
-  const sendFrame = (tab: Tab, image: NativeImage) => {
-    if (tab.win.isDestroyed() || (watched.get(tab.chat.id) ?? 0) < Date.now() || image.isEmpty() || tab.chat.active !== tab.n) return;
-    const view = TRY_WIDTHS[tab.width], size = image.getSize();
-    const small = size.width > FRAME_WIDTH ? image.resize({ width: FRAME_WIDTH, quality: "good" }) : image;
+  const isWatched = (tab: Tab) => !tab.win.isDestroyed() && (watched.get(tab.chat.id) ?? 0) >= Date.now() && tab.chat.active === tab.n;
+  /// A picture of a watched tab, sent as an event the daemon keeps for the desktop. `ratio` is its height over its width.
+  const sendFrame = (tab: Tab, jpeg: string, ratio: number) => {
+    if (!isWatched(tab)) return;
+    const view = TRY_WIDTHS[tab.width];
     tab.framed = Date.now();
+    tab.last = { jpeg, ratio };
     const contents = tab.win.webContents;
-    write({ event: "frame", chat: tab.chat.id, jpeg: small.toJPEG(76).toString("base64"), width: view.width, height: Math.round(view.width * size.height / Math.max(1, size.width)),
+    write({ event: "frame", chat: tab.chat.id, jpeg, width: view.width, height: Math.round(view.width * ratio),
       url: contents.getURL(), title: contents.getTitle(), handover: tab.chat.held, tabs: tabList(tab.chat),
       ...(tab.pointer ? { pointer: { x: tab.pointer.x, y: tab.pointer.y, ago: Date.now() - tab.pointer.at } } : {}),
       back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward() });
   };
+  /// The page streams its own pictures while watched: Chromium draws them small and as JPEG itself, off
+  /// this process, and sends the next only once the last is taken, so a busy page can't pile them up.
+  const startCast = (tab: Tab) => {
+    if (tab.casting || tab.win.isDestroyed()) return;
+    const contents = tab.win.webContents;
+    if (!contents.debugger.isAttached()) return;
+    tab.casting = true;
+    contents.setFrameRate(WATCHED_FPS);
+    const view = TRY_WIDTHS[tab.width];
+    void contents.debugger.sendCommand("Page.startScreencast", { format: "jpeg", quality: 72, maxWidth: Math.min(FRAME_WIDTH, view.width), maxHeight: view.width * 3 })
+      .catch(() => { tab.casting = false; });
+  };
+  const stopCast = (tab: Tab) => {
+    if (!tab.casting) return;
+    tab.casting = false;
+    if (tab.win.isDestroyed()) return;
+    tab.win.webContents.setFrameRate(UNWATCHED_FPS);
+    void tab.win.webContents.debugger.sendCommand("Page.stopScreencast").catch(() => {});
+  };
+  /// One streamed picture: sent on, and taken (so the next can come) no sooner than FRAME_MS later.
+  const castFrame = (tab: Tab, params: Record<string, any>) => {
+    const take = () => { if (!tab.win.isDestroyed() && tab.casting) void tab.win.webContents.debugger.sendCommand("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => {}); };
+    if (!isWatched(tab)) { stopCast(tab); return; }
+    const meta = params.metadata ?? {}, ratio = Number(meta.deviceHeight) > 0 && Number(meta.deviceWidth) > 0 ? Number(meta.deviceHeight) / Number(meta.deviceWidth) : 0.625;
+    clearTimeout(tab.frameTimer); tab.frameTimer = undefined;
+    // Chromium sends a few ahead of the takes: only the newest goes on, one each FRAME_MS.
+    tab.last = { jpeg: String(params.data ?? ""), ratio };
+    const wait = FRAME_MS - (Date.now() - tab.framed);
+    if (wait <= 0) sendFrame(tab, tab.last.jpeg, ratio);
+    else tab.frameTimer = setTimeout(() => { tab.frameTimer = undefined; if (tab.last) sendFrame(tab, tab.last.jpeg, tab.last.ratio); }, wait);
+    setTimeout(take, FRAME_MS);
+  };
+  /// Pictures flow for the tab on show, and news (who has it, its tabs, where it pointed) reaches the
+  /// desktop even when the page itself did not change.
   const frameSoon = (tab: Tab | undefined) => {
-    if (!tab || tab.frameTimer || (watched.get(tab.chat.id) ?? 0) < Date.now()) return;
-    const wait = Math.max(0, FRAME_MS - (Date.now() - tab.framed));
+    if (!tab || tab.win.isDestroyed()) return;
+    for (const one of tab.chat.tabs.values()) if (one !== tab) stopCast(one);
+    if (!isWatched(tab)) { stopCast(tab); return; }
+    startCast(tab);
+    if (tab.frameTimer) return;
     tab.frameTimer = setTimeout(() => {
       tab.frameTimer = undefined;
-      if (tab.win.isDestroyed()) return;
-      void tab.win.webContents.capturePage().then((image) => sendFrame(tab, image), () => {});
-    }, wait);
+      if (!isWatched(tab)) return;
+      if (tab.last && tab.casting) { sendFrame(tab, tab.last.jpeg, tab.last.ratio); return; }
+      // No stream (the debugger is taken): a still picture instead.
+      void tab.win.webContents.capturePage().then((image) => {
+        if (image.isEmpty()) return;
+        const size = image.getSize(), small = size.width > FRAME_WIDTH ? image.resize({ width: FRAME_WIDTH, quality: "good" }) : image;
+        sendFrame(tab, small.toJPEG(76).toString("base64"), size.height / Math.max(1, size.width));
+      }, () => {});
+    }, Math.max(FRAME_MS, 250 - (Date.now() - tab.framed)));
   };
+  // A watch that lapsed stops its stream.
+  setInterval(() => { for (const chat of chats.values()) for (const tab of chat.tabs.values()) if (tab.casting && !isWatched(tab)) stopCast(tab); }, 1000).unref?.();
   /// A page it went to, kept small, so the desktop can step back through them afterwards.
   /// A small picture of each page a tab went to. Right after a load the offscreen page may not have drawn yet, so it tries again.
   const sendVisit = (tab: Tab, tries = 4) => {
@@ -269,12 +321,21 @@ export function runBrowserHost() {
   }
 
   /// Watches what this computer's page asks its server, so the model can read an answer (`requests`, `response`).
+  /// Requests are followed only on this computer's own pages, where the model may read them: a public
+  /// site makes hundreds, and each would cross into this process for nothing.
+  const followed = new WeakMap<Tab, boolean>();
+  function watchNetwork(tab: Tab) {
+    if (tab.win.isDestroyed() || !tab.win.webContents.debugger.isAttached() || followed.get(tab) === tab.local) return;
+    followed.set(tab, tab.local);
+    void tab.win.webContents.debugger.sendCommand(tab.local ? "Network.enable" : "Network.disable").catch(() => {});
+  }
   function listen(tab: Tab, contents: WebContents) {
     try { contents.debugger.attach("1.3"); } catch { return; }
-    void contents.debugger.sendCommand("Network.enable").catch(() => {});
+    watchNetwork(tab);
     let n = 0;
     const methods = new Map<string, string>();
     contents.debugger.on("message", (_event, method, params: Record<string, any>) => {
+      if (method === "Page.screencastFrame") { castFrame(tab, params); return; }
       if (method === "Network.requestWillBeSent") { methods.set(params.requestId, params.request?.method ?? "GET"); if (methods.size > 400) methods.delete(methods.keys().next().value!); }
       else if (method === "Network.responseReceived" && tab.local && /^(XHR|Fetch|Document)$/.test(params.type)) {
         tab.requests.push({ id: params.requestId, n: ++n, method: methods.get(params.requestId) ?? "GET", url: String(params.response?.url ?? ""), status: Number(params.response?.status) || 0, type: params.type, mime: String(params.response?.mimeType ?? ""), finished: false });
@@ -300,8 +361,8 @@ export function runBrowserHost() {
       // A popup that closed itself (a sign-in done) hands back to the tab before it.
       if (chat.active === tab.n) { chat.active = [...chat.tabs.keys()].at(-1) ?? 0; frameSoon(activeTab(chat)); }
     });
-    // Repaints become pictures while someone is watching.
-    contents.on("paint", () => frameSoon(tab));
+    // Nobody watches a new tab yet: it draws sparingly until someone does.
+    contents.setFrameRate(UNWATCHED_FPS);
     // Where this tab may go: around this computer while it is here, the sites the person approved, and anywhere public while the person has it.
     const allowed = (url: string) => {
       if (localAddress(url)) return tab.local;
@@ -314,6 +375,7 @@ export function runBrowserHost() {
     const refuse = (event: { preventDefault(): void }, url: string) => { if (!allowed(url)) { event.preventDefault(); blocked(url); } };
     contents.on("did-navigate", (_event, url) => {
       tab.local = localAddress(url);
+      watchNetwork(tab);
       // Where the person went is approved for this tab from then on.
       const site = siteOf(url);
       if (site && chat.held) tab.sites.add(site);
@@ -397,6 +459,7 @@ export function runBrowserHost() {
       if (site !== null && command.site !== site) return { error: "That site was not approved for the browser." };
       if (site !== null) tab.sites.add(site);
       tab.local = site === null;
+      watchNetwork(tab);
       tab.errors.length = tab.failed.length = tab.blocked.length = 0;
       try { await win.loadURL(url); } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

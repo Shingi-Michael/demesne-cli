@@ -77,7 +77,6 @@ try {
   await split.waitFor();
   await win.waitForFunction(() => (document.querySelector<HTMLImageElement>("#browser-split .bs-page")?.naturalWidth ?? 0) > 300);
   assert.match(await split.locator(".bs-url").inputValue(), /localhost:\d+\/admin/);
-  assert.equal(await split.locator(".bs-url").getAttribute("readonly"), "", "the address is the model's while it browses");
   assert(await win.locator("#app.browser-split-on").count(), "the window is split");
   const box = await split.boundingBox(), chat = await win.locator("#main").boundingBox();
   assert(box && chat && box.width > 500 && chat.width > 380, `chat ${chat?.width}px, browser ${box?.width}px`);
@@ -113,13 +112,14 @@ try {
   release();
   await win.locator("#conversation .turn").filter({ hasText: "Order #1042 is at the top of Orders" }).waitFor();
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("done"));
-  assert.equal(await split.locator(".bs-back").count(), 0, "nothing to hand back any more");
+  await win.waitForFunction(() => !document.querySelector("#browser-split .bs-back"), undefined, { timeout: 5000 });
   assert.match(await split.locator(".bs-words").innerText(), /done with this page/);
   await win.mouse.move(400, 700);
   await win.waitForTimeout(400);
   await win.screenshot({ path: join(output, "done.png") });
 
   // You take it yourself: the address is yours to type, back and forward work, and the pages it went to stay to look back at.
+  assert.equal(await split.locator(".bs-url").getAttribute("readonly"), "", "the address is not yours until you take the page");
   await split.locator(".bs-take").click();
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
   assert.match(await split.locator(".bs-words").innerText(), /The page is yours/);

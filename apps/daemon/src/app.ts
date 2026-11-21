@@ -8,7 +8,7 @@ import { parseMailTurn } from "@demesne/protocol";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
-import { webFetchTool, webSearchTool } from "./web.ts";
+import { assertPublic, webFetchTool, webSearchTool } from "./web.ts";
 import { fileText, linkTitle, MAX_COPY_BYTES, SourceError, SourceStore } from "./sources.ts";
 import { rememberTool } from "./remember.ts";
 import { routineTool } from "./routine-tool.ts";
@@ -19,12 +19,13 @@ import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } fro
 import { foundryBuiltTool } from "./foundry-built.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
-import { BrowserHandovers, browserTool, electronBrowser, type BrowserDriver, type WatchableBrowser } from "./browser.ts";
+import { browserAddress, BrowserHandovers, browserTool, electronBrowser, type BrowserDriver, type WatchableBrowser } from "./browser.ts";
 import { openTool, showTool } from "./open-show.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
   encodeServerSentEvent,
   isRecord,
+  browserSiteKey,
   parseCreateSessionRequest,
   parseCompactSessionRequest,
   parseAnswerQuestionsRequest,
@@ -227,6 +228,8 @@ export function createDaemonApp(options: {
   pageLook?: PageLook;
   /// The model's own browser (tests pass a fake; the daemon uses the desktop app). False turns it off.
   browser?: (BrowserDriver & Partial<WatchableBrowser>) | false;
+  /// How an address you type in the browser split is looked up, to keep it off the local network (tests pass their own).
+  resolveHost?: (host: string) => Promise<string[]>;
   /// The engine's clock (evals step it to make the prompt cache go cold).
   now?: () => Date;
   /// The open and show tools (pass 210 A); on unless false.
@@ -1709,17 +1712,56 @@ export function createDaemonApp(options: {
           const after = Number(url.searchParams.get("after") ?? 0) || 0;
           const aspect = Number(url.searchParams.get("aspect"));
           const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined) : null;
-          const asked = handovers.asked(chat);
-          return json(frame ? { ...frame, ...(asked ? { asked } : {}) } : { seq: 0, ...(asked ? { asked } : {}) });
+          const held = handovers.held(chat);
+          const visits = browser?.visits?.(chat).map(({ seq, url, title, tab }) => ({ seq, url, title, tab })) ?? [];
+          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}), visits };
+          return json(frame ? { ...frame, ...extra } : { seq: 0, ...extra });
+        }
+        // A page it went to, to step back through.
+        if (request.method === "GET" && path[4] === "visit") {
+          const seq = Number(url.searchParams.get("seq"));
+          const visit = browser?.visits?.(chat).find((one) => one.seq === seq);
+          return visit ? json(visit) : apiError("not_found", "That page is no longer kept", 404);
+        }
+        // You take the page without being asked: the model's browser steps wait until you give it back.
+        if (request.method === "POST" && path[4] === "take") {
+          if (!browser) return apiError("invalid_state", "There is no browser", 409);
+          if (handovers.held(chat)) return json({ taken: true });
+          if (!handovers.take(chat)) return json({ taken: true });
+          const reply = await browser(chat, { action: "handover", on: true }, request.signal);
+          if (!reply || typeof reply.error === "string") { handovers.handBack(chat); return apiError("invalid_state", typeof reply?.error === "string" ? reply.error : "The browser did not answer", 409); }
+          return json({ taken: true });
+        }
+        // Your own address, back, forward and reload, while the page is yours.
+        if (request.method === "POST" && path[4] === "go") {
+          if (!browser || !handovers.held(chat)) return apiError("invalid_state", "The page is not yours right now", 409);
+          const body = await readJson(request);
+          const to = isRecord(body) ? body.to : undefined;
+          if (to === "back" || to === "forward" || to === "reload") { const reply = await browser(chat, { action: "go", to }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
+          const tab = typeof to === "string" ? /^tab:(\d{1,3})$/.exec(to) : null;
+          if (tab) { const reply = await browser(chat, { action: "switch", tab: Number(tab[1]) }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
+          if (typeof to !== "string" || !to.trim()) return apiError("invalid_request", "Say where to go", 400);
+          let address: string;
+          try { address = browserAddress(to.trim(), store.getSession(chat)?.workspace?.root ?? null); }
+          catch (error) { return apiError("invalid_request", error instanceof Error ? error.message.replace(/^\[[A-Z_]+\]\s*/, "") : String(error), 400); }
+          const site = browserSiteKey({ action: "open", url: address });
+          if (site) { try { await assertPublic(new URL(address), options.resolveHost ?? (async (host) => (await import("node:dns/promises").then((dns) => dns.lookup(host, { all: true }))).map((entry) => entry.address))); } catch { return apiError("invalid_request", "That address is on your local network; the browser opens this computer and public sites", 400); } }
+          const reply = await browser(chat, { action: "go", url: address, ...(site ? { site } : {}) }, request.signal);
+          return reply && typeof reply.error !== "string" ? json({ ok: true, url: reply.url }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
         }
         if (request.method === "POST" && path[4] === "input") {
-          if (!browser || !handovers.asked(chat)) return apiError("invalid_state", "The page is not yours right now", 409);
+          if (!browser || !handovers.held(chat)) return apiError("invalid_state", "The page is not yours right now", 409);
           const body = await readJson(request);
           const events = isRecord(body) && Array.isArray(body.events) ? body.events.slice(0, 40) : [];
           const reply = await browser(chat, { action: "input", events }, request.signal);
           return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", typeof reply?.error === "string" ? reply.error : "The browser did not answer", 409);
         }
-        if (request.method === "POST" && path[4] === "hand-back") return json({ handedBack: handovers.handBack(chat) });
+        if (request.method === "POST" && path[4] === "hand-back") {
+          const held = handovers.held(chat);
+          // A page you took goes back to the model here; one it asked for, the model takes back itself.
+          if (held?.by === "person" && browser) await browser(chat, { action: "handover", on: false }, request.signal);
+          return json({ handedBack: handovers.handBack(chat) });
+        }
       }
 
       if (request.method === "PATCH" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {

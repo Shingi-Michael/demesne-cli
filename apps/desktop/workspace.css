@@ -3305,8 +3305,6 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop #browser-split .bs-icon svg { width: 14px; height: 14px; }
 .desktop #browser-split .bs-icon:hover:not(:disabled) { color: var(--t1); background: var(--hair); }
 .desktop #browser-split .bs-icon:disabled { opacity: .35; }
-.desktop #browser-split .bs-zoom { flex: none; padding: 2px 8px; border-radius: 99px; color: var(--t3); font: 11.5px var(--sans, inherit); }
-.desktop #browser-split .bs-zoom:hover { color: var(--t1); background: var(--hair); }
 .desktop #browser-split .bs-tabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--hair); overflow-x: auto; scrollbar-width: none; }
 .desktop #browser-split .bs-tabs[hidden], .desktop #browser-split .bs-pages[hidden] { display: none; }
 .desktop #browser-split .bs-tab { flex: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 10px; border-radius: 99px; font-size: 12px; color: var(--t3); }
@@ -3314,9 +3312,6 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop #browser-split .bs-tab:not(:disabled):not(.on):hover { background: var(--hair); color: var(--t1); }
 .desktop #browser-split .bs-tab:disabled:not(.on) { cursor: default; }
 .desktop #browser-split .bs-stage { position: relative; }
-.desktop #browser-split.actual .bs-view { overflow: auto; }
-.desktop #browser-split.actual .bs-stage { width: max-content; }
-.desktop #browser-split.actual .bs-page { max-width: none; }
 .desktop #browser-split .bs-ring { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; border: 2.5px solid var(--electric); background: color-mix(in srgb, var(--electric) 18%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--electric) 12%, transparent); pointer-events: none; opacity: 0; }
 .desktop #browser-split .bs-ring.on { animation: bs-ring 1500ms cubic-bezier(.32,.72,0,1) forwards; }
 @keyframes bs-ring { 0% { opacity: 0; transform: scale(.55); } 14% { opacity: 1; transform: scale(1); } 70% { opacity: .8; } 100% { opacity: 0; transform: scale(1.25); } }
@@ -3333,7 +3328,7 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop #browser-split .bs-close { flex: none; width: 24px; height: 24px; border-radius: var(--r-sm); color: var(--t3); font: 16px/1 var(--display, inherit); }
 .desktop #browser-split .bs-close:hover { color: var(--t1); background: var(--hair); }
 .desktop #browser-split .bs-view { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; outline: none; }
-.desktop #browser-split .bs-page { display: block; width: 100%; height: auto; user-select: none; }
+.desktop #browser-split .bs-page { display: block; width: 100%; height: auto; margin: 0 auto; user-select: none; }
 .desktop #browser-split.yours .bs-view { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
 .desktop #browser-split.yours .bs-view:focus-visible { box-shadow: inset 0 0 0 2px var(--warn); }
 .desktop #browser-split.yours .bs-page { cursor: default; }

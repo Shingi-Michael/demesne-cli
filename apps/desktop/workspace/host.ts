@@ -2284,7 +2284,7 @@ export class WorkspaceHost {
     if (method === "foundry-shelf") return await this.client.foundryList();
     // The chat's browser in the split (pass 248 D): its newest picture, your input while it is yours, handing it back.
     if (method === "browser-frame") {
-      const frame = await this.client.browserFrame(String(args.sessionId), Number(args.after) || 0, Number(args.aspect) || undefined, typeof args.dark === "boolean" ? args.dark : undefined);
+      const frame = await this.client.browserFrame(String(args.sessionId), Number(args.after) || 0, Number(args.aspect) || undefined, typeof args.dark === "boolean" ? args.dark : undefined, Number(args.width) > 0 ? { width: Number(args.width), dpr: Number(args.dpr) || 1 } : undefined);
       const { jpeg, ...rest } = frame;
       return { ...rest, ...(typeof jpeg === "string" && jpeg ? { src: `data:image/jpeg;base64,${jpeg}` } : {}) };
     }

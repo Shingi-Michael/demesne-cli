@@ -1720,7 +1720,8 @@ export function createDaemonApp(options: {
         if (request.method === "GET" && path[4] === "frame") {
           const after = Number(url.searchParams.get("after") ?? 0) || 0;
           const aspect = Number(url.searchParams.get("aspect"));
-          const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined, url.searchParams.has("dark") ? url.searchParams.get("dark") === "1" : undefined) : null;
+          const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined, url.searchParams.has("dark") ? url.searchParams.get("dark") === "1" : undefined,
+            Number(url.searchParams.get("w")) > 100 ? { width: Math.min(4000, Number(url.searchParams.get("w"))), dpr: Math.max(1, Math.min(3, Number(url.searchParams.get("dpr")) || 1)) } : undefined) : null;
           const held = handovers.held(chat);
           const visits = browser?.visits?.(chat).map(({ seq, url, title, tab }) => ({ seq, url, title, tab })) ?? [];
           const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}), visits };

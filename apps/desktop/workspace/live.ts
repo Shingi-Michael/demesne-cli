@@ -84,6 +84,7 @@ import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
 import { updateCheckLine, type AppUpdate } from "./release-line.ts";
 import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-icons.ts";
 import { MemoryPill } from "./memory-pill.ts";
+import { pills, type PillSpec } from "./pill.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -380,7 +381,6 @@ let completionItems: {
 let follow = true,
   stopArmed = 0,
   draftTimer: ReturnType<typeof setTimeout> | undefined,
-  noticeTimer: ReturnType<typeof setTimeout> | undefined,
   lastDraftVersion = -1,
   lastSession = "";
 /// Turns whose plan checklist is open; closed until you click Checklist.
@@ -464,10 +464,12 @@ async function api<T = unknown>(
   const entry = { method, at: Date.now(), outcome: "pending" };
   if (recentRequests.push(entry) > 20) recentRequests.shift();
   try {
+    const allowed = method === "permission" && args.decision === "allow_always" ? state?.approvals.find((approval) => approval.id === args.id)?.rule : undefined;
     const result = await window.demesne.request<T>(method, {
       ...args,
       sessionId: state?.session?.id,
     });
+    if (allowed) ruleLearned(allowed);
     entry.outcome = "ok";
     return result;
   } catch (error) {
@@ -475,19 +477,29 @@ async function api<T = unknown>(
     throw error;
   }
 }
-function notice(message: string) {
-  el("notice").textContent = message;
-  el("notice").hidden = false;
-  clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => (el("notice").hidden = true), 4000);
+/// A passing notice is a silver pill in its place (pass 260 A): the middle
+/// seat on the composer unless `how` names another seat or mark.
+function notice(message: string, how: Partial<PillSpec> = {}) {
+  pills.show({ seat: "middle", mark: "note", words: message, ...how });
+}
+/// Something failed: the same pill, with the amber dot.
+function fail(error: unknown, how: Partial<PillSpec> = {}) {
+  notice(error instanceof Error ? error.message : String(error), { mark: "bang", need: true, ...how });
 }
 async function act(task: () => Promise<unknown>) {
   try {
     return await task();
   } catch (error) {
-    notice(error instanceof Error ? error.message : String(error));
+    fail(error);
     return null;
   }
+}
+/// "Always" taught Demesne a rule: the middle seat says so, and Ask again
+/// takes the rule back out of your config.
+function ruleLearned(rule: string) {
+  const what = rule.slice(rule.indexOf(":") + 1).replace(/ \*$/, " …");
+  const words = rule.startsWith("edit") || rule.startsWith("write") ? `Demesne will edit ${what && what !== "." ? what : "this project"} without asking` : `Demesne will run ${what} without asking`;
+  notice(words, { mark: "rule", seconds: 6, action: { label: "Ask again", run: () => void api("allow-rule-remove", { rule }).catch(fail) } });
 }
 /// The same model, whether or not either id carries its provider prefix.
 const sameModel = (a: string | undefined, b: string | undefined) =>
@@ -1562,7 +1574,7 @@ async function dropSources(event: DragEvent) {
     for (const file of files) {
       const path = pathFor?.(file) ?? "";
       if (path) await keepSource({ path });
-      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`);
+      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`, { mark: "bang", need: true });
     }
     return;
   }
@@ -1758,7 +1770,7 @@ function buildBrowserSplit(aside: HTMLElement) {
   const yours = splitYours;
   const send = (events: unknown[]) => { if (events.length) void api("browser-input", { events }).catch(() => {}); };
   const at = (event: MouseEvent) => pagePoint(event.clientX, event.clientY, img.getBoundingClientRect(), split.frame!);
-  const go = (to: string) => void api("browser-go", { to }).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  const go = (to: string) => void api("browser-go", { to }).catch((error) => fail(error));
   const BUTTONS = ["left", "middle", "right"] as const;
   let moved = 0;
   const mine = () => { if (!yours() && split.frame) void takeSplit(); return yours(); };
@@ -1797,7 +1809,7 @@ function buildBrowserSplit(aside: HTMLElement) {
     if (!await own()) return;
     split.home = false;
     try { await api("browser-go", { to, ...(fresh ? { newTab: true } : {}) }); }
-    catch (error) { notice(error instanceof Error ? error.message : String(error)); }
+    catch (error) { fail(error); }
     showSplitPicture(aside); renderBrowserSplit();
   });
   url.addEventListener("focus", () => {
@@ -1823,7 +1835,7 @@ function buildBrowserSplit(aside: HTMLElement) {
     const shut = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-close-tab]");
     if (shut) {
       if (shut.dataset.closeTab === "home") { home(false); return; }
-      void (async () => { if (!await own()) return; try { await api("browser-go", { to: `close:${shut.dataset.closeTab}` }); } catch (error) { notice(error instanceof Error ? error.message : String(error)); } })();
+      void (async () => { if (!await own()) return; try { await api("browser-go", { to: `close:${shut.dataset.closeTab}` }); } catch (error) { fail(error); } })();
       return;
     }
     const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-tab]");
@@ -2157,7 +2169,7 @@ function landWhenSeen(node: HTMLElement, shot: WindowShot) {
 /// The capture keys took a window (electron/capture-keys.ts).
 document.addEventListener("demesne:window-shot", (event) => {
   const shot = (event as CustomEvent<{ app?: string; title?: string; data?: string; text?: string; textNote?: string; from?: Rect; error?: string }>).detail;
-  if (shot.error) { notice(shot.error); return; }
+  if (shot.error) { fail(shot.error); return; }
   if (!state?.session || !shot.data) { notice("Open a chat, then press the keys again to add the window."); return; }
   const sessionId = state.session.id;
   void act(async () => {
@@ -3169,7 +3181,7 @@ const working = () => Boolean(state?.activeTurnId || state?.busy || state?.sessi
 function rebuildWhenIdle() {
   if (!rebuildAsked || state?.selfBuild.state !== "ready" || working()) return;
   rebuildAsked = false;
-  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => fail(error));
 }
 /// A sent message, its big pastes shown folded as they were in the composer.
 function requestText(content: string) {
@@ -5156,7 +5168,7 @@ async function attachFiles(files: File[]) {
     // Big photos and screenshots are redrawn to fit (fit-image.ts), never refused for size.
     let fitted: { url: string; type: string };
     try { fitted = await readPicture(file, { side: 4096, bytes: 15 * 1024 * 1024 }); }
-    catch { notice(`${file.name || "That image"} couldn't be read.`); continue; }
+    catch { notice(`${file.name || "That image"} couldn't be read.`, { mark: "bang", need: true }); continue; }
     const url = fitted.url;
     const image = await api("attach", { name: file.name || "pasted-image.png", mimeType: fitted.type, data: url.slice(url.indexOf(",") + 1) }) as { id: string } | undefined;
     if (image?.id) { attachmentPreviews.set(image.id, url); composerSignature = ""; renderComposer(); renderConversation(); }
@@ -6232,7 +6244,7 @@ document.addEventListener("demesne:notify-answer", (event) => {
   const done = ask.kind === "permission"
     ? (choice ? (ask.sessionId ? api("away-permission", { session: ask.sessionId, id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" }) : api("permission", { id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" })) : null)
     : (typed || choice) ? (ask.sessionId ? api("away-answer", { session: ask.sessionId, id: ask.id, answer: typed || choice, source: typed ? "typed" : "suggestion" }) : answerQuestion(typed || choice!, typed ? "typed" : "suggestion", questionById(ask.id))) : null;
-  void Promise.resolve(done).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  void Promise.resolve(done).catch((error) => fail(error));
 });
 // A banner's click comes back here and opens its chat.
 document.addEventListener("demesne:open-chat", (event) => {
@@ -6260,7 +6272,7 @@ async function driveAction(method: string, args: Record<string, unknown> = {}): 
   try {
     return await run;
   } catch (error) {
-    notice(error instanceof Error ? error.message : String(error));
+    fail(error);
     throw error;
   } finally {
     driveActionPending = "";
@@ -6740,7 +6752,7 @@ async function pointAt(key: string) {
   pointButton(key);
   let pick: PointPick | null = null;
   try { pick = await api<PointPick | null>("desktop-point", { frame: `pv-${key}` }); }
-  catch (error) { notice(error instanceof Error ? error.message : String(error)); }
+  catch (error) { fail(error); }
   finally { if (pointing === key) pointing = null; pointButton(key); }
   if (!pick) return;
   let source: PointSource | null = null;
@@ -6810,7 +6822,7 @@ async function submitText(value = editor.value, wait = false) {
         command.name === name || command.aliases.includes(name as never),
     )?.id;
     if (!id) {
-      notice(`Unknown command: ${name}`);
+      notice(`Unknown command: ${name}`, { mark: "bang", need: true });
       return;
     }
     const known = state.commands.find((command) => command.id === id);
@@ -6959,7 +6971,7 @@ async function submitText(value = editor.value, wait = false) {
       const result = await api<{ path: string }>("export", {
         format: argument === "json" ? "json" : "md",
       });
-      notice(`Saved ${result.path}`);
+      notice(`Saved ${result.path}`, { mark: "tray" });
       clear();
       return;
     }
@@ -7129,7 +7141,7 @@ async function dispatch(
   if (["settings-config", "allow-rule-remove", "trusted-forget", "mcp-remove"].includes(action)) return settingsCall(action, args);
   if (action === "restart-daemon") {
     settingsUi.error = "";
-    notice("Restarting the daemon…");
+    notice("Restarting the daemon…", { seat: "left", mark: "up" });
     return settingsCall("restart-daemon");
   }
   if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
@@ -7561,9 +7573,10 @@ async function dispatch(
     try {
       const done = await api<{ handoff: { status: string; error?: string } }>("handoff-act", { id, action: verb });
       handoffNow.set(id, { ...handoffNow.get(id), status: done.handoff.status, error: undefined });
-      notice(verb === "apply" ? "Brought in: the change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded");
+      // About your files, so it speaks from the right seat, under the cards.
+      notice(verb === "apply" ? "The change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded", { seat: "right", mark: verb === "apply" ? "tray" : "tick" });
     } catch (error) {
-      notice(error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error));
+      fail(error instanceof Error ? error.message.replace(/^.*?: /, "") : error, { seat: "right" });
     } finally {
       handoffBusy.delete(id);
       renderConversation();
@@ -7824,7 +7837,7 @@ async function dispatch(
           .map((e) => splitNextPrompt((e as any).raw).text)
           .join("\n\n") ?? "",
     });
-    notice("Copied");
+    notice("Copied", { seat: "at", mark: "copy", anchor: target });
     return;
   }
   if (
@@ -8922,7 +8935,7 @@ function resyncState() {
       const next = stateReceiver.seed(snapshot);
       if (next) renderState(next);
     })
-    .catch((error) => notice(String(error)))
+    .catch(fail)
     .finally(() => {
       resyncing = false;
       if (received && stateReceiver.needsReset) resyncState();
@@ -8970,7 +8983,7 @@ void window.demesne
     window.demesne.ready();
   })
   .catch((error) => {
-    notice(String(error));
+    fail(error);
     window.demesne.ready();
   });
 // Spinners and thinking sub-agents' phrases advance in place; the DOM (and

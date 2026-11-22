@@ -338,7 +338,6 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .proposal-row .next-kind { font-size: 9px; }
 .desktop .proposals-footer { font-size: 11px; }
 .desktop .modal { border-radius: 12px; box-shadow: 0 20px 70px #0006; }
-.desktop #notice { font-family: inherit; border-radius: 8px; }
 @media (max-width: 1150px) {
   #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 260px minmax(0, 1fr); }
   #desktop-toolbar { padding: 0 14px; gap: 8px; }
@@ -613,7 +612,6 @@ body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone
 .desktop .settings-segments button { border-radius: 4px; }
 .desktop .settings-segments button.on { box-shadow: var(--shadow-1); }
 .desktop .dialog-close { border-radius: var(--r-sm); }
-.desktop #notice { border: 0; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
 .desktop .drive-status, .desktop .saved, .desktop #desktop-error-message, .desktop .setup-list { border: 0; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair); }
 .desktop #setup input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--hair2); }
 .desktop #setup footer .right > button, .desktop-primary { border: 0; border-radius: var(--r); }
@@ -623,7 +621,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes desktop-appear { from { opacity: 0; transform: translateY(4px); } }
 @keyframes desktop-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
+  .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
   .desktop #approval:not([hidden]), .desktop .away-fold, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
   .desktop .step-fold.steady { animation: none; }
   .desktop #conversation > .turn, .desktop .compaction-card { animation: desktop-appear 220ms var(--ease); }

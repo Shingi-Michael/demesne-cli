@@ -52,11 +52,11 @@ test("the browser side keeps room for a page and for the chat", () => {
 });
 
 test("the line under the page says what is happening, and what is asked of you", () => {
-  expect(splitFoot({ reason: "Sign in to the admin" }, null, true)).toEqual({ tone: "ask", words: "Sign in to the admin, then hand it back. The model can't see what you type." });
+  expect(splitFoot({ reason: "Sign in to the admin" }, null, true)).toEqual({ tone: "ask", words: "Sign in to the admin, then go back to the chat. The model can't see what you type." });
   expect(splitFoot(null, "Clicked “Pay”", true)).toEqual({ tone: "now", words: "Clicked “Pay”" });
   expect(splitFoot(null, null, true).tone).toBe("");
   // A page you took yourself: the model waits for you.
-  expect(splitFoot(null, "Clicked “Pay”", true, true)).toEqual({ tone: "ask", words: "The page is yours. The model waits until you hand it back." });
+  expect(splitFoot(null, "Clicked “Pay”", true, true)).toEqual({ tone: "ask", words: "The page is yours. Go back to the chat to give it to the model." });
 });
 
 test("a ring shows where the model clicked, only while fresh", () => {

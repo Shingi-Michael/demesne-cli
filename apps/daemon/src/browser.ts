@@ -43,6 +43,8 @@ export interface BrowserVisit { seq: number; url: string; title: string; tab: nu
 export interface WatchableBrowser {
   frame(chat: string, after: number, signal: AbortSignal, aspect?: number, dark?: boolean, box?: { width: number; dpr: number }): Promise<BrowserFrame | null>;
   visits?(chat: string): BrowserVisit[];
+  /// Set by the daemon: the person scrolled, clicked or typed on a chat's page, which makes it theirs.
+  onTaken?: (chat: string) => void;
 }
 /// Pages kept per chat to step back through.
 export const VISITS_KEPT = 12;
@@ -148,6 +150,7 @@ export function electronBrowser(command: string[], profileDir?: string, desktop?
               const reply = JSON.parse(line) as Record<string, unknown>;
               if (typeof reply.id === "number") { waiting.get(reply.id)?.(reply); waiting.delete(reply.id); }
               else if (reply.event === "gone" && typeof reply.chat === "string") open.delete(reply.chat);
+              else if (reply.event === "taken" && typeof reply.chat === "string") driver.onTaken?.(reply.chat);
               else if (reply.event === "frame" && typeof reply.chat === "string" && typeof reply.jpeg === "string") {
                 frames.set(reply.chat, { seq: ++seq, jpeg: reply.jpeg, width: Number(reply.width) || 1280, height: Number(reply.height) || 800, url: String(reply.url ?? ""), title: String(reply.title ?? ""), handover: reply.handover === true,
                   ...(Array.isArray(reply.tabs) ? { tabs: (reply.tabs as Record<string, unknown>[]).slice(0, 8).map((one) => ({ n: Number(one.n) || 0, url: String(one.url ?? ""), title: String(one.title ?? ""), ...(one.active === true ? { active: true } : {}) })) } : {}),

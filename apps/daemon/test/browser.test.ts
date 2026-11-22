@@ -258,6 +258,7 @@ test.skipIf(process.platform === "win32")("with the desktop app open, the browse
         const line = JSON.parse(buffer.slice(0, end)) as Record<string, unknown>; buffer = buffer.slice(end + 1);
         heard.push(line);
         if (line.hello !== undefined) { if (line.hello !== "word") peer.destroy(); continue; }
+        if (line.action === "open") peer.write(JSON.stringify({ event: "taken", chat: line.chat }) + "\n");
         if (line.action === "open") peer.write(JSON.stringify({ event: "frame", chat: line.chat, jpeg: "", live: true, width: 640, height: 800, url: line.url, title: "Shop", tabs: [{ n: 1, url: line.url, title: "Shop", active: true }] }) + "\n");
         peer.write(JSON.stringify({ id: line.id, url: line.url ?? "", title: "Shop" }) + "\n");
       }
@@ -267,6 +268,8 @@ test.skipIf(process.platform === "win32")("with the desktop app open, the browse
   writeFileSync(pointer, JSON.stringify({ socket, token: "word", pid: process.pid }));
   // No hidden browser can start: the command is one that does not exist.
   const browser = electronBrowser(["/nonexistent/demesne"], join(dir, "profile"), pointer);
+  const taken: string[] = [];
+  browser.onTaken = (chat) => taken.push(chat);
   try {
     const signal = new AbortController().signal;
     const reply = await browser("chat-1", { action: "open", url: "http://localhost:5173/" }, signal);
@@ -278,5 +281,7 @@ test.skipIf(process.platform === "win32")("with the desktop app open, the browse
     const frame = await browser.frame("chat-1", 0, signal);
     expect(frame).toMatchObject({ live: true, jpeg: "", width: 640, url: "http://localhost:5173/" });
     expect(browser.visits?.("chat-1")).toEqual([]);
+    // You scrolled the page there: the daemon hears it is yours.
+    expect(taken).toEqual(["chat-1"]);
   } finally { browser.close(); await new Promise((done) => server.close(done)); rmSync(dir, { recursive: true, force: true }); }
 });

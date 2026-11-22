@@ -84,7 +84,7 @@ try {
 
   // The model hands it over: the line asks, and your keys reach the page.
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
-  assert.match(await split.locator(".bs-words").innerText(), /Sign in to the Slow Pour admin, then go back to the chat/);
+  assert.match(await split.locator(".bs-doing").innerText(), /Sign in to the Slow Pour admin, then go back to the chat/);
   assert.match(await win.locator("#conversation").innerText(), /waiting for you/);
   await win.waitForTimeout(500);
   await win.screenshot({ path: join(output, "yours.png") });
@@ -101,7 +101,7 @@ try {
   await win.screenshot({ path: join(output, "signed-in.png") });
   // Back to the chat hands it back.
   await win.locator("textarea").click();
-  console.log("PASS: a hand-over asks under the page, your click and keys reach the page, and a click in the chat hands it back.");
+  console.log("PASS: a hand-over asks in the bar, your click and keys reach the page, and a click in the chat hands it back.");
 
   // Handed back, the model clicks: a soft ring shows where.
   await win.waitForFunction(() => { const ring = document.querySelector<HTMLElement>("#browser-split .bs-ring"); return Boolean(ring && !ring.hidden && ring.classList.contains("on")); }, undefined, { timeout: 10000 });
@@ -115,18 +115,18 @@ try {
   await win.locator("#conversation .turn").filter({ hasText: "Order #1042 is at the top of Orders" }).waitFor();
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("done"));
   assert.equal(await win.locator("#browser-split.yours").count(), 0, "the model's click leaves the page the model's");
-  assert.match(await split.locator(".bs-words").innerText(), /done with this page/);
+  assert.equal(await split.locator(".bs-foot").isVisible(), false, "no line under the page once the model is done");
+  assert.equal(await split.locator(".bs-doing").isVisible(), false, "no words in the bar once the model is done");
   await win.mouse.move(400, 700);
   await win.waitForTimeout(400);
   await win.screenshot({ path: join(output, "done.png") });
 
   // You scroll it: it is yours. The address is yours to type, back and forward work, and the pages it went to stay to look back at.
-  assert.equal(await split.locator(".bs-url").getAttribute("readonly"), "", "the address is not yours until you take the page");
   const pic = (await img.boundingBox())!;
   await win.mouse.move(pic.x + 200, pic.y + 200);
   await win.mouse.wheel(0, 200);
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
-  assert.match(await split.locator(".bs-words").innerText(), /The page is yours/);
+  assert.match(await split.locator(".bs-doing").innerText(), /Yours · the model waits/);
   assert.equal(await split.locator(".bs-url").getAttribute("readonly"), null, "the address is yours to type");
   await split.locator(".bs-url").fill("localhost:" + site.port + "/cart");
   await split.locator(".bs-url").press("Enter");

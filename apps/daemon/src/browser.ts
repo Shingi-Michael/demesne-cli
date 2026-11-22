@@ -36,7 +36,7 @@ export type BrowserDriver = (chat: string, command: Record<string, unknown>, sig
 
 /// The newest picture of a chat's tab, for the split screen.
 export interface BrowserFrame { seq: number; jpeg: string; width: number; height: number; url: string; title: string; handover: boolean;
-  tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; /** The page itself is on show in the desktop app's window: there is no picture to draw. */ live?: boolean; /** When the browser sent it (its clock), to measure the way to the screen. */ at?: number }
+  tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; /** The page is still loading. */ loading?: boolean; /** The page itself is on show in the desktop app's window: there is no picture to draw. */ live?: boolean; /** When the browser sent it (its clock), to measure the way to the screen. */ at?: number }
 /// A page the chat's browser went to, kept small, to step back through.
 export interface BrowserVisit { seq: number; url: string; title: string; tab: number; jpeg: string }
 /// A driver you can also watch: pictures arrive as the tab repaints, and a small one of each page it went to.
@@ -155,7 +155,7 @@ export function electronBrowser(command: string[], profileDir?: string, desktop?
                 frames.set(reply.chat, { seq: ++seq, jpeg: reply.jpeg, width: Number(reply.width) || 1280, height: Number(reply.height) || 800, url: String(reply.url ?? ""), title: String(reply.title ?? ""), handover: reply.handover === true,
                   ...(Array.isArray(reply.tabs) ? { tabs: (reply.tabs as Record<string, unknown>[]).slice(0, 8).map((one) => ({ n: Number(one.n) || 0, url: String(one.url ?? ""), title: String(one.title ?? ""), ...(one.active === true ? { active: true } : {}) })) } : {}),
                   ...(reply.pointer && typeof reply.pointer === "object" ? { pointer: { x: Number((reply.pointer as Record<string, unknown>).x) || 0, y: Number((reply.pointer as Record<string, unknown>).y) || 0, ago: Number((reply.pointer as Record<string, unknown>).ago) || 0 } } : {}),
-                  back: reply.back === true, forward: reply.forward === true, ...(reply.live === true ? { live: true } : {}), ...(typeof reply.at === "number" ? { at: reply.at } : {}) });
+                  back: reply.back === true, forward: reply.forward === true, ...(reply.loading === true ? { loading: true } : {}), ...(reply.live === true ? { live: true } : {}), ...(typeof reply.at === "number" ? { at: reply.at } : {}) });
                 // A page it reached while watched, before its own small picture came: the live one stands in.
                 const list = visits.get(reply.chat) ?? [], url = String(reply.url ?? "");
                 if (reply.jpeg && url && url !== "about:blank" && list.at(-1)?.url !== url) {

@@ -124,8 +124,8 @@ try {
 
   // The model hands it over: your mouse and keys reach the real page.
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
-  assert.equal(await split.locator(".bs-foot button").count(), 0, "no button to take the page or give it back");
-  assert.match(await split.locator(".bs-words").innerText(), /Sign in to the Slow Pour admin, then go back to the chat/);
+  assert.equal(await split.locator(".bs-foot").isVisible(), false, "no line under the page, and no button to take it or give it back");
+  assert.match(await split.locator(".bs-doing").innerText(), /Sign in to the Slow Pour admin, then go back to the chat/);
   await act("/admin", click(56 + 150, 150), "ada@slowpour.test");
   await act("/admin", click(56 + 60, 232));
   await until("your click signed in", () => real("/admin"), (page) => /Signed in as ada@slowpour.test \(1\)/.test(page?.said ?? ""));
@@ -149,13 +149,17 @@ try {
   // The model's own click did not make the page yours.
   await win.waitForTimeout(600);
   assert.equal(await win.locator("#browser-split.yours").count(), 0, "the model's click does not hand the page to you");
+  // Done: no line under the page, no words in the bar; the bar's buttons are all there.
+  assert.equal(await split.locator(".bs-foot").isVisible(), false, "no line under the page once the model is done");
+  assert.equal(await split.locator(".bs-doing").isVisible(), false, "no words in the bar once the model is done");
+  for (const label of ["Back", "Forward", "Reload", "New tab", "Open in your browser", "Close the browser"]) assert.equal(await split.getByRole("button", { name: label, exact: true }).count(), 1, `the bar has ${label}`);
   console.log("PASS: the model's clicks reach the page and leave it the model's.");
 
   // You scroll it: it is yours, your click counts, and your own address goes where you say.
   // Up, at the top: it does not move the page, but it is still you using it.
   await act("/admin", [{ type: "mouseWheel", x: 200, y: 300, deltaX: 0, deltaY: 200 }]);
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"), undefined, { timeout: 5000 });
-  assert.match(await split.locator(".bs-words").innerText(), /The page is yours\. Go back to the chat/);
+  assert.match(await split.locator(".bs-doing").innerText(), /Yours · the model waits/);
   await act("/admin", click(56 + 60, 232));
   await until("your click counts once you took the page", () => real("/admin"), (page) => /\(3\)/.test(page?.said ?? ""));
   await split.locator(".bs-url").fill("localhost:" + site.port + "/cart");
@@ -176,9 +180,22 @@ try {
   box = await area();
   await until("the page follows the split when the window changes size", async () => { box = await area(); return real("/cart"); }, (page) => Boolean(page?.shown && near(page.shown.x, box.x) && near(page.shown.width, box.width) && near(page.shown.height, box.height)));
   shot("cart.png");
+  // A new tab: the home screen is just the logo, the real page steps aside, and an address opens in a tab of its own.
+  await split.getByRole("button", { name: "New tab", exact: true }).click();
+  await split.locator(".bs-home svg").waitFor();
+  await until("the real page steps aside for the home screen", () => real("/cart"), (page) => Boolean(page && !page.shown));
+  assert.equal(await split.locator(".bs-url").inputValue(), "");
+  await win.screenshot({ path: join(output, "home.png") });
+  await split.locator(".bs-url").fill("localhost:" + site.port + "/admin");
+  await split.locator(".bs-url").press("Enter");
+  await until("the address opened in a new tab", () => real("/admin"), (page) => Boolean(page?.shown));
+  await until("two tabs show as chips", () => split.locator(".bs-tab").count(), (n) => n === 2);
+  assert.equal(await split.locator(".bs-home").isVisible(), false, "the home screen goes once you go somewhere");
+  await split.locator(".bs-tab", { hasText: "Cart" }).click();
+  await until("a chip switches back to the cart", () => real("/cart"), (page) => Boolean(page?.shown));
   await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
-  console.log("PASS: a scroll makes the page yours; you can go to your own address, look at an earlier page and come back.");
+  console.log("PASS: a scroll makes the page yours; you can go to your own address, look at an earlier page, open a new tab from its logo home screen, and come back.");
 
   // Settings over the chat, and ×: the real page is put away, and still there for the model.
   await split.locator(".bs-close").click();

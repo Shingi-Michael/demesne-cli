@@ -25,7 +25,7 @@ function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string
 export async function fixture(
   processor?: TurnProcessor,
   // `root` and `workspaceName` give screenshots a readable project path.
-  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string; agentCli?: import("../../../daemon/src/agent-cli.ts").AgentCliOptions; socials?: boolean; images?: { url: string; model: string }; seed?: (dataDir: string) => void; windowCapture?: import("../../../daemon/src/window-capture.ts").WindowCaptureDependencies; browser?: Parameters<typeof import("../../../daemon/src/app.ts").createDaemonApp>[0]["browser"] } = {},
+  options: { vision?: boolean; trusted?: boolean; root?: string; workspaceName?: string; heartbeatSocket?: string; agentCli?: import("../../../daemon/src/agent-cli.ts").AgentCliOptions; socials?: boolean; images?: { url: string; model: string }; seed?: (dataDir: string) => void; windowCapture?: import("../../../daemon/src/window-capture.ts").WindowCaptureDependencies; browser?: Parameters<typeof import("../../../daemon/src/app.ts").createDaemonApp>[0]["browser"]; signinWhere?: import("../../../daemon/src/browser-signins.ts").SigninWhere } = {},
 ) {
   if (options.root) mkdirSync(options.root);
   const root = realpathSync(
@@ -57,6 +57,7 @@ export async function fixture(
       ...(options.images ? { images: options.images } : {}),
       ...(options.windowCapture ? { windowCapture: options.windowCapture } : {}),
       ...(options.browser ? { browser: options.browser } : {}),
+      ...(options.signinWhere ? { signinWhere: options.signinWhere } : {}),
       processor: processor ?? {
         providerId: "test",
         modelId: "qwen3.8-27b",

@@ -3,6 +3,14 @@ import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
 /// Which agents may work, and where (the daemon's agent-choice.ts).
+/// Settings › Browser: the browsers found, one browser's sites, and what a project already brought in.
+export interface BrowserSignins {
+  sources: { id: string; label: string; state: "ready" | "missing" | "disk" | "locked" }[];
+  from: string | null;
+  sites: { site: string; lastUsed: number; cookies: number; never?: true }[];
+  kept: { site: string; from: string; at: number }[];
+  error?: string;
+}
 export interface AgentChoiceView { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[]; runs?: AgentRunsOn }[] }
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean; callback?: string }
@@ -447,6 +455,16 @@ export class DemesneClient {
   /// You take the page without being asked; the model's browser steps wait until you hand it back.
   async browserTake(sessionId: string): Promise<{ taken: boolean }> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/take`, { method: "POST", body: "{}" });
+  }
+  /// Sign-ins from your other browsers, for a project's browser (pass 261 A).
+  async browserSignins(root: string, from?: string): Promise<BrowserSignins> {
+    return this.request(`/v1/browser/signins?root=${encodeURIComponent(root)}${from ? `&from=${encodeURIComponent(from)}` : ""}`);
+  }
+  async browserSigninsBring(root: string, from: string, sites: string[]): Promise<{ set: number; sites: string[]; kept: BrowserSignins["kept"] }> {
+    return this.request("/v1/browser/signins", { method: "POST", body: JSON.stringify({ root, from, sites }) });
+  }
+  async browserSigninsRemove(root: string, site: string): Promise<{ removed: number; kept: BrowserSignins["kept"] }> {
+    return this.request("/v1/browser/signins/remove", { method: "POST", body: JSON.stringify({ root, site }) });
   }
   /// Your own address, or back, forward, reload, while the page is yours.
   async browserGo(sessionId: string, to: string, newTab = false): Promise<{ ok: boolean; url?: string }> {

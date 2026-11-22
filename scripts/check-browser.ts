@@ -338,7 +338,6 @@ try {
   const after = await step;
   assert.match(String(after.person_used), /used this browser/);
   assert.equal(after.title, "Orders", "back went back");
-  assert((more.visits?.("chat-m") ?? []).some((visit) => visit.url.endsWith("/session?set")), "the pages it went to are kept to step back through");
   // A sign-in that lasts only for the session is there after the browser starts again.
   assert.match((await moreCall({ action: "open", url: `${base}/session` })).outline.join("\n"), /Session kept|# Session/);
   assert.match((await moreCall({ action: "text" })).text, /Session kept/);

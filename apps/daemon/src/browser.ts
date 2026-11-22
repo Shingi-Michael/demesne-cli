@@ -38,16 +38,12 @@ export type BrowserDriver = (chat: string, command: Record<string, unknown>, sig
 export interface BrowserFrame { seq: number; jpeg: string; width: number; height: number; url: string; title: string; handover: boolean;
   tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; /** The page is still loading. */ loading?: boolean; /** The page itself is on show in the desktop app's window: there is no picture to draw. */ live?: boolean; /** When the browser sent it (its clock), to measure the way to the screen. */ at?: number }
 /// A page the chat's browser went to, kept small, to step back through.
-export interface BrowserVisit { seq: number; url: string; title: string; tab: number; jpeg: string }
 /// A driver you can also watch: pictures arrive as the tab repaints, and a small one of each page it went to.
 export interface WatchableBrowser {
   frame(chat: string, after: number, signal: AbortSignal, aspect?: number, dark?: boolean, box?: { width: number; dpr: number }): Promise<BrowserFrame | null>;
-  visits?(chat: string): BrowserVisit[];
   /// Set by the daemon: the person scrolled, clicked or typed on a chat's page, which makes it theirs.
   onTaken?: (chat: string) => void;
 }
-/// Pages kept per chat to step back through.
-export const VISITS_KEPT = 12;
 
 const COMMAND_TIMEOUT_MS = 40_000;
 /// A frame request waits this long for a newer picture before saying there is none.
@@ -138,7 +134,6 @@ export function electronBrowser(command: string[], profileDir?: string, desktop?
   let appFailedAt = 0;
   const waiting = new Map<number, (reply: Record<string, unknown> | null) => void>();
   const frames = new Map<string, BrowserFrame>(), frameWaiters = new Map<string, Set<() => void>>(), told = new Map<string, number>(), shape = new Map<string, number>();
-  const visits = new Map<string, BrowserVisit[]>();
   let scheme: boolean | undefined;
   /// How sharp the screen showing the split is, once a split has said: new tabs draw that sharp.
   let screen: number | undefined;
@@ -156,22 +151,7 @@ export function electronBrowser(command: string[], profileDir?: string, desktop?
                   ...(Array.isArray(reply.tabs) ? { tabs: (reply.tabs as Record<string, unknown>[]).slice(0, 8).map((one) => ({ n: Number(one.n) || 0, url: String(one.url ?? ""), title: String(one.title ?? ""), ...(one.active === true ? { active: true } : {}) })) } : {}),
                   ...(reply.pointer && typeof reply.pointer === "object" ? { pointer: { x: Number((reply.pointer as Record<string, unknown>).x) || 0, y: Number((reply.pointer as Record<string, unknown>).y) || 0, ago: Number((reply.pointer as Record<string, unknown>).ago) || 0 } } : {}),
                   back: reply.back === true, forward: reply.forward === true, ...(reply.loading === true ? { loading: true } : {}), ...(reply.live === true ? { live: true } : {}), ...(typeof reply.at === "number" ? { at: reply.at } : {}) });
-                // A page it reached while watched, before its own small picture came: the live one stands in.
-                const list = visits.get(reply.chat) ?? [], url = String(reply.url ?? "");
-                if (reply.jpeg && url && url !== "about:blank" && list.at(-1)?.url !== url) {
-                  const tab = Array.isArray(reply.tabs) ? Number((reply.tabs as Record<string, unknown>[]).find((one) => one.active === true)?.n) || 1 : 1;
-                  list.push({ seq: ++seq, url, title: String(reply.title ?? ""), tab, jpeg: reply.jpeg });
-                  if (list.length > VISITS_KEPT) list.shift();
-                  visits.set(reply.chat, list);
-                }
                 for (const wake of frameWaiters.get(reply.chat) ?? []) wake();
-              } else if (reply.event === "visit" && typeof reply.chat === "string" && typeof reply.jpeg === "string") {
-                const list = visits.get(reply.chat) ?? [];
-                // The same page again (a reload, a repaint after load) replaces its picture.
-                if (list.at(-1)?.url === reply.url) list.pop();
-                list.push({ seq: ++seq, url: String(reply.url ?? ""), title: String(reply.title ?? ""), tab: Number(reply.tab) || 1, jpeg: reply.jpeg });
-                if (list.length > VISITS_KEPT) list.shift();
-                visits.set(reply.chat, list);
               }
             } catch { /* Chromium's own chatter */ }
   };
@@ -218,7 +198,7 @@ export function electronBrowser(command: string[], profileDir?: string, desktop?
     if (signal.aborted) { resolve(null); return; }
     // Nothing to close when no browser was ever started.
     if (!child && body.action === "close") { resolve({ closed: true }); return; }
-    if (body.action === "close") { frames.delete(chat); visits.delete(chat); open.delete(chat); }
+    if (body.action === "close") { frames.delete(chat); open.delete(chat); }
     // The desktop app opened since the hidden browser started: move into its window once no other chat would lose a page.
     if (child && !child.inApp && body.action === "open" && [...open].every((one) => one === chat) && app()) { const hidden = child; drop(); hidden.end(); }
     let running: Link;
@@ -258,7 +238,6 @@ export function electronBrowser(command: string[], profileDir?: string, desktop?
     });
     return frames.get(chat) ?? null;
   };
-  driver.visits = (chat) => visits.get(chat) ?? [];
   driver.close = () => {
     const running = child;
     drop();

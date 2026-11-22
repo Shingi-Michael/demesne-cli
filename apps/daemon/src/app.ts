@@ -1727,15 +1727,8 @@ export function createDaemonApp(options: {
           const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined, url.searchParams.has("dark") ? url.searchParams.get("dark") === "1" : undefined,
             Number(url.searchParams.get("w")) > 100 ? { width: Math.min(4000, Number(url.searchParams.get("w"))), dpr: Math.max(1, Math.min(3, Number(url.searchParams.get("dpr")) || 1)) } : undefined) : null;
           const held = handovers.held(chat);
-          const visits = browser?.visits?.(chat).map(({ seq, url, title, tab }) => ({ seq, url, title, tab })) ?? [];
-          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}), visits };
+          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}) };
           return json(frame ? { ...frame, ...extra } : { seq: 0, ...extra });
-        }
-        // A page it went to, to step back through.
-        if (request.method === "GET" && path[4] === "visit") {
-          const seq = Number(url.searchParams.get("seq"));
-          const visit = browser?.visits?.(chat).find((one) => one.seq === seq);
-          return visit ? json(visit) : apiError("not_found", "That page is no longer kept", 404);
         }
         // You take the page without being asked: the model's browser steps wait until you give it back.
         if (request.method === "POST" && path[4] === "take") {

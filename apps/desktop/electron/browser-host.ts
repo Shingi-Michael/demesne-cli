@@ -277,18 +277,6 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
   };
   // A watch that lapsed stops its stream.
   { const timer = setInterval(() => { for (const chat of chats.values()) for (const tab of chat.tabs.values()) if (tab.casting && !isWatched(tab)) stopCast(tab); }, 1000); timer.unref?.(); timers.push(timer); }
-  /// A page it went to, kept small, so the desktop can step back through them afterwards.
-  /// A small picture of each page a tab went to. Right after a load the offscreen page may not have drawn yet, so it tries again.
-  const sendVisit = (tab: Tab, tries = 4) => {
-    if (tab.win.isDestroyed()) return;
-    const contents = tab.win.webContents, url = contents.getURL();
-    if (!url || url === "about:blank") return;
-    hideMark(tab);
-    void contents.capturePage().then((image) => {
-      if (image.isEmpty()) { if (tries > 1) setTimeout(() => { if (!tab.win.isDestroyed() && tab.win.webContents.getURL() === url) sendVisit(tab, tries - 1); }, 400); return; }
-      write({ event: "visit", chat: tab.chat.id, url, title: contents.getTitle(), tab: tab.n, jpeg: image.resize({ width: 640, quality: "good" }).toJPEG(70).toString("base64") });
-    }, () => {});
-  };
   /// The page's height follows the split's shape; its width stays the model's.
   /// While you watch a desktop-width tab it is as wide as the split shows it,
   /// so the page lays itself out for the room it has and nothing is shrunk. Nobody watching: the
@@ -538,7 +526,6 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       if (site && chat.held) tab.sites.add(site);
       tab.pointer = undefined;
     });
-    contents.on("did-stop-loading", () => sendVisit(tab));
     // Sites see an ordinary browser, not the app's name.
     contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|demesne[\w-]*)\/\S+/gi, ""));
     contents.on("will-navigate", (event, url) => refuse(event, url));

@@ -379,13 +379,20 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     placement = rect ? { chat, rect } : null;
     relayout();
   };
-  /// While the model has the page, your mouse and keys do not reach it (in the app the page is really there
-  /// under your pointer); its own steps let input through for as long as they take.
-  const gate = (tab: Tab, closed: boolean) => {
-    if (!inApp || tab.win.isDestroyed() || !tab.win.webContents.debugger.isAttached()) return Promise.resolve();
-    return tab.win.webContents.debugger.sendCommand("Input.setIgnoreInputEvents", { ignore: closed }).then(() => {}, () => {});
+  /// The model's own clicks and keys, sent here: the page hears of them at once (input-event), so one
+  /// that comes while this is set is the model's, and any other is the person's.
+  let sending = false;
+  const send = (contents: WebContents, event: Parameters<WebContents["sendInputEvent"]>[0]) => { sending = true; try { contents.sendInputEvent(event); } finally { sending = false; } };
+  /// You scroll, click or type on the page while the model has it: the page is yours from then on, and the
+  /// model's next step waits until you go back to the chat (the desktop hands it back then).
+  const PERSON = new Set(["mouseDown", "mouseWheel", "rawKeyDown", "keyDown", "char"]);
+  const taken = (chat: Chat, type: string) => {
+    if (sending || chat.held || !PERSON.has(type)) return;
+    chat.held = true;
+    chat.used = Date.now();
+    write({ event: "taken", chat: chat.id });
+    frameSoon(activeTab(chat));
   };
-  const regate = (chat: Chat) => { for (const tab of chat.tabs.values()) void gate(tab, !chat.held); };
   /// Where the model pointed, marked on the real page for a moment (drawn over it, not put into it).
   const marks = new WeakMap<Tab, ReturnType<typeof setTimeout>>();
   const hideMark = (tab: Tab) => {
@@ -474,12 +481,10 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     try { contents.debugger.attach("1.3"); } catch { return; }
     watchNetwork(tab);
     if (inApp) {
-      // The page behaves as the one in front (the chat keeps your typing), and takes no input but the model's.
+      // The page behaves as the one in front, so it draws and types like one; your first scroll, click or key on it makes it yours.
       const front = () => void contents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
       front(); contents.on("did-navigate", front);
-      void gate(tab, !tab.chat.held);
-      // A click on a page that is not yours must not take the keyboard from the chat.
-      contents.on("focus", () => { if (!tab.chat.held && !inApp.window.isDestroyed()) inApp.window.webContents.focus(); });
+      contents.on("input-event", (_event, input) => taken(tab.chat, input.type));
     }
     let n = 0;
     const methods = new Map<string, string>();
@@ -647,7 +652,6 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     if (action === "handover") {
       chat.held = command.on === true;
       frameSoon(tab);
-      regate(chat);
       if (chat.held) { contents.focus(); return { url: contents.getURL(), title: contents.getTitle(), handover: true }; }
       // Your typing goes back to the chat.
       if (inApp && contents.isFocused() && !inApp.window.isDestroyed()) inApp.window.webContents.focus();
@@ -716,9 +720,9 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     const point = (x: number, y: number) => { tab!.pointer = { x: Math.round(x), y: Math.round(y), at: Date.now() }; mark(tab!, x, y); };
     const click = async (x: number, y: number) => {
       point(x, y);
-      contents.sendInputEvent({ type: "mouseMove", x, y });
-      contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-      contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+      send(contents, { type: "mouseMove", x, y });
+      send(contents, { type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      send(contents, { type: "mouseUp", x, y, button: "left", clickCount: 1 });
     };
     const reach = async (ref: unknown, then: (x: number, y: number) => Promise<void>): Promise<{ ok: boolean; said: string }> => {
       const found = await find(ref);
@@ -731,16 +735,16 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       return { ok: true, said: found.what };
     };
     const key = (keyCode: string) => {
-      contents.sendInputEvent({ type: "keyDown", keyCode });
-      if (keyCode === "Enter" || keyCode === "Space") contents.sendInputEvent({ type: "char", keyCode: keyCode === "Enter" ? "\r" : " " });
-      contents.sendInputEvent({ type: "keyUp", keyCode });
+      send(contents, { type: "keyDown", keyCode });
+      if (keyCode === "Enter" || keyCode === "Space") send(contents, { type: "char", keyCode: keyCode === "Enter" ? "\r" : " " });
+      send(contents, { type: "keyUp", keyCode });
     };
     // In the app the chat keeps the keyboard: the page is told it is in front (listen), and let take the model's input.
-    if (inApp) await gate(tab, false); else contents.focus();
+    if (!inApp) contents.focus();
     const before = await print(), at = contents.getURL(), y0 = await js<number>("scrollY"), tabsBefore = chat.tabs.size;
     let result: { ok: boolean; said: string } = { ok: true, said: "" };
     if (action === "click") result = await reach(command.ref, click);
-    else if (action === "hover") result = await reach(command.ref, async (x, y) => { point(x, y); contents.sendInputEvent({ type: "mouseMove", x, y }); });
+    else if (action === "hover") result = await reach(command.ref, async (x, y) => { point(x, y); send(contents, { type: "mouseMove", x, y }); });
     else if (action === "type") {
       if (command.ref !== undefined && command.ref !== "") result = await reach(command.ref, click);
       if (result.ok) {
@@ -816,7 +820,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
           const event = handInput(raw);
           if (!event) continue;
           if (event.type === "text") void contents.insertText(event.text);
-          else contents.sendInputEvent(event as Parameters<typeof contents.sendInputEvent>[0]);
+          else send(contents, event as Parameters<typeof contents.sendInputEvent>[0]);
         }
         chat.used = Date.now();
         frameSoon(tab);
@@ -835,7 +839,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       const mine = chat;
       mine.used = Date.now();
       // One command at a time in a chat's browser, in the order they came.
-      mine.queue = mine.queue.then(() => run(mine, command)).finally(() => { if (inApp) regate(mine); }).then((result) => answer(command.id, result), (error) => answer(command.id, { error: error instanceof Error ? error.message : String(error) }));
+      mine.queue = mine.queue.then(() => run(mine, command)).then((result) => answer(command.id, result), (error) => answer(command.id, { error: error instanceof Error ? error.message : String(error) }));
   };
   // A chat's browser left alone for 20 minutes closes, unless the person has it.
   { const timer = setInterval(() => { for (const [id, chat] of chats) if (!chat.held && Date.now() - chat.used > IDLE_MS) { for (const tab of [...chat.tabs.values()]) tab.win.destroy(); chats.delete(id); write({ event: "gone", chat: id }); } }, 60_000); timer.unref?.(); timers.push(timer); }

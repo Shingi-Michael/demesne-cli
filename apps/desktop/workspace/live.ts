@@ -1628,9 +1628,8 @@ function renderBrowserSplit() {
   renderSplitTabs(aside, yours);
   renderSplitPages(aside);
   const footNode = aside.querySelector<HTMLElement>(".bs-foot")!;
-  const button = split.still ? btn("browser-live", "Back to live", {}, "bs-back")
-    : split.held ? btn("browser-hand-back", "Hand back", {}, "bs-back")
-    : split.frame ? btn("browser-take", "Take over", {}, "bs-take") : "";
+  // No buttons to take the page or give it back: scrolling or clicking it makes it yours, and going back to the chat hands it back.
+  const button = split.still ? btn("browser-live", "Back to live", {}, "bs-back") : "";
   const footHTML = `<span class="bs-words ${foot.tone}">${h(foot.words)}</span>${button}`;
   if (footNode.dataset.html !== footHTML) { footNode.innerHTML = footHTML; footNode.dataset.html = footHTML; }
   const view = aside.querySelector<HTMLElement>(".bs-view")!;
@@ -1755,17 +1754,18 @@ function buildBrowserSplit(aside: HTMLElement) {
   const go = (to: string) => void api("browser-go", { to }).catch((error) => notice(error instanceof Error ? error.message : String(error)));
   const BUTTONS = ["left", "middle", "right"] as const;
   let moved = 0;
-  img.addEventListener("mousedown", (event) => { if (!yours()) return; event.preventDefault(); view.focus({ preventScroll: true }); send([{ type: "mouseDown", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
+  const mine = () => { if (!yours() && split.frame && !split.still) void takeSplit(); return yours(); };
+  img.addEventListener("mousedown", (event) => { if (!mine()) return; event.preventDefault(); view.focus({ preventScroll: true }); send([{ type: "mouseDown", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
   img.addEventListener("mouseup", (event) => { if (!yours()) return; send([{ type: "mouseUp", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
   img.addEventListener("mousemove", (event) => { if (!yours() || Date.now() - moved < 60) return; moved = Date.now(); send([{ type: "mouseMove", ...at(event) }]); });
   img.addEventListener("contextmenu", (event) => { if (yours()) event.preventDefault(); });
   view.addEventListener("wheel", (event) => {
-    if (!yours()) return;
+    if (!mine()) return;
     event.preventDefault();
     send([{ type: "mouseWheel", ...at(event), deltaX: -event.deltaX, deltaY: -event.deltaY }]);
   }, { passive: false });
   view.addEventListener("keydown", (event) => {
-    if (!yours() || event.isComposing) return;
+    if (event.isComposing || !keyInputs(event).length || !mine()) return;
     const events = keyInputs(event);
     if (!events.length) return;
     event.preventDefault();
@@ -1829,6 +1829,28 @@ function buildBrowserSplit(aside: HTMLElement) {
   document.addEventListener("visibilitychange", placeSplitView);
   setInterval(placeSplitView, 400);
 }
+/// You go back to the chat (a click in it, or the composer taking your typing): the page goes back to the model.
+async function handSplitBack() {
+  if (!split.held) return;
+  split.handedAsk = handOverAsk(state?.runs.find((one) => one.id === state?.activeTurnId))?.toolCallId ?? "";
+  split.held = null; split.heldAt = Date.now();
+  renderCards();
+  await api("browser-hand-back", {}).catch(() => {});
+}
+/// You scroll, click or type on the picture of the page (the hidden browser): it is yours from then on.
+/// (The real page in the window makes itself yours, and the daemon says so.)
+async function takeSplit() {
+  if (split.held || !split.frame || split.still) return;
+  split.held = "person"; split.heldAt = Date.now();
+  renderCards();
+  await api("browser-take", {}).catch(() => {});
+}
+const backToChat = (event: Event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (split.held && split.open && target?.closest("#main") && !target.closest("#browser-split")) void handSplitBack();
+};
+document.addEventListener("pointerdown", backToChat, true);
+document.addEventListener("focusin", (event) => { if (event.target instanceof HTMLTextAreaElement) backToChat(event); }, true);
 /// Asks for newer pictures while the split shows; the daemon waits a moment for one.
 async function pumpBrowserFrames() {
   if (split.pumping) return;
@@ -7229,9 +7251,6 @@ async function dispatch(
     renderCards();
     return;
   }
-  if (action === "browser-hand-back") { await api("browser-hand-back", {}); split.handedAsk = handOverAsk(state?.runs.find((one) => one.id === state?.activeTurnId))?.toolCallId ?? ""; split.held = null; split.heldAt = Date.now(); renderCards(); return; }
-  // You take the page without being asked: the model's browser steps wait for you.
-  if (action === "browser-take") { await api("browser-take", {}); split.held = "person"; split.heldAt = Date.now(); split.still = null; renderCards(); el("browser-split").querySelector<HTMLElement>(".bs-view")?.focus({ preventScroll: true }); return; }
   if (action === "browser-live") { split.still = null; const aside = el("browser-split"); showSplitPicture(aside); renderCards(); return; }
   // A browser step opens the split again.
   if (action === "tool") {

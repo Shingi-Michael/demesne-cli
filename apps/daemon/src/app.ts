@@ -420,6 +420,8 @@ export function createDaemonApp(options: {
   const browser = options.browser === false ? null : options.browser ?? ownBrowser;
   const handovers = new BrowserHandovers();
   if (browser) tools.register(browserTool(browser, undefined, undefined, handovers));
+  // You scrolled, clicked or typed on the chat's page: it is yours, and the model's next browser step waits for you.
+  if (browser && browser.frame) browser.onTaken = (chat) => { handovers.take(chat); };
   // Open it behind Demesne, and show it on the right (pass 210 A).
   if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index

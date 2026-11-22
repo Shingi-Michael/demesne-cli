@@ -1,9 +1,10 @@
 /** Real Electron check: the chat's browser as a real page in the window.
  * While the desktop app is open, the model's browser lives in the app's own
  * window (browser-inapp.ts), and the split shows the page itself, not pictures
- * of it. The page sits exactly on the split's page area, takes no input while
- * the model has it, takes yours while it is yours, and is put away when the
- * split closes or an earlier page's picture is up.
+ * of it. The page sits exactly on the split's page area. There are no buttons
+ * to take it or give it back: your first scroll, click or key on the page makes
+ * it yours, and going back to the chat gives it to the model. It is put away
+ * when the split closes or an earlier page's picture is up.
  * Run bun scripts/prepare-desktop.ts first (Linux: xvfb-run -a). */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
@@ -122,8 +123,9 @@ try {
   console.log("PASS: when the model starts browsing, the window splits and the real page sits in the split.");
 
   // The model hands it over: your mouse and keys reach the real page.
-  await split.locator(".bs-back").waitFor();
-  assert.match(await split.locator(".bs-words").innerText(), /Sign in to the Slow Pour admin, then hand it back/);
+  await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
+  assert.equal(await split.locator(".bs-foot button").count(), 0, "no button to take the page or give it back");
+  assert.match(await split.locator(".bs-words").innerText(), /Sign in to the Slow Pour admin, then go back to the chat/);
   await act("/admin", click(56 + 150, 150), "ada@slowpour.test");
   await act("/admin", click(56 + 60, 232));
   await until("your click signed in", () => real("/admin"), (page) => /Signed in as ada@slowpour.test \(1\)/.test(page?.said ?? ""));
@@ -135,24 +137,25 @@ try {
   // A picture of the whole screen, where there is a tool for it (the window's own picture leaves the real page out).
   const shot = (name: string) => { try { Bun.spawnSync(["import", "-window", "root", join(output, name)], { stderr: "ignore" }); } catch { /* no tool: no picture */ } };
   shot("yours.png");
-  await split.locator(".bs-back").click();
-  console.log("PASS: a page handed to you takes your typing, clicks and wheel directly.");
+  // Back to the chat: the page goes back to the model.
+  await win.locator("textarea").click();
+  console.log("PASS: a page handed to you takes your typing, clicks and wheel directly, and a click in the chat hands it back.");
 
   // Handed back, the model clicks (its click gets through), and takes a picture of the real page.
   release();
   await win.locator("#conversation .turn").filter({ hasText: "Order #1042 is at the top of Orders" }).waitFor();
   await until("the model's click reached the page", () => real("/admin"), (page) => /\(2\)/.test(page?.said ?? ""));
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("done"));
-  await win.waitForFunction(() => !document.querySelector("#browser-split .bs-back"), undefined, { timeout: 5000 });
-  // The page is the model's: your click does nothing.
-  await act("/admin", click(56 + 60, 232));
-  await win.waitForTimeout(500);
-  assert.match((await real("/admin"))!.said, /\(2\)/, "a click while the page is not yours does not reach it");
-  console.log("PASS: the model's clicks reach the page, and yours do not while it is not yours.");
+  // The model's own click did not make the page yours.
+  await win.waitForTimeout(600);
+  assert.equal(await win.locator("#browser-split.yours").count(), 0, "the model's click does not hand the page to you");
+  console.log("PASS: the model's clicks reach the page and leave it the model's.");
 
-  // You take it: your click counts again, and your own address goes where you say.
-  await split.locator(".bs-take").click();
-  await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
+  // You scroll it: it is yours, your click counts, and your own address goes where you say.
+  // Up, at the top: it does not move the page, but it is still you using it.
+  await act("/admin", [{ type: "mouseWheel", x: 200, y: 300, deltaX: 0, deltaY: 200 }]);
+  await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"), undefined, { timeout: 5000 });
+  assert.match(await split.locator(".bs-words").innerText(), /The page is yours\. Go back to the chat/);
   await act("/admin", click(56 + 60, 232));
   await until("your click counts once you took the page", () => real("/admin"), (page) => /\(3\)/.test(page?.said ?? ""));
   await split.locator(".bs-url").fill("localhost:" + site.port + "/cart");
@@ -173,9 +176,9 @@ try {
   box = await area();
   await until("the page follows the split when the window changes size", async () => { box = await area(); return real("/cart"); }, (page) => Boolean(page?.shown && near(page.shown.x, box.x) && near(page.shown.width, box.width) && near(page.shown.height, box.height)));
   shot("cart.png");
-  await split.locator(".bs-back", { hasText: "Hand back" }).click();
+  await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
-  console.log("PASS: you can take the page, go to your own address, look at an earlier page and come back.");
+  console.log("PASS: a scroll makes the page yours; you can go to your own address, look at an earlier page and come back.");
 
   // Settings over the chat, and ×: the real page is put away, and still there for the model.
   await split.locator(".bs-close").click();

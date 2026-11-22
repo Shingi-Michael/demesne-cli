@@ -1,7 +1,7 @@
 /** Real Electron check (pass 248 D): the chat's browser beside the chat.
  * The window splits when the model starts browsing: the chat on the left, the
  * model's own browser on the right, live. When the model hands the page over
- * (a sign-in), your keys reach the page until you press Hand back, and the
+ * (a sign-in), your keys reach the page until you go back to the chat, and the
  * model reads the page again. The page stays after the answer until ×, and a
  * browser step opens it again.
  * Run bun scripts/prepare-desktop.ts first (Linux: xvfb-run -a). */
@@ -83,8 +83,8 @@ try {
   console.log("PASS: when the model starts browsing, the window splits and the page shows live on the right.");
 
   // The model hands it over: the line asks, and your keys reach the page.
-  await split.locator(".bs-back").waitFor();
-  assert.match(await split.locator(".bs-words").innerText(), /Sign in to the Slow Pour admin, then hand it back/);
+  await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
+  assert.match(await split.locator(".bs-words").innerText(), /Sign in to the Slow Pour admin, then go back to the chat/);
   assert.match(await win.locator("#conversation").innerText(), /waiting for you/);
   await win.waitForTimeout(500);
   await win.screenshot({ path: join(output, "yours.png") });
@@ -99,8 +99,9 @@ try {
   await win.waitForFunction(() => /Orders/.test(document.querySelector("#browser-split .bs-url")?.getAttribute("title") ?? ""), undefined, { timeout: 10000 });
   await win.waitForTimeout(400);
   await win.screenshot({ path: join(output, "signed-in.png") });
-  await split.locator(".bs-back").click();
-  console.log("PASS: a hand-over asks under the page, and your click and keys reach the page.");
+  // Back to the chat hands it back.
+  await win.locator("textarea").click();
+  console.log("PASS: a hand-over asks under the page, your click and keys reach the page, and a click in the chat hands it back.");
 
   // Handed back, the model clicks: a soft ring shows where.
   await win.waitForFunction(() => { const ring = document.querySelector<HTMLElement>("#browser-split .bs-ring"); return Boolean(ring && !ring.hidden && ring.classList.contains("on")); }, undefined, { timeout: 10000 });
@@ -113,15 +114,17 @@ try {
   release();
   await win.locator("#conversation .turn").filter({ hasText: "Order #1042 is at the top of Orders" }).waitFor();
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("done"));
-  await win.waitForFunction(() => !document.querySelector("#browser-split .bs-back"), undefined, { timeout: 5000 });
+  assert.equal(await win.locator("#browser-split.yours").count(), 0, "the model's click leaves the page the model's");
   assert.match(await split.locator(".bs-words").innerText(), /done with this page/);
   await win.mouse.move(400, 700);
   await win.waitForTimeout(400);
   await win.screenshot({ path: join(output, "done.png") });
 
-  // You take it yourself: the address is yours to type, back and forward work, and the pages it went to stay to look back at.
+  // You scroll it: it is yours. The address is yours to type, back and forward work, and the pages it went to stay to look back at.
   assert.equal(await split.locator(".bs-url").getAttribute("readonly"), "", "the address is not yours until you take the page");
-  await split.locator(".bs-take").click();
+  const pic = (await img.boundingBox())!;
+  await win.mouse.move(pic.x + 200, pic.y + 200);
+  await win.mouse.wheel(0, 200);
   await win.waitForFunction(() => document.querySelector("#browser-split")?.classList.contains("yours"));
   assert.match(await split.locator(".bs-words").innerText(), /The page is yours/);
   assert.equal(await split.locator(".bs-url").getAttribute("readonly"), null, "the address is yours to type");
@@ -138,9 +141,9 @@ try {
   await win.waitForFunction(() => !/earlier page/.test(document.querySelector("#browser-split .bs-words")?.textContent ?? ""));
   await split.locator('[data-go="back"]').click();
   await win.waitForFunction(() => /\/admin$/.test((document.querySelector<HTMLInputElement>("#browser-split .bs-url"))?.value ?? ""), undefined, { timeout: 10000 });
-  await split.locator(".bs-back", { hasText: "Hand back" }).click();
+  await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
-  console.log("PASS: you can take the page, type an address, go back, look at earlier pages, and hand it back.");
+  console.log("PASS: a scroll makes the page yours; you can type an address, go back, look at earlier pages, and hand it back.");
   await split.locator(".bs-close").click();
   await split.waitFor({ state: "hidden" });
   assert.equal(await win.locator("#app.browser-split-on").count(), 0, "the chat has the window back");

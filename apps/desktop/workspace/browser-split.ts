@@ -2,7 +2,7 @@
 /// chat on the left, the model's own browser on the right, live. It opens by
 /// itself the first time a turn browses, or when you click a browser step, and
 /// stays until you close it with ×. When the model hands the page over (a
-/// sign-in), your clicks and keys go to the page until you press Hand back.
+/// sign-in), your clicks and keys go to the page until you go back to the chat. Scrolling or clicking the page takes it any time.
 /// Pure parts here; live.ts draws it and runs the picture loop.
 
 export interface SplitTool { name: string; input: Record<string, unknown>; state: string; toolCallId: string }
@@ -66,10 +66,10 @@ export const splitWidth = (wanted: number, total: number) => Math.round(Math.max
 
 /// The line under the page. `took` is true while you hold a page the model did not ask for.
 export function splitFoot(ask: { reason: string } | null, working: string | null, hasPage: boolean, took = false): { tone: "ask" | "now" | ""; words: string } {
-  if (ask) return { tone: "ask", words: `${ask.reason}, then hand it back. The model can't see what you type.` };
-  if (took) return { tone: "ask", words: "The page is yours. The model waits until you hand it back." };
+  if (ask) return { tone: "ask", words: `${ask.reason}, then go back to the chat. The model can't see what you type.` };
+  if (took) return { tone: "ask", words: "The page is yours. Go back to the chat to give it to the model." };
   if (working) return { tone: "now", words: working };
-  return { tone: "", words: hasPage ? "The model is done with this page. Look at it, or close it with ×." : "The page shows here once the model opens one." };
+  return { tone: "", words: hasPage ? "The model is done with this page. Scroll or click it to use it, or close it with ×." : "The page shows here once the model opens one." };
 }
 
 /// Where the model last clicked or typed, as a share of the page, while it is fresh.

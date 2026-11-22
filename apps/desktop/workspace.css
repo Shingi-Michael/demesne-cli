@@ -3414,6 +3414,14 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-said-b:hover, .fd-said-b:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }
 /* Errors come back: a mockup that throws while you use it says so on one quiet
    line under it, with Send to the chat. A small amber dot is the only colour. */
+/* Real data (Foundry step 5): the quiet line that asks before a mockup reads a site. */
+.fd-site { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
+.fd-site b { color: var(--t1); font-weight: 500; }
+.fd-site-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--t3, #888); flex: none; }
+.fd-site-b { all: unset; cursor: pointer; padding: 1px 8px; border-radius: 6px; color: var(--t1); box-shadow: 0 0 0 1px var(--hair); }
+.fd-site-b.quiet { box-shadow: none; color: var(--t2); }
+.fd-site-b:hover { background: color-mix(in srgb, var(--t1) 7%, transparent); }
+.fd-site-b:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 1px; }
 .fd-err { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-err-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn, #d9a441); align-self: center; }
 .fd-err-what { min-width: 0; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 12px; }

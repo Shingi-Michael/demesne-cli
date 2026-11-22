@@ -102,12 +102,15 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
 export const FOUNDRY_DEMO_KINDS = new Set(["html", "deck", "doc", "dashboard", "react", "mermaid", "code"]);
 /** A page's own calls to Demesne: foundry://data/<id> keeps what the page
  * saves, foundry://ask/<id> asks the chat's model. Null for anything else. */
-export function foundryPageCall(value: string): { what: "data" | "ask"; id: string } | null {
+/** What a page may ask Demesne for: its saves, the model, and real data (read, list, fetch: foundry-data.ts). */
+export const PAGE_CALLS = ["data", "ask", "read", "list", "fetch"] as const;
+export type PageCall = typeof PAGE_CALLS[number];
+export function foundryPageCall(value: string): { what: PageCall; id: string } | null {
   try {
     const url = new URL(value);
-    if (url.protocol !== "foundry:" || (url.hostname !== "data" && url.hostname !== "ask") || url.username || url.password || url.port || url.search) return null;
+    if (url.protocol !== "foundry:" || !(PAGE_CALLS as readonly string[]).includes(url.hostname) || url.username || url.password || url.port || url.search) return null;
     const id = decodeURIComponent(url.pathname.slice(1));
-    return /^[\w-]{1,200}$/.test(id) ? { what: url.hostname, id } : null;
+    return /^[\w-]{1,200}$/.test(id) ? { what: url.hostname as PageCall, id } : null;
   } catch { return null; }
 }
 /** Pass 240 A: a real picture a mockup shows, served from inside the app at
@@ -127,7 +130,7 @@ export function withShots(html: string, shots: Record<string, ShotPlace>) {
   return Object.keys(shots).length ? withRemember(html, `window.__demesneShots=${JSON.stringify(shots).replace(/</g, "\\u003c")};`) : html;
 }
 /** A page uses the remember runtime when it calls one of its four functions. */
-export const usesRemember = (html: string) => /\bdemesne\s*\.\s*(?:save|load|ask|pick)\s*\(/.test(html);
+export const usesRemember = (html: string) => /\bdemesne\s*\.\s*(?:save|load|ask|pick|read|list|fetch)\s*\(/.test(html);
 /** A page that uses it gets the runtime first, before its own scripts run. With
  * a page (its id and the key Demesne made for it) saves and asks reach
  * Demesne; without one (the look window, an exported file) they stay in the

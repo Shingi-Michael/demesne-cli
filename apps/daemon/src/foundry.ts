@@ -87,7 +87,10 @@ export const MORE_KINDS_RULES = "More kinds: an interactive app, tool or game yo
 /// the runtime in front of any page that calls it, so the page needs no tag.
 export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: await demesne.save(name, jsonValue) and await demesne.load(name, fallback) keep what the person enters with the artifact (across closing, reloads and new versions; 256 KB; localStorage does not work here); "
   + "await demesne.ask(question) returns the chat model's answer as text, for a button the person presses (never on load or in a loop; a few a minute); await demesne.pick({accept}) lets them choose a file ({name, type, text} or {name, type, dataURL}). "
-  + "Use them when the page is a tool to keep (a tracker, checklist, planner, journal, quiz): load on start, save on every change, show a saved state.";
+  + "Use them when the page is a tool to keep (a tracker, checklist, planner, journal, quiz): load on start, save on every change, show a saved state. "
+  + "Real data: await demesne.read(path) returns a file in this project as text (a CSV, JSON or log to chart; never .env or keys), await demesne.list(folder) its names (folders end in /), "
+  + "await demesne.fetch(httpsUrl) live public data ({ok, status, type, text, json()}; the person allows each site once, so fetch on load is fine and a refusal comes back as an error). "
+  + "Use them when the person asks for their real numbers or files; show a quiet loading state, and on an error say what was missing in the page (your own look sees the error, not the data).";
 
 /// Pass 221 A: Foundry draws the surface and plays the demo, so the page
 /// holds only the thing being made.

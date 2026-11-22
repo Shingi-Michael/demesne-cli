@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, screen, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createHmac, randomBytes } from "node:crypto";
 import { homedir, release } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -9,6 +9,7 @@ import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { isReadyKind } from "./foundry-kinds.ts";
 import { codeExtension } from "./foundry-more-kinds.ts";
+import { allowSite, FETCH_TIMEOUT_MS, LIST_MAX, limitedText, projectPath, publicAddress, READ_MAX_BYTES, readSites, secretPath, siteAllowed, type AllowedSites } from "./foundry-data.ts";
 import { BROWSER_HOST_FLAG, runBrowserHost } from "./browser-host.ts";
 import { serveBrowser } from "./browser-inapp.ts";
 import { withChanges } from "./foundry-changed.ts";
@@ -16,7 +17,7 @@ import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -41,6 +42,8 @@ let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Up
 let inAppBrowser: ReturnType<typeof serveBrowser> | undefined;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
+/// Real data (Foundry step 5): set where the frames are served, called when you allow a site on the Foundry page.
+let allowFoundrySite: (id: string, host: string) => void = () => { throw new Error("Foundry isn't ready"); };
 // Keep native notifications alive until the OS closes them or they are clicked.
 const notifications = new Set<Notification>();
 // Where the Mac window's own red, yellow and green buttons sit.
@@ -221,7 +224,37 @@ if (!lookJob) void app.whenReady().then(async () => {
   // and a secret that lives only as long as the app, so a page can reach its
   // own saves and asks and no other artifact's.
   const pageSecret = randomBytes(32), pageKey = (id: string) => createHmac("sha256", pageSecret).update(id).digest("base64url");
-  const pageCall = async (call: { what: "data" | "ask"; id: string }, request: Request) => {
+  // Real data (Foundry step 5): the sites each mockup may read, kept beside the app's settings.
+  const sitesFile = join(app.getPath("userData"), "foundry-sites.json");
+  let sites: AllowedSites = readSites(existsSync(sitesFile) ? readFileSync(sitesFile, "utf8") : null);
+  allowFoundrySite = (id, host) => { sites = allowSite(sites, id, host); writeFileSync(sitesFile, JSON.stringify(sites, null, 2)); };
+  const realData = async (call: { what: "read" | "list" | "fetch"; id: string }, body: Record<string, unknown>) => {
+    if (call.what === "fetch") {
+      const url = publicAddress(String(body.url ?? ""));
+      if (!url) throw new Error("demesne.fetch reads public https:// addresses only");
+      if (!siteAllowed(sites, call.id, url.hostname)) throw new Error(`ask:${url.hostname}`);
+      // Electron's own network, so the system's proxy and certificates apply as in the browser.
+      const response = await net.fetch(url.href, { redirect: "error", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { Accept: "application/json, text/*;q=0.9, */*;q=0.5" } });
+      const type = response.headers.get("content-type") ?? "";
+      if (type && !/json|text|xml|csv|javascript|yaml/i.test(type)) throw new Error(`${url.hostname} sent ${type.split(";")[0]}, not text a page can read`);
+      return { ok: response.ok, status: response.status, type, text: await limitedText(response) };
+    }
+    const found = await backend!.request("foundry-get", { id: call.id }) as { workspace: string | null };
+    const place = projectPath(found.workspace, String(body.path ?? ""));
+    if ("error" in place) throw new Error(place.error);
+    if (call.what === "list") {
+      const names = (await readdir(place.path, { withFileTypes: true })).filter((entry) => !entry.name.startsWith(".") && !secretPath(entry.name))
+        .slice(0, LIST_MAX).map((entry) => entry.isDirectory() ? `${entry.name}/` : entry.name).sort();
+      return { names };
+    }
+    const info = await stat(place.path);
+    if (info.isDirectory()) throw new Error(`${String(body.path)} is a folder: demesne.list it`);
+    if (info.size > READ_MAX_BYTES) throw new Error(`${String(body.path)} is bigger than 2 MB`);
+    const bytes = await readFile(place.path);
+    if (bytes.subarray(0, 8000).includes(0)) throw new Error(`${String(body.path)} isn't text`);
+    return { text: bytes.toString("utf8") };
+  };
+  const pageCall = async (call: { what: PageCall; id: string }, request: Request) => {
     const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     if (request.method !== "POST") return reply({ error: "Not found" }, 404);
     let body: Record<string, unknown>;
@@ -230,6 +263,7 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (!body || typeof body !== "object" || body.page !== pageKey(call.id)) return reply({ error: "This page can't reach Demesne" }, 403);
     try {
       if (call.what === "ask") return reply(await backend!.request("foundry-ask", { id: call.id, question: String(body.question ?? "") }));
+      if (call.what === "read" || call.what === "list" || call.what === "fetch") return reply(await realData({ what: call.what, id: call.id }, body));
       if (typeof body.name === "string") return reply(await backend!.request("foundry-data-set", { id: call.id, name: body.name, value: body.value ?? null }));
       return reply(await backend!.request("foundry-data", { id: call.id }));
     } catch (error) { return reply({ error: error instanceof Error ? error.message : String(error) }, 400); }
@@ -496,6 +530,13 @@ if (!lookJob) void app.whenReady().then(async () => {
       savedCopies.add(path);
       // ready: there is another format to offer (a deck's page, a doc's PDF, a component's source).
       return { path, name: path.slice(folder.length + 1), pdf, ready: ready || drawn };
+    }
+    // Real data (Foundry step 5): you allowed a mockup to read a site, on the Foundry page.
+    if (method === "desktop-foundry-site") {
+      const { id, host } = args as Record<string, unknown>;
+      if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id) || typeof host !== "string" || !publicAddress(`https://${host}/`)) throw new Error("No such site");
+      allowFoundrySite(id, host);
+      return { allowed: true };
     }
     // Show a saved copy in Finder: only a file Save a copy just wrote.
     if (method === "desktop-show-copy") {

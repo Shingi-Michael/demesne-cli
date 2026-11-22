@@ -124,7 +124,7 @@ The opened mockup's head line has a compare icon (the split square). Press it an
 
 Both versions are live pages in their own frames (`wipeHTML` and `earlierOf` in `apps/desktop/workspace/foundry-page.ts`); the cut is a CSS `clip-path` on the earlier one, moved in place by `live.ts` without reloading either page. While you drag, the frames let the pointer through so the line follows it. `xvfb-run -a bun scripts/check-foundry-open.ts` checks it in the real app.
 
-Read more: [clip-path](https://developer.mozilla.org/en-US/docs/Web/CSS/clip-path) (MDN), [ARIA slider pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/) (how the line works from the keyboard), [Image comparison sliders](https://www.nngroup.com/articles/before-after-sliders/) (why a wipe beats side by side for small changes).
+Read more: [clip-path](https://developer.mozilla.org/en-US/docs/Web/CSS/clip-path) (MDN), [ARIA slider pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/) (how the line works from the keyboard).
 
 ## Edit docs and decks in place
 

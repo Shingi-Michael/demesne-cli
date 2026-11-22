@@ -53,6 +53,7 @@
     "allowToChangeInstallationDirectory": true
   },
   "deb": {
+    "compression": "gz",
     "fpm": ["--replaces", "demesne-desktop", "--conflicts", "demesne-desktop"]
   },
   "artifactName": "demesne-${os}-${arch}.${ext}"

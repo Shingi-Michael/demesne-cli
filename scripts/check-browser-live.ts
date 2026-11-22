@@ -4,7 +4,7 @@
  * of it. The page sits exactly on the split's page area. There are no buttons
  * to take it or give it back: your first scroll, click or key on the page makes
  * it yours, and going back to the chat gives it to the model. It is put away
- * when the split closes.
+ * when the split closes. Find, zoom and pointing at it work on the page and leave it the model's.
  * Run bun scripts/prepare-desktop.ts first (Linux: xvfb-run -a). */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
@@ -200,6 +200,67 @@ try {
   await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
   console.log("PASS: a scroll makes the page yours; you can go to your own address, open a new tab from its logo home screen, close it with its ×, and come back.");
+
+  // Find on the page: ⌘F (Ctrl here) pressed on the page opens a thin find bar under the toolbar; it counts, and Esc closes it.
+  const mod = process.platform === "darwin" ? "meta" : "control";
+  const chord = (key: string) => [{ type: "keyDown", keyCode: key, modifiers: [mod] }, { type: "keyUp", keyCode: key, modifiers: [mod] }];
+  await act("/cart", click(400, 400));
+  await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
+  await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
+  const zoomOf = () => app.evaluate(({ BrowserWindow, webContents }) => { const window = BrowserWindow.getAllWindows()[0]!; return webContents.getAllWebContents().find((one) => one !== window.webContents && one.getURL().includes("/cart"))?.getZoomFactor() ?? 0; });
+  // (The daemon hears the page went back a moment after the split does.)
+  await win.waitForTimeout(800);
+  await act("/cart", chord("F"));
+  await split.locator(".bs-find-text").waitFor();
+  await until("the find field takes your typing", () => win!.evaluate(() => document.activeElement?.className ?? ""), (name) => name === "bs-find-text");
+  await win.keyboard.type("yearly");
+  await until("the find bar counts the match", () => split.locator(".bs-find-count").innerText(), (words) => words === "1 of 1");
+  const below = await area();
+  await until("the page moves down for the find bar, not under it", () => real("/cart"), (page) => Boolean(page?.shown && near(page.shown.y, below.y) && near(page.shown.height, below.height)));
+  await win.screenshot({ path: join(output, "find.png") });
+  await split.locator(".bs-find-text").fill("nowhere at all");
+  await until("and says when there is none", () => split.locator(".bs-find-count").innerText(), (words) => words === "No matches");
+  await split.locator(".bs-find-text").press("Escape");
+  await split.locator(".bs-find").waitFor({ state: "hidden" });
+  assert.equal(await win.locator("#browser-split.yours").count(), 0, "finding does not take the page from the model");
+  console.log("PASS: ⌘F on the page opens a find bar under the toolbar that counts matches; Esc closes it, and the page stays the model's.");
+
+  // Zoom: ⌘+ on the page zooms it (not the app), a chip says how far, and a click on the chip goes back to 100%.
+  const appZoom = await win.evaluate(() => devicePixelRatio);
+  await act("/cart", chord("="));
+  await until("the page zoomed in", zoomOf, (zoom) => near(zoom * 100, 110));
+  await until("the chip says how far", () => split.locator(".bs-zoom").innerText(), (words) => words === "110%");
+  assert.equal(await win.evaluate(() => devicePixelRatio), appZoom, "the app itself did not zoom");
+  await act("/cart", chord("-"));
+  await act("/cart", chord("-"));
+  await until("and out", zoomOf, (zoom) => near(zoom * 100, 90));
+  await split.locator(".bs-zoom").click();
+  await until("the chip goes back to 100%", zoomOf, (zoom) => zoom === 1);
+  await split.locator(".bs-zoom").waitFor({ state: "hidden" });
+  console.log("PASS: ⌘+ and ⌘− zoom the page, not the app; the chip shows it and takes it back to 100%.");
+
+  // Point at it: the bar's Point button, then a click on the page picks what is under it; it rides with the next message as a chip.
+  await split.getByRole("button", { name: "Point at something on the page", exact: true }).click();
+  await until("the Point button is on", () => split.locator('[data-go="point"]').getAttribute("aria-pressed"), (on) => on === "true");
+  await win.waitForTimeout(300);
+  await act("/cart", click(90, 80));
+  const chip = win.locator(".point-chip");
+  await chip.waitFor();
+  assert.match(await chip.innerText(), /Cart heading/);
+  assert.match((await chip.getAttribute("title")) ?? "", /On http:\/\/localhost:\d+\/cart/);
+  assert.equal(await split.locator('[data-go="point"]').getAttribute("aria-pressed"), "false");
+  assert.equal(await win.locator("#browser-split.yours").count(), 0, "pointing does not take the page from the model");
+  assert.equal((await real("/cart"))!.title, "Cart", "the click picked; it did not reach the page");
+  await win.screenshot({ path: join(output, "point.png") });
+  // Esc stops pointing with nothing picked.
+  await split.getByRole("button", { name: "Point at something on the page", exact: true }).click();
+  await until("pointing again", () => split.locator('[data-go="point"]').getAttribute("aria-pressed"), (on) => on === "true");
+  await act("/cart", [{ type: "keyDown", keyCode: "Escape" }, { type: "keyUp", keyCode: "Escape" }]);
+  await until("Esc stops it", () => split.locator('[data-go="point"]').getAttribute("aria-pressed"), (on) => on === "false");
+  assert.equal(await win.locator(".point-chip").count(), 1, "nothing more was picked");
+  await chip.click();
+  await chip.waitFor({ state: "detached" });
+  console.log("PASS: Point picks what you click on the page into the next message as a chip, without taking the page; Esc stops it.");
 
   // Settings over the chat, and ×: the real page is put away, and still there for the model.
   await split.locator(".bs-close").click();

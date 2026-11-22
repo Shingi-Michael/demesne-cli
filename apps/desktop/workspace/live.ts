@@ -14,7 +14,7 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
-import { browserSteps, handOverAsk, keyInputs, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, type SplitTab } from "./browser-split.ts";
+import { browserSteps, findWords, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
@@ -1601,7 +1601,7 @@ function card(name: keyof typeof CARD_ICON, line: string, right: string, body: s
 // The chat's browser, beside the chat (pass 248 D) ---------------------------
 
 /// The split's own state: which chat, whether it is open, what you closed, the newest picture.
-type SplitFrame = { src: string; /** The page itself is on show (a real view the app puts over the split), not a picture. */ live?: boolean; width: number; height: number; url: string; title: string; back: boolean; forward: boolean; /** The page is still loading: a thin silver line runs along the bar. */ loading?: boolean };
+type SplitFrame = { src: string; /** The page itself is on show (a real view the app puts over the split), not a picture. */ live?: boolean; width: number; height: number; url: string; title: string; back: boolean; forward: boolean; /** The page is still loading: a thin silver line runs along the bar. */ loading?: boolean; /** How far you zoomed it, when not 100%. */ zoom?: number };
 const split = {
   session: "", open: false, openedTurn: null as string | null, closedTurn: null as string | null, closedAsk: null as string | null,
   seq: 0, frame: null as null | SplitFrame,
@@ -1611,6 +1611,8 @@ const split = {
   /// A new tab you opened: the home screen (just the Demesne logo) shows until you go somewhere.
   home: false,
   ringAt: 0,
+  /// Find on the page (⌘F): the bar under the toolbar, what you typed, and where it is in the matches.
+  find: { open: false, text: "", found: null as null | { matches: number; at: number } },
   pumping: false, width: (() => { try { return Number(localStorage.getItem("demesne-browser-split")) || 0; } catch { return 0; } })(),
 };
 const BROWSER_SPLIT_LABEL = "The chat’s browser";
@@ -1621,6 +1623,9 @@ const BS_ICONS = {
   plus: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   out: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5v3a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   close: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  point: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75v2.5M8 11.75v2.5M1.75 8h2.5M11.75 8h2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  up: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  down: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 const splitButton = (go: string, label: string, icon: keyof typeof BS_ICONS = go as keyof typeof BS_ICONS) => `<button type="button" class="bs-icon" data-go="${go}" aria-label="${label}" title="${label}">${BS_ICONS[icon]}</button>`;
 /// The page reaches your mouse and keys only while you hold it.
@@ -1631,7 +1636,7 @@ function renderBrowserSplit() {
   const s = state;
   if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; placeSplitView(); return; }
   if (split.session !== s.session.id) {
-    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0 });
+    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0, find: { open: false, text: "", found: null } });
     // Another chat's page does not stay up while this one's first picture comes.
     splitDrawn = splitWanted = ""; const old = aside.querySelector<HTMLCanvasElement>(".bs-page"); if (old) old.hidden = true;
   }
@@ -1657,6 +1662,7 @@ function renderBrowserSplit() {
   aside.classList.toggle("home", split.home || !split.frame);
   renderSplitHead(aside, doing);
   renderSplitTabs(aside, yours);
+  renderSplitFind(aside);
   const view = aside.querySelector<HTMLElement>(".bs-view")!;
   view.tabIndex = yours ? 0 : -1;
   view.setAttribute("aria-label", yours ? (ask ? `The page is yours: ${ask.reason}` : "The page is yours") : "The page the model is on");
@@ -1705,7 +1711,98 @@ function renderSplitHead(aside: HTMLElement, doing: { tone: string; words: strin
   words.className = `bs-doing ${doing?.tone ?? ""}`;
   words.hidden = !doing || split.home;
   aside.querySelector<HTMLElement>(".bs-load")!.hidden = !(split.frame?.loading && !split.home);
+  // Pointing works on the page itself (the real view in the window), and doesn't take it from the model.
+  const aim = aside.querySelector<HTMLButtonElement>('[data-go="point"]')!, aiming = pointing === "browser";
+  aim.disabled = !split.frame?.live || split.home;
+  aim.classList.toggle("on", aiming);
+  aim.setAttribute("aria-pressed", String(aiming));
+  aim.title = aiming ? "Pointing: click something on the page, Esc to stop" : "Point at something on the page; it goes in your next message";
+  const zoom = aside.querySelector<HTMLButtonElement>(".bs-zoom")!, zoomed = split.home ? "" : zoomWords(split.frame?.zoom);
+  if (zoom.textContent !== zoomed) zoom.textContent = zoomed;
+  zoom.hidden = !zoomed;
 }
+/// The find bar (⌘F): under the toolbar, it pushes the page down a little rather than covering it.
+function renderSplitFind(aside: HTMLElement) {
+  const bar = aside.querySelector<HTMLElement>(".bs-find")!, open = split.find.open && Boolean(split.frame?.live) && !split.home;
+  if (bar.hidden === open) { bar.hidden = !open; placeSplitView(); }
+  const input = bar.querySelector<HTMLInputElement>(".bs-find-text")!;
+  if (document.activeElement !== input && input.value !== split.find.text) input.value = split.find.text;
+  const count = bar.querySelector<HTMLElement>(".bs-find-count")!, words = findWords(split.find.text, split.find.found);
+  if (count.textContent !== words) count.textContent = words;
+  count.classList.toggle("none", split.find.found?.matches === 0);
+  for (const button of bar.querySelectorAll<HTMLButtonElement>('[data-find="back"], [data-find="next"]')) button.disabled = !split.find.found?.matches;
+}
+function openFind() {
+  if (!split.open || !split.frame?.live || split.home) return;
+  const aside = el("browser-split");
+  split.find.open = true;
+  renderSplitFind(aside);
+  const input = aside.querySelector<HTMLInputElement>(".bs-find-text")!;
+  input.focus(); input.select();
+  if (split.find.text) void findOnPage(true);
+}
+function closeFind() {
+  if (!split.find.open) return;
+  split.find = { open: false, text: "", found: null };
+  void api("desktop-browser-view", { chat: split.session, stop: true }).catch(() => {});
+  renderSplitFind(el("browser-split"));
+}
+/// Looks for the words on the page; `again` goes to the next match (or the one before, `back`).
+async function findOnPage(again: boolean, back = false) {
+  const text = split.find.text, chat = split.session;
+  if (!text.trim()) {
+    split.find.found = null;
+    renderSplitFind(el("browser-split"));
+    void api("desktop-browser-view", { chat, stop: true }).catch(() => {});
+    return;
+  }
+  let found: { matches: number; at: number } | null = null;
+  try { const got = await api<{ matches?: number; at?: number }>("desktop-browser-view", { chat, find: text, again, back }); found = { matches: Number(got?.matches) || 0, at: Number(got?.at) || 0 }; }
+  catch { /* the page went: no count */ }
+  if (split.session !== chat || split.find.text !== text || !split.find.open) return;
+  split.find.found = found;
+  renderSplitFind(el("browser-split"));
+}
+/// ⌘+ ⌘− ⌘0 on the page: its own zoom, not the app's. The chip in the bar shows it, and a click on it goes back to 100%.
+async function zoomPage(way: "in" | "out" | "reset") {
+  if (!split.open || !split.frame?.live || split.home) return;
+  try {
+    const got = await api<{ zoom?: number }>("desktop-browser-view", { chat: split.session, zoom: way });
+    if (split.frame && typeof got?.zoom === "number") { split.frame.zoom = got.zoom; renderBrowserSplit(); }
+  } catch (error) { fail(error); }
+}
+/// Point at it, on the chat's page: your next click there picks what is under it, and it rides with your next
+/// message as a chip, like a pick in a live preview. A page on this computer is looked up in the project's code too.
+let pointingPage = "";
+async function pointAtPage() {
+  if (pointing === "browser") return void stopPointing();
+  stopPointing();
+  const chat = split.session;
+  pointing = "browser"; pointingPage = chat;
+  renderBrowserSplit();
+  let pick: PointPick | null = null;
+  try { pick = await api<PointPick | null>("desktop-browser-point", { chat }); }
+  catch (error) { fail(error); }
+  finally { if (pointing === "browser" && pointingPage === chat) { pointing = null; pointingPage = ""; } renderBrowserSplit(); }
+  if (!pick || state?.session?.id !== chat) return;
+  let source: PointSource | null = null;
+  if (localPage(pick.page)) try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
+  pointed.push({ ...pick, id: `${Date.now()}:${pointed.length}`, source });
+  renderComposer();
+  editor.focus();
+}
+function stopPointing() {
+  if (pointing === "browser") void api("desktop-browser-point", { chat: pointingPage, cancel: true }).catch(() => {});
+  else if (pointing) void api("desktop-point", { cancel: true }).catch(() => {});
+}
+// Find and zoom keys pressed on the page itself come from the window.
+document.addEventListener("demesne:browser-key", (event) => {
+  const { chat, key } = (event as CustomEvent<{ chat?: string; key?: string }>).detail ?? {};
+  if (!chat || chat !== split.session || !split.open) return;
+  if (key === "find") openFind();
+  else if (key === "find-next" || key === "find-back") { if (split.find.open) void findOnPage(true, key === "find-back"); else openFind(); }
+  else if (key === "zoom-in" || key === "zoom-out" || key === "zoom-reset") void zoomPage(key === "zoom-in" ? "in" : key === "zoom-out" ? "out" : "reset");
+});
 /// One chip per tab, when the chat's browser has more than one. While the page is yours, a chip switches to it.
 function renderSplitTabs(aside: HTMLElement, _yours: boolean) {
   const row = aside.querySelector<HTMLElement>(".bs-tabs")!;
@@ -1776,8 +1873,10 @@ function buildBrowserSplit(aside: HTMLElement) {
   aside.innerHTML = `<div class="bs-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize"></div>`
     + `<div class="bs-head"><span class="bs-nav">${splitButton("back", "Back")}${splitButton("forward", "Forward")}${splitButton("reload", "Reload")}</span>`
     + `<label class="bs-addr"><input class="bs-url" readonly spellcheck="false" autocomplete="off" aria-label="Address"><span class="bs-doing" hidden></span></label>`
-    + `${splitButton("new", "New tab", "plus")}${splitButton("outside", "Open in your browser", "out")}<button type="button" class="bs-icon bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close the browser">${BS_ICONS.close}</button><i class="bs-load" hidden></i></div>`
+    + `<button type="button" class="bs-zoom" data-go="zoom-reset" title="Back to 100%" hidden></button>${splitButton("point", "Point at something on the page", "point")}${splitButton("new", "New tab", "plus")}${splitButton("outside", "Open in your browser", "out")}<button type="button" class="bs-icon bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close the browser">${BS_ICONS.close}</button><i class="bs-load" hidden></i></div>`
     + `<div class="bs-tabs" hidden></div>`
+    + `<div class="bs-find" role="search" hidden><input class="bs-find-text" spellcheck="false" autocomplete="off" placeholder="Find on page" aria-label="Find on page"><span class="bs-find-count" aria-live="polite"></span>`
+    + `<button type="button" class="bs-icon" data-find="back" aria-label="Previous match" title="Previous match">${BS_ICONS.up}</button><button type="button" class="bs-icon" data-find="next" aria-label="Next match" title="Next match">${BS_ICONS.down}</button><button type="button" class="bs-icon" data-find="close" aria-label="Close find" title="Close (Esc)">${BS_ICONS.close}</button></div>`
     + `<div class="bs-view"><div class="bs-stage"><canvas class="bs-page" aria-hidden="true" hidden></canvas><i class="bs-ring" hidden></i></div><div class="bs-home"><svg viewBox="0 0 100 100" role="img" aria-label="Demesne"><use href="#demesne-mark"/></svg></div></div>`;
   const view = aside.querySelector<HTMLElement>(".bs-view")!, img = aside.querySelector<HTMLCanvasElement>(".bs-page")!;
   const yours = splitYours;
@@ -1836,6 +1935,9 @@ function buildBrowserSplit(aside: HTMLElement) {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-go]");
     if (!button || button.disabled) return;
     const what = button.dataset.go!;
+    // Pointing and zoom are looking at the page, not using it: the model keeps it.
+    if (what === "point") { void pointAtPage(); return; }
+    if (what === "zoom-reset") { void zoomPage("reset"); return; }
     if (what === "outside") { const address = split.frame?.url; if (openableOutside(address)) void api("open-link", { url: address }).catch(() => {}); return; }
     if (!await own()) return;
     if (what === "new") { home(true); url.focus(); return; }
@@ -1854,6 +1956,20 @@ function buildBrowserSplit(aside: HTMLElement) {
     const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-tab]");
     if (!chip || chip.disabled) return;
     void (async () => { if (!split.held) await takeSplit(); if (!split.held) return; split.home = false; showSplitPicture(aside); renderBrowserSplit(); go(`tab:${chip.dataset.tab}`); })();
+  });
+  // The find bar: typing finds as you go, Enter is the next match (Shift+Enter the one before), Esc closes it.
+  const find = aside.querySelector<HTMLElement>(".bs-find")!, findText = find.querySelector<HTMLInputElement>(".bs-find-text")!;
+  findText.addEventListener("input", () => { split.find.text = findText.value; void findOnPage(false); });
+  findText.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Enter") { event.preventDefault(); void findOnPage(true, event.shiftKey); }
+    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeFind(); }
+  });
+  find.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-find]");
+    if (!button || button.disabled) return;
+    if (button.dataset.find === "close") closeFind();
+    else void findOnPage(true, button.dataset.find === "back");
   });
   // The line between chat and browser moves either way; the width is kept.
   const grip = aside.querySelector<HTMLElement>(".bs-grip")!;
@@ -1906,7 +2022,7 @@ async function pumpBrowserFrames() {
     while (split.open && state?.session?.id === split.session && !pageOpen) {
       if (document.visibilityState !== "visible") { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
       const session = split.session;
-      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number } };
+      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number } };
       let got: Got | null = null;
       // The view's shape, so the page is drawn as tall as the split shows it.
       const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
@@ -1923,12 +2039,14 @@ async function pumpBrowserFrames() {
         (window as unknown as { __at?: number }).__at = Number((got as { at?: number }).at) || 0;
         split.seq = Number(got.seq);
         const first = !split.frame, before = split.frame;
-        split.frame = { src: got.src ?? "", ...(got.live ? { live: true } : {}), width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward), ...(got.loading ? { loading: true } : {}) };
+        split.frame = { src: got.src ?? "", ...(got.live ? { live: true } : {}), width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward), ...(got.loading ? { loading: true } : {}), ...(typeof got.zoom === "number" && got.zoom > 0 ? { zoom: got.zoom } : {}) };
         const tabs = Array.isArray(got.tabs) ? got.tabs : [];
         if (JSON.stringify(tabs) !== JSON.stringify(split.tabs)) { split.tabs = tabs; redraw = true; }
         showSplitPicture(aside);
         showSplitRing(aside, got.pointer);
-        if (first || before?.url !== split.frame.url || before?.title !== split.frame.title || before?.back !== split.frame.back || before?.forward !== split.frame.forward || Boolean(before?.loading) !== Boolean(split.frame.loading)) redraw = true;
+        if (first || before?.url !== split.frame.url || before?.title !== split.frame.title || before?.back !== split.frame.back || before?.forward !== split.frame.forward || Boolean(before?.loading) !== Boolean(split.frame.loading) || before?.zoom !== split.frame.zoom) redraw = true;
+        // A new page: what you are finding is looked for on it.
+        if (before && before.url !== split.frame.url && split.find.open && split.find.text) void findOnPage(false);
       }
       if (redraw) renderBrowserSplit();
       // While the page is yours the next picture is asked for at once; watching can breathe.
@@ -5498,7 +5616,7 @@ function composerDraft(width: number) {
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
-  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
+  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : point.where === "browser" ? `On ${point.page}; the page and selector go with your message` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
   // Notes pinned on Foundry and not sent: they go with the next message here (a click shows them).
   const foundryChips = question ? "" : ridingNotes().map((key) => {
     const id = key.slice(0, key.lastIndexOf(":")), mockup = foundryList?.find((item) => item.id === id), count = foundryNotes.waiting.get(key)?.length ?? 0;
@@ -6813,7 +6931,7 @@ function pointButton(key: string) {
 }
 async function pointAt(key: string) {
   if (pointing === key) return void api("desktop-point", { cancel: true }).catch(() => {});
-  if (pointing) await api("desktop-point", { cancel: true }).catch(() => {});
+  if (pointing) stopPointing();
   pointing = key;
   pointButton(key);
   let pick: PointPick | null = null;
@@ -8296,7 +8414,7 @@ function renderState(next: Snapshot) {
     lastSession = next.session?.id ?? "";
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;
     pointed.length = 0;
-    if (pointing) { pointing = null; void api("desktop-point", { cancel: true }).catch(() => {}); }
+    if (pointing) { stopPointing(); pointing = null; pointingPage = ""; }
     follow = true;
     overlay = null;
     driveShown = ideasShown = brokeShown = false;
@@ -8749,8 +8867,14 @@ document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;
   if (pointing && event.key === "Escape") {
     event.preventDefault();
-    void api("desktop-point", { cancel: true }).catch(() => {});
+    stopPointing();
     return;
+  }
+  // ⌘F and ⌘G while you are in the chat's browser (its bar, the find field): find on its page.
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.target instanceof Element && event.target.closest("#browser-split")) {
+    const pressed = event.key.toLowerCase();
+    if (pressed === "f" && !event.shiftKey) { event.preventDefault(); openFind(); return; }
+    if (pressed === "g" && split.find.open) { event.preventDefault(); void findOnPage(true, event.shiftKey); return; }
   }
   const field =
     event.target instanceof HTMLInputElement ||

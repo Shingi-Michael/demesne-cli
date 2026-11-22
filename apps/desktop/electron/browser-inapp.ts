@@ -18,8 +18,8 @@ import { createBrowserHost, type Rect } from "./browser-host.ts";
 /// A line longer than this is not a command.
 const LINE_MAX = 4 * 1024 * 1024;
 
-export function serveBrowser(options: { window: BrowserWindow; pointer: string; log: (message: string) => void }) {
-  const { window, pointer, log } = options;
+export function serveBrowser(options: { window: BrowserWindow; pointer: string; log: (message: string) => void; tell?: (news: Record<string, unknown>) => void }) {
+  const { window, pointer, log, tell } = options;
   const token = randomBytes(24).toString("base64url");
   const path = process.platform === "win32" ? `\\\\.\\pipe\\demesne-browser-${process.pid}-${randomBytes(6).toString("hex")}` : join(tmpdir(), `demesne-browser-${process.pid}.sock`);
   /// One browser per daemon that connects (each keeps its own projects' sign-ins).
@@ -42,7 +42,7 @@ export function serveBrowser(options: { window: BrowserWindow; pointer: string; 
           greeted = true;
           const profile = typeof hello.profile === "string" && hello.profile ? hello.profile : "";
           if (profile) try { mkdirSync(profile, { recursive: true }); } catch {}
-          const host = createBrowserHost({ profile, kept: Boolean(profile), inApp: { window }, write: (out) => { if (!socket.destroyed) socket.write(JSON.stringify(out) + "\n"); } });
+          const host = createBrowserHost({ profile, kept: Boolean(profile), inApp: { window, tell }, write: (out) => { if (!socket.destroyed) socket.write(JSON.stringify(out) + "\n"); } });
           hosts.set(socket, host);
           if (placed?.rect) host.place(placed.chat, placed.rect);
           log("The model's browser is in this window.");
@@ -67,6 +67,10 @@ export function serveBrowser(options: { window: BrowserWindow; pointer: string; 
   return {
     /// The page says where the split shows the browser (null: it does not).
     place(chat: string, rect: Rect | null) { placed = { chat, rect }; for (const host of hosts.values()) host.place(chat, rect); },
+    /// Find on the chat's page or zoom it (looking, not using it).
+    async view(chat: string, command: Record<string, unknown>) { const host = [...hosts.values()].find((one) => one.has(chat)); return host ? host.view(chat, command) : { error: "No page is open" }; },
+    /// Point at something on the chat's page: what you click there, or null.
+    async point(chat: string, cancel: boolean) { const host = [...hosts.values()].find((one) => one.has(chat)); if (!host) { if (cancel) return null; throw new Error("No page is open"); } return host.point(chat, cancel); },
     /// The app is closing: tabs go, sign-ins are written out.
     async close() {
       try { rmSync(pointer, { force: true }); } catch {}

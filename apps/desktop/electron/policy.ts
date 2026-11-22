@@ -229,6 +229,17 @@ export const ZOOM_VERSION = 2;
 export function nextZoom(current: number, step: number) {
   return step === 0 ? 1 : step > 0 ? ZOOM_LEVELS.find(level => level > current + 1e-9) ?? current : [...ZOOM_LEVELS].reverse().find(level => level < current - 1e-9) ?? current;
 }
+/// A find or zoom key pressed on the page (⌘ on a Mac, Ctrl elsewhere).
+export function browserKey(input: { type: string; key: string; meta: boolean; control: boolean; alt: boolean; shift: boolean }, mac = process.platform === "darwin"): string {
+  if (input.type !== "keyDown" || input.alt || !(mac ? input.meta : input.control)) return "";
+  const key = input.key.toLowerCase();
+  if (key === "f" && !input.shift) return "find";
+  if (key === "g") return input.shift ? "find-back" : "find-next";
+  if (key === "=" || key === "+") return "zoom-in";
+  if (key === "-" || key === "_") return "zoom-out";
+  if (key === "0" && !input.shift) return "zoom-reset";
+  return "";
+}
 /// Where the browser split says its page area is (the page's own pixels), as a place in the window
 /// for the real page (browser-inapp.ts): whole points, kept inside the window, or nothing when it is too small to show.
 export function placeRect(value: unknown, zoom: number, bounds: { width: number; height: number }): { x: number; y: number; width: number; height: number } | null {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, placeRect, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, browserKey, openTarget, placeRect, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -30,6 +30,23 @@ test("external opening accepts web URLs or absolute files, never executable URL 
   expect(openTarget("https://example.com/a")).toBe("url");
   expect(openTarget(resolve("README.md"))).toBe("file");
   for (const target of ["javascript:alert(1)", "data:text/html,test", "file:///etc/passwd", "mailto:a@example.com", "https://user:password@example.com", "relative.txt"]) expect(() => openTarget(target)).toThrow();
+});
+test("find and zoom keys pressed on the chat's page go to its bar", () => {
+  const key = (k: string, more: Partial<{ meta: boolean; control: boolean; alt: boolean; shift: boolean; type: string }> = {}) => ({ type: "keyDown", key: k, meta: true, control: false, alt: false, shift: false, ...more });
+  expect(browserKey(key("f"), true)).toBe("find");
+  expect(browserKey(key("g"), true)).toBe("find-next");
+  expect(browserKey(key("G", { shift: true }), true)).toBe("find-back");
+  expect(browserKey(key("="), true)).toBe("zoom-in");
+  expect(browserKey(key("+", { shift: true }), true)).toBe("zoom-in");
+  expect(browserKey(key("-"), true)).toBe("zoom-out");
+  expect(browserKey(key("0"), true)).toBe("zoom-reset");
+  // Ctrl is the key off a Mac; ⌘ is on one. Typing and other shortcuts stay the page's.
+  expect(browserKey(key("f", { meta: false, control: true }), false)).toBe("find");
+  expect(browserKey(key("f", { meta: false, control: true }), true)).toBe("");
+  expect(browserKey(key("f", { meta: false }), true)).toBe("");
+  expect(browserKey(key("c"), true)).toBe("");
+  expect(browserKey(key("f", { alt: true }), true)).toBe("");
+  expect(browserKey(key("f", { type: "keyUp" }), true)).toBe("");
 });
 test("zoom preserves the desktop's fixed levels", () => {
   expect(nextZoom(1, 1)).toBe(1.1);

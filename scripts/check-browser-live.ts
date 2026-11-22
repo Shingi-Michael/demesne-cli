@@ -4,7 +4,7 @@
  * of it. The page sits exactly on the split's page area. There are no buttons
  * to take it or give it back: your first scroll, click or key on the page makes
  * it yours, and going back to the chat gives it to the model. It is put away
- * when the split closes or an earlier page's picture is up.
+ * when the split closes.
  * Run bun scripts/prepare-desktop.ts first (Linux: xvfb-run -a). */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
@@ -105,8 +105,12 @@ try {
   };
 
   await win.locator("#composer-model").waitFor();
-  await win.locator("textarea").fill("Check that the admin sign-in works.");
-  await win.locator("textarea").press("Enter");
+  // The start screen can take a moment to be ready for typing: send again if nothing started.
+  for (let tries = 0; tries < 3; tries++) {
+    await win.locator("textarea").fill("Check that the admin sign-in works.");
+    await win.locator("textarea").press("Enter");
+    if (await win.locator("#conversation .turn").first().waitFor({ timeout: 4000 }).then(() => true, () => false)) break;
+  }
 
   // The model opens the page: the window splits, and the page itself sits on the split's page area.
   const split = win.locator("#browser-split");
@@ -166,14 +170,7 @@ try {
   await split.locator(".bs-url").press("Enter");
   await win.waitForFunction(() => /\/cart$/.test((document.querySelector<HTMLInputElement>("#browser-split .bs-url"))?.value ?? ""), undefined, { timeout: 10000 });
   await until("the real page went to the cart", () => real("/cart"), (page) => Boolean(page?.shown && page.title === "Cart"));
-  // An earlier page's picture takes the real page off; back to live puts it back.
-  await split.locator(".bs-visit").first().waitFor();
-  await split.locator(".bs-visit").first().click();
-  await win.waitForFunction(() => /earlier page/.test(document.querySelector("#browser-split .bs-words")?.textContent ?? ""));
-  await until("the real page is put away under an earlier page's picture", () => real("/cart"), (page) => Boolean(page && !page.shown));
-  assert.equal(await split.locator(".bs-page").isVisible(), true, "the earlier page shows as a picture");
-  await split.locator(".bs-back", { hasText: "Back to live" }).click();
-  await until("back to live, the real page is on show again", () => real("/cart"), (page) => Boolean(page?.shown));
+  assert.equal(await split.locator(".bs-pages").count(), 0, "no Pages strip under the page");
   // The window changes size: the page follows its place.
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1240, 820));
   await win.waitForTimeout(700);
@@ -193,9 +190,16 @@ try {
   assert.equal(await split.locator(".bs-home").isVisible(), false, "the home screen goes once you go somewhere");
   await split.locator(".bs-tab", { hasText: "Cart" }).click();
   await until("a chip switches back to the cart", () => real("/cart"), (page) => Boolean(page?.shown));
+  // Each tab closes with its own ×.
+  await split.locator(".bs-chip:not(.on)").hover();
+  await win.screenshot({ path: join(output, "tabs.png"), clip: { x: 760, y: 40, width: 480, height: 100 } });
+  await split.locator(".bs-chip:not(.on) .bs-tab-x").click();
+  await until("the tab's × closed it", () => real("/admin"), (page) => page === null);
+  await until("one tab left, so no chips", () => split.locator(".bs-tab").count(), (n) => n === 0);
+  await until("the cart is still on show", () => real("/cart"), (page) => Boolean(page?.shown));
   await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
-  console.log("PASS: a scroll makes the page yours; you can go to your own address, look at an earlier page, open a new tab from its logo home screen, and come back.");
+  console.log("PASS: a scroll makes the page yours; you can go to your own address, open a new tab from its logo home screen, close it with its ×, and come back.");
 
   // Settings over the chat, and ×: the real page is put away, and still there for the model.
   await split.locator(".bs-close").click();

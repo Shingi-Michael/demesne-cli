@@ -277,10 +277,9 @@ test.skipIf(process.platform === "win32")("with the desktop app open, the browse
     expect(browser.inApp()).toBe(true);
     expect(heard[0]).toEqual({ hello: "word", profile: join(dir, "profile") });
     expect(heard[1]).toMatchObject({ action: "open", chat: "chat-1", url: "http://localhost:5173/" });
-    // The page itself is on show there: the split is told so, and no picture is kept as a page it went to.
+    // The page itself is on show there: the split is told so.
     const frame = await browser.frame("chat-1", 0, signal);
     expect(frame).toMatchObject({ live: true, jpeg: "", width: 640, url: "http://localhost:5173/" });
-    expect(browser.visits?.("chat-1")).toEqual([]);
     // You scrolled the page there: the daemon hears it is yours.
     expect(taken).toEqual(["chat-1"]);
   } finally { browser.close(); await new Promise((done) => server.close(done)); rmSync(dir, { recursive: true, force: true }); }

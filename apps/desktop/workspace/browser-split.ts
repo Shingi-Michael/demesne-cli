@@ -92,10 +92,3 @@ export function tabName(tab: SplitTab): string {
   if (title) return title.length > 28 ? `${title.slice(0, 27)}…` : title;
   try { return new URL(tab.url).host || tab.url; } catch { return tab.url || `Tab ${tab.n}`; }
 }
-
-export interface SplitVisit { seq: number; url: string; title: string; tab: number }
-/// The pages to step back through: newest last, the page on show now left out.
-export function earlierPages(visits: readonly SplitVisit[], now: string): SplitVisit[] {
-  const kept = visits.filter((visit, index) => !(index === visits.length - 1 && visit.url === now));
-  return kept.slice(-8);
-}

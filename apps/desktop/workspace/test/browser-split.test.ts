@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { earlierPages, handOverAsk, keyInputs, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName } from "../browser-split.ts";
+import { handOverAsk, keyInputs, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName } from "../browser-split.ts";
 
 // Pass 248 D: the chat's browser beside the chat. When it opens, where a click
 // lands on the page, and which keys reach a page that is yours.
@@ -75,10 +75,8 @@ test("a ring shows where the model clicked, only while fresh", () => {
   expect(ringSpot(undefined, page)).toBeNull();
 });
 
-test("tab chips are named by title, else by site; earlier pages leave out the one on show", () => {
+
+test("tab chips are named by title, else by site", () => {
   expect(tabName({ n: 1, url: "https://accounts.example/o/auth", title: "" })).toBe("accounts.example");
   expect(tabName({ n: 2, url: "x", title: "Sign in with your account to continue shopping" })).toBe("Sign in with your account t…");
-  const visits = [1, 2, 3].map((seq) => ({ seq, url: `https://shop.example/${seq}`, title: "", tab: 1 }));
-  expect(earlierPages(visits, "https://shop.example/3").map((one) => one.seq)).toEqual([1, 2]);
-  expect(earlierPages(visits, "https://shop.example/1").map((one) => one.seq)).toEqual([1, 2, 3]);
 });

@@ -3395,6 +3395,20 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-hd-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--hair2, var(--hair)); }
 .fd-code { box-sizing: border-box; margin: 0; height: max(520px, calc(100vh - 170px)); overflow: auto; padding: 18px 20px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--t1) 4%, transparent); box-shadow: 0 0 0 1px var(--hair); color: var(--t2); font: 12.5px/19px "JetBrains Mono", ui-monospace, Menlo, monospace; white-space: pre; tab-size: 2; }
 .fd-code:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; }
+/* Step 4, compare: the version before lies over the shown one, cut by a line you drag (--wipe). */
+.fd-wipe { position: relative; isolation: isolate; }
+.fd-wipe-after { position: relative; z-index: 0; }
+.fd-wipe-before { position: absolute; inset: 0; z-index: 1; clip-path: inset(0 calc(100% - var(--wipe)) 0 0); }
+.fd-wipe-bar { position: absolute; top: 0; bottom: 0; left: var(--wipe); z-index: 3; width: 24px; margin-left: -12px; cursor: ew-resize; touch-action: none; }
+.fd-wipe-bar::before { content: ""; position: absolute; top: 0; bottom: 0; left: 11px; width: 2px; background: rgba(255, 255, 255, .92); box-shadow: 0 0 0 1px rgba(0, 0, 0, .22); }
+.fd-wipe-bar::after { content: ""; position: absolute; top: 50%; left: 4px; width: 16px; height: 28px; margin-top: -14px; border-radius: 8px; background: rgba(255, 255, 255, .96); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
+.fd-wipe.dragging iframe { pointer-events: none; }
+.fd-wipe.dragging { cursor: ew-resize; user-select: none; }
+.fd-wipe-bar:focus-visible { outline: none; }
+.fd-wipe-bar:focus-visible::after { box-shadow: 0 0 0 2px var(--electric, #4c8dff); }
+.fd-wipe-tag { position: absolute; top: 10px; padding: 2px 8px; border-radius: 999px; background: rgba(20, 20, 20, .62); color: #fff; font-size: 11.5px; line-height: 17px; white-space: nowrap; pointer-events: none; }
+.fd-wipe-tag.was { right: 18px; }
+.fd-wipe-tag.now { left: 18px; }
 .fd-said { display: flex; align-items: center; gap: 10px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-said-b { all: unset; padding: 0 7px; margin: 0 -3px; border-radius: 6px; color: var(--t2); cursor: pointer; }
 .fd-said-b:hover, .fd-said-b:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }

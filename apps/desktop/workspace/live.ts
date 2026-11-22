@@ -7101,7 +7101,8 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
     return true;
   }
   const open = foundryOpen;
-  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit";
+  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit" || action === "foundry-compare";
+  if (action === "foundry-compare") { open.compare = !open.compare; if (open.compare) delete open.code; renderPage(); return true; }
   if (action === "foundry-edit") { await foundryEdit(open); return true; }
   if (action === "foundry-shrink") {
     foundryOpen = null;
@@ -7173,6 +7174,35 @@ async function foundryEdit(open: FoundryOpen) {
     await loadFoundry();
   } catch (error) { open.said = `Couldn't keep your changes: ${errorWords(error)}`; paintFoundrySaid(); }
 }
+/// Step 4, compare: drag the line (or use the arrow keys on it) to move the cut, in place.
+function moveWipe(bar: HTMLElement, percent: number) {
+  const wipe = bar.closest<HTMLElement>(".fd-wipe");
+  if (!wipe) return;
+  const value = Math.max(0, Math.min(100, percent));
+  wipe.style.setProperty("--wipe", `${value}%`);
+  bar.setAttribute("aria-valuenow", String(Math.round(value)));
+}
+document.addEventListener("pointerdown", (event) => {
+  const bar = (event.target as HTMLElement | null)?.closest?.<HTMLElement>(".fd-wipe-bar");
+  if (!bar || event.button !== 0) return;
+  event.preventDefault();
+  bar.focus({ preventScroll: true });
+  // The frames under the line would take the pointer as it moves (they are other pages): they let it through while you drag.
+  const wipe = bar.closest<HTMLElement>(".fd-wipe")!;
+  wipe.classList.add("dragging");
+  const move = (at: PointerEvent) => { const box = wipe.getBoundingClientRect(); moveWipe(bar, ((at.clientX - box.left) / box.width) * 100); };
+  const done = () => { wipe.classList.remove("dragging"); document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", done); document.removeEventListener("pointercancel", done); };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", done);
+  document.addEventListener("pointercancel", done);
+});
+document.addEventListener("keydown", (event) => {
+  const bar = (event.target as HTMLElement | null)?.closest?.<HTMLElement>(".fd-wipe-bar");
+  if (!bar || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const now = Number(bar.getAttribute("aria-valuenow")) || 50;
+  moveWipe(bar, event.key === "Home" ? 0 : event.key === "End" ? 100 : now + (event.key === "ArrowLeft" ? -5 : 5) * (event.shiftKey ? 4 : 1));
+});
 /// A piece of text the frame says you changed: placed in the content, or put back.
 window.addEventListener("message", (event) => {
   const data = event.data as { demesne?: unknown; action?: unknown; piece?: unknown; before?: unknown; after?: unknown } | null;

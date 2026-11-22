@@ -118,6 +118,14 @@ The frame tells the page (`apps/desktop/foundry-kit/errors.js`, first of the scr
 
 Read more: [Window: error event](https://developer.mozilla.org/en-US/docs/Web/API/Window/error_event) and [unhandledrejection](https://developer.mozilla.org/en-US/docs/Web/API/Window/unhandledrejection_event) (MDN), [Window.postMessage](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage) (how a walled-off frame talks to the page), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (Try fixing).
 
+## Compare two versions
+
+The opened mockup's head line has a compare icon (the split square). Press it and the version before the one shown lies over it, cut by a line down the middle: the earlier one on the left, the shown one on the right, each named at the top. Drag the line (or focus it and use the arrow keys, Shift for bigger steps, Home and End) to sweep across and see exactly what changed where. ‹ › still step through versions, each compared with the one before it. Nothing plays while you compare, and notes wait. A first version has nothing to compare with, so the icon rests.
+
+Both versions are live pages in their own frames (`wipeHTML` and `earlierOf` in `apps/desktop/workspace/foundry-page.ts`); the cut is a CSS `clip-path` on the earlier one, moved in place by `live.ts` without reloading either page. While you drag, the frames let the pointer through so the line follows it. `xvfb-run -a bun scripts/check-foundry-open.ts` checks it in the real app.
+
+Read more: [clip-path](https://developer.mozilla.org/en-US/docs/Web/CSS/clip-path) (MDN), [ARIA slider pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/) (how the line works from the keyboard).
+
 ## Edit docs and decks in place
 
 The opened deck, doc or dashboard has a pencil in its head line (its newest version only). Press it and every piece of text becomes editable where it sits: headings, paragraphs, list items, table cells, stat tiles, captions. Leave a piece (click away, Enter) and the change goes into the content; Escape puts a piece back. The quiet line under it counts your changes, and **Done** (the check where the pencil was) keeps them all as one new version, "Edited by you", and shows it. No model is involved, so it costs nothing and is instant. While you edit, the demo, the deck's own playing and notes are off, and Esc on the Foundry page doesn't close it.

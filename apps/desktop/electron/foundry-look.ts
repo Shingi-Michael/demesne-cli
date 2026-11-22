@@ -63,7 +63,7 @@ export function runFoundryLook(path: string) {
       if (kit) return new Response(kitFile(kit), { headers: { "Content-Type": FOUNDRY_KIT[kit]!.type, "Access-Control-Allow-Origin": "*" } });
       // A page that remembers runs on its own here: saves stay in memory, asks get a placeholder.
       let page = foundryDocument(job.kind, job.source, job.title);
-      if (job.kind === "html" && usesRemember(job.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"));
+      if ((job.kind === "html" || job.kind === "react") && usesRemember(job.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"));
       // Its pictures ride in the job, so they go in as data.
       if (job.kind === "html" && job.shots) page = withShots(page, Object.fromEntries(Object.entries(job.shots).map(([id, shot]) => [id, { url: `data:${shot.mimeType};base64,${shot.data}`, width: shot.width, height: shot.height, scale: shot.scale }])));
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });

@@ -193,5 +193,6 @@ test("pass 262 C: the mockup you open grows where it sits, with a quiet head lin
   expect(savedLine({ id: "a1", at: 2, shown: 2, said: "Saved Orders board v2.html to Downloads", saved: { path: "/x", pdf: false, ready: false } }, "html"))
     .toBe('Saved Orders board v2.html to Downloads<button type="button" class="fd-said-b" data-action="foundry-copy-show">Show</button>');
   expect(savedLine({ id: "d", at: 1, shown: 1, said: "Saved Plan v1.pdf to Downloads", saved: { path: "/y", pdf: true, ready: true } }, "deck")).toContain(">Also as a web page</button>");
+  expect(savedLine({ id: "r", at: 1, shown: 1, said: "Saved Counter v1.html to Downloads", saved: { path: "/z", pdf: false, ready: true } }, "react")).toContain(">Also as the .jsx</button>");
   expect(savedLine({ id: "a1", at: 2, shown: 2 }, "html")).toBe("");
 });

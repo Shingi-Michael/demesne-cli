@@ -118,6 +118,18 @@ The frame tells the page (`apps/desktop/foundry-kit/errors.js`, first of the scr
 
 Read more: [Window: error event](https://developer.mozilla.org/en-US/docs/Web/API/Window/error_event) and [unhandledrejection](https://developer.mozilla.org/en-US/docs/Web/API/Window/unhandledrejection_event) (MDN), [Window.postMessage](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage) (how a walled-off frame talks to the page), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (Try fixing).
 
+## More kinds: React, diagrams, code
+
+Besides pages (`html`), graphics, notes and the ready kinds, a mockup can be what the model would write anyway, the way Claude artifacts take React, Mermaid and code:
+
+- **`react`**: one component in JSX or TSX with `export default`, styled with Tailwind classes, importing only `react`, `react-dom`, `lucide-react` (icons) and `recharts` (charts). Demesne compiles it with Sucrase and runs it with React 18, Tailwind 4 and those libraries from the app's own kit (`foundry://kit/react.js` and so on), so it works offline and nothing is fetched. `demesne.save` / `load` / `ask` / `pick` work in it as in a page.
+- **`mermaid`**: a Mermaid diagram (flowchart, sequence, class, state, ER, gantt, journey, pie, mind map, timeline…), drawn in the page in calm greys, light or dark like the app.
+- **`code`**: a file of code, highlighted with a row per line. The title's extension (`orders.ts`) picks the language, else it is guessed.
+
+A component that doesn't compile, imports anything else or has no default export, and a diagram that doesn't start with its type, are refused at save with why, so the model fixes them before you see them (`checkKindSource` in `apps/daemon/src/foundry.ts`). A diagram that still doesn't parse says so on the error line under it. On the Foundry page they read **App**, **Diagram** and **Code**; Save a copy writes an App or a Diagram as a page that runs on its own with its libraries inlined (then **Also as the .jsx** / **.mmd** for the source), and Code as the file itself. The pages are drawn in `apps/desktop/electron/foundry-more-kinds.ts`; `xvfb-run -a bun scripts/check-foundry-kinds.ts` checks all three in the real app.
+
+Read more: [React: your first component](https://react.dev/learn/your-first-component), [Writing markup with JSX](https://react.dev/learn/writing-markup-with-jsx), [Tailwind: styling with utility classes](https://tailwindcss.com/docs/styling-with-utility-classes), [Lucide icons](https://lucide.dev/icons/), [Recharts](https://recharts.github.io/en-US/guide/getting-started/), [Mermaid syntax](https://mermaid.js.org/intro/syntax-reference.html), [Sucrase](https://github.com/alangpierce/sucrase) (the compiler), [highlight.js](https://highlightjs.org/), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (the kinds Claude makes).
+
 ## The page holds only the thing
 
 A mockup used to carry controls that were not part of the design: Foundry's own option strip and deck buttons were drawn inside it, and since Foundry could not play a demo, models wrote Replay and Next step buttons into the page. Every page also sat in the same tall white box. Now Foundry owns the surface and the demo, and the page holds only what is being made.

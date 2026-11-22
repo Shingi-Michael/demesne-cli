@@ -1,5 +1,6 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import { isReadyKind, renderReadyKind } from "./foundry-kinds.ts";
+import { codePage, mermaidPage, reactPage } from "./foundry-more-kinds.ts";
 export const APP_URL = "demesne://app/index.html";
 /** Whether the window is glass, with the Glass slider in Settings: on the
  *  Mac, Windows and Linux alike. DEMESNE_GLASS=0 keeps Linux or Windows
@@ -82,13 +83,21 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "demo.js": { path: "kit/demo.js", type: "application/javascript; charset=utf-8" },
   // Notes on a mockup (pass 233 A): put in front of pages on the Foundry page; it tells the page which part is under the pointer.
   "note.js": { path: "kit/note.js", type: "application/javascript; charset=utf-8" },
+  // More kinds (foundry-more-kinds.ts): what a React page, a Mermaid diagram runs on, from the app, so they work offline.
+  "react.js": { path: "kit/react.js", type: "application/javascript; charset=utf-8" },
+  "react-dom.js": { path: "kit/react-dom.js", type: "application/javascript; charset=utf-8" },
+  "prop-types.js": { path: "kit/prop-types.js", type: "application/javascript; charset=utf-8" },
+  "lucide.js": { path: "kit/lucide.js", type: "application/javascript; charset=utf-8" },
+  "recharts.js": { path: "kit/recharts.js", type: "application/javascript; charset=utf-8" },
+  "tailwind.js": { path: "kit/tailwind.js", type: "application/javascript; charset=utf-8" },
+  "mermaid.js": { path: "kit/mermaid.js", type: "application/javascript; charset=utf-8" },
   // Errors come back: put first in front of pages on the Foundry page; it tells the page when the mockup throws while you use it.
   "errors.js": { path: "kit/errors.js", type: "application/javascript; charset=utf-8" },
   ...Object.fromEntries([400, 500, 600].map((weight) => [`fonts/inter-latin-${weight}-normal.woff2`, { path: `vendor/fonts/inter-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
   ...Object.fromEntries([400, 500].map((weight) => [`fonts/jetbrains-mono-latin-${weight}-normal.woff2`, { path: `vendor/fonts/jetbrains-mono-latin-${weight}-normal.woff2`, type: "font/woff2" }])),
 };
 /** The kinds whose pages can play a demo on the Foundry page. */
-export const FOUNDRY_DEMO_KINDS = new Set(["html", "deck", "doc", "dashboard"]);
+export const FOUNDRY_DEMO_KINDS = new Set(["html", "deck", "doc", "dashboard", "react", "mermaid", "code"]);
 /** A page's own calls to Demesne: foundry://data/<id> keeps what the page
  * saves, foundry://ask/<id> asks the chat's model. Null for anything else. */
 export function foundryPageCall(value: string): { what: "data" | "ask"; id: string } | null {
@@ -130,7 +139,8 @@ export function withRemember(html: string, runtime: string, page?: { id: string;
 /** Pass 262 C: a page as it leaves Demesne (Save a copy). The kit it leans
  * on is inlined so the file stands on its own; a page that remembers keeps
  * its saves in the browser once it is a file. Fonts fall back to the system's. */
-export function exportedSource(source: string, kit: { style: string; script: string; parts: string; kinds: { style: string; script: string }; remember: string }) {
+/// `libs`: the libraries a React page or a Mermaid diagram loads from the kit (react.js, mermaid.js…), by name, inlined too.
+export function exportedSource(source: string, kit: { style: string; script: string; parts: string; kinds: { style: string; script: string }; remember: string }, libs: Record<string, string> = {}) {
   if (usesRemember(source)) source = withRemember(source, kit.remember);
   const tag = (name: string, address: string) => new RegExp(`<${name}\\b[^>]*\\b(?:href|src)=["']?${address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']?[^>]*>(?:\\s*</${name}>)?`, "gi");
   const inline = (code: string) => code.replace(/<\//g, "<\\/");
@@ -140,7 +150,8 @@ export function exportedSource(source: string, kit: { style: string; script: str
     .replace(tag("script", "foundry://kit/anime.js"), () => `<script>${inline(kit.script)}</script>`)
     .replace(tag("script", "foundry://kit/parts.js"), () => `<script>${inline(kit.parts)}</script>`)
     .replace(tag("link", "foundry://kit/kinds.css"), () => `<style>\n${kit.kinds.style}</style>`)
-    .replace(tag("script", "foundry://kit/kinds.js"), () => `<script>${inline(kit.kinds.script)}</script>`);
+    .replace(tag("script", "foundry://kit/kinds.js"), () => `<script>${inline(kit.kinds.script)}</script>`)
+    .replace(/<script\b[^>]*\bsrc=["']?foundry:\/\/kit\/([\w.-]+)["']?[^>]*>\s*<\/script>/gi, (whole, name: string) => Object.hasOwn(libs, name) ? `<script>${inline(libs[name]!)}</script>` : whole);
 }
 /** Pass 262 C: the file a saved copy gets in Downloads: the artifact's name
  * made safe, its version, and the extension; a number when that is taken. */
@@ -176,6 +187,9 @@ export function foundryDocument(kind: string, source: string, title: string) {
   // A Deck, a Doc or a Dashboard: the content drawn by the app's own renderer.
   if (isReadyKind(kind)) return renderReadyKind(kind, source, title);
   if (kind === "html") return source;
+  if (kind === "react") return reactPage(source, title);
+  if (kind === "mermaid") return mermaidPage(source, title);
+  if (kind === "code") return codePage(source, title);
   if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
   return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><pre style="white-space:pre-wrap;font:14px/1.6 system-ui;padding:24px">${esc(source)}</pre>`;
 }

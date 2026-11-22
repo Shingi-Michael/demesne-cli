@@ -132,7 +132,9 @@ const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 /// It waits for `pid`, moves the old app aside as `<root>.prev`, moves the
 /// new one in, opens it, and waits for `started` to name the new version;
 /// once it does the old app is deleted, and if it never does the old app
-/// comes back and opens.
+/// comes back and opens. Anything else still running from the old app (the
+/// model's hidden browser, which the daemon keeps alive) is ended first: on a
+/// Mac, `open` would otherwise just wake that copy and never start the new one.
 export function swapScript(options: { kind: InstallKind; pid: number; root: string; staged: string; version: string; started: string; failed: string; relaunch: string[] }): string {
   const { kind, pid, root, staged, version, started, failed } = options;
   const prev = `${root}.prev`, launch = options.relaunch.map(q).join(" ");
@@ -142,14 +144,17 @@ export function swapScript(options: { kind: InstallKind; pid: number; root: stri
     : [`rm -rf ${q(prev)}`, `mv ${q(root)} ${q(prev)} || { ${open}; exit 1; }`,
       `if ! mv ${q(staged)} ${q(root)}; then mv ${q(prev)} ${q(root)}; echo ${q(version)} > ${q(failed)}; ${open}; exit 1; fi`,
       ...(kind === "mac" ? [`xattr -dr com.apple.quarantine ${q(root)} 2>/dev/null`] : [])].join("\n");
+  const ours = q(kind === "mac" ? `${root}/Contents/MacOS/` : `${root}/demesne`);
+  const leftovers = kind === "linux-deb" ? "" : `pkill -f ${ours} 2>/dev/null && sleep 1`;
   const rollback = kind === "linux-deb" ? "" : [
-    `pkill -f ${q(kind === "mac" ? `${root}/Contents/MacOS/` : `${root}/demesne`)} 2>/dev/null; sleep 1`,
+    `pkill -f ${ours} 2>/dev/null; sleep 1`,
     `rm -rf ${q(root)}; mv ${q(prev)} ${q(root)}`,
   ].join("\n");
   return [
     "#!/bin/sh",
     `while kill -0 ${pid} 2>/dev/null; do sleep 0.2; done`,
     `rm -f ${q(started)}`,
+    leftovers,
     install,
     open,
     `i=0; while [ $i -lt ${START_WAIT_S * 2} ]; do grep -qx ${q(version)} ${q(started)} 2>/dev/null && { ${kind === "linux-deb" ? "" : `rm -rf ${q(prev)}; `}exit 0; }; sleep 0.5; i=$((i+1)); done`,

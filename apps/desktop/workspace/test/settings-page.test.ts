@@ -19,6 +19,7 @@ const info: SettingsInfo = {
 };
 const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
   section: "general", query: "", mac: true, glass: true, desktop: true, home: info.home, info, error: "", fold: "",
+  browser: { project: "slowpour", root: "/Users/mike/projects/slowpour", data: null, picked: [], busy: "", said: "" },
   general: { openOn: "home", awake: true },
   notify: { wait: true, error: true, drive: true, done: false, social: true },
   appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral", activityBorder: true },
@@ -81,7 +82,7 @@ test("numbers are typed as you would say them", () => {
 });
 
 test("every section draws, in four categories with Overview first (pass 207)", () => {
-  expect(SETTINGS_ORDER).toEqual(["overview", "general", "notifications", "appearance", "keys", "models", "providers", "agents", "permissions", "drive", "connectors", "usage", "archived", "data"]);
+  expect(SETTINGS_ORDER).toEqual(["overview", "general", "notifications", "appearance", "keys", "models", "providers", "agents", "permissions", "drive", "connectors", "browser", "usage", "archived", "data"]);
   for (const section of SETTINGS_ORDER) expect(settingsPage(view({ section }))).toContain('class="cp-title"');
   expect(settingsPage(view({ section: "providers" }))).toContain('<h1 class="cp-title">Accounts</h1>');
   expect(settingsPage(view({ section: "heartbeat" }))).toContain('<h1 class="cp-title">Connections</h1>');
@@ -325,4 +326,24 @@ test("Settings › Agents › Models: each agent's model, and Codex's thinking, 
   expect(open).toContain(h('{"agent":"codex","model":"","effort":"high"}'));
   expect(open).toMatch(/st-choice on" aria-pressed="true" data-action="agent-model" data-args="[^"]*gpt-5.5[^"]*high/);
   expect(open).toContain(h('{"agent":"codex","model":"gpt-5.5","effort":""}'));
+});
+
+test("Settings › Browser lists the sites to bring in, greys out email and money, and lists what the project has", () => {
+  const data = {
+    sources: [{ id: "chrome", label: "Chrome", state: "ready" as const }, { id: "firefox", label: "Firefox", state: "ready" as const }, { id: "safari", label: "Safari", state: "disk" as const }],
+    from: "chrome", kept: [{ site: "github.com", from: "chrome", at: Date.now() }],
+    sites: [{ site: "vercel.com", lastUsed: Date.now(), cookies: 4 }, { site: "github.com", lastUsed: Date.now(), cookies: 9 }, { site: "chase.com", lastUsed: Date.now(), cookies: 3, never: true as const }],
+  };
+  const html = settingsPage(view({ section: "browser", browser: { project: "slowpour", root: "/Users/mike/projects/slowpour", data, picked: ["vercel.com"], busy: "", said: "" } }));
+  expect(html).toContain("Signed in, in Chrome");
+  expect(html).toContain("Bring in 1 sign-in");
+  expect(html).toContain('data-action="signins-bring"');
+  // A site already in the project isn't offered again; it is listed with Remove.
+  expect(html).not.toContain("Bring in github.com");
+  expect(html).toContain('data-action="signins-remove"');
+  // Email and money show, with no switch.
+  expect(html).toContain("Email and money sites never come in");
+  expect(html).not.toContain("Bring in chase.com");
+  expect(html).toContain("Full Disk Access");
+  expect(settingsPage(view({ section: "browser", browser: { project: "", root: null, data: null, picked: [], busy: "", said: "" } }))).toContain("Open a project first");
 });

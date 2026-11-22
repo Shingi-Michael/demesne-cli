@@ -64,7 +64,7 @@ import { deferredChanges } from "./display-runs.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
-import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
+import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type BrowserSigninsView, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import type { ChatCache, FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, Routine } from "@demesne/protocol";
 import { cacheHalfHTML } from "./cache-line.ts";
@@ -4442,6 +4442,22 @@ async function editCustomizable(path: string) {
 /// Settings: the section shown, the search, the row whose words are unfolded,
 /// and what the host read from config.toml and the daemon.
 const settingsUi = { section: "overview" as SettingsSection, query: "", fold: "", error: "" };
+/// Settings › Browser (pass 261 A): sign-ins from your other browsers, for the project open now.
+const signins = { root: "", from: "", data: null as BrowserSigninsView["data"], picked: [] as string[], busy: "" as BrowserSigninsView["busy"], said: "" };
+const signinsRoot = () => { const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace || ""; return isPlain() || !here ? "" : here; };
+async function loadSignins(from?: string) {
+  const root = signinsRoot();
+  if (root !== signins.root) Object.assign(signins, { root, data: null, picked: [], said: "", from: "" });
+  if (!root) return renderPage();
+  signins.busy = "list"; renderPage();
+  try {
+    signins.data = await api<NonNullable<BrowserSigninsView["data"]>>("browser-signins", { root, ...(from ?? signins.from ? { from: from ?? signins.from } : {}) });
+    signins.from = signins.data.from ?? "";
+    // The sites you ticked stay ticked while they are still there to bring.
+    signins.picked = signins.picked.filter((site) => signins.data!.sites.some((one) => one.site === site && !one.never));
+  } catch (error) { signins.data = { sources: [], from: null, sites: [], kept: [], error: error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error) }; }
+  signins.busy = ""; renderPage();
+}
 let googleAIForm: GoogleAIForm | null = null;
 function clearGoogleAIForm() {
   if (!googleAIForm) return;
@@ -4543,6 +4559,7 @@ function settingsView(): SettingsView {
     chats: { here: s.sessions.filter((item) => item.workspace === here && item.turns).length, all: s.sessions.filter((item) => item.turns).length },
     online: s.connection === "online",
     plans: [...planLimits].sort((a, b) => Number(b.provider === s.model.provider) - Number(a.provider === s.model.provider)),
+    browser: { project: signins.root ? projectLabel(signins.root) : "", root: signins.root || null, data: signins.data, picked: signins.picked, busy: signins.busy, said: signins.said },
   };
 }
 /// The sidebar holds Settings' list while it is open; the search keeps the
@@ -4568,6 +4585,7 @@ function settingsSection(id: SettingsSection) {
   const search = document.getElementById("settings-search") as HTMLInputElement | null;
   if (search) search.value = "";
   if (id === "overview" || id === "permissions" || id === "data") loadSettings();
+  if (id === "browser") void loadSignins();
   renderPage();
   document.getElementById("page")?.scrollTo?.({ top: 0 });
 }
@@ -7137,6 +7155,24 @@ async function dispatch(
     return renderPage();
   }
   if (action === "notify-kind") { setNotifyKind(args.kind as NotifyKind, args.on === true); return renderPage(); }
+  if (action === "signins-from") { signins.picked = []; signins.said = ""; return loadSignins(String(args.from)); }
+  if (action === "signins-pick") { const site = String(args.site); signins.picked = signins.picked.includes(site) ? signins.picked.filter((one) => one !== site) : [...signins.picked, site]; signins.said = ""; return renderPage(); }
+  if (action === "signins-bring") {
+    if (!signins.picked.length || !signins.from || signins.busy) return;
+    signins.busy = "bring"; signins.said = ""; renderPage();
+    try {
+      const done = await api<{ set: number; sites: string[] }>("browser-signins-bring", { root: signins.root, from: signins.from, sites: signins.picked });
+      signins.picked = [];
+      signins.said = `Brought in ${done.sites.length} ${done.sites.length === 1 ? "site" : "sites"}: ${done.sites.join(", ")}`;
+    } catch (error) { signins.said = `!${error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error)}`; }
+    signins.busy = "";
+    return loadSignins();
+  }
+  if (action === "signins-remove") {
+    try { await api("browser-signins-remove", { root: signins.root, site: String(args.site) }); }
+    catch (error) { settingsUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error); }
+    return loadSignins();
+  }
   // A setting changes in place; the page stays to show it took.
   if (action === "settings-set") {
     const result = await api<{ zoom?: number } | null>(String(args.method), args.args ?? {});

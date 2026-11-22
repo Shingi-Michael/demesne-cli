@@ -456,6 +456,36 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     return session;
   }
 
+  /// Sign-ins from your other browsers go straight into a project's kept profile, the one its chats share.
+  async function signins(command: Command): Promise<Record<string, unknown>> {
+    const partition = browserPartition("", command.profile, kept);
+    if (!partition.startsWith("persist:")) return { error: "Sign-ins are kept only for a project." };
+    const session = await keptSession(partition);
+    if (command.action === "cookies_remove") {
+      const sites = Array.isArray(command.sites) ? command.sites.filter((one): one is string => typeof one === "string" && one.length > 0) : [];
+      let removed = 0;
+      for (const cookie of await session.cookies.get({})) {
+        const host = (cookie.domain ?? "").replace(/^\./, "");
+        if (!sites.some((site) => host === site || host.endsWith(`.${site}`))) continue;
+        await session.cookies.remove(`${cookie.secure ? "https" : "http"}://${host}${cookie.path ?? "/"}`, cookie.name).catch(() => {});
+        removed++;
+      }
+      await session.cookies.flushStore().catch(() => {});
+      return { removed };
+    }
+    const cookies = Array.isArray(command.cookies) ? command.cookies.slice(0, 5000) as Record<string, unknown>[] : [];
+    let set = 0;
+    for (const cookie of cookies) {
+      if (typeof cookie.url !== "string" || typeof cookie.name !== "string" || typeof cookie.value !== "string" || !/^https?:\/\//.test(cookie.url)) continue;
+      const sameSite = cookie.sameSite === "lax" || cookie.sameSite === "strict" || cookie.sameSite === "no_restriction" ? cookie.sameSite : undefined;
+      // A cookie with SameSite=None must be secure, or Chromium refuses it.
+      const ok = await session.cookies.set({ url: cookie.url, name: cookie.name, value: cookie.value, ...(typeof cookie.domain === "string" ? { domain: cookie.domain } : {}), path: typeof cookie.path === "string" ? cookie.path : "/", secure: cookie.secure === true, httpOnly: cookie.httpOnly === true, ...(typeof cookie.expirationDate === "number" ? { expirationDate: cookie.expirationDate } : {}), ...(sameSite && !(sameSite === "no_restriction" && cookie.secure !== true) ? { sameSite } : {}) }).then(() => true, () => false);
+      if (ok) set++;
+    }
+    await session.cookies.flushStore().catch(() => {});
+    return { set };
+  }
+
   /// Watches what this computer's page asks its server, so the model can read an answer (`requests`, `response`).
   /// Requests are followed only on this computer's own pages, where the model may read them: a public
   /// site makes hundreds, and each would cross into this process for nothing.
@@ -782,6 +812,8 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
   const line = (text: string) => {
       let command: Command;
       try { command = JSON.parse(text) as Command; } catch { return; }
+      // Sign-ins brought in from your other browsers (pass 261 A): into a project's kept profile, or taken out of it.
+      if (command.action === "cookies_set" || command.action === "cookies_remove") { void signins(command).then((result) => answer(command.id, result), (error) => answer(command.id, { error: error instanceof Error ? error.message : String(error) })); return; }
       const id = String(command.chat ?? "");
       if (!id) { answer(command.id, { error: "chat is required" }); return; }
       let chat = chats.get(id);

@@ -437,7 +437,7 @@ export class DemesneClient {
   }
   /// The chat's browser, beside it (pass 248 D): the newest picture after `after` (waits up to 1.5 s for one).
   async browserFrame(sessionId: string, after: number, aspect?: number, dark?: boolean, box?: { width: number; dpr: number }): Promise<{ seq: number; jpeg?: string; width?: number; height?: number; url?: string; title?: string; handover?: boolean; asked?: string; held?: "model" | "person";
-    tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; live?: boolean; visits?: { seq: number; url: string; title: string; tab: number }[] }> {
+    tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; loading?: boolean; live?: boolean; visits?: { seq: number; url: string; title: string; tab: number }[] }> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/frame?after=${Math.max(0, Math.floor(after))}${aspect ? `&aspect=${aspect.toFixed(3)}` : ""}${dark === undefined ? "" : `&dark=${dark ? 1 : 0}`}${box ? `&w=${Math.round(box.width)}&dpr=${box.dpr}` : ""}`);
   }
   /// Your clicks and keys on a page the model handed you.
@@ -449,8 +449,8 @@ export class DemesneClient {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/take`, { method: "POST", body: "{}" });
   }
   /// Your own address, or back, forward, reload, while the page is yours.
-  async browserGo(sessionId: string, to: string): Promise<{ ok: boolean; url?: string }> {
-    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/go`, { method: "POST", body: JSON.stringify({ to }) });
+  async browserGo(sessionId: string, to: string, newTab = false): Promise<{ ok: boolean; url?: string }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/go`, { method: "POST", body: JSON.stringify({ to, ...(newTab ? { newTab: true } : {}) }) });
   }
   /// A page it went to, kept small.
   async browserVisit(sessionId: string, seq: number): Promise<{ seq: number; url: string; title: string; tab: number; jpeg: string }> {

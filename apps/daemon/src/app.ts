@@ -1760,7 +1760,8 @@ export function createDaemonApp(options: {
           catch (error) { return apiError("invalid_request", error instanceof Error ? error.message.replace(/^\[[A-Z_]+\]\s*/, "") : String(error), 400); }
           const site = browserSiteKey({ action: "open", url: address });
           if (site) { try { await assertPublic(new URL(address), options.resolveHost ?? (async (host) => (await import("node:dns/promises").then((dns) => dns.lookup(host, { all: true }))).map((entry) => entry.address))); } catch { return apiError("invalid_request", "That address is on your local network; the browser opens this computer and public sites", 400); } }
-          const reply = await browser(chat, { action: "go", url: address, ...(site ? { site } : {}) }, request.signal);
+          // A new tab you opened goes there in a tab of its own; the page it was opened over stays.
+          const reply = await browser(chat, { action: "go", url: address, ...(site ? { site } : {}), ...(isRecord(body) && body.newTab === true ? { new_tab: true } : {}) }, request.signal);
           return reply && typeof reply.error !== "string" ? json({ ok: true, url: reply.url }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
         }
         if (request.method === "POST" && path[4] === "input") {

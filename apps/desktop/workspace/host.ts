@@ -2291,7 +2291,7 @@ export class WorkspaceHost {
     if (method === "browser-input") return this.client.browserInput(String(args.sessionId), Array.isArray(args.events) ? args.events.slice(0, 40) : []);
     if (method === "browser-hand-back") return this.client.browserHandBack(String(args.sessionId));
     if (method === "browser-take") return this.client.browserTake(String(args.sessionId));
-    if (method === "browser-go") return this.client.browserGo(String(args.sessionId), string(args.to, "address", 2000));
+    if (method === "browser-go") return this.client.browserGo(String(args.sessionId), string(args.to, "address", 2000), args.newTab === true);
     if (method === "browser-visit") {
       const { jpeg, ...rest } = await this.client.browserVisit(String(args.sessionId), Number(args.seq) || 0);
       return { ...rest, src: `data:image/jpeg;base64,${jpeg}` };

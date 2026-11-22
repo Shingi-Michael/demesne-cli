@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { earlierPages, handOverAsk, keyInputs, pagePoint, ringSpot, splitFoot, splitOpen, splitWidth, tabName } from "../browser-split.ts";
+import { earlierPages, handOverAsk, keyInputs, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName } from "../browser-split.ts";
 
 // Pass 248 D: the chat's browser beside the chat. When it opens, where a click
 // lands on the page, and which keys reach a page that is yours.
@@ -51,12 +51,20 @@ test("the browser side keeps room for a page and for the chat", () => {
   expect(splitWidth(700, 1400)).toBe(700);
 });
 
-test("the line under the page says what is happening, and what is asked of you", () => {
-  expect(splitFoot({ reason: "Sign in to the admin" }, null, true)).toEqual({ tone: "ask", words: "Sign in to the admin, then go back to the chat. The model can't see what you type." });
-  expect(splitFoot(null, "Clicked “Pay”", true)).toEqual({ tone: "now", words: "Clicked “Pay”" });
-  expect(splitFoot(null, null, true).tone).toBe("");
+test("the bar says what the model is doing at the end of the address, and nothing once it is done", () => {
+  expect(splitDoing({ reason: "Sign in to the admin" }, null)).toEqual({ tone: "ask", words: "Sign in to the admin, then go back to the chat" });
+  expect(splitDoing(null, "Clicked “Pay”")).toEqual({ tone: "now", words: "Clicked “Pay”" });
+  expect(splitDoing(null, null)).toBeNull();
   // A page you took yourself: the model waits for you.
-  expect(splitFoot(null, "Clicked “Pay”", true, true)).toEqual({ tone: "ask", words: "The page is yours. Go back to the chat to give it to the model." });
+  expect(splitDoing(null, "Clicked “Pay”", true)).toEqual({ tone: "mine", words: "Yours · the model waits" });
+});
+
+test("only a web address opens in your own browser", () => {
+  expect(openableOutside("https://slowpour.test/checkout")).toBe(true);
+  expect(openableOutside("http://localhost:5173/")).toBe(true);
+  expect(openableOutside("about:blank")).toBe(false);
+  expect(openableOutside("")).toBe(false);
+  expect(openableOutside(undefined)).toBe(false);
 });
 
 test("a ring shows where the model clicked, only while fresh", () => {

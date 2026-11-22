@@ -206,7 +206,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     write({ event: "frame", chat: tab.chat.id, at: Date.now(), jpeg, ...(inApp ? { live: true } : {}), width: view.width, height: Math.round(view.width * ratio),
       url: contents.getURL(), title: contents.getTitle(), handover: tab.chat.held, tabs: tabList(tab.chat),
       ...(tab.pointer ? { pointer: { x: tab.pointer.x, y: tab.pointer.y, ago: Date.now() - tab.pointer.at } } : {}),
-      back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward() });
+      back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward(), ...(contents.isLoading() ? { loading: true } : {}) });
   };
   /// The page streams its own pictures while watched: Chromium draws them small and as JPEG itself, off
   /// this process, and sends the next only once the last is taken, so a busy page can't pile them up.
@@ -586,7 +586,9 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       if (!chat.tabs.size) return { closed: true, tabs: [] };
     }
     let tab = activeTab(chat);
-    if (action === "open") {
+    // The person's own new tab, from the bar while the page is theirs.
+    const ownNewTab = action === "go" && command.new_tab === true && typeof command.url === "string" && chat.held;
+    if (action === "open" || ownNewTab) {
       const fresh = command.new_tab === true || !tab || (command.width !== undefined && tab.width !== width);
       if (fresh && chat.tabs.size >= MAX_TABS) return { error: `This chat already has ${MAX_TABS} tabs; close one first.` };
       if (tab && fresh && command.new_tab !== true) { tab.win.destroy(); chat.tabs.delete(tab.n); }

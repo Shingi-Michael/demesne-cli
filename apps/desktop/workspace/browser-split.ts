@@ -2,7 +2,8 @@
 /// chat on the left, the model's own browser on the right, live. It opens by
 /// itself the first time a turn browses, or when you click a browser step, and
 /// stays until you close it with ×. When the model hands the page over (a
-/// sign-in), your clicks and keys go to the page until you go back to the chat. Scrolling or clicking the page takes it any time.
+/// sign-in), your clicks and keys go to the page until you go back to the chat. Scrolling or clicking the page takes it any time,
+/// and so does any button in its bar (back, forward, reload, the address, a new tab).
 /// Pure parts here; live.ts draws it and runs the picture loop.
 
 export interface SplitTool { name: string; input: Record<string, unknown>; state: string; toolCallId: string }
@@ -64,13 +65,17 @@ export function keyInputs(event: KeyLike): KeyInput[] {
 export const SPLIT_MIN = 360, CHAT_MIN = 380;
 export const splitWidth = (wanted: number, total: number) => Math.round(Math.max(SPLIT_MIN, Math.min(Math.max(SPLIT_MIN, total - CHAT_MIN), wanted)));
 
-/// The line under the page. `took` is true while you hold a page the model did not ask for.
-export function splitFoot(ask: { reason: string } | null, working: string | null, hasPage: boolean, took = false): { tone: "ask" | "now" | ""; words: string } {
-  if (ask) return { tone: "ask", words: `${ask.reason}, then go back to the chat. The model can't see what you type.` };
-  if (took) return { tone: "ask", words: "The page is yours. Go back to the chat to give it to the model." };
+/// What the model is doing, as a few words at the end of the address (pass 256). Nothing once it is done:
+/// the bar is then just a browser bar. `took` is true while you hold a page the model did not ask for.
+export function splitDoing(ask: { reason: string } | null, working: string | null, took = false): { tone: "ask" | "mine" | "now"; words: string } | null {
+  if (ask) return { tone: "ask", words: `${ask.reason}, then go back to the chat` };
+  if (took) return { tone: "mine", words: "Yours · the model waits" };
   if (working) return { tone: "now", words: working };
-  return { tone: "", words: hasPage ? "The model is done with this page. Scroll or click it to use it, or close it with ×." : "The page shows here once the model opens one." };
+  return null;
 }
+
+/// The page's address can open in your own browser only when it is a web address.
+export const openableOutside = (url: string | undefined) => /^https?:\/\//i.test(url ?? "");
 
 /// Where the model last clicked or typed, as a share of the page, while it is fresh.
 export const RING_MS = 1600;

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { BrowserHandovers, browserTool, electronBrowser as hiddenOrInApp } from "../apps/daemon/src/browser.ts";
+import { BrowserHandovers, browserProfile, browserTool, electronBrowser as hiddenOrInApp } from "../apps/daemon/src/browser.ts";
 
 const root = resolve(import.meta.dir, "..");
 const electron = process.env.DEMESNE_ELECTRON ?? join(root, "node_modules/electron/dist", process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron");
@@ -346,6 +346,14 @@ try {
   more = electronBrowser(command, profile);
   await moreCall({ action: "open", url: `${base}/session` }, "chat-m2");
   assert.match((await moreCall({ action: "text" }, "chat-m2")).text, /Session kept/, "a session sign-in lasts after a restart");
+  // Sign-ins brought in from another browser land in the project's profile, and come out again (pass 261 A).
+  const key = browserProfile(project)!, host = new URL(base).hostname, signal = new AbortController().signal;
+  assert.equal((await more("signins", { action: "cookies_set", profile: key, cookies: [{ url: `${base}/`, name: "visit", value: "brought", path: "/", secure: false, httpOnly: false, expirationDate: Date.now() / 1000 + 3600 }] }, signal))?.set, 1);
+  await moreCall({ action: "open", url: `${base}/session` }, "chat-m3");
+  assert.match((await moreCall({ action: "text" }, "chat-m3")).text, /Session brought/, "a brought-in sign-in reaches the project's pages");
+  assert((Number((await more("signins", { action: "cookies_remove", profile: key, sites: [host] }, signal))?.removed) || 0) >= 1);
+  await moreCall({ action: "reload" }, "chat-m3");
+  assert.match((await moreCall({ action: "text" }, "chat-m3")).text, /Session none/, "a removed sign-in is gone");
   more.close();
   console.log(`check-browser tabs, files, answers, styles and taking over passed in ${Date.now() - started}ms`);
 } finally { server.stop(true); await closeApp(); setTimeout(() => { for (const one of [project, profile]) try { rmSync(one, { recursive: true, force: true }); } catch {} }, 2200); }

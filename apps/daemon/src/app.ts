@@ -20,7 +20,8 @@ import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } fro
 import { foundryBuiltTool } from "./foundry-built.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
-import { browserAddress, BrowserHandovers, browserTool, electronBrowser, type BrowserDriver, type WatchableBrowser } from "./browser.ts";
+import { browserAddress, BrowserHandovers, browserProfile, browserTool, electronBrowser, type BrowserDriver, type WatchableBrowser } from "./browser.ts";
+import { isSigninSource, signinCookies, signinLabel, SigninRecord, signinSites, signinSources, type KeyReader, type SigninWhere } from "./browser-signins.ts";
 import { openTool, showTool } from "./open-show.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
@@ -170,6 +171,9 @@ export interface DaemonApp {
 
 export function createDaemonApp(options: {
   databasePath: string;
+  /// Tests: whose home to look for browsers in, and the key that unlocks Chromium cookies.
+  signinWhere?: SigninWhere;
+  signinKey?: KeyReader;
   /// Provider ids served from your own machines (loopback, private or
   /// Tailscale addresses), so the model scoreboard can mark local models.
   localProviders?: string[];
@@ -418,6 +422,7 @@ export function createDaemonApp(options: {
   // Its sign-ins are kept per project, beside the database (pass 248 D).
   const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith, join(dirname(options.databasePath), "browser-profile"), options.desktopBrowser) : null;
   const browser = options.browser === false ? null : options.browser ?? ownBrowser;
+  const signinRecord = new SigninRecord(join(dirname(options.databasePath), "browser-signins.json"));
   const handovers = new BrowserHandovers();
   if (browser) tools.register(browserTool(browser, undefined, undefined, handovers));
   // You scrolled, clicked or typed on the chat's page: it is yours, and the model's next browser step waits for you.
@@ -1261,6 +1266,42 @@ export function createDaemonApp(options: {
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start", 409); }
       }
       // The folders you trust, for Settings; Drive's own worktrees stay out of it.
+      // Sign-ins from your other browsers, for one project's browser (pass 261 A).
+      if (url.pathname === "/v1/browser/signins" || url.pathname === "/v1/browser/signins/remove") {
+        const body = request.method === "POST" ? await readJson(request) : null;
+        const root = request.method === "GET" ? url.searchParams.get("root") : isRecord(body) && typeof body.root === "string" ? body.root : null;
+        const profile = root && isAbsolute(root) ? browserProfile(root) : undefined;
+        if (!profile) return apiError("invalid_request", "Open a project to bring sign-ins into it", 400);
+        const where = options.signinWhere, sources = signinSources(where);
+        if (request.method === "GET") {
+          const asked = url.searchParams.get("from"), from = sources.find((one) => one.id === asked && one.state === "ready") ?? sources.find((one) => one.state === "ready");
+          let sites: ReturnType<typeof signinSites> = [], error = "";
+          if (from) { try { sites = signinSites(from.id, where); } catch (failure) { error = failure instanceof Error ? failure.message : String(failure); } }
+          return json({ sources, from: from?.id ?? null, sites, kept: signinRecord.list(profile), ...(error ? { error } : {}) });
+        }
+        if (!browser) return apiError("invalid_state", "There is no browser on this computer", 409);
+        if (url.pathname.endsWith("/remove")) {
+          const site = isRecord(body) && typeof body.site === "string" ? body.site.trim().toLowerCase() : "";
+          if (!site) return apiError("invalid_request", "Say which site", 400);
+          const reply = await browser("signins", { action: "cookies_remove", profile, sites: [site] }, request.signal);
+          if (!reply || typeof reply.error === "string") return apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
+          signinRecord.remove(profile, site);
+          return json({ removed: Number(reply.removed) || 0, kept: signinRecord.list(profile) });
+        }
+        const from = isRecord(body) ? body.from : undefined;
+        const sites = isRecord(body) && Array.isArray(body.sites) ? body.sites.filter((one): one is string => typeof one === "string").slice(0, 60) : [];
+        if (!isSigninSource(from) || !sources.some((one) => one.id === from && one.state === "ready")) return apiError("invalid_request", "That browser's sign-ins can't be read here", 400);
+        if (!sites.length) return apiError("invalid_request", "Pick at least one site", 400);
+        let cookies: Awaited<ReturnType<typeof signinCookies>>;
+        try { cookies = await signinCookies(from, sites, { ...(where ? { where } : {}), ...(options.signinKey ? { key: options.signinKey } : {}) }); }
+        catch (failure) { return apiError("invalid_state", failure instanceof Error ? failure.message : String(failure), 409); }
+        const brought = [...new Set(cookies.map((cookie) => sites.find((site) => { const host = (cookie.domain ?? new URL(cookie.url).hostname).replace(/^\./, ""); return host === site || host.endsWith(`.${site}`); })).filter((one): one is string => Boolean(one)))];
+        if (!cookies.length) return apiError("invalid_state", `No sign-ins to bring in from ${signinLabel(from)} for those sites`, 409);
+        const reply = await browser("signins", { action: "cookies_set", profile, cookies }, request.signal);
+        if (!reply || typeof reply.error === "string") return apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
+        signinRecord.add(profile, from, brought);
+        return json({ set: Number(reply.set) || 0, sites: brought, kept: signinRecord.list(profile) });
+      }
       if (request.method === "GET" && url.pathname === "/v1/trusted") {
         return json({ trusted: trustedRoots() } satisfies TrustedResponse);
       }

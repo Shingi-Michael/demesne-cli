@@ -2291,6 +2291,9 @@ export class WorkspaceHost {
     if (method === "browser-input") return this.client.browserInput(String(args.sessionId), Array.isArray(args.events) ? args.events.slice(0, 40) : []);
     if (method === "browser-hand-back") return this.client.browserHandBack(String(args.sessionId));
     if (method === "browser-take") return this.client.browserTake(String(args.sessionId));
+    if (method === "browser-signins") return this.client.browserSignins(string(args.root, "project", 4000), typeof args.from === "string" ? args.from : undefined);
+    if (method === "browser-signins-bring") return this.client.browserSigninsBring(string(args.root, "project", 4000), string(args.from, "browser", 40), Array.isArray(args.sites) ? args.sites.filter((one): one is string => typeof one === "string").slice(0, 60) : []);
+    if (method === "browser-signins-remove") return this.client.browserSigninsRemove(string(args.root, "project", 4000), string(args.site, "site", 300));
     if (method === "browser-go") return this.client.browserGo(String(args.sessionId), string(args.to, "address", 2000), args.newTab === true);
     // A picture a tool took this chat (look_at_page), for its step in the turn.
     if (method === "tool-picture") {

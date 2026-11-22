@@ -109,6 +109,33 @@ try {
   await open.getByRole("button", { name: "Show the page" }).click();
   await open.locator(".fd-stage").waitFor();
 
+  // Compare (step 4): v1 lies over v2, cut by a line you drag; nothing plays; then back.
+  await open.getByRole("button", { name: "Compare with v1" }).click();
+  const wipe = open.locator(".fd-wipe");
+  await wipe.waitFor();
+  assert.match((await wipe.locator(".fd-wipe-after iframe").getAttribute("src"))!, new RegExp(`${mockup.id}\\?v=2&`));
+  assert.match((await wipe.locator(".fd-wipe-before iframe").getAttribute("src"))!, new RegExp(`${mockup.id}\\?v=1&`));
+  const bar = wipe.locator(".fd-wipe-bar"), box = (await wipe.boundingBox())!;
+  await step(108, async () => (await bar.boundingBox()) !== null);
+  const grip = (await bar.boundingBox())!;
+  const y = Math.min(Math.max(box.y, 0) + 200, 700);
+  await page.mouse.move(grip.x + grip.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.25, y, { steps: 6 });
+  await page.mouse.up();
+  const cut = Number(await bar.getAttribute("aria-valuenow"));
+  assert.ok(Math.abs(cut - 25) <= 2, `the line follows the drag (${cut}%)`);
+  await bar.press("End");
+  assert.equal(await bar.getAttribute("aria-valuenow"), "100");
+  await bar.press("ArrowLeft");
+  assert.equal(await bar.getAttribute("aria-valuenow"), "95");
+  await page.waitForTimeout(1200);
+  await bar.press("Home"); await bar.press("ArrowRight"); await bar.press("ArrowRight"); await bar.press("ArrowRight"); await bar.press("ArrowRight"); await bar.press("ArrowRight"); await bar.press("ArrowRight");
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(output, "foundry-compare.png") });
+  await open.getByRole("button", { name: "Stop comparing" }).click();
+  await step(124, async () => await open.locator(".fd-wipe").count() === 0);
+
   // It works: a click moves the order along in the page.
   await step(104, async () => !!frameAt(2) && await frameAt(2)!.evaluate(() => !!document.querySelector(".card")).catch(() => false));
   await frameAt(2)!.evaluate(() => (document.querySelector(".card") as HTMLElement).click());

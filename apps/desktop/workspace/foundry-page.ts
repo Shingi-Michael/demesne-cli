@@ -48,10 +48,10 @@ const GROW_START = 480;
 /// only to fit), on its backdrop; and, when it has a demo or is a deck, the
 /// quiet line under it that the demo's words appear in. Without a surface it
 /// is the plain stage it always was.
-export function stageHTML(artifact: Pick<FoundryArtifact, "id" | "title" | "kind">, version: Pick<FoundryShelfVersion, "version" | "createdAt" | "stage">, first = false, edit = false) {
+export function stageHTML(artifact: Pick<FoundryArtifact, "id" | "title" | "kind">, version: Pick<FoundryShelfVersion, "version" | "createdAt" | "stage">, first = false, edit = false, still = edit) {
   const inner = frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt, first, edit);
-  // While you edit it, nothing plays on it.
-  const demo = !edit && version.stage?.demo?.length ? version.stage.demo : null, deck = !edit && artifact.kind === "deck";
+  // While you edit it or compare it, nothing plays on it.
+  const demo = !still && version.stage?.demo?.length ? version.stage.demo : null, deck = !still && artifact.kind === "deck";
   const plays = `${demo ? ` data-demo="${h(JSON.stringify(demo))}"` : ""}${deck ? " data-deck" : ""}`;
   const line = demo || deck ? '<p class="fd-demo" aria-live="polite"></p>' : "";
   const surface = version.stage?.surface && artifact.kind !== "svg" ? drawnSurface(version.stage.surface) : null;
@@ -96,6 +96,20 @@ export interface FoundryOpen {
   /// its text editable; `source` is the content with your changes so far,
   /// `base` the version they apply to, kept as a new version on Done.
   editing?: { source: string; base: number; changes: number } | null;
+  /// Step 4, compare: the version before the one shown lies over it, cut
+  /// by a line you drag, so what changed shows where it changed.
+  compare?: boolean;
+}
+
+/// The version before `shown` among an artifact's versions (oldest first), if any.
+export const earlierOf = (all: readonly number[], shown: number) => { const at = all.indexOf(shown); return at > 0 ? all[at - 1] : undefined; };
+
+/// Step 4: the shown version with the one before it laid over it, cut at
+/// the middle by a line you drag (live.ts moves it in place). Neither plays.
+export function wipeHTML(before: string, after: string, was: number, now: number) {
+  return `<div class="fd-wipe" style="--wipe:50%"><div class="fd-wipe-after">${after}</div><div class="fd-wipe-before">${before}</div>`
+    + `<div class="fd-wipe-bar" role="slider" tabindex="0" aria-label="${h(`Drag to compare v${was} and v${now}`)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">`
+    + `<span class="fd-wipe-tag was">v${was}</span><span class="fd-wipe-tag now">v${now}</span></div></div>`;
 }
 
 /// The kinds you can edit in place: the ones Demesne draws from content.
@@ -105,6 +119,7 @@ export const EDIT_KINDS = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
 export const versionsOf = (versions: readonly FoundryShelfVersion[], id: string) =>
   versions.filter((item) => item.artifactId === id).map((item) => item.version).sort((a, b) => a - b);
 
+const COMPARE = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 3v18"/><path d="M7 12h2M15 12h2" />';
 const PENCIL = '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>';
 
 /// The head line of the opened mockup (pass 262 C): the versions to step
@@ -113,7 +128,7 @@ export function openHead(open: FoundryOpen, all: readonly number[], kind?: Found
   const at = all.indexOf(open.shown), earlier = at > 0 ? all[at - 1] : undefined, later = at >= 0 && at < all.length - 1 ? all[at + 1] : undefined;
   const ico = (action: string, args: Record<string, unknown>, paths: string, label: string, extra = "") =>
     `<button type="button" class="fd-hd-b" data-action="${action}" data-args="${h(JSON.stringify(args))}" aria-label="${h(label)}" title="${h(label)}"${extra}>${icon(paths)}</button>`;
-  const editing = !!open.editing;
+  const editing = !!open.editing, compare = !!open.compare && earlier !== undefined;
   const step = (version: number | undefined, paths: string, label: string) => version === undefined || editing
     ? `<button type="button" class="fd-hd-b" disabled aria-label="${h(label)}">${icon(paths)}</button>`
     : ico("foundry-shown", { version }, paths, `${label} (v${version})`);
@@ -124,7 +139,10 @@ export function openHead(open: FoundryOpen, all: readonly number[], kind?: Found
     + step(later, '<path d="m10 6 6 6-6 6"/>', "Later version")
     + '<i class="fd-hd-sep" aria-hidden="true"></i>'
     // Step 3: a deck, doc or dashboard's text, edited where it sits (its newest version only).
-    + (kind && EDIT_KINDS.has(kind) && !code
+    // Step 4: lay the version before over this one, cut by a line you drag.
+    + (editing || code ? "" : earlier === undefined ? `<button type="button" class="fd-hd-b" disabled aria-label="Nothing earlier to compare with" title="Nothing earlier to compare with">${icon(COMPARE)}</button>`
+      : ico("foundry-compare", {}, COMPARE, compare ? "Stop comparing" : `Compare with v${earlier}`, ` aria-pressed="${compare}"`))
+    + (kind && EDIT_KINDS.has(kind) && !code && !compare
       ? open.shown !== all.at(-1) ? `<button type="button" class="fd-hd-b" disabled aria-label="Edit the newest version" title="Edit the newest version">${icon(PENCIL)}</button>`
         : ico("foundry-edit", {}, editing ? '<path d="m5 12.5 4.5 4.5L19 7.5"/>' : PENCIL, editing ? "Done editing" : "Edit the text", ` aria-pressed="${editing}"`)
       : "")
@@ -216,7 +234,11 @@ export function foundryPage(view: FoundryView) {
     const taste = why?.followed && !/^none\b/i.test(why.followed) ? why.followed : "";
     const reasons = why ? ([["Direction", why.direction], ["Look at", why.look], ["Dropped", why.dropped], ["Your taste", taste]] as const).filter(([, text]) => text) : [];
     const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
-    const body = open && open.code !== undefined
+    const before = open?.compare && open.code === undefined && !open.editing ? earlierOf(versionsOf(shown, artifact.id), open.shown) : undefined;
+    const beforeSlot = before === undefined ? undefined : shown.find((item) => item.artifactId === artifact.id && item.version === before);
+    const body = beforeSlot
+      ? wipeHTML(stageHTML(artifact, beforeSlot, false, false, true), stageHTML(artifact, version, false, false, true), beforeSlot.version, version.version)
+      : open && open.code !== undefined
       ? `<pre class="fd-code" tabindex="0" aria-label="${h(`${artifact.title} v${version.version}, its code`)}"><code>${open.code === null ? "Reading…" : h(open.code)}</code></pre>`
       : artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
@@ -224,7 +246,7 @@ export function foundryPage(view: FoundryView) {
     // Pass 233 A: notes are pinned to the newest version only (a correction makes the next one), and their quiet line sits under it.
     // A build's record takes none: what to change goes to the code or the mockup.
     const notes = artifact.version === version.version && NOTE_KINDS.has(artifact.kind) && !artifact.built ? '<p class="fd-notes" aria-live="polite" hidden></p>' : "";
-    const notesHere = open && (open.code !== undefined || !!open.editing || version !== slot) ? "" : notes;
+    const notesHere = open && (open.code !== undefined || !!open.editing || !!beforeSlot || version !== slot) ? "" : notes;
     return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");

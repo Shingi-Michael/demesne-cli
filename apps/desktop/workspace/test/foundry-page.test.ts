@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifact } from "@demesne/protocol";
-import { foundryPage, openHead, savedLine, shelfKey, stageHTML } from "../foundry-page.ts";
+import { foundryPage, openHead, savedLine, shelfKey, stageHTML, wipeHTML } from "../foundry-page.ts";
 
 const artifact = (id: string, title: string, kind: FoundryArtifact["kind"] = "html"): FoundryArtifact =>
   ({ id, title, kind, workspace: null, sessionId: "s1", createdAt: "2026-11-07T10:00:00Z", updatedAt: "2026-11-08T10:00:00Z", version: 2, description: "", basedOn: null });
@@ -212,4 +212,18 @@ test("step 3: a deck, doc or dashboard's newest version can be edited in place",
   expect(stage).toContain("&amp;edit=1");
   expect(stage).not.toContain("data-deck");
   expect(stageHTML({ id: "d", title: "Plan", kind: "deck" }, { version: 3, createdAt: "2026-11-22T10:00:00Z", stage: null })).toContain("data-deck");
+});
+
+test("step 4: compare lays the version before over the shown one", () => {
+  const open = { id: "d", at: 2, shown: 2 };
+  expect(openHead(open, [1, 2], "html")).toContain('aria-label="Compare with v1"');
+  expect(openHead({ ...open, shown: 1 }, [1, 2], "html")).toContain('disabled aria-label="Nothing earlier to compare with"');
+  const comparing = openHead({ ...open, compare: true }, [1, 2], "doc");
+  expect(comparing).toContain('aria-label="Stop comparing"');
+  expect(comparing).not.toContain("Edit the text");
+  const wipe = wipeHTML("<i>one</i>", "<i>two</i>", 1, 2);
+  expect(wipe).toContain('class="fd-wipe-before"><i>one</i>');
+  expect(wipe).toContain('role="slider"');
+  expect(wipe).toContain('aria-label="Drag to compare v1 and v2"');
+  expect(stageHTML({ id: "d", title: "Plan", kind: "deck" }, { version: 1, createdAt: "2026-11-22T10:00:00Z", stage: null }, false, false, true)).not.toContain("data-deck");
 });

@@ -34,6 +34,23 @@ The first time a turn uses the browser, the window splits: the chat on the left,
 
 Read more: [Visibility of system status](https://www.nngroup.com/articles/visibility-system-status/) (why showing what the model is doing matters), [offscreen rendering in Electron](https://www.electronjs.org/docs/latest/tutorial/offscreen-rendering) (how a hidden page still paints, and why its frame rate matters), [CDP `Page.startScreencast`](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-startScreencast) (how the page streams its pictures), [`webContents.sendInputEvent`](https://www.electronjs.org/docs/latest/api/web-contents#contentssendinputeventinputevent) (how your clicks and keys reach it), [sessions and `persist:` partitions](https://www.electronjs.org/docs/latest/api/session#sessionfrompartitionpartition-options) (how a project's cookies are kept on disk), and [HTTP cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Cookies) (why a session cookie ends when the browser does, and a persistent one does not).
 
+## The page itself, in the window
+
+While the desktop app is open, the split does not show pictures of the page. It shows the page.
+
+The model's browser used to run only in a hidden copy of the app, which sent the split a stream of small pictures: up to 30 a second, each one compressed, sent through the daemon and drawn again. That is why it could feel slow and soft however much it was tuned. Now, when the app is open, the browser runs inside the app's own window, and each tab is a real page of that window, placed exactly on the split's page area.
+
+- **It is as fast and sharp as any browser.** Scrolling, typing, video and text are drawn by the page itself, at your screen's own sharpness, with nothing in between.
+- **While the page is yours, you use it directly.** Your mouse, wheel and keyboard go straight to the page. Select and copy work as usual.
+- **While the model has it, the page takes no input from you.** A click or a key on it does nothing, and does not take the keyboard from the chat. The model's own clicks and typing go through. **Take over** makes it yours, as before.
+- **Where the model clicks is marked on the page** for a moment, drawn over it without changing it.
+- **The model still drives every chat's page.** A chat that is not on show, or a split you closed with ×, keeps its page open, put away inside the window at the model's own 1280 width. Its sign-ins are the same ones the hidden browser keeps (`browser-profile/`).
+- **The hidden browser is still there** for when the app is not open (the terminal, Drive on a server), and takes over by itself. `DEMESNE_BROWSER=hidden` keeps the old behaviour always.
+
+An earlier page from **Pages** is still a picture. Settings and other pages over the chat put the real page away until you come back.
+
+Read more: [`WebContentsView`](https://www.electronjs.org/docs/latest/api/web-contents-view) (a real page as part of a window), [Chromium's multi-process architecture](https://www.chromium.org/developers/design-documents/multi-process-architecture/) (why each page is its own process, and why streaming pictures between them costs so much), [CDP `Input.setIgnoreInputEvents`](https://chromedevtools.github.io/devtools-protocol/tot/Input/#method-setIgnoreInputEvents) (how the page ignores you while the model has it), and [Unix domain sockets](https://en.wikipedia.org/wiki/Unix_domain_socket) (how the daemon talks to the open app).
+
 ## More of a real browser
 
 - **Where it clicked.** A soft blue ring shows on the page where the model last clicked, hovered or typed, and fades in about a second and a half.
@@ -72,10 +89,12 @@ Each call is an ordinary step: "Opened localhost:5173/login", "Typed “Ada” i
 ## How it is built
 
 - `apps/desktop/electron/browser-host.ts`: the app started as `Demesne --browser-host`. No window, no Dock icon, its own temporary profile. It reads commands as JSON lines on stdin and answers each on stdout, and quits when the daemon closes its input.
+- `apps/desktop/electron/browser-inapp.ts`: the same browser inside the open app's window. The app listens on a socket only you can reach and writes where it is, with a word to say on it, to `~/.demesne/desktop-browser.json`; the daemon connects there instead of starting the hidden copy, and speaks the same lines. `createBrowserHost` in `browser-host.ts` is both browsers: tabs are hidden windows in one and `WebContentsView`s of the app's window in the other. The split tells the app where its page area is (`desktop-browser-place`).
 - `apps/desktop/electron/browser-runtime.ts`: the script put in each page that builds the outline and keeps the numbers (on top of `foundry-try.ts`, which finds controls and says what changed).
 - `apps/daemon/src/browser.ts`: the `browser` tool, and `electronBrowser`, which starts the host on first use and starts it again if it dies.
 - `apps/desktop/workspace/browser-split.ts` and `renderBrowserSplit` in `live.ts`: the split beside the chat, the picture loop (`browser-frame`), and your input while the page is yours (`browser-input`, `browser-take`, `browser-go`, `browser-hand-back`, `browser-visit`). The daemon routes are `GET /v1/sessions/:id/browser/frame` and `…/browser/visit`, and `POST …/browser/take`, `…/go`, `…/input` and `…/hand-back`; input and going somewhere are refused unless the page is yours.
 - `scripts/check-browser.ts`: drives a small local app through the real hidden browser (`xvfb-run -a bun scripts/check-browser.ts` on Linux, after `bun scripts/prepare-desktop.ts`), then watches it, hands it over, and checks that a sign-in is shared by a project's chats and lasts a restart; then popups and tabs, an upload and a download, a server's answer, a control's styles, taking the page and going back, and a session sign-in after a restart.
+- `scripts/check-browser-live.ts`: the real app with the browser in its window; it checks the real page sits exactly on the split, takes your typing, clicks and wheel while it is yours and nothing while it is not, follows the window's size, and is put away under an earlier page's picture and after ×. `CHECK_INAPP=1 xvfb-run -a bun scripts/check-browser.ts` runs every step of the hidden browser's check inside the app's window instead.
 - `scripts/check-browser-scroll.ts`: the real app while a taken page scrolls; the split is photographed throughout and must never be blank between pictures (they are drawn on a canvas once decoded, never swapped as an image's `src`).
 - `scripts/check-browser-split.ts`: the real app with a scripted model that opens a page, hands it over and clicks; it checks the split opens, your click and keys reach the page, the click ring, Hand back, Take over with a typed address, back, an earlier page, and ×.
 

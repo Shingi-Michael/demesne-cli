@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, placeRect, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -159,4 +159,16 @@ test("pages that remember: only a page's own data and ask addresses, and the run
   expect(page.startsWith("<!DOCTYPE html><script>window.__demesnePage={\"id\":\"a1\",\"key\":\"k\\u003c\"};</script><script>window.demesne={}<\\/script></script><html>")).toBe(true);
   expect(withRemember("<p>x</p>", "R")).toBe("<script>R</script><p>x</p>");
   expect(FOUNDRY_KIT["remember.js"]?.path).toBe("kit/remember.js");
+});
+
+test("the browser split's page area becomes a place in the window for the real page", () => {
+  const window = { width: 1440, height: 900 };
+  expect(placeRect({ x: 880.4, y: 86, width: 550, height: 752 }, 1, window)).toEqual({ x: 880, y: 86, width: 550, height: 752 });
+  // The page's own pixels times the app's zoom are the window's points.
+  expect(placeRect({ x: 400, y: 40, width: 300, height: 300 }, 1.5, window)).toEqual({ x: 600, y: 60, width: 450, height: 450 });
+  // Kept inside the window; too small to show, or not a place at all, is nothing.
+  expect(placeRect({ x: 1200, y: 700, width: 600, height: 600 }, 1, window)).toEqual({ x: 1200, y: 700, width: 240, height: 200 });
+  expect(placeRect({ x: 1400, y: 86, width: 500, height: 700 }, 1, window)).toBeNull();
+  expect(placeRect({ x: 0, y: 0, width: Number.NaN, height: 300 }, 1, window)).toBeNull();
+  expect(placeRect(null, 1, window)).toBeNull();
 });

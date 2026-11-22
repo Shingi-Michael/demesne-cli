@@ -1576,7 +1576,7 @@ function card(name: keyof typeof CARD_ICON, line: string, right: string, body: s
 // The chat's browser, beside the chat (pass 248 D) ---------------------------
 
 /// The split's own state: which chat, whether it is open, what you closed, the newest picture.
-type SplitFrame = { src: string; width: number; height: number; url: string; title: string; back: boolean; forward: boolean };
+type SplitFrame = { src: string; /** The page itself is on show (a real view the app puts over the split), not a picture. */ live?: boolean; width: number; height: number; url: string; title: string; back: boolean; forward: boolean };
 const split = {
   session: "", open: false, openedTurn: null as string | null, closedTurn: null as string | null, closedAsk: null as string | null,
   seq: 0, frame: null as null | SplitFrame,
@@ -1600,7 +1600,7 @@ const splitYours = () => Boolean(split.held && split.frame && !split.still);
 function renderBrowserSplit() {
   const aside = el("browser-split"), app = el("app");
   const s = state;
-  if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; return; }
+  if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; placeSplitView(); return; }
   if (split.session !== s.session.id) {
     Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], visits: [], still: null, ringAt: 0 });
     // Another chat's page does not stay up while this one's first picture comes.
@@ -1611,7 +1611,7 @@ function renderBrowserSplit() {
   split.open = next.open; split.openedTurn = next.openedTurn;
   app.classList.toggle("browser-split-on", split.open);
   aside.hidden = !split.open;
-  if (!split.open) return;
+  if (!split.open) { placeSplitView(); return; }
   if (!aside.firstElementChild) buildBrowserSplit(aside);
   const total = el("workspace").clientWidth || innerWidth;
   aside.style.width = `${splitWidth(split.width || Math.round(total * 0.48), total)}px`;
@@ -1636,7 +1636,28 @@ function renderBrowserSplit() {
   const view = aside.querySelector<HTMLElement>(".bs-view")!;
   view.tabIndex = yours ? 0 : -1;
   view.setAttribute("aria-label", yours ? (ask ? `The page is yours: ${ask.reason}` : "The page is yours") : "The page the model is on");
+  placeSplitView();
   void pumpBrowserFrames();
+}
+/// In the desktop app the chat's page is a real view of the window, not a picture: the app is told where
+/// the split's page area is, and puts the page there. It is put away whenever the area is not on show,
+/// is covered by something of ours, or an earlier page's picture is up.
+let splitPlaced = "";
+function placeSplitView() {
+  const aside = el("browser-split"), view = aside.querySelector<HTMLElement>(".bs-view");
+  let rect: { x: number; y: number; width: number; height: number } | null = null;
+  if (view && split.open && !aside.hidden && split.frame?.live && !split.still && document.visibilityState === "visible") {
+    const box = view.getBoundingClientRect();
+    // While the page is yours its amber edge stays in sight around it.
+    const edge = aside.classList.contains("yours") ? 2 : 0;
+    // Anything of ours over the area (a notice, a card) would be under the real page: it steps aside instead.
+    const clear = [0.06, 0.5, 0.94].every((kx) => [0.06, 0.5, 0.94].every((ky) => { const top = document.elementFromPoint(box.left + box.width * kx, box.top + box.height * ky); return Boolean(top && view.contains(top)); }));
+    if (clear && box.width >= 160 && box.height >= 160) rect = { x: box.left + edge, y: box.top + edge, width: box.width - edge * 2, height: box.height - edge * 2 };
+  }
+  const key = rect ? `${split.session}|${[rect.x, rect.y, rect.width, rect.height].map(Math.round).join()}` : "";
+  if (key === splitPlaced) return;
+  splitPlaced = key;
+  void api("desktop-browser-place", { chat: split.session, rect }).catch(() => {});
 }
 /// The bar over the page: where it is, and, while it is yours, back, forward, reload and your own address.
 function renderSplitHead(aside: HTMLElement, yours: boolean) {
@@ -1671,7 +1692,10 @@ function renderSplitPages(aside: HTMLElement) {
 let splitDrawing = "", splitWanted = "", splitDrawn = "";
 function showSplitPicture(aside: HTMLElement) {
   const page = aside.querySelector<HTMLCanvasElement>(".bs-page"), src = split.still?.src ?? split.frame?.src;
+  // The page itself is on show: no picture to draw.
+  if (page && !split.still && split.frame?.live) { page.hidden = true; splitDrawn = splitWanted = ""; aside.querySelector<HTMLElement>(".bs-wait")?.remove(); placeSplitView(); return; }
   if (!page || !src) return;
+  placeSplitView();
   // The page is as wide as the split, so it shows at its own size. A phone-width page keeps its width, in the middle.
   const room = aside.querySelector<HTMLElement>(".bs-view")?.clientWidth ?? 0;
   page.style.width = split.frame && !split.still && split.frame.width < room - 24 ? `${split.frame.width}px` : "";
@@ -1706,7 +1730,7 @@ function showSplitPicture(aside: HTMLElement) {
 /// A soft ring where the model last clicked or typed, fading out.
 function showSplitRing(aside: HTMLElement, pointer: { x: number; y: number; ago: number } | undefined) {
   const ring = aside.querySelector<HTMLElement>(".bs-ring")!;
-  const spot = split.frame && !split.still ? ringSpot(pointer, split.frame) : null;
+  const spot = split.frame && !split.still && !split.frame.live ? ringSpot(pointer, split.frame) : null;
   if (!spot || !pointer) { if (!pointer) ring.hidden = true; return; }
   const at = Date.now() - pointer.ago;
   if (Math.abs(at - split.ringAt) < 120) return;
@@ -1791,7 +1815,7 @@ function buildBrowserSplit(aside: HTMLElement) {
     grip.setPointerCapture(event.pointerId);
     aside.classList.add("resizing");
     const right = el("workspace").getBoundingClientRect().right, total = el("workspace").clientWidth;
-    const move = (e: PointerEvent) => { split.width = splitWidth(right - e.clientX, total); aside.style.width = `${split.width}px`; };
+    const move = (e: PointerEvent) => { split.width = splitWidth(right - e.clientX, total); aside.style.width = `${split.width}px`; placeSplitView(); };
     const up = () => {
       grip.removeEventListener("pointermove", move); aside.classList.remove("resizing");
       try { localStorage.setItem("demesne-browser-split", String(split.width)); } catch {}
@@ -1800,6 +1824,10 @@ function buildBrowserSplit(aside: HTMLElement) {
     grip.addEventListener("pointerup", up, { once: true });
     grip.addEventListener("pointercancel", up, { once: true });
   });
+  // The real page follows its place as the window changes around it.
+  addEventListener("resize", placeSplitView);
+  document.addEventListener("visibilitychange", placeSplitView);
+  setInterval(placeSplitView, 400);
 }
 /// Asks for newer pictures while the split shows; the daemon waits a moment for one.
 async function pumpBrowserFrames() {
@@ -1809,7 +1837,7 @@ async function pumpBrowserFrames() {
     while (split.open && state?.session?.id === split.session && !pageOpen) {
       if (document.visibilityState !== "visible") { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
       const session = split.session;
-      type Got = { seq?: number; src?: string; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; held?: "model" | "person"; tabs?: SplitTab[]; visits?: SplitVisit[]; pointer?: { x: number; y: number; ago: number } };
+      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; held?: "model" | "person"; tabs?: SplitTab[]; visits?: SplitVisit[]; pointer?: { x: number; y: number; ago: number } };
       let got: Got | null = null;
       // The view's shape, so the page is drawn as tall as the split shows it.
       const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
@@ -1824,11 +1852,11 @@ async function pumpBrowserFrames() {
       if (held !== split.held && askedAt > split.heldAt) { split.held = held; redraw = true; }
       const visits = Array.isArray(got.visits) ? got.visits : [];
       if (visits.map((one) => one.seq).join() !== split.visits.map((one) => one.seq).join()) { split.visits = visits; redraw = true; }
-      if (got.src && Number(got.seq) > split.seq) {
+      if ((got.src || got.live) && Number(got.seq) > split.seq) {
         (window as unknown as { __at?: number }).__at = Number((got as { at?: number }).at) || 0;
         split.seq = Number(got.seq);
         const first = !split.frame, before = split.frame;
-        split.frame = { src: got.src, width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward) };
+        split.frame = { src: got.src ?? "", ...(got.live ? { live: true } : {}), width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward) };
         const tabs = Array.isArray(got.tabs) ? got.tabs : [];
         if (JSON.stringify(tabs) !== JSON.stringify(split.tabs)) { split.tabs = tabs; redraw = true; }
         showSplitPicture(aside);

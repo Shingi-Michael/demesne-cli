@@ -58,6 +58,8 @@ try {
     processor,
     nameChats: true,
     plainChatsHome: homedir(),
+    // The open desktop app can hold the model's browser in its own window (the split then shows the page itself).
+    ...(process.env.DEMESNE_BROWSER === "hidden" ? {} : { desktopBrowser: process.env.DEMESNE_DESKTOP_BROWSER ?? join(homedir(), ".demesne", "desktop-browser.json") }),
     socials: true,
     localProviders: [config.provider, ...Object.values(config.additionalProviders ?? {})].filter(isLocalProvider)
       .map((item) => item.id ?? "openai-compatible"),

@@ -229,6 +229,8 @@ export function createDaemonApp(options: {
   pageLook?: PageLook;
   /// The model's own browser (tests pass a fake; the daemon uses the desktop app). False turns it off.
   browser?: (BrowserDriver & Partial<WatchableBrowser>) | false;
+  /// The file where the open desktop app says its window can hold the browser (browser-inapp.ts); the split then shows the page itself.
+  desktopBrowser?: string;
   /// How an address you type in the browser split is looked up, to keep it off the local network (tests pass their own).
   resolveHost?: (host: string) => Promise<string[]>;
   /// The engine's clock (evals step it to make the prompt cache go cold).
@@ -414,7 +416,7 @@ export function createDaemonApp(options: {
   const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
   if (pageLook) tools.register(lookAtPageTool(pageLook));
   // Its sign-ins are kept per project, beside the database (pass 248 D).
-  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith, join(dirname(options.databasePath), "browser-profile")) : null;
+  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith, join(dirname(options.databasePath), "browser-profile"), options.desktopBrowser) : null;
   const browser = options.browser === false ? null : options.browser ?? ownBrowser;
   const handovers = new BrowserHandovers();
   if (browser) tools.register(browserTool(browser, undefined, undefined, handovers));

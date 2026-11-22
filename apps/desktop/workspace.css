@@ -1064,7 +1064,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .env-m { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
 /* Work in progress: the working cube (working-cube.ts draws it as one SVG
    each frame) and a silver shine across the words. */
-.cube-mark { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; vertical-align: -2px; }
+.cube-mark { display: inline-grid; grid-template: 100% / 100%; place-items: center; flex: none; width: 12px; height: 12px; vertical-align: -2px; }
 .cube-mark svg { display: block; overflow: visible; }
 .shine { background: linear-gradient(100deg, var(--t3) 0%, var(--t3) 42%, var(--t1) 50%, var(--t3) 58%, var(--t3) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 @media (prefers-reduced-motion: no-preference) {

@@ -763,12 +763,12 @@ function renderAssistantRow() {
   row.classList.toggle("on", open);
   if (open) row.setAttribute("aria-current", "page"); else row.removeAttribute("aria-current");
   const mark = row.querySelector<HTMLElement>(".sidebar-session-mark");
-  if (mark) { mark.className = `sidebar-session-mark ${tone}`; mark.hidden = !tone; }
+  if (mark) { mark.className = `sidebar-session-mark ${tone}`; mark.hidden = !tone || (open && tone === "working"); }
   const about = STATE_WORDS[tone] ?? "";
   row.title = about ? `Assistant, ${about}` : "Assistant";
   row.setAttribute("aria-label", row.title);
   const badge = rail?.querySelector<HTMLElement>(".rail-badge");
-  if (badge) { badge.hidden = !tone; badge.classList.toggle("blue", tone !== "warn"); }
+  if (badge) { badge.hidden = !tone || (open && tone === "working"); badge.classList.toggle("blue", tone !== "warn"); }
 }
 /// What Scheduled and Foundry say on their rows (pass 213): when the next
 /// routine runs, and how many mockups arrived since you last looked.
@@ -896,13 +896,15 @@ function renderSidebar() {
     const about = STATE_WORDS[tone] ?? "";
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
-    const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
+    // The conversation already shows this turn working; keep the state in its accessible name.
+    const quietWork = selected && tone === "working";
+    const mark = quietWork ? "" : tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
     const pr = pullRequests.get(id);
     // A chat that needs you says so where its time was, in its state's
     // colour: asks you, working, finished, failed, back now.
     const back = backOf(item) === "back" && !selected;
-    const say = back ? "back now" : selected && tone !== "working" && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
-    const side = say || (pr || (id === current?.id && !inSession()) ? "" : right);
+    const say = back ? "back now" : selected && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
+    const side = say || (quietWork || pr || (id === current?.id && !inSession()) ? "" : right);
     const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${side ? `<span class="sidebar-session-age${say ? ` sidebar-say-state ${back ? "warn" : tone}` : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}${side ? " has-side" : ""}`)
       .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
@@ -927,7 +929,7 @@ function renderSidebar() {
       const hand = prHandable(pr, prOpenSince) ? btn("pr-hand", "Hand it to the chat", { id }, "sidebar-back-opt key") : "";
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
-    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
+    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${quietWork ? "" : dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
     return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}${rowLit.has(id) ? " lit" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
@@ -2432,7 +2434,7 @@ function renderRailChats(open: { item: Chat; tone: string; on: boolean }[]) {
     const title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
     const [action, args] = chatTarget(item.id);
     const letter = (/[\p{L}\p{N}]/u.exec(title)?.[0] ?? "·").toUpperCase();
-    return `<button type="button" class="rail-chat${on ? " on" : ""}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-tip="${h(about ? `${title} · ${about}` : title)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${on ? ' aria-current="page"' : ""}>${h(letter)}${tone ? `<i class="rail-chat-dot ${tone}" aria-hidden="true"></i>` : ""}</button>`;
+    return `<button type="button" class="rail-chat${on ? " on" : ""}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-tip="${h(about ? `${title} · ${about}` : title)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${on ? ' aria-current="page"' : ""}>${h(letter)}${tone && !(on && tone === "working") ? `<i class="rail-chat-dot ${tone}" aria-hidden="true"></i>` : ""}</button>`;
   }).join("");
 }
 function renderTabs() {
@@ -2473,7 +2475,7 @@ function renderTabs() {
       : `<span class="bar-tab-words"><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span><span class="bar-tab-sub" aria-hidden="true">${h(sub)}</span></span>`;
     // The close slot is always kept, so a name never moves when × shows.
     const close = pinned ? "" : btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `);
-    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-light" aria-hidden="true">${threadLight(thread)}</span>` : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
+    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-light" aria-hidden="true">${threadLight(thread)}</span>` : on && tone === "working" ? "" : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";

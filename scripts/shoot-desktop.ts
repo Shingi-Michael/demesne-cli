@@ -168,8 +168,8 @@ if (!readme) {
   const before = pageErrors.length;
   await page.evaluate(() => {
     const notes: string[] = ((window as unknown as { notices: string[] }).notices = []);
-    const notice = document.getElementById("notice")!;
-    new MutationObserver(() => { if (!notice.hidden) notes.push(notice.textContent ?? ""); }).observe(notice, { attributes: true, childList: true, characterData: true, subtree: true });
+    // Notices are pills now (pass 260 A): watch the window for them.
+    new MutationObserver(() => { for (const pill of document.querySelectorAll(".seat-pill .mp-words")) notes.push(pill.textContent ?? ""); }).observe(document.body, { childList: true, subtree: true });
   });
   await page.fill("textarea", "/fix-bug Handle an empty name in greet()"); await page.keyboard.press("Enter");
   for (let i = 0; i < 20 && !(await page.locator("#briefing:not([hidden])").count()); i++) await page.waitForTimeout(500);

@@ -1,5 +1,5 @@
 /// The memory pill (passes 249 A, 254 1, 255): when a turn ends having kept
-/// something in Demesne's memory, a small silver pill above the composer says
+/// something in Demesne's memory, a small silver pill centred above the composer says
 /// "Demesne will remember 3 things". A silver light runs around its edge for
 /// as long as it is up; it leaves by itself after six seconds, and resting on
 /// it (or opening its list) keeps it there. Clicking it lists what was kept,

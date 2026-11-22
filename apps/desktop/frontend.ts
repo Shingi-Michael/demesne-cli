@@ -2,6 +2,7 @@ import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
 performance.mark("demesne-script");
 import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
 import { checkResult, releaseLine, type AppUpdate } from "./workspace/release-line.ts";
+import { pills } from "./workspace/pill.ts";
 
 interface DesktopBootstrap {
   workspace: string | null;
@@ -87,10 +88,7 @@ function showActionError(error: unknown) {
     setBusy(false, errorMessage(error));
     startStatus.dataset.error = "true";
   } else {
-    const notice = el("notice");
-    notice.textContent = errorMessage(error);
-    notice.hidden = false;
-    setTimeout(() => { notice.hidden = true; }, 6000);
+    pills.show({ seat: "middle", mark: "bang", need: true, words: errorMessage(error), seconds: 6 });
   }
 }
 function renderProjects() {
@@ -210,6 +208,10 @@ const releaseEl = document.querySelector<HTMLElement>(".sidebar-release");
 let lastUpdate: AppUpdate | null = null, updateAsked = false, updateSaid: ReturnType<typeof checkResult> = null;
 let saidTimer: ReturnType<typeof setTimeout> | undefined;
 function showAppUpdate(update: AppUpdate) {
+  // The moment an update is ready, the left seat says so (pass 260 A); the
+  // release line under it keeps saying it after the pill has gone.
+  if (update.state === "ready" && !update.waiting && !(lastUpdate?.state === "ready" && !lastUpdate.waiting))
+    pills.show({ seat: "left", mark: "up", words: `${update.to} is ready`, seconds: 8, action: { label: "Restart", run: restartIntoUpdate } });
   lastUpdate = update;
   if (updateAsked && update.state !== "off" && !(update.state === "idle" && update.checking)) {
     updateAsked = false;
@@ -235,8 +237,11 @@ releaseEl?.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   if (target.closest("[data-update-check]")) { checkForUpdate(); return; }
   if (!target.closest("[data-update-restart]")) return;
-  void request<AppUpdate>("desktop-update", { action: "restart" }).then(showAppUpdate, showActionError);
+  restartIntoUpdate();
 });
+function restartIntoUpdate() {
+  void request<AppUpdate>("desktop-update", { action: "restart" }).then(showAppUpdate, showActionError);
+}
 setBusy(true);
 void start();
 

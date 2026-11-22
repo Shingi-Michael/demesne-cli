@@ -321,41 +321,36 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
   /// A hidden window as a tab's pane.
   const windowPane = (win: BrowserWindow): Pane => ({ webContents: win.webContents, isDestroyed: () => win.isDestroyed(), destroy: () => win.destroy(), getContentSize: () => win.getContentSize(),
     setContentSize: (width, height) => win.setContentSize(width, height), loadURL: (url) => win.loadURL(url), onClosed: (done) => { win.on("closed", done); } });
-  /// In the app, tabs not on show are put away under one point of the window's corner: a page has to
-  /// be in the window, however little of it, to keep drawing, taking clicks and giving pictures.
-  let holder: View | undefined;
-  const away = () => {
-    if (!holder) {
-      holder = new View();
-      const cover = new View();
+  /// In the app, tabs not on show are put away with all but one point of them outside the window, at its
+  /// top-left corner, under a one-point cover: a page has to be in the window, however little of it, to keep
+  /// drawing, taking clicks and giving pictures. (Not inside a small holder view: a Mac does not clip a
+  /// view to its parent, so a held page showed whole over the chat.)
+  let cover: View | undefined;
+  const coverUp = () => {
+    const root = inApp!.window.contentView;
+    if (!cover) {
+      cover = new View();
       cover.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#161617" : "#ececec");
-      holder.addChildView(cover);
       cover.setBounds({ x: 0, y: 0, width: 1, height: 1 });
-      inApp!.window.contentView.addChildView(holder);
-      holder.setBounds({ x: 0, y: 0, width: 1, height: 1 });
     }
-    return holder;
+    // Added again, it goes on top of the pages put away under it.
+    root.addChildView(cover);
   };
   /// A real view of the app's window as a tab's pane.
   const viewPane = (view: WebContentsView): Pane => {
-    let size: number[] = [TRY_WIDTHS.desktop.width, TRY_WIDTHS.desktop.height], shown: Rect | null = null, parked = false, gone = false;
+    let size: number[] = [TRY_WIDTHS.desktop.width, TRY_WIDTHS.desktop.height], shown: Rect | null = null, added = false, gone = false;
     const closed: (() => void)[] = [];
     const end = () => {
       if (gone) return;
       gone = true;
-      try { if (shown) inApp!.window.contentView.removeChildView(view); else if (parked) away().removeChildView(view); } catch { /* the window went first */ }
+      try { if (added) inApp!.window.contentView.removeChildView(view); } catch { /* the window went first */ }
       for (const done of closed) done();
     };
     const lay = () => {
       if (gone || inApp!.window.isDestroyed()) return;
-      if (shown) {
-        if (parked) { away().removeChildView(view); parked = false; inApp!.window.contentView.addChildView(view); }
-        view.setBounds({ x: Math.round(shown.x), y: Math.round(shown.y), width: Math.max(1, Math.round(shown.width)), height: Math.max(1, Math.round(shown.height)) });
-      } else {
-        // Under the cover, so the one point of it in the window never shows.
-        if (!parked) { try { inApp!.window.contentView.removeChildView(view); } catch {} away().addChildView(view, 0); parked = true; }
-        view.setBounds({ x: 0, y: 0, width: size[0]!, height: size[1]! });
-      }
+      if (!added) { inApp!.window.contentView.addChildView(view); added = true; }
+      if (shown) view.setBounds({ x: Math.round(shown.x), y: Math.round(shown.y), width: Math.max(1, Math.round(shown.width)), height: Math.max(1, Math.round(shown.height)) });
+      else { view.setBounds({ x: 1 - size[0]!, y: 1 - size[1]!, width: size[0]!, height: size[1]! }); coverUp(); }
     };
     view.setBackgroundColor("#ffffff");
     view.webContents.once("destroyed", end);
@@ -365,7 +360,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       getContentSize: () => shown ? [Math.round(shown.width), Math.round(shown.height)] : [...size],
       setContentSize: (width, height) => { size = [width, height]; lay(); },
       loadURL: (url) => view.webContents.loadURL(url), onClosed: (done) => { closed.push(done); },
-      place: (rect) => { if (JSON.stringify(rect) === JSON.stringify(shown) && (rect ? !parked : parked)) return; shown = rect; lay(); } };
+      place: (rect) => { if (added && JSON.stringify(rect) === JSON.stringify(shown)) return; shown = rect; lay(); } };
   };
   /// Which chat's page is on show in the window, and where (the split's page area).
   let placement: { chat: string; rect: Rect } | null = null;

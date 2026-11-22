@@ -81,7 +81,11 @@ try {
     const window = BrowserWindow.getAllWindows()[0]!;
     const contents = webContents.getAllWebContents().find((one) => one !== window.webContents && one.getURL().includes(match));
     if (!contents) return null;
-    const shown = window.contentView.children.find((child) => (child as unknown as { webContents?: unknown }).webContents === contents);
+    const mine = window.contentView.children.find((child) => (child as unknown as { webContents?: unknown }).webContents === contents);
+    // On show means more than the one point a put-away page keeps inside the window.
+    const at = mine?.getBounds(), [wide, high] = window.getContentSize();
+    const inside = at ? Math.max(0, Math.min(at.x + at.width, wide!) - Math.max(at.x, 0)) * Math.max(0, Math.min(at.y + at.height, high!) - Math.max(at.y, 0)) : 0;
+    const shown = inside > 1 ? mine : undefined;
     return { url: contents.getURL(), title: contents.getTitle(), shown: shown ? shown.getBounds() : null, inner: await contents.executeJavaScript("[innerWidth, innerHeight, devicePixelRatio, scrollY]") as number[], said: await contents.executeJavaScript("document.querySelector('#said')?.textContent ?? ''") as string };
   }, match);
   /// What you do on the real page with the mouse and keys (the same road your own input takes).

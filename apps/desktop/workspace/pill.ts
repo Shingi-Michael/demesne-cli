@@ -113,10 +113,15 @@ export class Pills {
   private layer: HTMLElement | null = null;
 
   constructor() {
-    if (typeof window !== "undefined") window.addEventListener("resize", () => this.settle());
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", () => this.settle());
+    // Folding the sidebar resizes the workspace over 200ms without a window resize.
+    const workspace = document.getElementById("app");
+    if (workspace) new ResizeObserver(() => this.settle()).observe(workspace);
   }
 
-  show(spec: PillSpec): void {
+  /// Dismiss just this notice, even if another has since taken its seat.
+  show(spec: PillSpec): (() => void) | undefined {
     if (typeof document === "undefined" || !spec.words.trim()) return;
     const place = placePill(spec, stageNow(spec.anchor));
     this.close(place.seat);
@@ -137,6 +142,10 @@ export class Pills {
     this.put(host, place);
     this.ground().append(host);
     this.live.set(place.seat, entry);
+    return () => {
+      if (this.live.get(place.seat) === entry) this.close(place.seat);
+      else host.remove(); // It may still be playing its exit animation.
+    };
   }
 
   /// The words of the pills on screen (for checks).

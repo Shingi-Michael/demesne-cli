@@ -7,7 +7,7 @@ import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
+import { eventually, fixture } from "../apps/desktop/workspace/test/fixture.ts";
 
 const f = await fixture({
   providerId: "fixture", modelId: "update-check",
@@ -18,6 +18,9 @@ let desktop: Awaited<ReturnType<typeof electron.launch>> | undefined, page: Page
 const output = resolve("test-results/desktop");
 mkdirSync(output, { recursive: true });
 try {
+  const chat = (await f.client.createSession({ workspacePath: f.workspace })).session.id;
+  await f.client.submitTurn(chat, { content: "Check the desktop update." });
+  await eventually(async () => (await f.client.getSessionState(chat)).session.turns.at(-1)?.status === "completed");
   const executable = process.argv[2];
   desktop = await electron.launch({ ...(executable ? { executablePath: resolve(executable) } : {}),
     args: [...(executable ? [] : [resolve("apps/desktop/build/app")]), `--user-data-dir=${join(f.root, "electron-update")}`, `--workspace=${f.workspace}`, `--server=${f.server.url}`],
@@ -27,9 +30,49 @@ try {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.locator("#composer-model").waitFor();
+  await page.evaluate(id => window.demesneDesktop!.core.invoke("desktop_request", { method: "select-session", args: { id } }), chat);
+  await page.locator("#conversation").getByText("Check the desktop update.", { exact: true }).waitFor();
   const send = (status: unknown) => desktop!.evaluate(({ BrowserWindow }, value) => BrowserWindow.getAllWindows()[0]!.webContents.send("demesne:app-update", value), status);
   const line = page.locator(".sidebar-release");
   const idle = { state: "idle", version: "0.8.8", enabled: true, checked: Date.now() - 12 * 60_000 };
+  // The release line and the folded fallback never announce ready together.
+  const ready = { state: "ready", version: idle.version, to: "0.8.9" };
+  const toggle = page.locator("#desktop-toggle-sidebar"), restart = line.locator("[data-update-restart]");
+  const notice = page.locator(".seat-pill.middle").filter({ hasText: "0.8.9 is ready" });
+  await send(ready);
+  await restart.waitFor();
+  assert.equal(await page.locator(".seat-pill").filter({ hasText: "0.8.9 is ready" }).count(), 0);
+  await page.screenshot({ path: join(output, "update-ready-expanded.png") });
+  await toggle.click();
+  await notice.waitFor();
+  assert.equal(await line.isVisible(), false);
+  assert.equal(await notice.locator("button").count(), 0);
+  // Wait for the entrance animation, then check the notice sits above the composer.
+  await notice.evaluate(el => Promise.all(el.getAnimations().filter(a => a.effect?.getTiming().iterations === 1).map(a => a.finished)));
+  const box = (await notice.boundingBox())!, composer = (await page.locator("#composer").boundingBox())!;
+  assert(Math.abs(box.x + box.width / 2 - composer.x - composer.width / 2) < 2, "notice centred on the composer");
+  assert(Math.abs(composer.y - box.y - box.height - 10) < 2, "10px gap above composer");
+  await page.screenshot({ path: join(output, "update-ready-folded.png") });
+  await toggle.click();
+  await restart.waitFor();
+  assert.equal(await notice.count(), 0, "unfold removes the notice immediately");
+  await toggle.click();
+  await notice.waitFor();
+  await send(ready);
+  assert.equal(await notice.count(), 1);
+  await notice.waitFor({ state: "detached", timeout: 10000 });
+  await toggle.click(); await toggle.click();
+  assert.equal(await notice.count(), 0, "folding again does not replay an expired notice");
+  const newer = { ...ready, to: "0.8.10" };
+  await send(newer);
+  const newerNotice = page.locator(".seat-pill.middle").filter({ hasText: "0.8.10 is ready" });
+  await newerNotice.waitFor();
+  await send({ ...newer, waiting: true });
+  await newerNotice.waitFor({ state: "detached" });
+  await page.locator("#rail-search").click();
+  await line.filter({ hasText: "0.8.10 restarts when this finishes" }).waitFor();
+  assert.equal(await restart.count(), 0);
+  console.log("PASS: one ready notice, folded timeout, immediate dismissal, and waiting restart.");
   await send(idle);
   // The name is the button that checks.
   const check = line.locator("button[data-update-check]");

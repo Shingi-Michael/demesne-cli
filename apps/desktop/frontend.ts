@@ -121,6 +121,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
     performance.mark("demesne-ui");
   }
   setBusy(false, "");
+  syncReadyNotice(); // A folded startup now has its composer to anchor the notice.
 }
 /// `fresh` opens a new chat there carrying `draft`: Home's where word.
 async function openProject(path?: string, sessionId?: string, fresh?: { draft: string }) {
@@ -207,12 +208,22 @@ async function start() {
 const releaseEl = document.querySelector<HTMLElement>(".sidebar-release");
 let lastUpdate: AppUpdate | null = null, updateAsked = false, updateSaid: ReturnType<typeof checkResult> = null;
 let saidTimer: ReturnType<typeof setTimeout> | undefined;
+// The sidebar owns Restart. Only while folded, lend the composer a brief status
+// notice. Repeated status events and folds share one eight-second window.
+let noticeVersion: string | undefined, noticeUntil = 0, dismissReady: (() => void) | undefined;
+function syncReadyNotice() {
+  const version = lastUpdate?.state === "ready" && !lastUpdate.waiting ? lastUpdate.to : undefined;
+  const folded = shell.classList.contains("sidebar-collapsed");
+  if (version !== noticeVersion || !folded) { dismissReady?.(); dismissReady = undefined; }
+  if (version !== noticeVersion) { noticeVersion = version; noticeUntil = 0; }
+  if (!version || !folded || !mounted || busy || dismissReady) return;
+  const now = performance.now();
+  noticeUntil ||= now + 8000;
+  if (noticeUntil > now) dismissReady = pills.show({ seat: "middle", mark: "up", words: `${version} is ready`, seconds: (noticeUntil - now) / 1000 });
+}
 function showAppUpdate(update: AppUpdate) {
-  // The moment an update is ready, the left seat says so (pass 260 A); the
-  // release line under it keeps saying it after the pill has gone.
-  if (update.state === "ready" && !update.waiting && !(lastUpdate?.state === "ready" && !lastUpdate.waiting))
-    pills.show({ seat: "left", mark: "up", words: `${update.to} is ready`, seconds: 8, action: { label: "Restart", run: restartIntoUpdate } });
   lastUpdate = update;
+  syncReadyNotice();
   if (updateAsked && update.state !== "off" && !(update.state === "idle" && update.checking)) {
     updateAsked = false;
     updateSaid = checkResult(update);
@@ -252,6 +263,7 @@ const sidebarToggle = el<HTMLButtonElement>("desktop-toggle-sidebar");
 function setSidebarCollapsed(collapsed: boolean) {
   shell.classList.toggle("sidebar-collapsed", collapsed);
   sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+  syncReadyNotice();
   try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
 }
 try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}

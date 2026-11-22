@@ -94,7 +94,8 @@ function withCopy<T>(file: string, read: (db: Database) => T): T {
     const copy = join(dir, "cookies.sqlite");
     copyFileSync(file, copy);
     for (const end of ["-wal", "-shm"]) if (existsSync(file + end)) copyFileSync(file + end, copy + end);
-    const db = new Database(copy, { readonly: false });
+    // Opened read-write (the default) so SQLite can replay the copied -wal; { readonly: false } alone is "API misuse" on Bun 1.4.0, which CI runs.
+    const db = new Database(copy);
     try { return read(db); } finally { db.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }

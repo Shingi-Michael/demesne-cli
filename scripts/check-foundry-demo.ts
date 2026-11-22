@@ -105,7 +105,7 @@ try {
   await step(81, async () => /Yours now/.test((await line.textContent()) ?? ""));
   await step(82, async () => frame().evaluate(() => getComputedStyle(document.querySelector("[data-chrome][aria-hidden=true]")!).opacity === "0"));
   // Resting on a part shows its tag (pass 233 A); nothing else is there to press.
-  assert.equal(await page.locator("#page").locator("button:not(.fd-link):not(.fn-plus):visible, form:visible, input:visible").count(), 0, "nothing to press on Foundry");
+  assert.equal(await page.locator("#page").locator("button:not(.fd-link):not(.fn-plus):not(.fd-hd-b):visible, form:visible, input:visible").count(), 0, "nothing to press on Foundry");
   console.log("PASS: a mockup sits on its surface and plays its demo under it; moving in stops it.");
   await page.mouse.move(5, 5);
 

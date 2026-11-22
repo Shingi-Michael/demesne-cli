@@ -172,3 +172,19 @@ test("the browser split's page area becomes a place in the window for the real p
   expect(placeRect({ x: 0, y: 0, width: Number.NaN, height: 300 }, 1, window)).toBeNull();
   expect(placeRect(null, 1, window)).toBeNull();
 });
+
+test("pass 262 C: a saved copy stands on its own and gets a free name in Downloads", async () => {
+  const { exportedSource, copyName } = await import("../electron/policy.ts");
+  const kit = { style: "@font-face{src:url(foundry://kit/fonts/inter.woff2)}\nbody{margin:0}", script: "anime()", parts: "parts()</script>", kinds: { style: ".deck{}", script: "kinds()" }, remember: "remember()" };
+  const page = `<!doctype html><link rel="stylesheet" href="foundry://kit/base.css"><script src="foundry://kit/parts.js"></script><script>demesne.save("a", 1)</script>`;
+  const out = exportedSource(page, kit);
+  expect(out).not.toContain("foundry://kit/base.css");
+  expect(out).not.toContain("foundry://kit/parts.js");
+  expect(out).toContain("<style>\nbody{margin:0}</style>");
+  expect(out).toContain("<script>parts()<\\/script></script>");
+  expect(out.startsWith("<!doctype html><script>remember()</script>")).toBe(true);
+  const taken = new Set(["Orders board v2.html"]);
+  expect(copyName("Orders/board", 2, "html", () => false)).toBe("Ordersboard v2.html");
+  expect(copyName("Orders board", 2, "html", (name) => taken.has(name))).toBe("Orders board v2 (2).html");
+  expect(copyName("  ", 1, "svg", () => false)).toBe("Mockup v1.svg");
+});

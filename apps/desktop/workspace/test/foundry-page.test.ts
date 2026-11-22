@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifact } from "@demesne/protocol";
-import { foundryPage, shelfKey } from "../foundry-page.ts";
+import { foundryPage, savedLine, shelfKey } from "../foundry-page.ts";
 
 const artifact = (id: string, title: string, kind: FoundryArtifact["kind"] = "html"): FoundryArtifact =>
   ({ id, title, kind, workspace: null, sessionId: "s1", createdAt: "2026-11-07T10:00:00Z", updatedAt: "2026-11-08T10:00:00Z", version: 2, description: "", basedOn: null });
@@ -151,4 +151,47 @@ test("the newest version of a page can take notes, and a version made from notes
   // The version the notes made outlines what changed, once.
   expect(section(shelfKey("a1", 2))).toMatch(/v=2&amp;stack=1&amp;at=\d+&amp;first=1"/);
   expect(section(shelfKey("a1", 1))).not.toContain("first=1");
+});
+
+test("pass 262 C: the mockup you open grows where it sits, with a quiet head line, and only that one", () => {
+  const view = {
+    list: [artifact("a1", "Orders board"), artifact("b2", "Menu")],
+    versions: [
+      { artifactId: "a1", version: 2, createdAt: today, sessionId: "s1", note: "Timers" },
+      { artifactId: "b2", version: 2, createdAt: today, sessionId: null, note: "" },
+      { artifactId: "a1", version: 1, createdAt: earlier, sessionId: "s1", note: "First" },
+    ],
+    error: "",
+    chatTitle: () => null,
+  };
+  // Closed: every name opens its mockup here; no head line anywhere.
+  const closed = foundryPage(view);
+  expect(closed).toMatch(/data-action="foundry-grow"[^>]*data-args="\{&quot;id&quot;:&quot;a1&quot;,&quot;version&quot;:2\}"/);
+  expect(closed).not.toContain("fd-hd");
+  // Open at v2: only that one grows and carries ‹ v2 ›, code, save a copy and close.
+  const open = foundryPage({ ...view, open: { id: "a1", at: 2, shown: 2 } });
+  expect(open.match(/fd-item[^"]*fd-open/g)?.length).toBe(1);
+  expect(open).toContain(`fd-open" data-fd="${shelfKey("a1", 2)}"`);
+  expect(open.match(/class="fd-hd"/g)?.length).toBe(1);
+  expect(open).toContain('<span class="fd-hd-v" aria-live="polite">v2</span>');
+  expect(open).toMatch(/data-action="foundry-shown" data-args="\{&quot;version&quot;:1\}"/);
+  expect(open).toMatch(/<button type="button" class="fd-hd-b" disabled aria-label="Later version">/);
+  for (const action of ["foundry-code", "foundry-copy", "foundry-shrink"]) expect(open).toContain(`data-action="${action}"`);
+  // Stepping back shows v1 in the same place, with v1's own line; notes stay with the newest version.
+  const back = foundryPage({ ...view, open: { id: "a1", at: 2, shown: 1 } });
+  expect(back).toContain(`fd-open" data-fd="${shelfKey("a1", 2)}"`);
+  expect(back).toContain("<b>v1 · First</b>");
+  expect(back).toContain("foundry://artifact/a1?v=1&amp;stack=1");
+  expect(back.split(`data-fd="${shelfKey("a1", 2)}"`)[1]!.split("</section>")[0]).not.toContain("fd-notes");
+  // The code view replaces the page with its source, escaped; the saved line offers Show and the other format.
+  const code = foundryPage({ ...view, open: { id: "a1", at: 2, shown: 2, code: "<div class=\"x\">hi</div>" } });
+  expect(code).toContain('<pre class="fd-code"');
+  expect(code).toContain("&lt;div class=&quot;x&quot;&gt;hi&lt;/div&gt;");
+  expect(code).toMatch(/aria-label="Show the page" title="Show the page" aria-pressed="true"/);
+  // The line after a save is painted in place, so saving never reloads the mockups.
+  expect(open).toContain('<p class="fd-said" role="status" data-kind="html" hidden></p>');
+  expect(savedLine({ id: "a1", at: 2, shown: 2, said: "Saved Orders board v2.html to Downloads", saved: { path: "/x", pdf: false, ready: false } }, "html"))
+    .toBe('Saved Orders board v2.html to Downloads<button type="button" class="fd-said-b" data-action="foundry-copy-show">Show</button>');
+  expect(savedLine({ id: "d", at: 1, shown: 1, said: "Saved Plan v1.pdf to Downloads", saved: { path: "/y", pdf: true, ready: true } }, "deck")).toContain(">Also as a web page</button>");
+  expect(savedLine({ id: "a1", at: 2, shown: 2 }, "html")).toBe("");
 });

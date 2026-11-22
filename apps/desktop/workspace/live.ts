@@ -35,7 +35,7 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryOrder, foundryPage, shelfKey } from "./foundry-page.ts";
+import { foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
 import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
@@ -4322,6 +4322,8 @@ function ensureMockupNames() {
 }
 /// The version a chat link asked for: the long page scrolls to it once drawn.
 let foundryFocus: { id: string; version?: number; quiet?: boolean } | null = null;
+/// Pass 262 C: the one mockup grown to full width on the long page, if any.
+let foundryOpen: FoundryOpen | null = null;
 /// Documents on the long page, rendered once they scroll near ("id:version").
 const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
 const foundryUi = { error: "" };
@@ -4794,6 +4796,7 @@ async function sendFoundryNotes(key: string) {
 /// unless the link names one).
 function openFoundry(id: string, version?: number) {
   foundryFocus = { id, ...(version ? { version } : {}) };
+  growFoundry(id, version);
   if (pageOpen !== "foundry") openPage("foundry"); else { renderPage(); showFoundryFocus(); }
 }
 function showFoundryFocus() {
@@ -4949,7 +4952,7 @@ function renderPage() {
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
     foundryNotesTick();
-    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
+    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, open: foundryOpen, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
       builtIn: (id) => { const pr = pullRequests.get(id); return pr?.state === "merged" ? { number: pr.number, createdAt: pr.createdAt } : null; } });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
@@ -4976,6 +4979,7 @@ function renderPage() {
   if (foundryNotesWatch) { foundryNotesWatch.stop(); foundryNotesWatch = null; foundryNotesCarry(); }
   root.innerHTML = html;
   root.dataset.html = html;
+  if (pageOpen === "foundry") paintFoundrySaid();
   if (pageOpen === "today") mountReel(root);
   if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider], [data-anthropic-provider]");
@@ -7030,8 +7034,87 @@ function followLatest() {
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
+/// Pass 262 C: the mockup you open grows where it sits on the long page,
+/// its newest version unless a link names one. Everything else stays look-only.
+function growFoundry(id: string, version?: number) {
+  const at = version ?? foundryList?.find((item) => item.id === id)?.version ?? foundryVersions?.find((item) => item.artifactId === id)?.version;
+  foundryOpen = at ? { id, at, shown: at } : null;
+}
+/// The opened mockup's source, for its code view: read for the version it shows.
+async function foundryCode(open: FoundryOpen) {
+  const shown = open.shown;
+  try {
+    const found = await api<{ source: string }>("foundry-get", { id: open.id, version: shown });
+    if (foundryOpen === open && open.shown === shown && open.code !== undefined) open.code = found.source;
+  } catch (error) {
+    if (foundryOpen === open && open.code !== undefined) open.code = `Couldn't read the code: ${errorWords(error)}`;
+  }
+  renderPage();
+}
+let foundrySaidTimer = 0;
+/// The opened mockup's quiet line after a save, painted in place.
+function paintFoundrySaid() {
+  const line = document.querySelector<HTMLElement>("#page .fd-open .fd-said");
+  if (!line) return;
+  const inner = foundryOpen ? savedLine(foundryOpen, (line.dataset.kind ?? "html") as FoundryArtifact["kind"]) : "";
+  line.innerHTML = inner;
+  line.hidden = !inner;
+}
+async function foundryOpenAction(action: string, args: Record<string, any>) {
+  if (action === "foundry-grow") {
+    growFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
+    foundryFocus = foundryOpen ? { id: foundryOpen.id, version: foundryOpen.at, quiet: true } : null;
+    renderPage(); showFoundryFocus();
+    return true;
+  }
+  const open = foundryOpen;
+  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show";
+  if (action === "foundry-shrink") {
+    foundryOpen = null;
+    foundryFocus = { id: open.id, version: open.at, quiet: true };
+    renderPage(); showFoundryFocus();
+    return true;
+  }
+  if (action === "foundry-shown") {
+    const all = foundryVersionsOf(foundryVersions ?? [], open.id);
+    if (!all.includes(args.version)) return true;
+    open.shown = args.version; open.said = ""; open.saved = null;
+    if (open.code !== undefined) { open.code = null; void foundryCode(open); }
+    renderPage();
+    return true;
+  }
+  if (action === "foundry-code") {
+    if (open.code !== undefined) { delete open.code; renderPage(); return true; }
+    open.code = null; renderPage(); void foundryCode(open);
+    return true;
+  }
+  if (action === "foundry-copy") {
+    open.said = "Saving a copy…"; open.saved = null; paintFoundrySaid();
+    try {
+      const saved = await api<{ path: string; name: string; pdf: boolean; ready: boolean }>("desktop-foundry-copy", { id: open.id, version: open.shown, ...(args.other ? { other: true } : {}) });
+      open.said = `Saved ${saved.name} to Downloads`;
+      open.saved = { path: saved.path, pdf: saved.pdf, ready: saved.ready && !args.other };
+    } catch (error) { open.said = `Couldn't save a copy: ${errorWords(error)}`; open.saved = null; }
+    clearTimeout(foundrySaidTimer);
+    foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === open) { open.said = ""; open.saved = null; paintFoundrySaid(); } }, 12_000);
+    paintFoundrySaid();
+    return true;
+  }
+  if (action === "foundry-copy-show") {
+    if (open.saved) await api("desktop-show-copy", { path: open.saved.path }).catch((error) => { open.said = `Couldn't show it: ${errorWords(error)}`; paintFoundrySaid(); });
+    return true;
+  }
+  return false;
+}
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || pageOpen !== "foundry" || !foundryOpen || event.defaultPrevented || event.isComposing) return;
+  if ((event.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable], #composer")) return;
+  event.preventDefault();
+  void foundryOpenAction("foundry-shrink", {});
+});
 /// Foundry's long page: links from the chat, and the day strip. You only look here.
 async function foundryAction(action: string, args: Record<string, any>) {
+  if (await foundryOpenAction(action, args)) return;
   if (action === "foundry-open") return openFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
   if (action === "foundry-open-step") {
     // A new artifact's id is in the tool's result; a revision names it in its input.
@@ -8883,7 +8966,7 @@ document.addEventListener("keydown", (event) => {
 });
 window.demesneInspect = () => ({
   // What the host last published: the session, its turn, queue and draft.
-  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, questionDraft: state?.questions[0]?.draft, restored: state?.restored, connection: state?.connection, notice: el("notice").hidden ? "" : el("notice").textContent, requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
+  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, questionDraft: state?.questions[0]?.draft, restored: state?.restored, connection: state?.connection, notice: (() => { const notice = document.getElementById("notice"); return !notice || notice.hidden ? "" : notice.textContent; })(), requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",

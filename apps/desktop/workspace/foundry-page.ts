@@ -70,6 +70,60 @@ export interface FoundryView {
   builtIn?: (sessionId: string) => { number: number; createdAt: string } | null;
   /// Versions that just came back from notes (pass 233 A), as shelf keys: each outlines what changed.
   changed?: ReadonlySet<string>;
+  /// Pass 262 C: the one mockup you opened, grown to full width where it sits.
+  open?: FoundryOpen | null;
+}
+
+/// Pass 262 C, a mockup you can hold: the one you open grows on the long
+/// page to full width, with a quiet head line (‹ vN ›, code, save a copy, ×).
+/// `at` is the version whose place on the page it grows in; `shown` the
+/// version it shows there now (‹ › step through them in place); `code` its
+/// source while the code view is on (null while it is read); `said` the
+/// quiet line under it after a save, and `saved` that copy.
+export interface FoundryOpen {
+  id: string;
+  at: number;
+  shown: number;
+  code?: string | null;
+  said?: string;
+  saved?: { path: string; pdf: boolean; ready: boolean } | null;
+}
+
+/// An artifact's versions on the page, oldest first.
+export const versionsOf = (versions: readonly FoundryShelfVersion[], id: string) =>
+  versions.filter((item) => item.artifactId === id).map((item) => item.version).sort((a, b) => a - b);
+
+/// The head line of the opened mockup (pass 262 C): the versions to step
+/// through, then code, save a copy and close, as quiet grey icons.
+export function openHead(open: FoundryOpen, all: readonly number[]) {
+  const at = all.indexOf(open.shown), earlier = at > 0 ? all[at - 1] : undefined, later = at >= 0 && at < all.length - 1 ? all[at + 1] : undefined;
+  const ico = (action: string, args: Record<string, unknown>, paths: string, label: string, extra = "") =>
+    `<button type="button" class="fd-hd-b" data-action="${action}" data-args="${h(JSON.stringify(args))}" aria-label="${h(label)}" title="${h(label)}"${extra}>${icon(paths)}</button>`;
+  const step = (version: number | undefined, paths: string, label: string) => version === undefined
+    ? `<button type="button" class="fd-hd-b" disabled aria-label="${h(label)}">${icon(paths)}</button>`
+    : ico("foundry-shown", { version }, paths, `${label} (v${version})`);
+  const code = open.code !== undefined;
+  return `<span class="fd-hd" role="group" aria-label="This mockup">`
+    + step(earlier, '<path d="m14 6-6 6 6 6"/>', "Earlier version")
+    + `<span class="fd-hd-v" aria-live="polite">v${open.shown}</span>`
+    + step(later, '<path d="m10 6 6 6-6 6"/>', "Later version")
+    + '<i class="fd-hd-sep" aria-hidden="true"></i>'
+    + ico("foundry-code", {}, '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', code ? "Show the page" : "Show the code", ` aria-pressed="${code}"`)
+    + ico("foundry-copy", {}, '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', "Save a copy to Downloads")
+    + ico("foundry-shrink", {}, '<path d="M6 6l12 12M18 6 6 18"/>', "Close (Esc)")
+    + "</span>";
+}
+
+/// The quiet line under the opened mockup after a save: where it went, Show,
+/// and the other format once for a deck, doc or dashboard.
+/// Painted into the opened mockup's quiet line in place (never a redraw of
+/// the page, which would reload every mockup on it).
+export function savedLine(open: FoundryOpen, kind: FoundryKind) {
+  if (!open.said) return "";
+  const saved = open.saved;
+  const show = saved ? `<button type="button" class="fd-said-b" data-action="foundry-copy-show">Show</button>` : "";
+  const other = saved && saved.ready ? `<button type="button" class="fd-said-b" data-action="foundry-copy" data-args='{"other":true}'>${kind === "deck" ? "Also as a web page" : "Also as PDF"}</button>` : "";
+  return `${h(open.said)}${show}${other}`;
 }
 
 /// The kinds a note can be pinned to (pass 233 A): the ones drawn in a frame that says what is under the pointer.
@@ -113,11 +167,17 @@ export function foundryPage(view: FoundryView) {
   const built = builtVersions(shown, view.builtIn);
   // Pass 208 A: the name, from which chat (a link to it), what it is, and
   // the version's own name; "based on" links to the mockup it came from.
-  const item = (version: FoundryShelfVersion, pick: boolean) => {
-    const artifact = byId.get(version.artifactId)!, key = shelfKey(artifact.id, version.version);
+  const item = (slot: FoundryShelfVersion, pick: boolean) => {
+    const artifact = byId.get(slot.artifactId)!, slotKey = shelfKey(artifact.id, slot.version);
+    // Pass 262 C: the opened mockup grows in its place and may show another of its versions there.
+    const open = view.open && view.open.id === artifact.id && view.open.at === slot.version ? view.open : null;
+    const version = open ? shown.find((item) => item.artifactId === artifact.id && item.version === open.shown) ?? slot : slot;
+    const key = shelfKey(artifact.id, version.version);
     const chat = version.sessionId ? view.chatTitle(version.sessionId) : null;
-    const line = `<div class="fd-ln"><b>${h(artifact.title)}</b>${chat ? `<span>from ${link("select-session", { id: version.sessionId }, `“${h(chat)}”`, "Open the chat")}</span>` : ""}`
-      + `<span class="fd-ln-r">${artifact.built ? "Built" : h(KIND_WORD[artifact.kind])} · ${h(clock(version.createdAt))}</span></div>`;
+    const name = open ? `<b>${h(artifact.title)}</b>` : `<b>${link("foundry-grow", { id: artifact.id, version: slot.version }, h(artifact.title), "Open it here, full width")}</b>`;
+    const line = `<div class="fd-ln">${name}${chat ? `<span>from ${link("select-session", { id: version.sessionId }, `“${h(chat)}”`, "Open the chat")}</span>` : ""}`
+      + `<span class="fd-ln-r">${artifact.built ? "Built" : h(KIND_WORD[artifact.kind])} · ${h(clock(version.createdAt))}</span>`
+      + (open ? openHead(open, versionsOf(shown, artifact.id)) : "") + "</div>";
     const based = artifact.basedOn && byId.get(artifact.basedOn.id);
     const from = based ? link("foundry-open", { id: based.id, version: artifact.basedOn!.version }, `${h(based.title)} v${artifact.basedOn!.version}`, "Show it") : "";
     // Pass 241 A: a build's record says how it came out and links the mockup it follows.
@@ -136,13 +196,16 @@ export function foundryPage(view: FoundryView) {
     const taste = why?.followed && !/^none\b/i.test(why.followed) ? why.followed : "";
     const reasons = why ? ([["Direction", why.direction], ["Look at", why.look], ["Dropped", why.dropped], ["Your taste", taste]] as const).filter(([, text]) => text) : [];
     const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
-    const body = artifact.kind === "markdown"
+    const body = open && open.code !== undefined
+      ? `<pre class="fd-code" tabindex="0" aria-label="${h(`${artifact.title} v${version.version}, its code`)}"><code>${open.code === null ? "Reading…" : h(open.code)}</code></pre>`
+      : artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
       : stageHTML(artifact, version, view.changed?.has(key));
     // Pass 233 A: notes are pinned to the newest version only (a correction makes the next one), and their quiet line sits under it.
     // A build's record takes none: what to change goes to the code or the mockup.
     const notes = artifact.version === version.version && NOTE_KINDS.has(artifact.kind) && !artifact.built ? '<p class="fd-notes" aria-live="polite" hidden></p>' : "";
-    return `<section class="fd-item${pick ? " fd-rec" : ""}" data-fd="${h(key)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${notes}</section>`;
+    const notesHere = open && (open.code !== undefined || version !== slot) ? "" : notes;
+    return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
 }

@@ -5,20 +5,36 @@ name: CI
 on:
   pull_request:
     branches: ["main"]
+    # A change that only touches docs can't break a test, so it skips CI.
+    # Nothing on main requires these checks, so a skipped run never blocks
+    # a merge. Read more:
+    # https://docs.github.com/actions/writing-workflows/workflow-syntax-for-github-actions#onpushpull_requestpull_request_targetpathspaths-ignore
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The two jobs below run side by side on separate machines, so the run
+# takes as long as the slower one, not the two added up. Read more:
+# https://docs.github.com/actions/writing-workflows/choosing-what-your-workflow-does/using-jobs-in-a-workflow
 jobs:
-  check:
-    name: Typecheck & Tests
+  installer:
+    name: Installer tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Installer regression tests
         run: python3 scripts/test-install.py
+
+  check:
+    name: Typecheck & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
@@ -31,10 +47,25 @@ jobs:
       - name: Expose bun in /usr/local/bin
         run: sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
       # search_files has a ripgrep path and a fallback; the tools tests cover both.
+      # The release binary downloads in about a second; apt-get update alone
+      # took about nine. apt stays as the fallback.
       - name: Install ripgrep
-        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
+        run: |
+          command -v rg && exit 0
+          v=14.1.1
+          if curl -fsSL --retry 3 "https://github.com/BurntSushi/ripgrep/releases/download/$v/ripgrep-$v-x86_64-unknown-linux-musl.tar.gz" | tar -xz -C "$RUNNER_TEMP"; then
+            sudo install "$RUNNER_TEMP/ripgrep-$v-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
+          else
+            sudo apt-get update -q && sudo apt-get install -y -q ripgrep
+          fi
+          rg --version
       - run: bun install --frozen-lockfile
       - name: Typecheck
         run: bun run typecheck
+      # Most test time is spent waiting on timers and child processes, not
+      # on the CPU, so running files in worker processes (one per core)
+      # cuts the step from about 90s to about 30s. --parallel also gives
+      # each file a fresh global, so files can't leak state into each other.
+      # Read more: https://bun.com/docs/cli/test
       - name: Unit Tests
-        run: HOME=$(mktemp -d) bun test
+        run: HOME=$(mktemp -d) bun test --parallel

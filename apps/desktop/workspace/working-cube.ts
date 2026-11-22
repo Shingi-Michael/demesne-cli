@@ -3,8 +3,7 @@
 /// lit from a fixed light, so a mark costs a few polygons instead of dozens of
 /// 3D layers, and a mark drawn mid-beat (the conversation repaints while the
 /// model streams) starts on the same frame as every other. One unit is one
-/// pixel, the size of the CSS cube it replaced: it is a little larger than its
-/// 12px box and spills past it while parted.
+/// pixel. The viewport contains the parted cubelets without scaling the mark.
 
 type Matrix = [number, number, number, number, number, number, number, number, number];
 type Vector = [number, number, number];
@@ -80,5 +79,6 @@ export function cubeSvg(state: CubeState, now: number, still = false): string {
     const points = face.corners.map((corner) => `${(center[0] + corner[0]).toFixed(2)},${(center[1] + corner[1]).toFixed(2)}`).join(" ");
     return `<polygon points="${points}" style="fill:color-mix(in srgb,var(--t1) ${share}%,var(--t4))"/>`;
   }));
-  return `<svg viewBox="-6 -6 12 12" width="12" height="12">${polygons.join("")}</svg>`;
+  // Every rotated corner lies within sqrt(3) * (PARTED + HALF) = 12.65px of the centre.
+  return `<svg viewBox="-13 -13 26 26" width="26" height="26">${polygons.join("")}</svg>`;
 }

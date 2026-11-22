@@ -29,8 +29,8 @@ test("the split gets the chat's newest picture, and input only while the page is
   try {
     const { session } = await (await call("/v1/sessions", { title: "Shop" })).json() as { session: { id: string } };
     const base = `/v1/sessions/${session.id}/browser`;
-    expect(await (await call(`${base}/frame?after=0`)).json()).toEqual({ ...frame, visits: [] });
-    expect(await (await call(`${base}/frame?after=3`)).json()).toEqual({ seq: 0, visits: [] });
+    expect(await (await call(`${base}/frame?after=0`)).json()).toEqual(frame);
+    expect(await (await call(`${base}/frame?after=3`)).json()).toEqual({ seq: 0 });
     expect((await call(`/v1/sessions/nope/browser/frame`)).status).toBe(404);
     // Not yours: refused, and nothing reached the browser.
     expect((await call(`${base}/input`, { events: [{ type: "text", text: "secret" }] })).status).toBe(409);
@@ -39,14 +39,13 @@ test("the split gets the chat's newest picture, and input only while the page is
   } finally { server.stop(true); }
 });
 
-test("you take the page, go where you like on it, step back through pages, and hand it back", async () => {
+test("you take the page, go where you like on it, and hand it back", async () => {
   const directory = mkdtempSync(join(tmpdir(), "demesne-split-"));
   directories.push(directory);
   const sent: Record<string, unknown>[] = [];
   const frame: BrowserFrame = { seq: 2, jpeg: "/9j/", width: 1280, height: 800, url: "https://shop.example/", title: "Shop", handover: false };
-  const visits = [{ seq: 1, url: "https://shop.example/", title: "Shop", tab: 1, jpeg: "/9j/a" }];
   const browser = Object.assign((async (_chat, command) => { sent.push(command); return { url: String(command.url ?? frame.url), title: "Shop", ok: true }; }) as BrowserDriver,
-    { frame: async (_chat: string, after: number) => after < frame.seq ? frame : null, visits: () => visits });
+    { frame: async (_chat: string, after: number) => after < frame.seq ? frame : null });
   const resolveHost = async (host: string) => host === "inside.example" ? ["192.168.1.4"] : ["93.184.215.14"];
   const app = createDaemonApp({ databasePath: join(directory, "data", "demesne.sqlite"), browser, resolveHost });
   apps.push(app);
@@ -55,9 +54,6 @@ test("you take the page, go where you like on it, step back through pages, and h
   try {
     const { session } = await (await call("/v1/sessions", { title: "Shop" })).json() as { session: { id: string } };
     const base = `/v1/sessions/${session.id}/browser`;
-    expect((await (await call(`${base}/frame?after=0`)).json()).visits).toEqual([{ seq: 1, url: "https://shop.example/", title: "Shop", tab: 1 }]);
-    expect(await (await call(`${base}/visit?seq=1`)).json()).toEqual(visits[0]!);
-    expect((await call(`${base}/visit?seq=9`)).status).toBe(404);
     // Not yours yet: going anywhere is refused.
     expect((await call(`${base}/go`, { to: "back" })).status).toBe(409);
     expect(await (await call(`${base}/take`, {})).json()).toEqual({ taken: true });

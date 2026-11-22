@@ -15,7 +15,8 @@
 /// Each project keeps its own cookies on disk, so a sign-in lasts.
 import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { connect } from "node:net";
 import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { browserSiteKey, isRecord, TRY_KEYS } from "@demesne/protocol";
 import type { ImageOutput } from "./artifacts.ts";
@@ -35,16 +36,14 @@ export type BrowserDriver = (chat: string, command: Record<string, unknown>, sig
 
 /// The newest picture of a chat's tab, for the split screen.
 export interface BrowserFrame { seq: number; jpeg: string; width: number; height: number; url: string; title: string; handover: boolean;
-  tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; /** When the browser sent it (its clock), to measure the way to the screen. */ at?: number }
+  tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; /** The page is still loading. */ loading?: boolean; /** The page itself is on show in the desktop app's window: there is no picture to draw. */ live?: boolean; /** When the browser sent it (its clock), to measure the way to the screen. */ at?: number }
 /// A page the chat's browser went to, kept small, to step back through.
-export interface BrowserVisit { seq: number; url: string; title: string; tab: number; jpeg: string }
 /// A driver you can also watch: pictures arrive as the tab repaints, and a small one of each page it went to.
 export interface WatchableBrowser {
   frame(chat: string, after: number, signal: AbortSignal, aspect?: number, dark?: boolean, box?: { width: number; dpr: number }): Promise<BrowserFrame | null>;
-  visits?(chat: string): BrowserVisit[];
+  /// Set by the daemon: the person scrolled, clicked or typed on a chat's page, which makes it theirs.
+  onTaken?: (chat: string) => void;
 }
-/// Pages kept per chat to step back through.
-export const VISITS_KEPT = 12;
 
 const COMMAND_TIMEOUT_MS = 40_000;
 /// A frame request waits this long for a newer picture before saying there is none.
@@ -110,81 +109,109 @@ export class BrowserHandovers {
   }
 }
 
-/// Keeps one hidden browser running for the daemon, started on first use and
-/// started again if it dies. `close` ends it, with every chat's tab.
-export function electronBrowser(command: string[], profileDir?: string): BrowserDriver & WatchableBrowser & { close(): void } {
-  let child: ReturnType<typeof Bun.spawn> | null = null, next = 1, seq = 0;
+/// Where the open desktop app says its window can hold the browser: a socket, and the word to say on it.
+export function desktopBrowserAt(pointer: string | undefined): { socket: string; token: string } | null {
+  if (!pointer || !existsSync(pointer)) return null;
+  try {
+    const said = JSON.parse(readFileSync(pointer, "utf8")) as Record<string, unknown>;
+    if (typeof said.socket !== "string" || typeof said.token !== "string" || !Number.isInteger(said.pid)) return null;
+    // A file left by an app that is gone.
+    try { process.kill(said.pid as number, 0); } catch { return null; }
+    return { socket: said.socket, token: said.token };
+  } catch { return null; }
+}
+
+/// The browser's other end: a hidden copy of the app, or the open app's window.
+interface Link { inApp: boolean; send(line: string): void; end(): void }
+
+/// Keeps one browser running for the daemon, started on first use and started again if it dies: inside the
+/// open desktop app's window when there is one (`desktop` names the file where the app says so), where the
+/// split shows the page itself; else a hidden copy of the app. `close` ends it, with every chat's tab.
+export function electronBrowser(command: string[], profileDir?: string, desktop?: string): BrowserDriver & WatchableBrowser & { close(): void; inApp(): boolean } {
+  let child: Link | null = null, next = 1, seq = 0;
+  /// The chats with a tab open, to know when moving into the app's window would lose nothing.
+  const open = new Set<string>();
+  let appFailedAt = 0;
   const waiting = new Map<number, (reply: Record<string, unknown> | null) => void>();
   const frames = new Map<string, BrowserFrame>(), frameWaiters = new Map<string, Set<() => void>>(), told = new Map<string, number>(), shape = new Map<string, number>();
-  const visits = new Map<string, BrowserVisit[]>();
   let scheme: boolean | undefined;
   /// How sharp the screen showing the split is, once a split has said: new tabs draw that sharp.
   let screen: number | undefined;
   const boxes = new Map<string, { width: number; dpr: number }>();
-  const drop = () => { for (const resolve of waiting.values()) resolve(null); waiting.clear(); child = null; };
-  const start = () => {
-    const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
-    const started = Bun.spawn([...command, "--browser-host", ...(profileDir ? [`--browser-profile=${profileDir}`] : [])], { stdin: "pipe", stdout: "pipe", stderr: process.env.DEMESNE_BROWSER_DEBUG ? "inherit" : "ignore", env });
-    told.clear();
-    child = started;
-    void (async () => {
-      const decoder = new TextDecoder();
-      let buffer = "";
-      try {
-        for await (const chunk of started.stdout as ReadableStream<Uint8Array>) {
-          buffer += decoder.decode(chunk, { stream: true });
-          let end: number;
-          while ((end = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+  const drop = () => { for (const resolve of waiting.values()) resolve(null); waiting.clear(); child = null; open.clear(); };
+  /// One line from the browser: an answer to a command, or news (a picture, a page it went to).
+  const heard = (line: string) => {
             try {
               const reply = JSON.parse(line) as Record<string, unknown>;
               if (typeof reply.id === "number") { waiting.get(reply.id)?.(reply); waiting.delete(reply.id); }
+              else if (reply.event === "gone" && typeof reply.chat === "string") open.delete(reply.chat);
+              else if (reply.event === "taken" && typeof reply.chat === "string") driver.onTaken?.(reply.chat);
               else if (reply.event === "frame" && typeof reply.chat === "string" && typeof reply.jpeg === "string") {
                 frames.set(reply.chat, { seq: ++seq, jpeg: reply.jpeg, width: Number(reply.width) || 1280, height: Number(reply.height) || 800, url: String(reply.url ?? ""), title: String(reply.title ?? ""), handover: reply.handover === true,
                   ...(Array.isArray(reply.tabs) ? { tabs: (reply.tabs as Record<string, unknown>[]).slice(0, 8).map((one) => ({ n: Number(one.n) || 0, url: String(one.url ?? ""), title: String(one.title ?? ""), ...(one.active === true ? { active: true } : {}) })) } : {}),
                   ...(reply.pointer && typeof reply.pointer === "object" ? { pointer: { x: Number((reply.pointer as Record<string, unknown>).x) || 0, y: Number((reply.pointer as Record<string, unknown>).y) || 0, ago: Number((reply.pointer as Record<string, unknown>).ago) || 0 } } : {}),
-                  back: reply.back === true, forward: reply.forward === true, ...(typeof reply.at === "number" ? { at: reply.at } : {}) });
-                // A page it reached while watched, before its own small picture came: the live one stands in.
-                const list = visits.get(reply.chat) ?? [], url = String(reply.url ?? "");
-                if (url && url !== "about:blank" && list.at(-1)?.url !== url) {
-                  const tab = Array.isArray(reply.tabs) ? Number((reply.tabs as Record<string, unknown>[]).find((one) => one.active === true)?.n) || 1 : 1;
-                  list.push({ seq: ++seq, url, title: String(reply.title ?? ""), tab, jpeg: reply.jpeg });
-                  if (list.length > VISITS_KEPT) list.shift();
-                  visits.set(reply.chat, list);
-                }
+                  back: reply.back === true, forward: reply.forward === true, ...(reply.loading === true ? { loading: true } : {}), ...(reply.live === true ? { live: true } : {}), ...(typeof reply.at === "number" ? { at: reply.at } : {}) });
                 for (const wake of frameWaiters.get(reply.chat) ?? []) wake();
-              } else if (reply.event === "visit" && typeof reply.chat === "string" && typeof reply.jpeg === "string") {
-                const list = visits.get(reply.chat) ?? [];
-                // The same page again (a reload, a repaint after load) replaces its picture.
-                if (list.at(-1)?.url === reply.url) list.pop();
-                list.push({ seq: ++seq, url: String(reply.url ?? ""), title: String(reply.title ?? ""), tab: Number(reply.tab) || 1, jpeg: reply.jpeg });
-                if (list.length > VISITS_KEPT) list.shift();
-                visits.set(reply.chat, list);
               }
             } catch { /* Chromium's own chatter */ }
-          }
-        }
-      } catch { /* the pipe closed */ }
-      if (child === started) drop();
+  };
+  const lines = (take: (line: string) => void) => {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    return (chunk: Uint8Array) => {
+      buffer += decoder.decode(chunk, { stream: true });
+      let end: number;
+      while ((end = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); take(line); }
+    };
+  };
+  /// The open desktop app, when it is there and did not just fail us.
+  const app = () => Date.now() - appFailedAt > 10_000 ? desktopBrowserAt(desktop) : null;
+  const start = (): Link => {
+    told.clear();
+    const at = app();
+    if (at) {
+      // The app's own window holds the browser: the same lines, over its socket.
+      const socket = connect(at.socket);
+      const link: Link = { inApp: true, send: (line) => { socket.write(line); }, end: () => { socket.end(); } };
+      const gone = () => { if (child === link) { appFailedAt = Date.now(); drop(); } };
+      socket.on("data", lines(heard));
+      socket.on("error", gone);
+      socket.on("close", gone);
+      socket.write(`${JSON.stringify({ hello: at.token, ...(profileDir ? { profile: profileDir } : {}) })}\n`);
+      child = link;
+      return link;
+    }
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const started = Bun.spawn([...command, "--browser-host", ...(profileDir ? [`--browser-profile=${profileDir}`] : [])], { stdin: "pipe", stdout: "pipe", stderr: process.env.DEMESNE_BROWSER_DEBUG ? "inherit" : "ignore", env });
+    const stdin = started.stdin as import("bun").FileSink;
+    const link: Link = { inApp: false, send: (line) => { stdin.write(line); stdin.flush(); }, end: () => { try { stdin.end(); } catch { /* already gone */ } setTimeout(() => started.kill(), 1500).unref?.(); } };
+    child = link;
+    void (async () => {
+      const take = lines(heard);
+      try { for await (const chunk of started.stdout as ReadableStream<Uint8Array>) take(chunk); } catch { /* the pipe closed */ }
+      if (child === link) drop();
     })();
-    return started;
+    return link;
   };
   const driver = ((chat, body, signal) => new Promise<Record<string, unknown> | null>((resolve) => {
     if (signal.aborted) { resolve(null); return; }
     // Nothing to close when no browser was ever started.
     if (!child && body.action === "close") { resolve({ closed: true }); return; }
-    if (body.action === "close") { frames.delete(chat); visits.delete(chat); }
-    let running: ReturnType<typeof Bun.spawn>;
+    if (body.action === "close") { frames.delete(chat); open.delete(chat); }
+    // The desktop app opened since the hidden browser started: move into its window once no other chat would lose a page.
+    if (child && !child.inApp && body.action === "open" && [...open].every((one) => one === chat) && app()) { const hidden = child; drop(); hidden.end(); }
+    let running: Link;
     try { running = child ?? start(); } catch { resolve(null); return; }
     const id = next++;
-    const finish = (reply: Record<string, unknown> | null) => { clearTimeout(timer); signal.removeEventListener("abort", stop); waiting.delete(id); resolve(reply); };
+    const finish = (reply: Record<string, unknown> | null) => { clearTimeout(timer); signal.removeEventListener("abort", stop); waiting.delete(id); if (body.action === "open" && reply && typeof reply.error !== "string" && child === running) open.add(chat); resolve(reply); };
     const stop = () => finish(null);
     const timer = setTimeout(stop, COMMAND_TIMEOUT_MS);
     signal.addEventListener("abort", stop, { once: true });
     waiting.set(id, finish);
-    try { const stdin = running.stdin as import("bun").FileSink; stdin.write(`${JSON.stringify({ ...body, ...(body.action === "open" && screen ? { dpr: screen } : {}), id, chat })}\n`); stdin.flush(); } catch { finish(null); }
-  })) as BrowserDriver & WatchableBrowser & { close(): void };
+    try { running.send(`${JSON.stringify({ ...body, ...(body.action === "open" && screen ? { dpr: screen } : {}), id, chat })}\n`); } catch { finish(null); }
+  })) as BrowserDriver & WatchableBrowser & { close(): void; inApp(): boolean };
+  driver.inApp = () => Boolean(child?.inApp);
   // The newest picture after `after`, waiting a little for one; the host is told someone is watching.
   driver.frame = async (chat, after, signal, aspect, dark, box) => {
     // The split's own width and sharpness, so the page is laid out for the room it is shown in.
@@ -211,13 +238,10 @@ export function electronBrowser(command: string[], profileDir?: string): Browser
     });
     return frames.get(chat) ?? null;
   };
-  driver.visits = (chat) => visits.get(chat) ?? [];
   driver.close = () => {
     const running = child;
     drop();
-    if (!running) return;
-    try { (running.stdin as import("bun").FileSink).end(); } catch { /* already gone */ }
-    setTimeout(() => running.kill(), 1500).unref?.();
+    running?.end();
   };
   return driver;
 }

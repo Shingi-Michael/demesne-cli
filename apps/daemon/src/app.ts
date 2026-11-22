@@ -229,6 +229,8 @@ export function createDaemonApp(options: {
   pageLook?: PageLook;
   /// The model's own browser (tests pass a fake; the daemon uses the desktop app). False turns it off.
   browser?: (BrowserDriver & Partial<WatchableBrowser>) | false;
+  /// The file where the open desktop app says its window can hold the browser (browser-inapp.ts); the split then shows the page itself.
+  desktopBrowser?: string;
   /// How an address you type in the browser split is looked up, to keep it off the local network (tests pass their own).
   resolveHost?: (host: string) => Promise<string[]>;
   /// The engine's clock (evals step it to make the prompt cache go cold).
@@ -414,10 +416,12 @@ export function createDaemonApp(options: {
   const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
   if (pageLook) tools.register(lookAtPageTool(pageLook));
   // Its sign-ins are kept per project, beside the database (pass 248 D).
-  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith, join(dirname(options.databasePath), "browser-profile")) : null;
+  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith, join(dirname(options.databasePath), "browser-profile"), options.desktopBrowser) : null;
   const browser = options.browser === false ? null : options.browser ?? ownBrowser;
   const handovers = new BrowserHandovers();
   if (browser) tools.register(browserTool(browser, undefined, undefined, handovers));
+  // You scrolled, clicked or typed on the chat's page: it is yours, and the model's next browser step waits for you.
+  if (browser && browser.frame) browser.onTaken = (chat) => { handovers.take(chat); };
   // Open it behind Demesne, and show it on the right (pass 210 A).
   if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index
@@ -1723,15 +1727,8 @@ export function createDaemonApp(options: {
           const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined, url.searchParams.has("dark") ? url.searchParams.get("dark") === "1" : undefined,
             Number(url.searchParams.get("w")) > 100 ? { width: Math.min(4000, Number(url.searchParams.get("w"))), dpr: Math.max(1, Math.min(3, Number(url.searchParams.get("dpr")) || 1)) } : undefined) : null;
           const held = handovers.held(chat);
-          const visits = browser?.visits?.(chat).map(({ seq, url, title, tab }) => ({ seq, url, title, tab })) ?? [];
-          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}), visits };
+          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}) };
           return json(frame ? { ...frame, ...extra } : { seq: 0, ...extra });
-        }
-        // A page it went to, to step back through.
-        if (request.method === "GET" && path[4] === "visit") {
-          const seq = Number(url.searchParams.get("seq"));
-          const visit = browser?.visits?.(chat).find((one) => one.seq === seq);
-          return visit ? json(visit) : apiError("not_found", "That page is no longer kept", 404);
         }
         // You take the page without being asked: the model's browser steps wait until you give it back.
         if (request.method === "POST" && path[4] === "take") {
@@ -1749,6 +1746,8 @@ export function createDaemonApp(options: {
           const to = isRecord(body) ? body.to : undefined;
           if (to === "back" || to === "forward" || to === "reload") { const reply = await browser(chat, { action: "go", to }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
           const tab = typeof to === "string" ? /^tab:(\d{1,3})$/.exec(to) : null;
+          const shut = typeof to === "string" ? /^close:(\d{1,3})$/.exec(to) : null;
+          if (shut) { const reply = await browser(chat, { action: "close_tab", tab: Number(shut[1]) }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
           if (tab) { const reply = await browser(chat, { action: "switch", tab: Number(tab[1]) }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
           if (typeof to !== "string" || !to.trim()) return apiError("invalid_request", "Say where to go", 400);
           let address: string;
@@ -1756,7 +1755,8 @@ export function createDaemonApp(options: {
           catch (error) { return apiError("invalid_request", error instanceof Error ? error.message.replace(/^\[[A-Z_]+\]\s*/, "") : String(error), 400); }
           const site = browserSiteKey({ action: "open", url: address });
           if (site) { try { await assertPublic(new URL(address), options.resolveHost ?? (async (host) => (await import("node:dns/promises").then((dns) => dns.lookup(host, { all: true }))).map((entry) => entry.address))); } catch { return apiError("invalid_request", "That address is on your local network; the browser opens this computer and public sites", 400); } }
-          const reply = await browser(chat, { action: "go", url: address, ...(site ? { site } : {}) }, request.signal);
+          // A new tab you opened goes there in a tab of its own; the page it was opened over stays.
+          const reply = await browser(chat, { action: "go", url: address, ...(site ? { site } : {}), ...(isRecord(body) && body.newTab === true ? { new_tab: true } : {}) }, request.signal);
           return reply && typeof reply.error !== "string" ? json({ ok: true, url: reply.url }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
         }
         if (request.method === "POST" && path[4] === "input") {

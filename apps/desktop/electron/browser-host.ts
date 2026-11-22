@@ -17,10 +17,13 @@
 /// back, and while it is yours the site limits are yours to cross, so a
 /// "Sign in with Google" window opens as a tab of its own. With a profile
 /// folder, a project's cookies are kept on disk, session sign-ins included.
+/// While the desktop app is open the same browser runs inside the app's own window instead
+/// (browser-inapp.ts): each tab is a real view of that window, the split shows the page itself, and
+/// no pictures are sent. `createBrowserHost` is both; `runBrowserHost` is the hidden one.
 /// For the model's own work on this computer's pages it can read what the
 /// server answered and how a control is styled, upload a project file and
 /// download into the project.
-import { app, BrowserWindow, nativeTheme, session as sessions, type Cookie, type NativeImage, type Session, type WebContents } from "electron";
+import { app, BrowserWindow, nativeTheme, session as sessions, View, WebContentsView, type Cookie, type Session, type WebContents } from "electron";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -74,7 +77,13 @@ function siteOf(url: string): string | null {
 }
 
 /// One hidden tab. A chat has one or more; the model acts on the active one.
-interface Tab { win: BrowserWindow; chat: Chat; n: number; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; downloaded: string[];
+/// What holds a tab's page: a window nobody sees (the hidden browser), or a real view inside the desktop
+/// app's own window (browser-inapp.ts), which shows the page itself in the split, not pictures of it.
+interface Pane { webContents: WebContents; isDestroyed(): boolean; destroy(): void; getContentSize(): number[]; setContentSize(width: number, height: number): void; loadURL(url: string): Promise<void>; onClosed(done: () => void): void;
+  /** In the app: on show at this place in the window (its own points), or put away (null). */ place?(rect: Rect | null): void }
+/// A place in the desktop window, in the window's own points.
+export interface Rect { x: number; y: number; width: number; height: number }
+interface Tab { win: Pane; chat: Chat; n: number; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; downloaded: string[];
   framed: number; frameTimer?: ReturnType<typeof setTimeout>; pointer?: { x: number; y: number; at: number }; requests: Seen[]; popup?: boolean; sized?: boolean; fps?: number;
   /// The page is streaming its pictures (CDP screencast), and the newest one, to send again with news.
   casting?: boolean; last?: { jpeg: string; ratio: number } }
@@ -137,6 +146,7 @@ export const BODY_CHARS = 6_000;
 /// A file name a download can be saved under: no folders, nothing hidden.
 export const safeFileName = (name: string) => (basename(name).replace(/[^\w.\- ()]+/g, "_").replace(/^\.+/, "").slice(0, 120)) || "download";
 
+/// The app started as `--browser-host`: the browser nobody sees, talking over stdin and stdout.
 export function runBrowserHost() {
   const keptAt = process.argv.find((arg) => arg.startsWith(BROWSER_PROFILE_FLAG))?.slice(BROWSER_PROFILE_FLAG.length) ?? "";
   const kept = Boolean(keptAt);
@@ -147,6 +157,21 @@ export function runBrowserHost() {
   if (process.platform === "darwin") app.setActivationPolicy("accessory");
   app.dock?.hide();
   app.on("window-all-closed", () => {});
+  void app.whenReady().then(() => {
+    const host = createBrowserHost({ profile, kept, write: (line) => process.stdout.write(JSON.stringify(line) + "\n") });
+    const lines = createInterface({ input: process.stdin });
+    lines.on("line", (line) => host.line(line));
+    // The daemon closing our input (or going away) is the end of the browser.
+    lines.on("close", () => { void host.shutdown().then(() => { if (!kept) try { rmSync(profile, { recursive: true, force: true }); } catch {} app.exit(0); }); });
+    process.stdout.write(JSON.stringify({ id: "ready", ready: true }) + "\n");
+  });
+}
+
+/// One browser: its chats' tabs, and the commands that drive them. `write` takes each answer and event.
+/// With `inApp`, its tabs are real views of that window (the desktop app's), put on show with `place`.
+export function createBrowserHost(options: { profile: string; kept: boolean; write: (line: Record<string, unknown>) => void; inApp?: { window: BrowserWindow } }) {
+  const { profile, kept, write } = options, inApp = options.inApp;
+  const timers: ReturnType<typeof setInterval>[] = [];
   const chats = new Map<string, Chat>();
   /// The tab each page belongs to, for the handlers its session shares with other chats of the project.
   const byContents = new Map<number, Tab>();
@@ -155,18 +180,17 @@ export function runBrowserHost() {
   /// The sessions kept on disk, by partition, so their cookies are written out before the host goes.
   const keptSessions = new Map<string, Session>();
   const sessionCookies = (partition: string) => join(profile, "session-cookies", `${partition.replace(/[^\w-]/g, "_")}.json`);
-  const quit = async () => {
-    for (const chat of chats.values()) for (const tab of chat.tabs.values()) tab.win.destroy();
+  const shutdown = async () => {
+    for (const timer of timers) clearInterval(timer);
+    for (const chat of chats.values()) for (const tab of [...chat.tabs.values()]) tab.win.destroy();
+    chats.clear();
     // A sign-in that lasts only for the session is kept too, and comes back as one when the browser starts again.
     await Promise.race([Promise.all([...keptSessions].map(async ([partition, one]) => {
       const held = (await one.cookies.get({}).catch(() => [])).filter((cookie) => cookie.session);
       if (held.length) { mkdirSync(join(profile, "session-cookies"), { recursive: true }); writeFileSync(sessionCookies(partition), JSON.stringify(held)); }
       await one.cookies.flushStore().catch(() => {});
     })), settle(1500)]);
-    if (!kept) try { rmSync(profile, { recursive: true, force: true }); } catch {}
-    app.exit(0);
   };
-  const write = (line: Record<string, unknown>) => process.stdout.write(JSON.stringify(line) + "\n");
   const answer = (id: unknown, result: Record<string, unknown>) => write({ id, ...result });
   const activeTab = (chat: Chat | undefined) => chat ? chat.tabs.get(chat.active) : undefined;
   const tabList = (chat: Chat) => [...chat.tabs.values()].map((tab) => ({ n: tab.n, url: tab.win.isDestroyed() ? "" : tab.win.webContents.getURL(), title: tab.win.isDestroyed() ? "" : tab.win.webContents.getTitle(), ...(tab.n === chat.active ? { active: true } : {}) }));
@@ -179,17 +203,17 @@ export function runBrowserHost() {
     tab.framed = Date.now();
     tab.last = { jpeg, ratio };
     const contents = tab.win.webContents;
-    write({ event: "frame", chat: tab.chat.id, at: Date.now(), jpeg, width: view.width, height: Math.round(view.width * ratio),
+    write({ event: "frame", chat: tab.chat.id, at: Date.now(), jpeg, ...(inApp ? { live: true } : {}), width: view.width, height: Math.round(view.width * ratio),
       url: contents.getURL(), title: contents.getTitle(), handover: tab.chat.held, tabs: tabList(tab.chat),
       ...(tab.pointer ? { pointer: { x: tab.pointer.x, y: tab.pointer.y, ago: Date.now() - tab.pointer.at } } : {}),
-      back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward() });
+      back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward(), ...(contents.isLoading() ? { loading: true } : {}) });
   };
   /// The page streams its own pictures while watched: Chromium draws them small and as JPEG itself, off
   /// this process, and sends the next only once the last is taken, so a busy page can't pile them up.
   const frameMs = (tab: Tab) => tab.chat.held ? HELD_FRAME_MS : FRAME_MS;
   /// How often a tab draws follows who is looking: nobody, someone watching, or someone using it.
   const pace = (tab: Tab) => {
-    if (tab.win.isDestroyed()) return;
+    if (tab.win.isDestroyed() || inApp) return;
     const fps = !tab.casting ? UNWATCHED_FPS : tab.chat.held ? HELD_FPS : WATCHED_FPS;
     if (tab.fps !== fps) { tab.fps = fps; tab.win.webContents.setFrameRate(fps); }
   };
@@ -226,7 +250,14 @@ export function runBrowserHost() {
   /// Pictures flow for the tab on show, and news (who has it, its tabs, where it pointed) reaches the
   /// desktop even when the page itself did not change.
   const frameSoon = (tab: Tab | undefined) => {
+    if (inApp) relayout();
     if (!tab || tab.win.isDestroyed()) return;
+    // In the app the page itself is on show: only its news (address, title, tabs, who has it) is sent.
+    if (inApp) {
+      if (!isWatched(tab) || tab.frameTimer) return;
+      tab.frameTimer = setTimeout(() => { tab.frameTimer = undefined; if (isWatched(tab)) { const [wide, tall] = tab.win.getContentSize(); sendFrame(tab, "", (tall || 800) / Math.max(1, wide || 1280)); } }, 40);
+      return;
+    }
     for (const one of tab.chat.tabs.values()) if (one !== tab) stopCast(one);
     if (!isWatched(tab)) { stopCast(tab); return; }
     startCast(tab);
@@ -245,18 +276,7 @@ export function runBrowserHost() {
     }, Math.max(FRAME_MS, 250 - (Date.now() - tab.framed)));
   };
   // A watch that lapsed stops its stream.
-  setInterval(() => { for (const chat of chats.values()) for (const tab of chat.tabs.values()) if (tab.casting && !isWatched(tab)) stopCast(tab); }, 1000).unref?.();
-  /// A page it went to, kept small, so the desktop can step back through them afterwards.
-  /// A small picture of each page a tab went to. Right after a load the offscreen page may not have drawn yet, so it tries again.
-  const sendVisit = (tab: Tab, tries = 4) => {
-    if (tab.win.isDestroyed()) return;
-    const contents = tab.win.webContents, url = contents.getURL();
-    if (!url || url === "about:blank") return;
-    void contents.capturePage().then((image) => {
-      if (image.isEmpty()) { if (tries > 1) setTimeout(() => { if (!tab.win.isDestroyed() && tab.win.webContents.getURL() === url) sendVisit(tab, tries - 1); }, 400); return; }
-      write({ event: "visit", chat: tab.chat.id, url, title: contents.getTitle(), tab: tab.n, jpeg: image.resize({ width: 640, quality: "good" }).toJPEG(70).toString("base64") });
-    }, () => {});
-  };
+  { const timer = setInterval(() => { for (const chat of chats.values()) for (const tab of chat.tabs.values()) if (tab.casting && !isWatched(tab)) stopCast(tab); }, 1000); timer.unref?.(); timers.push(timer); }
   /// The page's height follows the split's shape; its width stays the model's.
   /// While you watch a desktop-width tab it is as wide as the split shows it,
   /// so the page lays itself out for the room it has and nothing is shrunk. Nobody watching: the
@@ -264,6 +284,8 @@ export function runBrowserHost() {
   const fit = (tab: Tab) => {
     if (tab.win.isDestroyed()) return;
     const view = TRY_WIDTHS[tab.width], [width, height] = tab.win.getContentSize();
+    // In the app a tab on show is the size of its place in the window; put away, the model's own size.
+    if (inApp) { tab.win.setContentSize(view.width, view.height); return; }
     const on = isWatched(tab), aspect = on ? aspects.get(tab.chat.id) : undefined, box = on && tab.width === "desktop" && !tab.popup ? boxes.get(tab.chat.id) : undefined;
     const wide = box ? Math.round(Math.max(360, Math.min(1600, box.width))) : view.width;
     const tall = aspect ? Math.round(Math.max(box ? 300 : view.height * 0.75, Math.min(wide * 3, wide * aspect))) : view.height;
@@ -282,6 +304,98 @@ export function runBrowserHost() {
       if (inner === 0 || tab.sized) { tab.sized = true; await contents.debugger.sendCommand("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: tab.chat.sharp, mobile: tab.width === "phone" }).catch(() => {}); }
     };
     if (contents.isLoading() || !contents.getURL()) contents.once("dom-ready", () => void size()); else void size();
+  };
+
+  /// A hidden window as a tab's pane.
+  const windowPane = (win: BrowserWindow): Pane => ({ webContents: win.webContents, isDestroyed: () => win.isDestroyed(), destroy: () => win.destroy(), getContentSize: () => win.getContentSize(),
+    setContentSize: (width, height) => win.setContentSize(width, height), loadURL: (url) => win.loadURL(url), onClosed: (done) => { win.on("closed", done); } });
+  /// In the app, tabs not on show are put away with all but one point of them outside the window, at its
+  /// top-left corner, under a one-point cover: a page has to be in the window, however little of it, to keep
+  /// drawing, taking clicks and giving pictures. (Not inside a small holder view: a Mac does not clip a
+  /// view to its parent, so a held page showed whole over the chat.)
+  let cover: View | undefined;
+  const coverUp = () => {
+    const root = inApp!.window.contentView;
+    if (!cover) {
+      cover = new View();
+      cover.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#161617" : "#ececec");
+      cover.setBounds({ x: 0, y: 0, width: 1, height: 1 });
+    }
+    // Added again, it goes on top of the pages put away under it.
+    root.addChildView(cover);
+  };
+  /// A real view of the app's window as a tab's pane.
+  const viewPane = (view: WebContentsView): Pane => {
+    let size: number[] = [TRY_WIDTHS.desktop.width, TRY_WIDTHS.desktop.height], shown: Rect | null = null, added = false, gone = false;
+    const closed: (() => void)[] = [];
+    const end = () => {
+      if (gone) return;
+      gone = true;
+      try { if (added) inApp!.window.contentView.removeChildView(view); } catch { /* the window went first */ }
+      for (const done of closed) done();
+    };
+    const lay = () => {
+      if (gone || inApp!.window.isDestroyed()) return;
+      if (!added) { inApp!.window.contentView.addChildView(view); added = true; }
+      if (shown) view.setBounds({ x: Math.round(shown.x), y: Math.round(shown.y), width: Math.max(1, Math.round(shown.width)), height: Math.max(1, Math.round(shown.height)) });
+      else { view.setBounds({ x: 1 - size[0]!, y: 1 - size[1]!, width: size[0]!, height: size[1]! }); coverUp(); }
+    };
+    view.setBackgroundColor("#ffffff");
+    view.webContents.once("destroyed", end);
+    lay();
+    return { webContents: view.webContents, isDestroyed: () => gone || view.webContents.isDestroyed(),
+      destroy: () => { if (gone) return; end(); try { view.webContents.close(); } catch {} },
+      getContentSize: () => shown ? [Math.round(shown.width), Math.round(shown.height)] : [...size],
+      setContentSize: (width, height) => { size = [width, height]; lay(); },
+      loadURL: (url) => view.webContents.loadURL(url), onClosed: (done) => { closed.push(done); },
+      place: (rect) => { if (added && JSON.stringify(rect) === JSON.stringify(shown)) return; shown = rect; lay(); } };
+  };
+  /// Which chat's page is on show in the window, and where (the split's page area).
+  let placement: { chat: string; rect: Rect } | null = null;
+  /// Each tab goes where it belongs: the active tab of the chat on show in its place, every other one away.
+  const relayout = () => {
+    for (const chat of chats.values()) for (const tab of chat.tabs.values()) {
+      if (tab.win.isDestroyed() || !tab.win.place) continue;
+      const rect = placement && placement.chat === chat.id && chat.active === tab.n ? placement.rect : null;
+      // A phone-width page keeps its width, in the middle.
+      const narrow = rect && tab.width === "phone" ? Math.min(TRY_WIDTHS.phone.width, rect.width) : 0;
+      tab.win.place(rect && narrow ? { x: rect.x + (rect.width - narrow) / 2, y: rect.y, width: narrow, height: rect.height } : rect);
+    }
+  };
+  /// The app says where the split's page area is (null: nothing is on show).
+  const place = (chat: string, rect: Rect | null) => {
+    placement = rect ? { chat, rect } : null;
+    relayout();
+  };
+  /// The model's own clicks and keys, sent here: the page hears of them at once (input-event), so one
+  /// that comes while this is set is the model's, and any other is the person's.
+  let sending = false;
+  const send = (contents: WebContents, event: Parameters<WebContents["sendInputEvent"]>[0]) => { sending = true; try { contents.sendInputEvent(event); } finally { sending = false; } };
+  /// You scroll, click or type on the page while the model has it: the page is yours from then on, and the
+  /// model's next step waits until you go back to the chat (the desktop hands it back then).
+  const PERSON = new Set(["mouseDown", "mouseWheel", "rawKeyDown", "keyDown", "char"]);
+  const taken = (chat: Chat, type: string) => {
+    if (sending || chat.held || !PERSON.has(type)) return;
+    chat.held = true;
+    chat.used = Date.now();
+    write({ event: "taken", chat: chat.id });
+    frameSoon(activeTab(chat));
+  };
+  /// Where the model pointed, marked on the real page for a moment (drawn over it, not put into it).
+  const marks = new WeakMap<Tab, ReturnType<typeof setTimeout>>();
+  const hideMark = (tab: Tab) => {
+    const timer = marks.get(tab);
+    if (!timer) return;
+    clearTimeout(timer); marks.delete(tab);
+    if (!tab.win.isDestroyed()) void tab.win.webContents.debugger.sendCommand("Overlay.disable").catch(() => {});
+  };
+  const mark = (tab: Tab, x: number, y: number) => {
+    if (!inApp || tab.win.isDestroyed() || !tab.win.webContents.debugger.isAttached()) return;
+    const debug = tab.win.webContents.debugger;
+    clearTimeout(marks.get(tab));
+    marks.set(tab, setTimeout(() => hideMark(tab), 900));
+    void debug.sendCommand("DOM.enable").then(() => debug.sendCommand("Overlay.enable")).then(() => debug.sendCommand("Overlay.highlightRect", { x: Math.round(x) - 11, y: Math.round(y) - 11, width: 22, height: 22,
+      color: { r: 150, g: 158, b: 172, a: 0.3 }, outlineColor: { r: 150, g: 158, b: 172, a: 0.85 } })).catch(() => {});
   };
 
   /// What a session's pages may do. Set once per session: chats of one project share it.
@@ -322,7 +436,8 @@ export function runBrowserHost() {
   }
   /// A session kept on disk, with the session sign-ins it had when the browser last quit.
   async function keptSession(partition: string) {
-    const session = sessions.fromPartition(partition);
+    // In the app the project's cookies are read from the same folder the hidden browser keeps them in.
+    const session = inApp ? sessions.fromPath(join(profile, "Partitions", partition.replace(/^persist:/, ""))) : sessions.fromPartition(partition);
     if (!keptSessions.has(partition)) {
       keptSessions.set(partition, session);
       const file = sessionCookies(partition);
@@ -353,6 +468,12 @@ export function runBrowserHost() {
   function listen(tab: Tab, contents: WebContents) {
     try { contents.debugger.attach("1.3"); } catch { return; }
     watchNetwork(tab);
+    if (inApp) {
+      // The page behaves as the one in front, so it draws and types like one; your first scroll, click or key on it makes it yours.
+      const front = () => void contents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
+      front(); contents.on("did-navigate", front);
+      contents.on("input-event", (_event, input) => taken(tab.chat, input.type));
+    }
     let n = 0;
     const methods = new Map<string, string>();
     contents.debugger.on("message", (_event, method, params: Record<string, any>) => {
@@ -366,24 +487,27 @@ export function runBrowserHost() {
   }
 
   /// A new hidden tab for a chat. A window the page opened (a sign-in popup) comes in as `win`.
-  function addTab(chat: Chat, width: "desktop" | "phone", session: Session | null, given?: BrowserWindow): Tab {
+  function addTab(chat: Chat, width: "desktop" | "phone", session: Session | null, given?: Pane): Tab {
     const view = TRY_WIDTHS[width];
-    const win = given ?? new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
-      webPreferences: { session: session!, offscreen: chat.sharp > 1 ? { deviceScaleFactor: chat.sharp } : true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    const win = given ?? (inApp ? viewPane(new WebContentsView({ webPreferences: { session: session!, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } }))
+      : windowPane(new BrowserWindow({ show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
+        webPreferences: { session: session!, offscreen: chat.sharp > 1 ? { deviceScaleFactor: chat.sharp } : true, sandbox: true, contextIsolation: true, nodeIntegration: false } })));
     if (given) win.setContentSize(view.width, view.height);
     const tab: Tab = { win, chat, n: chat.next++, width, sites: new Set(activeTab(chat)?.sites ?? []), local: true, errors: [], failed: [], blocked: [], downloaded: [], framed: 0, requests: [] };
     const contents = win.webContents;
     byContents.set(contents.id, tab);
     chat.tabs.set(tab.n, tab);
     chat.active = tab.n;
-    win.on("closed", () => {
-      byContents.delete(contents.id); clearTimeout(tab.frameTimer);
+    const contentsId = contents.id;
+    win.onClosed(() => {
+      byContents.delete(contentsId); clearTimeout(tab.frameTimer);
       chat.tabs.delete(tab.n);
       // A popup that closed itself (a sign-in done) hands back to the tab before it.
       if (chat.active === tab.n) { chat.active = [...chat.tabs.keys()].at(-1) ?? 0; frameSoon(activeTab(chat)); }
     });
     // Nobody watches a new tab yet: it draws sparingly until someone does.
-    tab.fps = UNWATCHED_FPS; contents.setFrameRate(UNWATCHED_FPS);
+    if (!inApp) { tab.fps = UNWATCHED_FPS; contents.setFrameRate(UNWATCHED_FPS); }
+    else for (const news of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-start-loading", "did-stop-loading"] as const) contents.on(news as "did-stop-loading", () => frameSoon(tab));
     // Where this tab may go: around this computer while it is here, the sites the person approved, and anywhere public while the person has it.
     const allowed = (url: string) => {
       if (localAddress(url)) return tab.local;
@@ -402,7 +526,6 @@ export function runBrowserHost() {
       if (site && chat.held) tab.sites.add(site);
       tab.pointer = undefined;
     });
-    contents.on("did-stop-loading", () => sendVisit(tab));
     // Sites see an ordinary browser, not the app's name.
     contents.setUserAgent(contents.getUserAgent().replace(/\s(?:Electron|demesne[\w-]*)\/\S+/gi, ""));
     contents.on("will-navigate", (event, url) => refuse(event, url));
@@ -411,13 +534,21 @@ export function runBrowserHost() {
     contents.setWindowOpenHandler(({ url }) => {
       if (url && url !== "about:blank" && !allowed(url)) { blocked(url); return { action: "deny" }; }
       if (chat.tabs.size >= MAX_TABS) { if (tab.blocked.length < 4) tab.blocked.push(`${url.slice(0, 200)} was not opened: this chat already has ${MAX_TABS} tabs; close one`); return { action: "deny" }; }
+      // In the app the new window is another real view, made here.
+      if (inApp) return { action: "allow", createWindow: (made) => {
+        const child = new WebContentsView({ ...(made as object), webPreferences: { ...made.webPreferences, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+        addTab(chat, tab.width, null, viewPane(child));
+        frameSoon(activeTab(chat));
+        return child.webContents;
+      } };
       return { action: "allow", overrideBrowserWindowOptions: { show: false, width: view.width, height: view.height, useContentSize: true, paintWhenInitiallyHidden: true,
         webPreferences: { offscreen: chat.sharp > 1 ? { deviceScaleFactor: chat.sharp } : true, sandbox: true, contextIsolation: true, nodeIntegration: false } } };
     });
-    contents.on("did-create-window", (child) => { const opened = addTab(chat, tab.width, null, child); opened.popup = true; sizePopup(opened); frameSoon(activeTab(chat)); });
+    if (!inApp) contents.on("did-create-window", (child) => { const opened = addTab(chat, tab.width, null, windowPane(child)); opened.popup = true; sizePopup(opened); frameSoon(activeTab(chat)); });
     contents.on("console-message", (event) => { if (tab.local && event.level === "error" && tab.errors.length < 8) tab.errors.push(event.message.slice(0, 200)); });
     listen(tab, contents);
     fit(tab);
+    if (inApp) relayout();
     return tab;
   }
 
@@ -442,7 +573,9 @@ export function runBrowserHost() {
       if (!chat.tabs.size) return { closed: true, tabs: [] };
     }
     let tab = activeTab(chat);
-    if (action === "open") {
+    // The person's own new tab, from the bar while the page is theirs.
+    const ownNewTab = action === "go" && command.new_tab === true && typeof command.url === "string" && chat.held;
+    if (action === "open" || ownNewTab) {
       const fresh = command.new_tab === true || !tab || (command.width !== undefined && tab.width !== width);
       if (fresh && chat.tabs.size >= MAX_TABS) return { error: `This chat already has ${MAX_TABS} tabs; close one first.` };
       if (tab && fresh && command.new_tab !== true) { tab.win.destroy(); chat.tabs.delete(tab.n); }
@@ -509,6 +642,8 @@ export function runBrowserHost() {
       chat.held = command.on === true;
       frameSoon(tab);
       if (chat.held) { contents.focus(); return { url: contents.getURL(), title: contents.getTitle(), handover: true }; }
+      // Your typing goes back to the chat.
+      if (inApp && contents.isFocused() && !inApp.window.isDestroyed()) inApp.window.webContents.focus();
       for (const one of chat.tabs.values()) { if (!one.win.isDestroyed()) one.local = localAddress(one.win.webContents.getURL()); one.errors.length = one.failed.length = 0; }
       return page(true);
     }
@@ -520,7 +655,11 @@ export function runBrowserHost() {
     }
     if (action === "picture") {
       const view = TRY_WIDTHS[tab.width];
-      let image = await contents.capturePage();
+      hideMark(tab);
+      // A page in a window that is hidden or minimised may not give a picture: say so, not wait.
+      const taken = await Promise.race([contents.capturePage(), settle(5000).then(() => null)]);
+      if (!taken || taken.isEmpty()) return { error: "A picture could not be taken just now (the Demesne window may be hidden). Read the outline or the text instead." };
+      let image = taken;
       if (image.getSize().width > view.scaleTo) image = image.resize({ width: view.scaleTo, quality: "good" });
       return page(false, { png: image.toPNG().toString("base64") });
     }
@@ -567,12 +706,12 @@ export function runBrowserHost() {
     const find = (ref: unknown) => typeof ref === "number" || /^\d+$/.test(String(ref))
       ? js<Found>(`window.__demesneBrowser.locate(${Number(ref)})`) : js<Found>(`window.__demesneTry.find(${JSON.stringify(String(ref))})`);
     // Where the model last pointed shows as a soft ring on the picture.
-    const point = (x: number, y: number) => { tab!.pointer = { x: Math.round(x), y: Math.round(y), at: Date.now() }; };
+    const point = (x: number, y: number) => { tab!.pointer = { x: Math.round(x), y: Math.round(y), at: Date.now() }; mark(tab!, x, y); };
     const click = async (x: number, y: number) => {
       point(x, y);
-      contents.sendInputEvent({ type: "mouseMove", x, y });
-      contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-      contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+      send(contents, { type: "mouseMove", x, y });
+      send(contents, { type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      send(contents, { type: "mouseUp", x, y, button: "left", clickCount: 1 });
     };
     const reach = async (ref: unknown, then: (x: number, y: number) => Promise<void>): Promise<{ ok: boolean; said: string }> => {
       const found = await find(ref);
@@ -585,15 +724,16 @@ export function runBrowserHost() {
       return { ok: true, said: found.what };
     };
     const key = (keyCode: string) => {
-      contents.sendInputEvent({ type: "keyDown", keyCode });
-      if (keyCode === "Enter" || keyCode === "Space") contents.sendInputEvent({ type: "char", keyCode: keyCode === "Enter" ? "\r" : " " });
-      contents.sendInputEvent({ type: "keyUp", keyCode });
+      send(contents, { type: "keyDown", keyCode });
+      if (keyCode === "Enter" || keyCode === "Space") send(contents, { type: "char", keyCode: keyCode === "Enter" ? "\r" : " " });
+      send(contents, { type: "keyUp", keyCode });
     };
-    contents.focus();
+    // In the app the chat keeps the keyboard: the page is told it is in front (listen), and let take the model's input.
+    if (!inApp) contents.focus();
     const before = await print(), at = contents.getURL(), y0 = await js<number>("scrollY"), tabsBefore = chat.tabs.size;
     let result: { ok: boolean; said: string } = { ok: true, said: "" };
     if (action === "click") result = await reach(command.ref, click);
-    else if (action === "hover") result = await reach(command.ref, async (x, y) => { point(x, y); contents.sendInputEvent({ type: "mouseMove", x, y }); });
+    else if (action === "hover") result = await reach(command.ref, async (x, y) => { point(x, y); send(contents, { type: "mouseMove", x, y }); });
     else if (action === "type") {
       if (command.ref !== undefined && command.ref !== "") result = await reach(command.ref, click);
       if (result.ok) {
@@ -639,11 +779,9 @@ export function runBrowserHost() {
     return page(moved || action === "reload", { ok: true, ...(result.said ? { did: result.said } : {}), changed: what ?? (action === "wait" || action === "hover" ? "" : "nothing visible changed") });
   }
 
-  void app.whenReady().then(() => {
-    const lines = createInterface({ input: process.stdin });
-    lines.on("line", (line) => {
+  const line = (text: string) => {
       let command: Command;
-      try { command = JSON.parse(line) as Command; } catch { return; }
+      try { command = JSON.parse(text) as Command; } catch { return; }
       const id = String(command.chat ?? "");
       if (!id) { answer(command.id, { error: "chat is required" }); return; }
       let chat = chats.get(id);
@@ -651,7 +789,7 @@ export function runBrowserHost() {
       if (command.action === "watch") {
         watched.set(id, Date.now() + WATCH_MS);
         // Pages follow the app's own light or dark (prefers-color-scheme), not the computer's.
-        if (typeof command.dark === "boolean") { const want = command.dark ? "dark" : "light"; if (nativeTheme.themeSource !== want) nativeTheme.themeSource = want; }
+        if (!inApp && typeof command.dark === "boolean") { const want = command.dark ? "dark" : "light"; if (nativeTheme.themeSource !== want) nativeTheme.themeSource = want; }
         const aspect = Number(command.aspect);
         if (Number.isFinite(aspect) && aspect > 0) aspects.set(id, aspect);
         const wide = Number(command.width), dpr = Number(command.dpr);
@@ -671,14 +809,14 @@ export function runBrowserHost() {
           const event = handInput(raw);
           if (!event) continue;
           if (event.type === "text") void contents.insertText(event.text);
-          else contents.sendInputEvent(event as Parameters<typeof contents.sendInputEvent>[0]);
+          else send(contents, event as Parameters<typeof contents.sendInputEvent>[0]);
         }
         chat.used = Date.now();
         frameSoon(tab);
         answer(command.id, { ok: true });
         return;
       }
-      if (command.action === "close") { for (const tab of chat?.tabs.values() ?? []) tab.win.destroy(); chats.delete(id); answer(command.id, { closed: true }); return; }
+      if (command.action === "close") { for (const tab of [...chat?.tabs.values() ?? []]) tab.win.destroy(); chats.delete(id); answer(command.id, { closed: true }); return; }
       if (!chat) {
         if (command.action !== "open") { answer(command.id, { error: "No page is open yet: start with action open." }); return; }
         chat = { sharp: sharpness(command.dpr), id, tabs: new Map(), active: 0, next: 1, held: false, queue: Promise.resolve(), used: Date.now(), profile: command.profile, downloads: typeof command.downloads === "string" && command.downloads ? command.downloads : null };
@@ -691,13 +829,10 @@ export function runBrowserHost() {
       mine.used = Date.now();
       // One command at a time in a chat's browser, in the order they came.
       mine.queue = mine.queue.then(() => run(mine, command)).then((result) => answer(command.id, result), (error) => answer(command.id, { error: error instanceof Error ? error.message : String(error) }));
-    });
-    // The daemon closing our input (or going away) is the end of the browser.
-    lines.on("close", () => { void quit(); });
-    // A chat's browser left alone for 20 minutes closes, unless the person has it.
-    setInterval(() => { for (const [id, chat] of chats) if (!chat.held && Date.now() - chat.used > IDLE_MS) { for (const tab of chat.tabs.values()) tab.win.destroy(); chats.delete(id); } }, 60_000).unref();
-    answer("ready", { ready: true });
-  });
+  };
+  // A chat's browser left alone for 20 minutes closes, unless the person has it.
+  { const timer = setInterval(() => { for (const [id, chat] of chats) if (!chat.held && Date.now() - chat.used > IDLE_MS) { for (const tab of [...chat.tabs.values()]) tab.win.destroy(); chats.delete(id); write({ event: "gone", chat: id }); } }, 60_000); timer.unref?.(); timers.push(timer); }
+  return { line, place, shutdown };
 }
 
 function shortUrl(url: string): string {

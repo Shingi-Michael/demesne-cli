@@ -42,6 +42,13 @@ body.desktop kbd { font: 11px/1 "JetBrains Mono", monospace; color: var(--t3); b
 /* Hover and the open chat draw a hairline outline; the row keeps its background. */
 .sidebar-session:hover, .sidebar-item:hover > .sidebar-session { box-shadow: inset 0 0 0 1px var(--hair); }
 .sidebar-session.selected { box-shadow: inset 0 0 0 1px var(--hair); color: var(--t1); }
+/* A chat's own row says its news (pass 260 A): glass and one lap of silver
+   light when it finishes or asks while you are elsewhere. Greys only. */
+@property --row-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.sidebar-item.lit > .sidebar-session { position: relative; color: var(--t1); background: linear-gradient(180deg, color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 4%, transparent)); box-shadow: none; }
+.sidebar-item.lit > .sidebar-session::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--row-a), color-mix(in srgb, var(--t1) 10%, transparent), color-mix(in srgb, var(--t1) 65%, transparent), color-mix(in srgb, var(--t1) 10%, transparent) 30%, color-mix(in srgb, var(--t1) 10%, transparent) 70%, color-mix(in srgb, var(--t1) 38%, transparent), color-mix(in srgb, var(--t1) 10%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: row-light 6s linear both; }
+@keyframes row-light { from { --row-a: -90deg; } to { --row-a: 270deg; } }
+@media (prefers-reduced-motion: reduce) { .sidebar-item.lit > .sidebar-session::before { animation: none; } }
 /* Each state has its own shape, not only its own colour: a ring needs you,
    a filled dot is a new reply, a spinner works, a cross failed. A settled
    chat has no mark; its space stays so the titles line up. */
@@ -338,7 +345,6 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .desktop .proposal-row .next-kind { font-size: 9px; }
 .desktop .proposals-footer { font-size: 11px; }
 .desktop .modal { border-radius: 12px; box-shadow: 0 20px 70px #0006; }
-.desktop #notice { font-family: inherit; border-radius: 8px; }
 @media (max-width: 1150px) {
   #desktop-shell:not(.sidebar-collapsed) { grid-template-columns: 260px minmax(0, 1fr); }
   #desktop-toolbar { padding: 0 14px; gap: 8px; }
@@ -613,7 +619,6 @@ body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone
 .desktop .settings-segments button { border-radius: 4px; }
 .desktop .settings-segments button.on { box-shadow: var(--shadow-1); }
 .desktop .dialog-close { border-radius: var(--r-sm); }
-.desktop #notice { border: 0; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
 .desktop .drive-status, .desktop .saved, .desktop #desktop-error-message, .desktop .setup-list { border: 0; border-radius: var(--r); box-shadow: 0 0 0 1px var(--hair); }
 .desktop #setup input { border: 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--hair2); }
 .desktop #setup footer .right > button, .desktop-primary { border: 0; border-radius: var(--r); }
@@ -623,7 +628,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 @keyframes desktop-appear { from { opacity: 0; transform: translateY(4px); } }
 @keyframes desktop-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]), #notice:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
+  .desktop #overlay:not([hidden]), .desktop #context-card:not([hidden]), .desktop #completion:not([hidden]) { animation: desktop-rise 160ms var(--ease); }
   .desktop #approval:not([hidden]), .desktop .away-fold, .desktop .step-fold { animation: desktop-appear 180ms var(--ease); }
   .desktop .step-fold.steady { animation: none; }
   .desktop #conversation > .turn, .desktop .compaction-card { animation: desktop-appear 220ms var(--ease); }
@@ -1059,7 +1064,7 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #cards .env-m { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
 /* Work in progress: the working cube (working-cube.ts draws it as one SVG
    each frame) and a silver shine across the words. */
-.cube-mark { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; vertical-align: -2px; }
+.cube-mark { display: inline-grid; grid-template: 100% / 100%; place-items: center; flex: none; width: 12px; height: 12px; vertical-align: -2px; }
 .cube-mark svg { display: block; overflow: visible; }
 .shine { background: linear-gradient(100deg, var(--t3) 0%, var(--t3) 42%, var(--t1) 50%, var(--t3) 58%, var(--t3) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 @media (prefers-reduced-motion: no-preference) {
@@ -3294,49 +3299,78 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop #browser-split .bs-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 2; }
 .desktop #browser-split .bs-grip::after { content: ""; position: absolute; left: 2.5px; top: calc(50% - 16px); width: 3px; height: 32px; border-radius: 2px; background: var(--hair2); opacity: 0; transition: opacity 160ms var(--ease); }
 .desktop #browser-split:is(:hover, .resizing) .bs-grip::after { opacity: 1; }
-.desktop #browser-split .bs-head { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--hair); font: 12px var(--mono, ui-monospace, Menlo, monospace); color: var(--t3); min-width: 0; }
-.desktop #browser-split .bs-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: transparent; color: inherit; font: inherit; padding: 3px 6px; border-radius: var(--r-sm); outline: none; }
-.desktop #browser-split .bs-url[readonly] { cursor: default; pointer-events: none; }
-.desktop #browser-split .bs-url:not([readonly]) { background: var(--hair); color: var(--t1); }
-.desktop #browser-split .bs-url:not([readonly]):focus { box-shadow: inset 0 0 0 1px var(--hair2); }
+/* The bar (pass 256 A): back, forward, reload, the address with what the model is doing at its end, new tab, open outside, ×. */
+.desktop #browser-split .bs-head { position: relative; display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--hair); color: var(--t3); min-width: 0; }
+.desktop #browser-split .bs-addr { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 26px; margin: 0 4px; padding: 0 10px; border-radius: 8px; background: var(--hair); cursor: text; }
+.desktop #browser-split .bs-addr:focus-within { box-shadow: inset 0 0 0 1px var(--hair2); }
+.desktop #browser-split .bs-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: transparent; color: var(--t2); font-family: inherit; font-size: 12.5px; padding: 0; outline: none; }
+.desktop #browser-split .bs-url:focus { color: var(--t1); }
+.desktop #browser-split .bs-url::placeholder { color: var(--t4); }
+.desktop #browser-split .bs-url[readonly] { cursor: default; }
+.desktop #browser-split .bs-doing { flex: none; max-width: 55%; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--t3); white-space: nowrap; overflow: hidden; }
+.desktop #browser-split .bs-doing span { overflow: hidden; text-overflow: ellipsis; }
+.desktop #browser-split .bs-doing i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--electric); }
+.desktop #browser-split .bs-doing.ask, .desktop #browser-split .bs-doing.mine { color: var(--warn); }
+.desktop #browser-split .bs-doing.ask i, .desktop #browser-split .bs-doing.mine i { background: var(--warn); }
+.desktop #browser-split .bs-doing[hidden], .desktop #browser-split .bs-addr:focus-within .bs-doing { display: none; }
+.desktop #browser-split .bs-load { position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; overflow: hidden; pointer-events: none; }
+.desktop #browser-split .bs-load::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: linear-gradient(90deg, transparent, var(--t3), transparent); animation: bs-load 1.1s linear infinite; }
+.desktop #browser-split .bs-load[hidden] { display: none; }
+@keyframes bs-load { from { left: -40%; } to { left: 100%; } }
+/* The home screen of a new tab, and before the model opens a page: just the Demesne logo, quiet. */
+.desktop #browser-split .bs-home { display: none; }
+.desktop #browser-split.home .bs-home { display: grid; place-items: center; height: 100%; color: var(--t4); }
+.desktop #browser-split.home .bs-home svg { width: 84px; height: 84px; margin-top: -24px; opacity: .8; }
+.desktop #browser-split.home .bs-stage { display: none; }
 .desktop #browser-split .bs-nav { display: flex; gap: 2px; }
-.desktop #browser-split .bs-nav[hidden] { display: none; }
 .desktop #browser-split .bs-icon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--r-sm); color: var(--t3); }
 .desktop #browser-split .bs-icon svg { width: 14px; height: 14px; }
 .desktop #browser-split .bs-icon:hover:not(:disabled) { color: var(--t1); background: var(--hair); }
 .desktop #browser-split .bs-icon:disabled { opacity: .35; }
 .desktop #browser-split .bs-tabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--hair); overflow-x: auto; scrollbar-width: none; }
-.desktop #browser-split .bs-tabs[hidden], .desktop #browser-split .bs-pages[hidden] { display: none; }
+.desktop #browser-split .bs-tabs[hidden] { display: none; }
 .desktop #browser-split .bs-tab { flex: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 10px; border-radius: 99px; font-size: 12px; color: var(--t3); }
 .desktop #browser-split .bs-tab.on { background: var(--hair2); color: var(--t1); }
 .desktop #browser-split .bs-tab:not(:disabled):not(.on):hover { background: var(--hair); color: var(--t1); }
 .desktop #browser-split .bs-tab:disabled:not(.on) { cursor: default; }
+.desktop #browser-split .bs-chip { flex: none; display: flex; align-items: center; border-radius: 99px; }
+.desktop #browser-split .bs-chip.on { background: var(--hair2); }
+.desktop #browser-split .bs-chip .bs-tab, .desktop #browser-split .bs-chip .bs-tab:hover { background: transparent; }
+.desktop #browser-split .bs-chip:not(.on):hover { background: var(--hair); }
+.desktop #browser-split .bs-chip:not(.on):hover .bs-tab { color: var(--t1); }
+.desktop #browser-split .bs-chip:has(.bs-tab-x) .bs-tab { padding-right: 4px; }
+.desktop #browser-split .bs-tab-x { flex: none; width: 18px; height: 18px; margin-right: 4px; display: grid; place-items: center; border-radius: 50%; color: var(--t3); opacity: .55; transition: opacity 120ms; }
+.desktop #browser-split .bs-tab-x svg { width: 10px; height: 10px; }
+.desktop #browser-split .bs-chip:is(.on, :hover, :focus-within) .bs-tab-x { opacity: 1; }
+.desktop #browser-split .bs-tab-x:hover { color: var(--t1); background: var(--hair); }
 .desktop #browser-split .bs-stage { position: relative; }
 .desktop #browser-split .bs-ring { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; border: 2.5px solid var(--electric); background: color-mix(in srgb, var(--electric) 18%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--electric) 12%, transparent); pointer-events: none; opacity: 0; }
 .desktop #browser-split .bs-ring.on { animation: bs-ring 1500ms cubic-bezier(.32,.72,0,1) forwards; }
 @keyframes bs-ring { 0% { opacity: 0; transform: scale(.55); } 14% { opacity: 1; transform: scale(1); } 70% { opacity: .8; } 100% { opacity: 0; transform: scale(1.25); } }
-.desktop #browser-split .bs-pages { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-top: 1px solid var(--hair); overflow-x: auto; scrollbar-width: none; }
-.desktop #browser-split .bs-pages-label { flex: none; font-size: 11.5px; color: var(--t4); margin-right: 4px; }
-.desktop #browser-split .bs-visit { flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 9px; border-radius: 99px; font-size: 11.5px; color: var(--t3); }
-.desktop #browser-split .bs-visit:hover { background: var(--hair); color: var(--t1); }
-.desktop #browser-split .bs-visit.on { background: var(--hair2); color: var(--t1); }
-.desktop #browser-split .bs-take { flex: none; padding: 4px 12px; border-radius: 99px; color: var(--t2); font-size: 12.5px; box-shadow: inset 0 0 0 1px var(--hair2); }
-.desktop #browser-split .bs-take:hover { color: var(--t1); background: var(--hair); }
-.desktop #browser-split .bs-light { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--t4); }
-.desktop #browser-split .bs-light.now { background: var(--electric); }
-.desktop #browser-split .bs-light.ask { background: var(--warn); }
-.desktop #browser-split .bs-close { flex: none; width: 24px; height: 24px; border-radius: var(--r-sm); color: var(--t3); font: 16px/1 var(--display, inherit); }
-.desktop #browser-split .bs-close:hover { color: var(--t1); background: var(--hair); }
 .desktop #browser-split .bs-view { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; outline: none; }
 .desktop #browser-split .bs-page { display: block; width: 100%; height: auto; margin: 0 auto; user-select: none; }
+.desktop #browser-split .bs-page[hidden] { display: none; }
 .desktop #browser-split.yours .bs-view { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
 .desktop #browser-split.yours .bs-view:focus-visible { box-shadow: inset 0 0 0 2px var(--warn); }
 .desktop #browser-split.yours .bs-page { cursor: default; }
-.desktop #browser-split .bs-wait { display: block; padding: 40px 18px; text-align: center; font-size: 13px; color: var(--t3); }
-.desktop #browser-split .bs-foot { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 14px; border-top: 1px solid var(--hair); font-size: 12.5px; color: var(--t2); }
-.desktop #browser-split .bs-words { flex: 1; min-width: 0; }
-.desktop #browser-split .bs-words.ask { color: var(--warn); }
-.desktop #browser-split .bs-back { flex: none; padding: 4px 12px; border-radius: 99px; background: var(--hair2); color: var(--t1); font-size: 12.5px; }
-.desktop #browser-split .bs-back:hover { background: var(--hair); }
 @keyframes bs-arrive { from { opacity: 0; transform: translateX(16px); } }
-@media (prefers-reduced-motion: reduce) { .desktop .live-app.browser-split-on #browser-split:not([hidden]), .desktop #browser-split .bs-ring.on { animation: none; } .desktop #browser-split .bs-ring.on { opacity: .8; } }
+@media (prefers-reduced-motion: reduce) { .desktop .live-app.browser-split-on #browser-split:not([hidden]), .desktop #browser-split .bs-ring.on, .desktop #browser-split .bs-load::after { animation: none; } .desktop #browser-split .bs-ring.on { opacity: .8; } }
+
+/* What waits on you rests on the pill's glass (passes 258 and 260 A). An
+   approval is as wide as the composer it sits on; a question fills the
+   answers' column. Neither times out, so there is no ring: a slow silver
+   light goes round the edge while it waits. Greys from the theme; amber
+   stays on the small mark. Read more:
+   https://www.nngroup.com/articles/visibility-system-status/ */
+@property --wait-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes wait-light { from { --wait-a: -90deg; } to { --wait-a: 270deg; } }
+.desktop .approval-row { position: relative; min-height: 36px; border-radius: 18px; background: linear-gradient(180deg, color-mix(in srgb, var(--t1) 10%, transparent), color-mix(in srgb, var(--t1) 5%, transparent)); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 9%, transparent); }
+.desktop .approval-row button { border-radius: 99px; }
+.desktop .ask-card { isolation: isolate; padding: 12px 16px 14px; }
+.desktop .ask-card::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: 18px; background: linear-gradient(180deg, color-mix(in srgb, var(--t1) 8%, transparent), color-mix(in srgb, var(--t1) 4%, transparent)); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 9%, transparent); pointer-events: none; }
+.desktop #question .ask-card { padding-left: 48px; }
+.desktop #question .ask-card::before, .desktop #question .ask-card::after { left: 32px; }
+.desktop #question .ask-q i { position: relative; left: auto; top: auto; transform: translateY(-1px); }
+.desktop .approval-row::after, .desktop .ask-card::after { content: ""; position: absolute; inset: 0; border-radius: 18px; padding: 1px; pointer-events: none; background: conic-gradient(from var(--wait-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 55%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 30%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: wait-light 9s linear infinite; }
+@media (prefers-reduced-motion: no-preference) { .ask-card.nudge { animation: none; } .ask-card.nudge::before { animation: ask-nudge 700ms var(--ease); } }
+@media (prefers-reduced-motion: reduce) { .desktop .approval-row::after, .desktop .ask-card::after { animation: none; } }

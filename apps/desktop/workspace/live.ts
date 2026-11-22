@@ -14,7 +14,7 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
-import { browserSteps, earlierPages, handOverAsk, keyInputs, pagePoint, RING_MS, ringSpot, splitFoot, splitOpen, splitWidth, tabName, type SplitTab, type SplitVisit } from "./browser-split.ts";
+import { browserSteps, handOverAsk, keyInputs, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
@@ -84,6 +84,9 @@ import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
 import { updateCheckLine, type AppUpdate } from "./release-line.ts";
 import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-icons.ts";
 import { MemoryPill } from "./memory-pill.ts";
+import { pills, type PillSpec } from "./pill.ts";
+import { lightRows } from "./row-light.ts";
+import { brokeNews, brokeSeen, type BrokeSeen } from "./broke-news.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -380,7 +383,6 @@ let completionItems: {
 let follow = true,
   stopArmed = 0,
   draftTimer: ReturnType<typeof setTimeout> | undefined,
-  noticeTimer: ReturnType<typeof setTimeout> | undefined,
   lastDraftVersion = -1,
   lastSession = "";
 /// Turns whose plan checklist is open; closed until you click Checklist.
@@ -464,10 +466,12 @@ async function api<T = unknown>(
   const entry = { method, at: Date.now(), outcome: "pending" };
   if (recentRequests.push(entry) > 20) recentRequests.shift();
   try {
+    const allowed = method === "permission" && args.decision === "allow_always" ? state?.approvals.find((approval) => approval.id === args.id)?.rule : undefined;
     const result = await window.demesne.request<T>(method, {
       ...args,
       sessionId: state?.session?.id,
     });
+    if (allowed) ruleLearned(allowed);
     entry.outcome = "ok";
     return result;
   } catch (error) {
@@ -475,19 +479,29 @@ async function api<T = unknown>(
     throw error;
   }
 }
-function notice(message: string) {
-  el("notice").textContent = message;
-  el("notice").hidden = false;
-  clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => (el("notice").hidden = true), 4000);
+/// A passing notice is a silver pill in its place (pass 260 A): the middle
+/// seat on the composer unless `how` names another seat or mark.
+function notice(message: string, how: Partial<PillSpec> = {}) {
+  pills.show({ seat: "middle", mark: "note", words: message, ...how });
+}
+/// Something failed: the same pill, with the amber dot.
+function fail(error: unknown, how: Partial<PillSpec> = {}) {
+  notice(error instanceof Error ? error.message : String(error), { mark: "bang", need: true, ...how });
 }
 async function act(task: () => Promise<unknown>) {
   try {
     return await task();
   } catch (error) {
-    notice(error instanceof Error ? error.message : String(error));
+    fail(error);
     return null;
   }
+}
+/// "Always" taught Demesne a rule: the middle seat says so, and Ask again
+/// takes the rule back out of your config.
+function ruleLearned(rule: string) {
+  const what = rule.slice(rule.indexOf(":") + 1).replace(/ \*$/, " …");
+  const words = rule.startsWith("edit") || rule.startsWith("write") ? `Demesne will edit ${what && what !== "." ? what : "this project"} without asking` : `Demesne will run ${what} without asking`;
+  notice(words, { mark: "rule", seconds: 6, action: { label: "Ask again", run: () => void api("allow-rule-remove", { rule }).catch(fail) } });
 }
 /// The same model, whether or not either id carries its provider prefix.
 const sameModel = (a: string | undefined, b: string | undefined) =>
@@ -513,6 +527,8 @@ function context() {
   };
 }
 let sidebarSignature = "";
+/// Each chat's state at the last draw, and the rows lit with their news (pass 260 A).
+let rowTones = new Map<string, string>(), rowLit = new Map<string, number>(), rowLitTimer: ReturnType<typeof setTimeout> | undefined;
 /// The full time, for a row's tooltip.
 const fullTime = (date: string) => new Date(date).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 /// When each chat was last looked at (its updatedAt then): a chat that has
@@ -747,12 +763,12 @@ function renderAssistantRow() {
   row.classList.toggle("on", open);
   if (open) row.setAttribute("aria-current", "page"); else row.removeAttribute("aria-current");
   const mark = row.querySelector<HTMLElement>(".sidebar-session-mark");
-  if (mark) { mark.className = `sidebar-session-mark ${tone}`; mark.hidden = !tone; }
+  if (mark) { mark.className = `sidebar-session-mark ${tone}`; mark.hidden = !tone || (open && tone === "working"); }
   const about = STATE_WORDS[tone] ?? "";
   row.title = about ? `Assistant, ${about}` : "Assistant";
   row.setAttribute("aria-label", row.title);
   const badge = rail?.querySelector<HTMLElement>(".rail-badge");
-  if (badge) { badge.hidden = !tone; badge.classList.toggle("blue", tone !== "warn"); }
+  if (badge) { badge.hidden = !tone || (open && tone === "working"); badge.classList.toggle("blue", tone !== "warn"); }
 }
 /// What Scheduled and Foundry say on their rows (pass 213): when the next
 /// routine runs, and how many mockups arrived since you last looked.
@@ -857,6 +873,11 @@ function renderSidebar() {
   const focused = focusedRow ? [...nav.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
   const titleOf = (item: typeof sessions[number]) => item.id === current?.id ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
   const tones = new Map(sessions.map((item) => [item.id, chatTone(item)] as const));
+  // A chat that just finished or asks, while you are elsewhere, lights its own row.
+  rowLit = lightRows(rowTones, tones, pageOpen ? null : current?.id ?? null, rowLit, Date.now());
+  rowTones = tones;
+  clearTimeout(rowLitTimer);
+  if (rowLit.size) rowLitTimer = setTimeout(() => { sidebarSignature = ""; renderSidebar(); }, Math.max(50, Math.min(...rowLit.values()) - Date.now() + 20));
   // Drive's own chats stay off the list: its work unfolds from its line in
   // your chat and lands as a branch to review. One you open shows while open.
   // An empty chat is the composer itself, and the New chat row above already
@@ -875,13 +896,15 @@ function renderSidebar() {
     const about = STATE_WORDS[tone] ?? "";
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
-    const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
+    // The conversation already shows this turn working; keep the state in its accessible name.
+    const quietWork = selected && tone === "working";
+    const mark = quietWork ? "" : tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
     const pr = pullRequests.get(id);
     // A chat that needs you says so where its time was, in its state's
     // colour: asks you, working, finished, failed, back now.
     const back = backOf(item) === "back" && !selected;
-    const say = back ? "back now" : selected && tone !== "working" && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
-    const side = say || (pr || (id === current?.id && !inSession()) ? "" : right);
+    const say = back ? "back now" : selected && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
+    const side = say || (quietWork || pr || (id === current?.id && !inSession()) ? "" : right);
     const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${side ? `<span class="sidebar-session-age${say ? ` sidebar-say-state ${back ? "warn" : tone}` : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}${side ? " has-side" : ""}`)
       .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
@@ -906,8 +929,8 @@ function renderSidebar() {
       const hand = prHandable(pr, prOpenSince) ? btn("pr-hand", "Hand it to the chat", { id }, "sidebar-back-opt key") : "";
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
-    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
+    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${quietWork ? "" : dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}${rowLit.has(id) ? " lit" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   // The agents: a letter tile, the name, and how it is (a dot
@@ -1562,7 +1585,7 @@ async function dropSources(event: DragEvent) {
     for (const file of files) {
       const path = pathFor?.(file) ?? "";
       if (path) await keepSource({ path });
-      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`);
+      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`, { mark: "bang", need: true });
     }
     return;
   }
@@ -1576,15 +1599,15 @@ function card(name: keyof typeof CARD_ICON, line: string, right: string, body: s
 // The chat's browser, beside the chat (pass 248 D) ---------------------------
 
 /// The split's own state: which chat, whether it is open, what you closed, the newest picture.
-type SplitFrame = { src: string; width: number; height: number; url: string; title: string; back: boolean; forward: boolean };
+type SplitFrame = { src: string; /** The page itself is on show (a real view the app puts over the split), not a picture. */ live?: boolean; width: number; height: number; url: string; title: string; back: boolean; forward: boolean; /** The page is still loading: a thin silver line runs along the bar. */ loading?: boolean };
 const split = {
   session: "", open: false, openedTurn: null as string | null, closedTurn: null as string | null, closedAsk: null as string | null,
   seq: 0, frame: null as null | SplitFrame,
   /// Who holds the page: the model asked ("model"), you took it ("person"), or nobody.
   held: null as null | "model" | "person", heldAt: 0, handedAsk: "",
-  tabs: [] as SplitTab[], visits: [] as SplitVisit[],
-  /// An earlier page on show instead of the live one.
-  still: null as null | { seq: number; src: string; url: string },
+  tabs: [] as SplitTab[],
+  /// A new tab you opened: the home screen (just the Demesne logo) shows until you go somewhere.
+  home: false,
   ringAt: 0,
   pumping: false, width: (() => { try { return Number(localStorage.getItem("demesne-browser-split")) || 0; } catch { return 0; } })(),
 };
@@ -1593,16 +1616,20 @@ const BS_ICONS = {
   back: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   forward: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   reload: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.6H9.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  plus: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  out: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5v3a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  close: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
 };
+const splitButton = (go: string, label: string, icon: keyof typeof BS_ICONS = go as keyof typeof BS_ICONS) => `<button type="button" class="bs-icon" data-go="${go}" aria-label="${label}" title="${label}">${BS_ICONS[icon]}</button>`;
 /// The page reaches your mouse and keys only while you hold it.
-const splitYours = () => Boolean(split.held && split.frame && !split.still);
+const splitYours = () => Boolean(split.held && split.frame && !split.home);
 /// Draws the split, or takes it away. Called with the cards, on every change of the chat.
 function renderBrowserSplit() {
   const aside = el("browser-split"), app = el("app");
   const s = state;
-  if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; return; }
+  if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; placeSplitView(); return; }
   if (split.session !== s.session.id) {
-    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], visits: [], still: null, ringAt: 0 });
+    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0 });
     // Another chat's page does not stay up while this one's first picture comes.
     splitDrawn = splitWanted = ""; const old = aside.querySelector<HTMLCanvasElement>(".bs-page"); if (old) old.hidden = true;
   }
@@ -1611,7 +1638,7 @@ function renderBrowserSplit() {
   split.open = next.open; split.openedTurn = next.openedTurn;
   app.classList.toggle("browser-split-on", split.open);
   aside.hidden = !split.open;
-  if (!split.open) return;
+  if (!split.open) { placeSplitView(); return; }
   if (!aside.firstElementChild) buildBrowserSplit(aside);
   const total = el("workspace").clientWidth || innerWidth;
   aside.style.width = `${splitWidth(split.width || Math.round(total * 0.48), total)}px`;
@@ -1619,62 +1646,89 @@ function renderBrowserSplit() {
   if (ask && !split.held && split.handedAsk !== ask.toolCallId) split.held = "model";
   const took = split.held === "person" && !ask;
   const working = run && last && last.state === "running" && !ask ? `${verb(last as unknown as ToolEntry)} ${stepTarget(last as unknown as ToolEntry)}`.trim() : null;
-  const foot = split.still ? { tone: "" as const, words: "An earlier page, as it looked then." } : splitFoot(ask, took ? null : working, Boolean(split.frame), took);
+  // A page you hand back stops being a new tab: the model carries on where it was.
+  if (split.home && !split.held) split.home = false;
+  const doing = splitDoing(ask, took ? null : working, took);
   const yours = splitYours();
-  aside.classList.toggle("yours", yours);
+  aside.classList.toggle("yours", yours && !split.home);
   aside.classList.toggle("done", !run);
-  aside.querySelector<HTMLElement>(".bs-light")!.className = `bs-light ${foot.tone}`;
-  renderSplitHead(aside, yours);
+  aside.classList.toggle("home", split.home || !split.frame);
+  renderSplitHead(aside, doing);
   renderSplitTabs(aside, yours);
-  renderSplitPages(aside);
-  const footNode = aside.querySelector<HTMLElement>(".bs-foot")!;
-  const button = split.still ? btn("browser-live", "Back to live", {}, "bs-back")
-    : split.held ? btn("browser-hand-back", "Hand back", {}, "bs-back")
-    : split.frame ? btn("browser-take", "Take over", {}, "bs-take") : "";
-  const footHTML = `<span class="bs-words ${foot.tone}">${h(foot.words)}</span>${button}`;
-  if (footNode.dataset.html !== footHTML) { footNode.innerHTML = footHTML; footNode.dataset.html = footHTML; }
   const view = aside.querySelector<HTMLElement>(".bs-view")!;
   view.tabIndex = yours ? 0 : -1;
   view.setAttribute("aria-label", yours ? (ask ? `The page is yours: ${ask.reason}` : "The page is yours") : "The page the model is on");
+  placeSplitView();
   void pumpBrowserFrames();
 }
-/// The bar over the page: where it is, and, while it is yours, back, forward, reload and your own address.
-function renderSplitHead(aside: HTMLElement, yours: boolean) {
-  const nav = aside.querySelector<HTMLElement>(".bs-nav")!, url = aside.querySelector<HTMLInputElement>(".bs-url")!;
-  nav.hidden = !yours;
-  aside.querySelector<HTMLButtonElement>('[data-go="back"]')!.disabled = !split.frame?.back;
-  aside.querySelector<HTMLButtonElement>('[data-go="forward"]')!.disabled = !split.frame?.forward;
-  url.readOnly = !yours;
-  url.tabIndex = yours ? 0 : -1;
-  const shown = split.still ? split.still.url : split.frame?.url ?? "";
-  if (document.activeElement !== url) url.value = yours ? shown : shown.replace(/^https?:\/\//, "");
+/// In the desktop app the chat's page is a real view of the window, not a picture: the app is told where
+/// the split's page area is, and puts the page there. It is put away whenever the area is not on show,
+/// or is covered by something of ours.
+let splitPlaced = "";
+function placeSplitView() {
+  const aside = el("browser-split"), view = aside.querySelector<HTMLElement>(".bs-view");
+  let rect: { x: number; y: number; width: number; height: number } | null = null;
+  if (view && split.open && !aside.hidden && split.frame?.live && !split.home && document.visibilityState === "visible") {
+    const box = view.getBoundingClientRect();
+    // While the page is yours its amber edge stays in sight around it.
+    const edge = aside.classList.contains("yours") ? 2 : 0;
+    // Anything of ours over the area (a notice, a card) would be under the real page: it steps aside instead.
+    const clear = [0.06, 0.5, 0.94].every((kx) => [0.06, 0.5, 0.94].every((ky) => { const top = document.elementFromPoint(box.left + box.width * kx, box.top + box.height * ky); return Boolean(top && view.contains(top)); }));
+    if (clear && box.width >= 160 && box.height >= 160) rect = { x: box.left + edge, y: box.top + edge, width: box.width - edge * 2, height: box.height - edge * 2 };
+  }
+  const key = rect ? `${split.session}|${[rect.x, rect.y, rect.width, rect.height].map(Math.round).join()}` : "";
+  if (key === splitPlaced) return;
+  splitPlaced = key;
+  void api("desktop-browser-place", { chat: split.session, rect }).catch(() => {});
+}
+/// The bar over the page (pass 256 A): back, forward, reload, the address, a new tab, open in your own browser and ×,
+/// always there. Using any of them makes the page yours. What the model is doing shows as a few words at the end of the address.
+function renderSplitHead(aside: HTMLElement, doing: { tone: string; words: string } | null) {
+  const url = aside.querySelector<HTMLInputElement>(".bs-url")!;
+  const page = Boolean(split.frame);
+  aside.querySelector<HTMLButtonElement>('[data-go="back"]')!.disabled = !page || !(split.home || split.frame?.back);
+  aside.querySelector<HTMLButtonElement>('[data-go="forward"]')!.disabled = !page || split.home || !split.frame?.forward;
+  aside.querySelector<HTMLButtonElement>('[data-go="reload"]')!.disabled = !page || split.home;
+  aside.querySelector<HTMLButtonElement>('[data-go="new"]')!.disabled = !page;
+  aside.querySelector<HTMLButtonElement>('[data-go="outside"]')!.disabled = split.home || !openableOutside(split.frame?.url);
+  url.readOnly = !page;
+  url.tabIndex = page ? 0 : -1;
+  url.placeholder = split.home ? "Type an address" : "";
+  const shown = split.home ? "" : split.frame?.url ?? "";
+  if (document.activeElement !== url) url.value = shown.replace(/^https?:\/\//, "").replace(/^about:blank$/, "");
   url.title = split.frame?.title ?? "";
+  const words = aside.querySelector<HTMLElement>(".bs-doing")!;
+  const html = doing ? `<i></i><span>${h(doing.words)}</span>` : "";
+  if (words.dataset.html !== html) { words.innerHTML = html; words.dataset.html = html; }
+  words.className = `bs-doing ${doing?.tone ?? ""}`;
+  words.hidden = !doing || split.home;
+  aside.querySelector<HTMLElement>(".bs-load")!.hidden = !(split.frame?.loading && !split.home);
 }
 /// One chip per tab, when the chat's browser has more than one. While the page is yours, a chip switches to it.
-function renderSplitTabs(aside: HTMLElement, yours: boolean) {
+function renderSplitTabs(aside: HTMLElement, _yours: boolean) {
   const row = aside.querySelector<HTMLElement>(".bs-tabs")!;
-  const html = split.tabs.length > 1 ? split.tabs.map((tab) => `<button type="button" class="bs-tab${tab.active ? " on" : ""}" data-tab="${tab.n}" ${yours && !tab.active ? "" : "disabled"} title="${h(tab.url)}">${h(tabName(tab))}</button>`).join("") : "";
+  // Each chip closes with its own ×, but the last page: × in the bar closes the browser.
+  const closable = split.tabs.length > 1;
+  const close = (what: string, name: string) => `<button type="button" class="bs-tab-x" data-close-tab="${what}" aria-label="Close ${h(name)}" title="Close tab">${BS_ICONS.close}</button>`;
+  const chips = split.tabs.map((tab) => { const on = tab.active && !split.home, name = tabName(tab); return `<span class="bs-chip${on ? " on" : ""}"><button type="button" class="bs-tab${on ? " on" : ""}" data-tab="${tab.n}" ${on ? "disabled" : ""} title="${h(tab.url)}">${h(name)}</button>${closable ? close(String(tab.n), name) : ""}</span>`; });
+  if (split.home) chips.push(`<span class="bs-chip on"><button type="button" class="bs-tab on" disabled>New tab</button>${close("home", "New tab")}</span>`);
+  const html = chips.length > 1 ? chips.join("") : "";
   if (row.dataset.html !== html) { row.innerHTML = html; row.dataset.html = html; }
   row.hidden = !html;
 }
-/// The pages it went to, to step back through.
-function renderSplitPages(aside: HTMLElement) {
-  const row = aside.querySelector<HTMLElement>(".bs-pages")!;
-  const pages = earlierPages(split.visits, split.frame?.url ?? "");
-  const html = pages.length ? `<span class="bs-pages-label">Pages</span>${pages.map((visit) => `<button type="button" class="bs-visit${split.still?.seq === visit.seq ? " on" : ""}" data-visit="${visit.seq}" title="${h(visit.title || visit.url)}">${h(pageName(visit.url) || visit.url)}</button>`).join("")}` : "";
-  if (row.dataset.html !== html) { row.innerHTML = html; row.dataset.html = html; }
-  row.hidden = !html;
-}
-/// Shows the picture on the page: the live one, or an earlier page you picked.
+/// Shows the picture of the page (the hidden browser; the real page in the window needs none).
 /// The picture is drawn on a canvas, and only once it is ready: the last one stays up meanwhile.
 /// (An <img> whose src changes ten times a second goes blank between pictures, which flickers.)
 let splitDrawing = "", splitWanted = "", splitDrawn = "";
 function showSplitPicture(aside: HTMLElement) {
-  const page = aside.querySelector<HTMLCanvasElement>(".bs-page"), src = split.still?.src ?? split.frame?.src;
+  const page = aside.querySelector<HTMLCanvasElement>(".bs-page"), src = split.frame?.src;
+  // The page itself is on show: no picture to draw.
+  if (page && (split.frame?.live || split.home)) { page.hidden = true; splitDrawn = splitWanted = ""; placeSplitView(); return; }
   if (!page || !src) return;
+  placeSplitView();
   // The page is as wide as the split, so it shows at its own size. A phone-width page keeps its width, in the middle.
   const room = aside.querySelector<HTMLElement>(".bs-view")?.clientWidth ?? 0;
-  page.style.width = split.frame && !split.still && split.frame.width < room - 24 ? `${split.frame.width}px` : "";
+  page.style.width = split.frame && split.frame.width < room - 24 ? `${split.frame.width}px` : "";
   if (src === splitDrawn) return;
   splitWanted = src;
   if (splitDrawing) return;
@@ -1695,7 +1749,6 @@ function showSplitPicture(aside: HTMLElement) {
       } else page.getContext("2d")!.drawImage(image, 0, 0);
       splitDrawn = now;
       page.hidden = false;
-      aside.querySelector<HTMLElement>(".bs-wait")?.remove();
     } catch { /* a picture that would not decode: the last one stays */ }
     splitDrawing = "";
     // Newer ones came meanwhile: only the newest is drawn.
@@ -1706,7 +1759,7 @@ function showSplitPicture(aside: HTMLElement) {
 /// A soft ring where the model last clicked or typed, fading out.
 function showSplitRing(aside: HTMLElement, pointer: { x: number; y: number; ago: number } | undefined) {
   const ring = aside.querySelector<HTMLElement>(".bs-ring")!;
-  const spot = split.frame && !split.still ? ringSpot(pointer, split.frame) : null;
+  const spot = split.frame && !split.frame.live ? ringSpot(pointer, split.frame) : null;
   if (!spot || !pointer) { if (!pointer) ring.hidden = true; return; }
   const at = Date.now() - pointer.ago;
   if (Math.abs(at - split.ringAt) < 120) return;
@@ -1719,29 +1772,30 @@ function showSplitRing(aside: HTMLElement, pointer: { x: number; y: number; ago:
 function buildBrowserSplit(aside: HTMLElement) {
   aside.setAttribute("aria-label", BROWSER_SPLIT_LABEL);
   aside.innerHTML = `<div class="bs-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize"></div>`
-    + `<div class="bs-head"><i class="bs-light"></i><span class="bs-nav" hidden><button type="button" class="bs-icon" data-go="back" aria-label="Back" title="Back">${BS_ICONS.back}</button><button type="button" class="bs-icon" data-go="forward" aria-label="Forward" title="Forward">${BS_ICONS.forward}</button><button type="button" class="bs-icon" data-go="reload" aria-label="Reload" title="Reload">${BS_ICONS.reload}</button></span>`
-    + `<input class="bs-url" readonly spellcheck="false" aria-label="Address"><button type="button" class="bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close">×</button></div>`
+    + `<div class="bs-head"><span class="bs-nav">${splitButton("back", "Back")}${splitButton("forward", "Forward")}${splitButton("reload", "Reload")}</span>`
+    + `<label class="bs-addr"><input class="bs-url" readonly spellcheck="false" autocomplete="off" aria-label="Address"><span class="bs-doing" hidden></span></label>`
+    + `${splitButton("new", "New tab", "plus")}${splitButton("outside", "Open in your browser", "out")}<button type="button" class="bs-icon bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close the browser">${BS_ICONS.close}</button><i class="bs-load" hidden></i></div>`
     + `<div class="bs-tabs" hidden></div>`
-    + `<div class="bs-view"><div class="bs-stage"><canvas class="bs-page" aria-hidden="true" hidden></canvas><i class="bs-ring" hidden></i></div><span class="bs-wait">Waiting for the page…</span></div>`
-    + `<div class="bs-pages" hidden></div><div class="bs-foot"></div>`;
+    + `<div class="bs-view"><div class="bs-stage"><canvas class="bs-page" aria-hidden="true" hidden></canvas><i class="bs-ring" hidden></i></div><div class="bs-home"><svg viewBox="0 0 100 100" role="img" aria-label="Demesne"><use href="#demesne-mark"/></svg></div></div>`;
   const view = aside.querySelector<HTMLElement>(".bs-view")!, img = aside.querySelector<HTMLCanvasElement>(".bs-page")!;
   const yours = splitYours;
   const send = (events: unknown[]) => { if (events.length) void api("browser-input", { events }).catch(() => {}); };
   const at = (event: MouseEvent) => pagePoint(event.clientX, event.clientY, img.getBoundingClientRect(), split.frame!);
-  const go = (to: string) => void api("browser-go", { to }).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  const go = (to: string) => void api("browser-go", { to }).catch((error) => fail(error));
   const BUTTONS = ["left", "middle", "right"] as const;
   let moved = 0;
-  img.addEventListener("mousedown", (event) => { if (!yours()) return; event.preventDefault(); view.focus({ preventScroll: true }); send([{ type: "mouseDown", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
+  const mine = () => { if (!yours() && split.frame) void takeSplit(); return yours(); };
+  img.addEventListener("mousedown", (event) => { if (!mine()) return; event.preventDefault(); view.focus({ preventScroll: true }); send([{ type: "mouseDown", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
   img.addEventListener("mouseup", (event) => { if (!yours()) return; send([{ type: "mouseUp", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
   img.addEventListener("mousemove", (event) => { if (!yours() || Date.now() - moved < 60) return; moved = Date.now(); send([{ type: "mouseMove", ...at(event) }]); });
   img.addEventListener("contextmenu", (event) => { if (yours()) event.preventDefault(); });
   view.addEventListener("wheel", (event) => {
-    if (!yours()) return;
+    if (!mine()) return;
     event.preventDefault();
     send([{ type: "mouseWheel", ...at(event), deltaX: -event.deltaX, deltaY: -event.deltaY }]);
   }, { passive: false });
   view.addEventListener("keydown", (event) => {
-    if (!yours() || event.isComposing) return;
+    if (event.isComposing || !keyInputs(event).length || !mine()) return;
     const events = keyInputs(event);
     if (!events.length) return;
     event.preventDefault();
@@ -1753,36 +1807,51 @@ function buildBrowserSplit(aside: HTMLElement) {
     event.preventDefault();
     if (text) send([{ type: "text", text: text.slice(0, 4000) }]);
   });
-  // Your own address, back, forward and reload, while the page is yours.
+  // The bar's buttons and the address work any time; using one makes the page yours, as scrolling it does.
   const url = aside.querySelector<HTMLInputElement>(".bs-url")!;
-  url.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { url.blur(); renderBrowserSplit(); return; }
+  const own = async () => { if (!split.held) await takeSplit(); return Boolean(split.held); };
+  const home = (on: boolean) => { split.home = on; showSplitPicture(aside); renderBrowserSplit(); };
+  url.addEventListener("keydown", async (event) => {
+    if (event.key === "Escape") { url.blur(); if (split.home) home(false); else renderBrowserSplit(); return; }
     if (event.key !== "Enter" || url.readOnly || !url.value.trim()) return;
     event.preventDefault();
-    go(url.value.trim());
+    const to = url.value.trim(), fresh = split.home;
     url.blur();
+    if (!await own()) return;
+    split.home = false;
+    try { await api("browser-go", { to, ...(fresh ? { newTab: true } : {}) }); }
+    catch (error) { fail(error); }
+    showSplitPicture(aside); renderBrowserSplit();
   });
-  url.addEventListener("focus", () => { if (!url.readOnly) url.select(); });
-  aside.querySelector<HTMLElement>(".bs-nav")!.addEventListener("click", (event) => {
+  url.addEventListener("focus", () => {
+    if (url.readOnly) return;
+    // The whole address while you edit it.
+    if (!split.home) url.value = split.frame?.url ?? url.value;
+    url.select();
+  });
+  url.addEventListener("blur", () => renderBrowserSplit());
+  aside.querySelector<HTMLElement>(".bs-head")!.addEventListener("click", async (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-go]");
-    if (button && !button.disabled && yours()) go(button.dataset.go!);
+    if (!button || button.disabled) return;
+    const what = button.dataset.go!;
+    if (what === "outside") { const address = split.frame?.url; if (openableOutside(address)) void api("open-link", { url: address }).catch(() => {}); return; }
+    if (!await own()) return;
+    if (what === "new") { home(true); url.focus(); return; }
+    // Back from a new tab is the page it was opened over.
+    if (what === "back" && split.home) { home(false); return; }
+    go(what);
   });
   aside.querySelector<HTMLElement>(".bs-tabs")!.addEventListener("click", (event) => {
+    // A chip's ×: the new tab goes back to the page it was opened over; a page's tab closes (closing one is using the browser, so the page is yours).
+    const shut = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-close-tab]");
+    if (shut) {
+      if (shut.dataset.closeTab === "home") { home(false); return; }
+      void (async () => { if (!await own()) return; try { await api("browser-go", { to: `close:${shut.dataset.closeTab}` }); } catch (error) { fail(error); } })();
+      return;
+    }
     const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-tab]");
-    if (chip && !chip.disabled && yours()) go(`tab:${chip.dataset.tab}`);
-  });
-  // An earlier page, still, until you go back to live.
-  aside.querySelector<HTMLElement>(".bs-pages")!.addEventListener("click", async (event) => {
-    const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-visit]");
-    if (!chip) return;
-    const seq = Number(chip.dataset.visit);
-    if (split.still?.seq === seq) { split.still = null; showSplitPicture(aside); renderBrowserSplit(); return; }
-    try {
-      const got = await api("browser-visit", { seq }) as { src?: string; url?: string } | null;
-      if (!got?.src) return;
-      split.still = { seq, src: String(got.src), url: String(got.url ?? "") };
-      showSplitPicture(aside); renderBrowserSplit();
-    } catch (error) { notice(error instanceof Error ? error.message : String(error)); }
+    if (!chip || chip.disabled) return;
+    void (async () => { if (!split.held) await takeSplit(); if (!split.held) return; split.home = false; showSplitPicture(aside); renderBrowserSplit(); go(`tab:${chip.dataset.tab}`); })();
   });
   // The line between chat and browser moves either way; the width is kept.
   const grip = aside.querySelector<HTMLElement>(".bs-grip")!;
@@ -1791,7 +1860,7 @@ function buildBrowserSplit(aside: HTMLElement) {
     grip.setPointerCapture(event.pointerId);
     aside.classList.add("resizing");
     const right = el("workspace").getBoundingClientRect().right, total = el("workspace").clientWidth;
-    const move = (e: PointerEvent) => { split.width = splitWidth(right - e.clientX, total); aside.style.width = `${split.width}px`; };
+    const move = (e: PointerEvent) => { split.width = splitWidth(right - e.clientX, total); aside.style.width = `${split.width}px`; placeSplitView(); };
     const up = () => {
       grip.removeEventListener("pointermove", move); aside.classList.remove("resizing");
       try { localStorage.setItem("demesne-browser-split", String(split.width)); } catch {}
@@ -1800,7 +1869,33 @@ function buildBrowserSplit(aside: HTMLElement) {
     grip.addEventListener("pointerup", up, { once: true });
     grip.addEventListener("pointercancel", up, { once: true });
   });
+  // The real page follows its place as the window changes around it.
+  addEventListener("resize", placeSplitView);
+  document.addEventListener("visibilitychange", placeSplitView);
+  setInterval(placeSplitView, 400);
 }
+/// You go back to the chat (a click in it, or the composer taking your typing): the page goes back to the model.
+async function handSplitBack() {
+  if (!split.held) return;
+  split.handedAsk = handOverAsk(state?.runs.find((one) => one.id === state?.activeTurnId))?.toolCallId ?? "";
+  split.held = null; split.heldAt = Date.now();
+  renderCards();
+  await api("browser-hand-back", {}).catch(() => {});
+}
+/// You scroll, click or type on the picture of the page (the hidden browser): it is yours from then on.
+/// (The real page in the window makes itself yours, and the daemon says so.)
+async function takeSplit() {
+  if (split.held || !split.frame) return;
+  split.held = "person"; split.heldAt = Date.now();
+  renderCards();
+  await api("browser-take", {}).catch(() => {});
+}
+const backToChat = (event: Event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (split.held && split.open && target?.closest("#main") && !target.closest("#browser-split")) void handSplitBack();
+};
+document.addEventListener("pointerdown", backToChat, true);
+document.addEventListener("focusin", (event) => { if (event.target instanceof HTMLTextAreaElement) backToChat(event); }, true);
 /// Asks for newer pictures while the split shows; the daemon waits a moment for one.
 async function pumpBrowserFrames() {
   if (split.pumping) return;
@@ -1809,7 +1904,7 @@ async function pumpBrowserFrames() {
     while (split.open && state?.session?.id === split.session && !pageOpen) {
       if (document.visibilityState !== "visible") { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
       const session = split.session;
-      type Got = { seq?: number; src?: string; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; held?: "model" | "person"; tabs?: SplitTab[]; visits?: SplitVisit[]; pointer?: { x: number; y: number; ago: number } };
+      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number } };
       let got: Got | null = null;
       // The view's shape, so the page is drawn as tall as the split shows it.
       const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
@@ -1822,18 +1917,16 @@ async function pumpBrowserFrames() {
       const held = got.held ?? null;
       // An answer asked for before you took or handed back the page is out of date about who holds it.
       if (held !== split.held && askedAt > split.heldAt) { split.held = held; redraw = true; }
-      const visits = Array.isArray(got.visits) ? got.visits : [];
-      if (visits.map((one) => one.seq).join() !== split.visits.map((one) => one.seq).join()) { split.visits = visits; redraw = true; }
-      if (got.src && Number(got.seq) > split.seq) {
+      if ((got.src || got.live) && Number(got.seq) > split.seq) {
         (window as unknown as { __at?: number }).__at = Number((got as { at?: number }).at) || 0;
         split.seq = Number(got.seq);
         const first = !split.frame, before = split.frame;
-        split.frame = { src: got.src, width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward) };
+        split.frame = { src: got.src ?? "", ...(got.live ? { live: true } : {}), width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward), ...(got.loading ? { loading: true } : {}) };
         const tabs = Array.isArray(got.tabs) ? got.tabs : [];
         if (JSON.stringify(tabs) !== JSON.stringify(split.tabs)) { split.tabs = tabs; redraw = true; }
         showSplitPicture(aside);
         showSplitRing(aside, got.pointer);
-        if (first || before?.url !== split.frame.url || before?.title !== split.frame.title || before?.back !== split.frame.back || before?.forward !== split.frame.forward) redraw = true;
+        if (first || before?.url !== split.frame.url || before?.title !== split.frame.title || before?.back !== split.frame.back || before?.forward !== split.frame.forward || Boolean(before?.loading) !== Boolean(split.frame.loading)) redraw = true;
       }
       if (redraw) renderBrowserSplit();
       // While the page is yours the next picture is asked for at once; watching can breathe.
@@ -2087,7 +2180,7 @@ function landWhenSeen(node: HTMLElement, shot: WindowShot) {
 /// The capture keys took a window (electron/capture-keys.ts).
 document.addEventListener("demesne:window-shot", (event) => {
   const shot = (event as CustomEvent<{ app?: string; title?: string; data?: string; text?: string; textNote?: string; from?: Rect; error?: string }>).detail;
-  if (shot.error) { notice(shot.error); return; }
+  if (shot.error) { fail(shot.error); return; }
   if (!state?.session || !shot.data) { notice("Open a chat, then press the keys again to add the window."); return; }
   const sessionId = state.session.id;
   void act(async () => {
@@ -2341,7 +2434,7 @@ function renderRailChats(open: { item: Chat; tone: string; on: boolean }[]) {
     const title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
     const [action, args] = chatTarget(item.id);
     const letter = (/[\p{L}\p{N}]/u.exec(title)?.[0] ?? "·").toUpperCase();
-    return `<button type="button" class="rail-chat${on ? " on" : ""}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-tip="${h(about ? `${title} · ${about}` : title)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${on ? ' aria-current="page"' : ""}>${h(letter)}${tone ? `<i class="rail-chat-dot ${tone}" aria-hidden="true"></i>` : ""}</button>`;
+    return `<button type="button" class="rail-chat${on ? " on" : ""}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-tip="${h(about ? `${title} · ${about}` : title)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${on ? ' aria-current="page"' : ""}>${h(letter)}${tone && !(on && tone === "working") ? `<i class="rail-chat-dot ${tone}" aria-hidden="true"></i>` : ""}</button>`;
   }).join("");
 }
 function renderTabs() {
@@ -2382,7 +2475,7 @@ function renderTabs() {
       : `<span class="bar-tab-words"><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span><span class="bar-tab-sub" aria-hidden="true">${h(sub)}</span></span>`;
     // The close slot is always kept, so a name never moves when × shows.
     const close = pinned ? "" : btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `);
-    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-light" aria-hidden="true">${threadLight(thread)}</span>` : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
+    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-light" aria-hidden="true">${threadLight(thread)}</span>` : on && tone === "working" ? "" : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
@@ -3099,7 +3192,7 @@ const working = () => Boolean(state?.activeTurnId || state?.busy || state?.sessi
 function rebuildWhenIdle() {
   if (!rebuildAsked || state?.selfBuild.state !== "ready" || working()) return;
   rebuildAsked = false;
-  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => fail(error));
 }
 /// A sent message, its big pastes shown folded as they were in the composer.
 function requestText(content: string) {
@@ -5086,7 +5179,7 @@ async function attachFiles(files: File[]) {
     // Big photos and screenshots are redrawn to fit (fit-image.ts), never refused for size.
     let fitted: { url: string; type: string };
     try { fitted = await readPicture(file, { side: 4096, bytes: 15 * 1024 * 1024 }); }
-    catch { notice(`${file.name || "That image"} couldn't be read.`); continue; }
+    catch { notice(`${file.name || "That image"} couldn't be read.`, { mark: "bang", need: true }); continue; }
     const url = fitted.url;
     const image = await api("attach", { name: file.name || "pasted-image.png", mimeType: fitted.type, data: url.slice(url.indexOf(",") + 1) }) as { id: string } | undefined;
     if (image?.id) { attachmentPreviews.set(image.id, url); composerSignature = ""; renderComposer(); renderConversation(); }
@@ -6162,7 +6255,7 @@ document.addEventListener("demesne:notify-answer", (event) => {
   const done = ask.kind === "permission"
     ? (choice ? (ask.sessionId ? api("away-permission", { session: ask.sessionId, id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" }) : api("permission", { id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" })) : null)
     : (typed || choice) ? (ask.sessionId ? api("away-answer", { session: ask.sessionId, id: ask.id, answer: typed || choice, source: typed ? "typed" : "suggestion" }) : answerQuestion(typed || choice!, typed ? "typed" : "suggestion", questionById(ask.id))) : null;
-  void Promise.resolve(done).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  void Promise.resolve(done).catch((error) => fail(error));
 });
 // A banner's click comes back here and opens its chat.
 document.addEventListener("demesne:open-chat", (event) => {
@@ -6190,7 +6283,7 @@ async function driveAction(method: string, args: Record<string, unknown> = {}): 
   try {
     return await run;
   } catch (error) {
-    notice(error instanceof Error ? error.message : String(error));
+    fail(error);
     throw error;
   } finally {
     driveActionPending = "";
@@ -6670,7 +6763,7 @@ async function pointAt(key: string) {
   pointButton(key);
   let pick: PointPick | null = null;
   try { pick = await api<PointPick | null>("desktop-point", { frame: `pv-${key}` }); }
-  catch (error) { notice(error instanceof Error ? error.message : String(error)); }
+  catch (error) { fail(error); }
   finally { if (pointing === key) pointing = null; pointButton(key); }
   if (!pick) return;
   let source: PointSource | null = null;
@@ -6740,7 +6833,7 @@ async function submitText(value = editor.value, wait = false) {
         command.name === name || command.aliases.includes(name as never),
     )?.id;
     if (!id) {
-      notice(`Unknown command: ${name}`);
+      notice(`Unknown command: ${name}`, { mark: "bang", need: true });
       return;
     }
     const known = state.commands.find((command) => command.id === id);
@@ -6889,7 +6982,7 @@ async function submitText(value = editor.value, wait = false) {
       const result = await api<{ path: string }>("export", {
         format: argument === "json" ? "json" : "md",
       });
-      notice(`Saved ${result.path}`);
+      notice(`Saved ${result.path}`, { mark: "tray" });
       clear();
       return;
     }
@@ -7059,7 +7152,7 @@ async function dispatch(
   if (["settings-config", "allow-rule-remove", "trusted-forget", "mcp-remove"].includes(action)) return settingsCall(action, args);
   if (action === "restart-daemon") {
     settingsUi.error = "";
-    notice("Restarting the daemon…");
+    notice("Restarting the daemon…", { seat: "left", mark: "up" });
     return settingsCall("restart-daemon");
   }
   if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
@@ -7201,10 +7294,6 @@ async function dispatch(
     renderCards();
     return;
   }
-  if (action === "browser-hand-back") { await api("browser-hand-back", {}); split.handedAsk = handOverAsk(state?.runs.find((one) => one.id === state?.activeTurnId))?.toolCallId ?? ""; split.held = null; split.heldAt = Date.now(); renderCards(); return; }
-  // You take the page without being asked: the model's browser steps wait for you.
-  if (action === "browser-take") { await api("browser-take", {}); split.held = "person"; split.heldAt = Date.now(); split.still = null; renderCards(); el("browser-split").querySelector<HTMLElement>(".bs-view")?.focus({ preventScroll: true }); return; }
-  if (action === "browser-live") { split.still = null; const aside = el("browser-split"); showSplitPicture(aside); renderCards(); return; }
   // A browser step opens the split again.
   if (action === "tool") {
     const step = state?.runs.find((run) => run.id === args.runId)?.entries.find((entry) => entry.id === args.id);
@@ -7495,9 +7584,10 @@ async function dispatch(
     try {
       const done = await api<{ handoff: { status: string; error?: string } }>("handoff-act", { id, action: verb });
       handoffNow.set(id, { ...handoffNow.get(id), status: done.handoff.status, error: undefined });
-      notice(verb === "apply" ? "Brought in: the change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded");
+      // About your files, so it speaks from the right seat, under the cards.
+      notice(verb === "apply" ? "The change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded", { seat: "right", mark: verb === "apply" ? "tray" : "tick" });
     } catch (error) {
-      notice(error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error));
+      fail(error instanceof Error ? error.message.replace(/^.*?: /, "") : error, { seat: "right" });
     } finally {
       handoffBusy.delete(id);
       renderConversation();
@@ -7758,7 +7848,7 @@ async function dispatch(
           .map((e) => splitNextPrompt((e as any).raw).text)
           .join("\n\n") ?? "",
     });
-    notice("Copied");
+    notice("Copied", { seat: "at", mark: "copy", anchor: target });
     return;
   }
   if (
@@ -7970,6 +8060,21 @@ function fillThreadLists() {
     if (slot.dataset.html !== html) { slot.innerHTML = html; slot.dataset.html = html; }
   }
 }
+/// Something just broke in this project: a pill in the project's seat, at
+/// the foot of the cards (pass 260 A). The line and its fold stay the place
+/// to act; "Show" unfolds them.
+let brokeBefore: BrokeSeen | null = null;
+function sayBroke(next: Snapshot) {
+  const signals = next.breakage.signals, fixing = Boolean(next.breakage.fix && ["starting", "running"].includes(next.breakage.fix.status));
+  const words = fixing ? null : brokeNews(brokeBefore, next.workspace, signals);
+  brokeBefore = brokeSeen(next.workspace, signals);
+  if (!words) return;
+  pills.show({ seat: "right", mark: "bang", need: true, words, seconds: 8, action: { label: "Show", run: () => {
+    brokeShown = true;
+    heroSignature = briefingSignature = "";
+    if (inSession()) renderBriefing(); else renderHero();
+  } } });
+}
 function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
   if (!notesLoaded) void loadWaitingNotes();
@@ -7982,6 +8087,7 @@ function renderState(next: Snapshot) {
   const wasStart = !state?.runs.length;
   const editorFocused = document.activeElement === editor;
   state = next;
+  sayBroke(next);
   if (lastSession !== next.session?.id) {
     lastSession = next.session?.id ?? "";
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;
@@ -8856,7 +8962,7 @@ function resyncState() {
       const next = stateReceiver.seed(snapshot);
       if (next) renderState(next);
     })
-    .catch((error) => notice(String(error)))
+    .catch(fail)
     .finally(() => {
       resyncing = false;
       if (received && stateReceiver.needsReset) resyncState();
@@ -8904,7 +9010,7 @@ void window.demesne
     window.demesne.ready();
   })
   .catch((error) => {
-    notice(String(error));
+    fail(error);
     window.demesne.ready();
   });
 // Spinners and thinking sub-agents' phrases advance in place; the DOM (and

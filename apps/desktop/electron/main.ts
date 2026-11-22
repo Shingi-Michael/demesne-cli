@@ -8,12 +8,13 @@ import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { BROWSER_HOST_FLAG, runBrowserHost } from "./browser-host.ts";
+import { serveBrowser } from "./browser-inapp.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -34,6 +35,8 @@ let stopCaptureKeys: (() => void) | undefined;
 const startup: Array<[string, number]> = [];
 const startupMark = (name: string) => { if (startup.length < 16) startup.push([name, Math.round(performance.now())]); };
 let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
+/// The model's browser, held in this window while the app is open (browser-inapp.ts).
+let inAppBrowser: ReturnType<typeof serveBrowser> | undefined;
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
 // Keep native notifications alive until the OS closes them or they are clicked.
@@ -54,6 +57,7 @@ async function quit() {
   try { unlinkSync(join(homedir(), ".demesne", "desktop.pid")); } catch {}
   updater?.stop();
   stopCaptureKeys?.();
+  await inAppBrowser?.close().catch(() => {});
   await backend?.close();
   exited = true;
   app.quit();
@@ -187,6 +191,12 @@ if (!lookJob) void app.whenReady().then(async () => {
     webPreferences: { additionalArguments: glass ? [blurs ? "--demesne-glass" : "--demesne-glass=sharp"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true, backgroundThrottling: false },
   });
   const contents = window.webContents, session = contents.session;
+  // The model's browser lives in this window while the app is open, so the split shows the page itself.
+  // DEMESNE_BROWSER=hidden keeps it in the hidden copy of the app, as before.
+  if (process.env.DEMESNE_BROWSER !== "hidden") inAppBrowser = serveBrowser({ window, pointer: process.env.DEMESNE_DESKTOP_BROWSER ?? join(homedir(), ".demesne", "desktop-browser.json"), log });
+  // The page reloading or going down takes what it drew away: the real page goes with it until the split says where it is again.
+  contents.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) inAppBrowser?.place("", null); });
+  contents.on("render-process-gone", () => inAppBrowser?.place("", null));
   nativeTheme.on("updated", () => {
     if(nativeTheme.themeSource==="system")emit("demesne:desktop-action",{action:"appearance",dark:nativeTheme.shouldUseDarkColors});
   });
@@ -407,6 +417,14 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (cancel) { await Promise.all(frames.map(frame => frame.executeJavaScript(POINT_CANCEL).catch(() => null))); return null; }
       if (typeof name !== "string" || !frames[0]) throw new Error("The preview is not showing");
       return frames[0].executeJavaScript(POINT_SCRIPT, true);
+    }
+    // The browser split says where its page area is: the chat's real page is put there, or put away.
+    if (method === "desktop-browser-place") {
+      const { chat, rect } = args as Record<string, unknown>;
+      if (typeof chat !== "string" || chat.length > 200) return null;
+      const [wide, high] = window?.getContentSize() ?? [0, 0];
+      inAppBrowser?.place(chat, window?.isVisible() ? placeRect(rect, contents.getZoomFactor(), { width: wide, height: high }) : null);
+      return null;
     }
     // A note on a mockup (pass 233 A) carries a picture of its part: that
     // piece of the window as it shows now, as a PNG. The place is in the

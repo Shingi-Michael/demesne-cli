@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toolTarget } from "@demesne/workbench/history.ts";
-import { browserAddress, BrowserHandovers, browserProfile, projectFiles, browserReport, browserTool, BROWSER_PICTURES_PER_TURN, type BrowserDriver } from "../src/browser.ts";
+import { createServer } from "node:net";
+import { browserAddress, BrowserHandovers, browserProfile, desktopBrowserAt, electronBrowser, projectFiles, browserReport, browserTool, BROWSER_PICTURES_PER_TURN, type BrowserDriver } from "../src/browser.ts";
 import { derivePersistedRule } from "@demesne/protocol";
 import { parseAllowRule } from "../src/allowlist.ts";
 import { seenToolPicture } from "../src/engine.ts";
@@ -225,4 +226,61 @@ test("an address you type: a bare site gets https, this computer's pages go as t
   expect(browserAddress("example.com/docs", null)).toBe("https://example.com/docs");
   expect(browserAddress("https://shop.example/a b", null)).toBe("https://shop.example/a%20b");
   expect(browserAddress("localhost:5173", null)).toBe("http://localhost:5173/");
+});
+
+test("the open desktop app is found by the file it writes, and not when it is gone", () => {
+  const dir = mkdtempSync(join(tmpdir(), "demesne-desktop-browser-")), pointer = join(dir, "desktop-browser.json");
+  try {
+    expect(desktopBrowserAt(undefined)).toBeNull();
+    expect(desktopBrowserAt(pointer)).toBeNull();
+    writeFileSync(pointer, "not json");
+    expect(desktopBrowserAt(pointer)).toBeNull();
+    writeFileSync(pointer, JSON.stringify({ socket: "/tmp/x.sock", token: "word", pid: process.pid }));
+    expect(desktopBrowserAt(pointer)).toEqual({ socket: "/tmp/x.sock", token: "word" });
+    // A file an app left behind when it went away.
+    writeFileSync(pointer, JSON.stringify({ socket: "/tmp/x.sock", token: "word", pid: 2 ** 22 + 12345 }));
+    expect(desktopBrowserAt(pointer)).toBeNull();
+    writeFileSync(pointer, JSON.stringify({ socket: "/tmp/x.sock", pid: process.pid }));
+    expect(desktopBrowserAt(pointer)).toBeNull();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test.skipIf(process.platform === "win32")("with the desktop app open, the browser is driven inside its window", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "demesne-desktop-browser-")), pointer = join(dir, "desktop-browser.json"), socket = join(dir, "b.sock");
+  const heard: Record<string, unknown>[] = [];
+  // A stand-in for the app: it wants the word first, then answers each command and tells of a page on show.
+  const server = createServer((peer) => {
+    let buffer = "";
+    peer.on("data", (chunk) => {
+      buffer += String(chunk);
+      let end: number;
+      while ((end = buffer.indexOf("\n")) >= 0) {
+        const line = JSON.parse(buffer.slice(0, end)) as Record<string, unknown>; buffer = buffer.slice(end + 1);
+        heard.push(line);
+        if (line.hello !== undefined) { if (line.hello !== "word") peer.destroy(); continue; }
+        if (line.action === "open") peer.write(JSON.stringify({ event: "taken", chat: line.chat }) + "\n");
+        if (line.action === "open") peer.write(JSON.stringify({ event: "frame", chat: line.chat, jpeg: "", live: true, width: 640, height: 800, url: line.url, title: "Shop", tabs: [{ n: 1, url: line.url, title: "Shop", active: true }] }) + "\n");
+        peer.write(JSON.stringify({ id: line.id, url: line.url ?? "", title: "Shop" }) + "\n");
+      }
+    });
+  });
+  await new Promise<void>((done) => server.listen(socket, done));
+  writeFileSync(pointer, JSON.stringify({ socket, token: "word", pid: process.pid }));
+  // No hidden browser can start: the command is one that does not exist.
+  const browser = electronBrowser(["/nonexistent/demesne"], join(dir, "profile"), pointer);
+  const taken: string[] = [];
+  browser.onTaken = (chat) => taken.push(chat);
+  try {
+    const signal = new AbortController().signal;
+    const reply = await browser("chat-1", { action: "open", url: "http://localhost:5173/" }, signal);
+    expect(reply?.title).toBe("Shop");
+    expect(browser.inApp()).toBe(true);
+    expect(heard[0]).toEqual({ hello: "word", profile: join(dir, "profile") });
+    expect(heard[1]).toMatchObject({ action: "open", chat: "chat-1", url: "http://localhost:5173/" });
+    // The page itself is on show there: the split is told so.
+    const frame = await browser.frame("chat-1", 0, signal);
+    expect(frame).toMatchObject({ live: true, jpeg: "", width: 640, url: "http://localhost:5173/" });
+    // You scrolled the page there: the daemon hears it is yours.
+    expect(taken).toEqual(["chat-1"]);
+  } finally { browser.close(); await new Promise((done) => server.close(done)); rmSync(dir, { recursive: true, force: true }); }
 });

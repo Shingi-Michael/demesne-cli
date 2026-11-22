@@ -3,17 +3,34 @@
 // a model would: by the numbers in the page's outline. Run after
 // `bun scripts/prepare-desktop.ts` (Linux needs a display:
 // xvfb-run -a bun scripts/check-browser.ts).
+// CHECK_INAPP=1 runs the same steps with the browser inside the open desktop
+// app's own window (real views, browser-inapp.ts) instead of the hidden copy.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { BrowserHandovers, browserTool, electronBrowser } from "../apps/daemon/src/browser.ts";
+import { BrowserHandovers, browserTool, electronBrowser as hiddenOrInApp } from "../apps/daemon/src/browser.ts";
 
 const root = resolve(import.meta.dir, "..");
 const electron = process.env.DEMESNE_ELECTRON ?? join(root, "node_modules/electron/dist", process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron");
 const command = [electron, ...(process.env.DEMESNE_ELECTRON ? [] : [join(root, "apps/desktop/build/app")]), ...(process.getuid?.() === 0 ? ["--no-sandbox"] : []),
   // The "internet" of this check: every .test site is this same local server, reached by a public-looking name.
   "--host-resolver-rules=MAP *.test 127.0.0.1", "--no-proxy-server"];
+
+// In the app: the desktop app is opened first, and says where its window can hold the browser.
+const INAPP = process.env.CHECK_INAPP === "1";
+const pointer = INAPP ? join(mkdtempSync(join(tmpdir(), "demesne-browser-inapp-")), "desktop-browser.json") : undefined;
+const electronBrowser = (cmd: string[], profile?: string) => hiddenOrInApp(cmd, profile, pointer);
+let closeApp = async () => {};
+if (INAPP) {
+  const { _electron } = await import("playwright");
+  const { fixture } = await import("../apps/desktop/workspace/test/fixture.ts");
+  const f = await fixture();
+  const desktop = await _electron.launch({ args: [resolve("apps/desktop/build/app"), `--user-data-dir=${join(f.root, "electron-browser-inapp")}`, `--workspace=${f.workspace}`, `--server=${f.server.url}`, "--host-resolver-rules=MAP *.test 127.0.0.1", "--no-proxy-server"],
+    env: { ...f.env, DEMESNE_BUN: process.execPath, DEMESNE_DESKTOP_BROWSER: pointer! }, timeout: 30000 });
+  await (await desktop.firstWindow()).locator("#composer-model").waitFor();
+  closeApp = async () => { await desktop.close(); await f.close(); };
+}
 
 const page = (title: string, body: string) => new Response(`<!doctype html><title>${title}</title><body style="font:16px sans-serif">${body}</body>`, { headers: { "Content-Type": "text/html" } });
 let reachedInside = 0;
@@ -169,19 +186,27 @@ try {
   const watching = new AbortController();
   const firstFrame = await drive.frame("chat-a", 0, watching.signal) ?? await drive.frame("chat-a", 0, watching.signal);
   assert(firstFrame, "a watched tab sends a picture");
-  assert.equal(Buffer.from(firstFrame.jpeg, "base64").subarray(0, 2).toString("hex"), "ffd8", "it is a JPEG");
+  if (INAPP) assert(firstFrame.live && drive.inApp(), "in the app the page itself is on show, with no picture");
+  else assert.equal(Buffer.from(firstFrame.jpeg, "base64").subarray(0, 2).toString("hex"), "ffd8", "it is a JPEG");
   assert.equal(firstFrame.width, 1280);
   assert.equal(firstFrame.url, `${base}/`);
   // A change on the page sends a newer one.
   await call({ action: "type", ref: "Name", text: "Bo", clear: true });
-  const newer = await drive.frame("chat-a", firstFrame.seq, watching.signal);
-  assert(newer && newer.seq > firstFrame.seq, "a repaint sends a newer picture");
-  // Pages follow the app's own light or dark, told with each look.
-  await call({ action: "open", url: `${base}/scheme` });
-  await drive.frame("chat-a", 0, watching.signal, undefined, true);
-  assert.match((await call({ action: "wait", for: "Scheme dark" })).did, /is on the page/);
-  await drive.frame("chat-a", 0, watching.signal, undefined, false);
-  assert.match((await call({ action: "wait", for: "Scheme light" })).did, /is on the page/);
+  // In the app there are no pictures to send, and its pages follow the app's light or dark by themselves.
+  if (!INAPP) {
+    const newer = await drive.frame("chat-a", firstFrame.seq, watching.signal);
+    assert(newer && newer.seq > firstFrame.seq, "a repaint sends a newer picture");
+    // Pages follow the app's own light or dark, told with each look.
+    await call({ action: "open", url: `${base}/scheme` });
+    await drive.frame("chat-a", 0, watching.signal, undefined, true);
+    assert.match((await call({ action: "wait", for: "Scheme dark" })).did, /is on the page/);
+    await drive.frame("chat-a", 0, watching.signal, undefined, false);
+    assert.match((await call({ action: "wait", for: "Scheme light" })).did, /is on the page/);
+  } else {
+    await call({ action: "open", url: `${base}/scheme` });
+    const told = await drive.frame("chat-a", firstFrame.seq, watching.signal);
+    assert(told && told.seq > firstFrame.seq && told.url.endsWith("/scheme"), "where the page went is told to the split");
+  }
   console.log(`check-browser passed in ${Date.now() - started}ms`);
 } finally { drive.close(); }
 
@@ -313,7 +338,6 @@ try {
   const after = await step;
   assert.match(String(after.person_used), /used this browser/);
   assert.equal(after.title, "Orders", "back went back");
-  assert((more.visits?.("chat-m") ?? []).some((visit) => visit.url.endsWith("/session?set")), "the pages it went to are kept to step back through");
   // A sign-in that lasts only for the session is there after the browser starts again.
   assert.match((await moreCall({ action: "open", url: `${base}/session` })).outline.join("\n"), /Session kept|# Session/);
   assert.match((await moreCall({ action: "text" })).text, /Session kept/);
@@ -324,4 +348,4 @@ try {
   assert.match((await moreCall({ action: "text" }, "chat-m2")).text, /Session kept/, "a session sign-in lasts after a restart");
   more.close();
   console.log(`check-browser tabs, files, answers, styles and taking over passed in ${Date.now() - started}ms`);
-} finally { server.stop(true); setTimeout(() => { for (const one of [project, profile]) try { rmSync(one, { recursive: true, force: true }); } catch {} }, 2200); }
+} finally { server.stop(true); await closeApp(); setTimeout(() => { for (const one of [project, profile]) try { rmSync(one, { recursive: true, force: true }); } catch {} }, 2200); }

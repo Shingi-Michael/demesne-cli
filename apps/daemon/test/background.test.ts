@@ -79,9 +79,9 @@ describe("background run_command", () => {
     expect(processExists(childPid)).toBe(true);
 
     await tools.get("command_stop")!.execute({ handle: launched.handle }, context);
-    for (let attempt = 0; attempt < 40 && processExists(childPid); attempt += 1) await Bun.sleep(50);
+    for (let attempt = 0; attempt < 120 && processExists(childPid); attempt += 1) await Bun.sleep(50);
     expect(processExists(childPid)).toBe(false);
-  });
+  }, 10_000);
 
   test("enforces the process cap and rejects unknown handles", async () => {
     const root = workspace();

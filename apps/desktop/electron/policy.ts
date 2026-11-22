@@ -186,3 +186,15 @@ export const ZOOM_VERSION = 2;
 export function nextZoom(current: number, step: number) {
   return step === 0 ? 1 : step > 0 ? ZOOM_LEVELS.find(level => level > current + 1e-9) ?? current : [...ZOOM_LEVELS].reverse().find(level => level < current - 1e-9) ?? current;
 }
+/// Where the browser split says its page area is (the page's own pixels), as a place in the window
+/// for the real page (browser-inapp.ts): whole points, kept inside the window, or nothing when it is too small to show.
+export function placeRect(value: unknown, zoom: number, bounds: { width: number; height: number }): { x: number; y: number; width: number; height: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const { x, y, width, height } = value as Record<string, unknown>;
+  if (![x, y, width, height].every((n) => typeof n === "number" && Number.isFinite(n))) return null;
+  const k = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const left = Math.max(0, Math.round((x as number) * k)), top = Math.max(0, Math.round((y as number) * k));
+  const right = Math.min(bounds.width, Math.round(((x as number) + (width as number)) * k)), bottom = Math.min(bounds.height, Math.round(((y as number) + (height as number)) * k));
+  return right - left >= 120 && bottom - top >= 120 ? { x: left, y: top, width: right - left, height: bottom - top } : null;
+}
+

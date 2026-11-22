@@ -85,6 +85,7 @@ import { updateCheckLine, type AppUpdate } from "./release-line.ts";
 import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-icons.ts";
 import { MemoryPill } from "./memory-pill.ts";
 import { pills, type PillSpec } from "./pill.ts";
+import { lightRows } from "./row-light.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -525,6 +526,8 @@ function context() {
   };
 }
 let sidebarSignature = "";
+/// Each chat's state at the last draw, and the rows lit with their news (pass 260 A).
+let rowTones = new Map<string, string>(), rowLit = new Map<string, number>(), rowLitTimer: ReturnType<typeof setTimeout> | undefined;
 /// The full time, for a row's tooltip.
 const fullTime = (date: string) => new Date(date).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 /// When each chat was last looked at (its updatedAt then): a chat that has
@@ -869,6 +872,11 @@ function renderSidebar() {
   const focused = focusedRow ? [...nav.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
   const titleOf = (item: typeof sessions[number]) => item.id === current?.id ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
   const tones = new Map(sessions.map((item) => [item.id, chatTone(item)] as const));
+  // A chat that just finished or asks, while you are elsewhere, lights its own row.
+  rowLit = lightRows(rowTones, tones, pageOpen ? null : current?.id ?? null, rowLit, Date.now());
+  rowTones = tones;
+  clearTimeout(rowLitTimer);
+  if (rowLit.size) rowLitTimer = setTimeout(() => { sidebarSignature = ""; renderSidebar(); }, Math.max(50, Math.min(...rowLit.values()) - Date.now() + 20));
   // Drive's own chats stay off the list: its work unfolds from its line in
   // your chat and lands as a branch to review. One you open shows while open.
   // An empty chat is the composer itself, and the New chat row above already
@@ -919,7 +927,7 @@ function renderSidebar() {
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
     if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}${rowLit.has(id) ? " lit" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   // The agents: a letter tile, the name, and how it is (a dot

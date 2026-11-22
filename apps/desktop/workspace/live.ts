@@ -86,6 +86,7 @@ import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-
 import { MemoryPill } from "./memory-pill.ts";
 import { pills, type PillSpec } from "./pill.ts";
 import { lightRows } from "./row-light.ts";
+import { brokeNews, brokeSeen, type BrokeSeen } from "./broke-news.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -8057,6 +8058,21 @@ function fillThreadLists() {
     if (slot.dataset.html !== html) { slot.innerHTML = html; slot.dataset.html = html; }
   }
 }
+/// Something just broke in this project: a pill in the project's seat, at
+/// the foot of the cards (pass 260 A). The line and its fold stay the place
+/// to act; "Show" unfolds them.
+let brokeBefore: BrokeSeen | null = null;
+function sayBroke(next: Snapshot) {
+  const signals = next.breakage.signals, fixing = Boolean(next.breakage.fix && ["starting", "running"].includes(next.breakage.fix.status));
+  const words = fixing ? null : brokeNews(brokeBefore, next.workspace, signals);
+  brokeBefore = brokeSeen(next.workspace, signals);
+  if (!words) return;
+  pills.show({ seat: "right", mark: "bang", need: true, words, seconds: 8, action: { label: "Show", run: () => {
+    brokeShown = true;
+    heroSignature = briefingSignature = "";
+    if (inSession()) renderBriefing(); else renderHero();
+  } } });
+}
 function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
   if (!notesLoaded) void loadWaitingNotes();
@@ -8069,6 +8085,7 @@ function renderState(next: Snapshot) {
   const wasStart = !state?.runs.length;
   const editorFocused = document.activeElement === editor;
   state = next;
+  sayBroke(next);
   if (lastSession !== next.session?.id) {
     lastSession = next.session?.id ?? "";
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { FoundryArtifact } from "@demesne/protocol";
-import { foundryPage, savedLine, shelfKey } from "../foundry-page.ts";
+import { foundryPage, openHead, savedLine, shelfKey, stageHTML } from "../foundry-page.ts";
 
 const artifact = (id: string, title: string, kind: FoundryArtifact["kind"] = "html"): FoundryArtifact =>
   ({ id, title, kind, workspace: null, sessionId: "s1", createdAt: "2026-11-07T10:00:00Z", updatedAt: "2026-11-08T10:00:00Z", version: 2, description: "", basedOn: null });
@@ -195,4 +195,21 @@ test("pass 262 C: the mockup you open grows where it sits, with a quiet head lin
   expect(savedLine({ id: "d", at: 1, shown: 1, said: "Saved Plan v1.pdf to Downloads", saved: { path: "/y", pdf: true, ready: true } }, "deck")).toContain(">Also as a web page</button>");
   expect(savedLine({ id: "r", at: 1, shown: 1, said: "Saved Counter v1.html to Downloads", saved: { path: "/z", pdf: false, ready: true } }, "react")).toContain(">Also as the .jsx</button>");
   expect(savedLine({ id: "a1", at: 2, shown: 2 }, "html")).toBe("");
+});
+
+test("step 3: a deck, doc or dashboard's newest version can be edited in place", () => {
+  const open = { id: "d", at: 3, shown: 3 };
+  expect(openHead(open, [1, 2, 3], "doc")).toContain('aria-label="Edit the text"');
+  expect(openHead(open, [1, 2, 3], "html")).not.toContain("Edit the");
+  expect(openHead({ ...open, shown: 2 }, [1, 2, 3], "doc")).toContain('disabled aria-label="Edit the newest version"');
+  // While editing: Done, and nothing else to step to or read.
+  const editing = openHead({ ...open, editing: { source: "# Hi", base: 3, changes: 1 } }, [1, 2, 3], "doc");
+  expect(editing).toContain('aria-label="Done editing"');
+  expect(editing).not.toContain("Show the code");
+  expect(editing).toContain('disabled aria-label="Earlier version"');
+  // The frame comes with its text editable, and nothing plays on it.
+  const stage = stageHTML({ id: "d", title: "Plan", kind: "deck" }, { version: 3, createdAt: "2026-11-22T10:00:00Z", stage: null }, false, true);
+  expect(stage).toContain("&amp;edit=1");
+  expect(stage).not.toContain("data-deck");
+  expect(stageHTML({ id: "d", title: "Plan", kind: "deck" }, { version: 3, createdAt: "2026-11-22T10:00:00Z", stage: null })).toContain("data-deck");
 });

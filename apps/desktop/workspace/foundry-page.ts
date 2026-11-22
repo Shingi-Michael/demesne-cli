@@ -35,8 +35,9 @@ export const frameURL = (id: string, version: number) => `foundry://artifact/${e
 /// ask change it in place (pass 197 A), so the frame loads the fixed page.
 /// `first` marks a version that just came back from notes (pass 233 A): its
 /// frame outlines what changed for a few seconds (electron/foundry-changed.ts).
-const frame = (id: string, version: number, title: string, at: string, first = false) =>
-  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1&at=${Date.parse(at) || 0}${first ? "&first=1" : ""}`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
+/// `edit` (step 3): the page comes with its text editable instead of its demo and notes (foundry-kit/edit.js).
+const frame = (id: string, version: number, title: string, at: string, first = false, edit = false) =>
+  `<iframe class="fd-frame" src="${h(`${frameURL(id, version)}&stack=1&at=${Date.parse(at) || 0}${first ? "&first=1" : ""}${edit ? "&edit=1" : ""}`)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="${h(title)}"></iframe>`;
 
 /// The bar a window or a browser surface draws above the page (pass 221 A).
 const CHROME: Partial<Record<string, number>> = { window: 30, browser: 38 };
@@ -47,9 +48,10 @@ const GROW_START = 480;
 /// only to fit), on its backdrop; and, when it has a demo or is a deck, the
 /// quiet line under it that the demo's words appear in. Without a surface it
 /// is the plain stage it always was.
-export function stageHTML(artifact: Pick<FoundryArtifact, "id" | "title" | "kind">, version: Pick<FoundryShelfVersion, "version" | "createdAt" | "stage">, first = false) {
-  const inner = frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt, first);
-  const demo = version.stage?.demo?.length ? version.stage.demo : null, deck = artifact.kind === "deck";
+export function stageHTML(artifact: Pick<FoundryArtifact, "id" | "title" | "kind">, version: Pick<FoundryShelfVersion, "version" | "createdAt" | "stage">, first = false, edit = false) {
+  const inner = frame(artifact.id, version.version, `${artifact.title} v${version.version}`, version.createdAt, first, edit);
+  // While you edit it, nothing plays on it.
+  const demo = !edit && version.stage?.demo?.length ? version.stage.demo : null, deck = !edit && artifact.kind === "deck";
   const plays = `${demo ? ` data-demo="${h(JSON.stringify(demo))}"` : ""}${deck ? " data-deck" : ""}`;
   const line = demo || deck ? '<p class="fd-demo" aria-live="polite"></p>' : "";
   const surface = version.stage?.surface && artifact.kind !== "svg" ? drawnSurface(version.stage.surface) : null;
@@ -90,19 +92,29 @@ export interface FoundryOpen {
   code?: string | null;
   said?: string;
   saved?: { path: string; pdf: boolean; ready: boolean } | null;
+  /// Step 3, edit in place: a deck, doc or dashboard's newest version with
+  /// its text editable; `source` is the content with your changes so far,
+  /// `base` the version they apply to, kept as a new version on Done.
+  editing?: { source: string; base: number; changes: number } | null;
 }
+
+/// The kinds you can edit in place: the ones Demesne draws from content.
+export const EDIT_KINDS = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
 
 /// An artifact's versions on the page, oldest first.
 export const versionsOf = (versions: readonly FoundryShelfVersion[], id: string) =>
   versions.filter((item) => item.artifactId === id).map((item) => item.version).sort((a, b) => a - b);
 
+const PENCIL = '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>';
+
 /// The head line of the opened mockup (pass 262 C): the versions to step
 /// through, then code, save a copy and close, as quiet grey icons.
-export function openHead(open: FoundryOpen, all: readonly number[]) {
+export function openHead(open: FoundryOpen, all: readonly number[], kind?: FoundryKind) {
   const at = all.indexOf(open.shown), earlier = at > 0 ? all[at - 1] : undefined, later = at >= 0 && at < all.length - 1 ? all[at + 1] : undefined;
   const ico = (action: string, args: Record<string, unknown>, paths: string, label: string, extra = "") =>
     `<button type="button" class="fd-hd-b" data-action="${action}" data-args="${h(JSON.stringify(args))}" aria-label="${h(label)}" title="${h(label)}"${extra}>${icon(paths)}</button>`;
-  const step = (version: number | undefined, paths: string, label: string) => version === undefined
+  const editing = !!open.editing;
+  const step = (version: number | undefined, paths: string, label: string) => version === undefined || editing
     ? `<button type="button" class="fd-hd-b" disabled aria-label="${h(label)}">${icon(paths)}</button>`
     : ico("foundry-shown", { version }, paths, `${label} (v${version})`);
   const code = open.code !== undefined;
@@ -111,7 +123,12 @@ export function openHead(open: FoundryOpen, all: readonly number[]) {
     + `<span class="fd-hd-v" aria-live="polite">v${open.shown}</span>`
     + step(later, '<path d="m10 6 6 6-6 6"/>', "Later version")
     + '<i class="fd-hd-sep" aria-hidden="true"></i>'
-    + ico("foundry-code", {}, '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', code ? "Show the page" : "Show the code", ` aria-pressed="${code}"`)
+    // Step 3: a deck, doc or dashboard's text, edited where it sits (its newest version only).
+    + (kind && EDIT_KINDS.has(kind) && !code
+      ? open.shown !== all.at(-1) ? `<button type="button" class="fd-hd-b" disabled aria-label="Edit the newest version" title="Edit the newest version">${icon(PENCIL)}</button>`
+        : ico("foundry-edit", {}, editing ? '<path d="m5 12.5 4.5 4.5L19 7.5"/>' : PENCIL, editing ? "Done editing" : "Edit the text", ` aria-pressed="${editing}"`)
+      : "")
+    + (editing ? "" : ico("foundry-code", {}, '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', code ? "Show the page" : "Show the code", ` aria-pressed="${code}"`))
     + ico("foundry-copy", {}, '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', "Save a copy to Downloads")
     + ico("foundry-shrink", {}, '<path d="M6 6l12 12M18 6 6 18"/>', "Close (Esc)")
     + "</span>";
@@ -180,7 +197,7 @@ export function foundryPage(view: FoundryView) {
     const name = open ? `<b>${h(artifact.title)}</b>` : `<b>${link("foundry-grow", { id: artifact.id, version: slot.version }, h(artifact.title), "Open it here, full width")}</b>`;
     const line = `<div class="fd-ln">${name}${chat ? `<span>from ${link("select-session", { id: version.sessionId }, `“${h(chat)}”`, "Open the chat")}</span>` : ""}`
       + `<span class="fd-ln-r">${artifact.built ? "Built" : h(KIND_WORD[artifact.kind])} · ${h(clock(version.createdAt))}</span>`
-      + (open ? openHead(open, versionsOf(shown, artifact.id)) : "") + "</div>";
+      + (open ? openHead(open, versionsOf(shown, artifact.id), artifact.kind) : "") + "</div>";
     const based = artifact.basedOn && byId.get(artifact.basedOn.id);
     const from = based ? link("foundry-open", { id: based.id, version: artifact.basedOn!.version }, `${h(based.title)} v${artifact.basedOn!.version}`, "Show it") : "";
     // Pass 241 A: a build's record says how it came out and links the mockup it follows.
@@ -203,11 +220,11 @@ export function foundryPage(view: FoundryView) {
       ? `<pre class="fd-code" tabindex="0" aria-label="${h(`${artifact.title} v${version.version}, its code`)}"><code>${open.code === null ? "Reading…" : h(open.code)}</code></pre>`
       : artifact.kind === "markdown"
       ? `<article class="fd-doc markdown" data-md="${h(key)}" data-at="${h(version.createdAt)}"><p class="cp-empty">Reading…</p></article>`
-      : stageHTML(artifact, version, view.changed?.has(key));
+      : stageHTML(artifact, version, view.changed?.has(key), !!open?.editing);
     // Pass 233 A: notes are pinned to the newest version only (a correction makes the next one), and their quiet line sits under it.
     // A build's record takes none: what to change goes to the code or the mockup.
     const notes = artifact.version === version.version && NOTE_KINDS.has(artifact.kind) && !artifact.built ? '<p class="fd-notes" aria-live="polite" hidden></p>' : "";
-    const notesHere = open && (open.code !== undefined || version !== slot) ? "" : notes;
+    const notesHere = open && (open.code !== undefined || !!open.editing || version !== slot) ? "" : notes;
     return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");

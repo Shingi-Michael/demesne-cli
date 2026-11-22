@@ -36,6 +36,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
+import { placeEdit } from "./foundry-edit.ts";
 import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
 import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
@@ -7100,7 +7101,8 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
     return true;
   }
   const open = foundryOpen;
-  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show";
+  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit";
+  if (action === "foundry-edit") { await foundryEdit(open); return true; }
   if (action === "foundry-shrink") {
     foundryOpen = null;
     foundryFocus = { id: open.id, version: open.at, quiet: true };
@@ -7138,8 +7140,59 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
   }
   return false;
 }
+/// Step 3, edit in place: the pencil starts editing the opened deck, doc or
+/// dashboard's newest version where it sits; Done keeps every change you
+/// made as one new version, "Edited by you", and shows it.
+const EDIT_SAID = "Click any text to change it. Done keeps your changes as a new version.";
+async function foundryEdit(open: FoundryOpen) {
+  if (!open.editing) {
+    open.said = "Reading…"; open.saved = null; paintFoundrySaid();
+    try {
+      const found = await api<{ source: string; version: number }>("foundry-get", { id: open.id, version: open.shown });
+      if (foundryOpen !== open) return;
+      open.editing = { source: found.source, base: found.version, changes: 0 };
+      open.said = EDIT_SAID;
+    } catch (error) { open.said = `Couldn't start editing: ${errorWords(error)}`; }
+    renderPage();
+    return;
+  }
+  // Pressing Done takes the focus out of the piece you were typing in: let its change arrive first.
+  await new Promise((done) => setTimeout(done, 80));
+  const editing = open.editing;
+  if (!editing || foundryOpen !== open) return;
+  if (!editing.changes) { open.editing = null; open.said = ""; renderPage(); return; }
+  open.said = "Saving your changes…"; paintFoundrySaid();
+  try {
+    const saved = await api<{ version: number }>("foundry-save", { id: open.id, source: editing.source, baseVersion: editing.base });
+    if (foundryOpen !== open) return;
+    foundryOpen = { id: open.id, at: saved.version, shown: saved.version, said: `Kept your ${editing.changes === 1 ? "change" : `${editing.changes} changes`} as v${saved.version}` };
+    foundryFocus = { id: open.id, version: saved.version, quiet: true };
+    const kept = foundryOpen;
+    clearTimeout(foundrySaidTimer);
+    foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === kept) { kept.said = ""; paintFoundrySaid(); } }, 12_000);
+    await loadFoundry();
+  } catch (error) { open.said = `Couldn't keep your changes: ${errorWords(error)}`; paintFoundrySaid(); }
+}
+/// A piece of text the frame says you changed: placed in the content, or put back.
+window.addEventListener("message", (event) => {
+  const data = event.data as { demesne?: unknown; action?: unknown; piece?: unknown; before?: unknown; after?: unknown } | null;
+  if (!data || data.demesne !== "edit" || data.action !== "change" || typeof data.before !== "string" || typeof data.after !== "string" || typeof data.piece !== "number") return;
+  const open = foundryOpen, frame = document.querySelector<HTMLIFrameElement>("#page .fd-open iframe.fd-frame");
+  if (!open?.editing || !frame || frame.contentWindow !== event.source) return;
+  const next = placeEdit(open.editing.source, data.before.slice(0, 4000), data.after.slice(0, 4000));
+  if (next === null) {
+    frame.contentWindow?.postMessage({ demesne: "edit", action: "back", piece: data.piece }, "*");
+    open.said = "That text comes from a chart or repeats here, so it went back. Ask for it in the chat.";
+  } else {
+    open.editing.source = next;
+    open.editing.changes++;
+    open.said = `${open.editing.changes === 1 ? "1 change" : `${open.editing.changes} changes`}. Done keeps ${open.editing.changes === 1 ? "it" : "them"} as a new version.`;
+  }
+  paintFoundrySaid();
+});
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || pageOpen !== "foundry" || !foundryOpen || event.defaultPrevented || event.isComposing) return;
+  // While you edit, Esc belongs to the text (it puts a piece back); Done or × end editing.
+  if (event.key !== "Escape" || pageOpen !== "foundry" || !foundryOpen || foundryOpen.editing || event.defaultPrevented || event.isComposing) return;
   if ((event.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable], #composer")) return;
   event.preventDefault();
   void foundryOpenAction("foundry-shrink", {});

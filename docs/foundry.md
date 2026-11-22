@@ -118,6 +118,14 @@ The frame tells the page (`apps/desktop/foundry-kit/errors.js`, first of the scr
 
 Read more: [Window: error event](https://developer.mozilla.org/en-US/docs/Web/API/Window/error_event) and [unhandledrejection](https://developer.mozilla.org/en-US/docs/Web/API/Window/unhandledrejection_event) (MDN), [Window.postMessage](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage) (how a walled-off frame talks to the page), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (Try fixing).
 
+## Edit docs and decks in place
+
+The opened deck, doc or dashboard has a pencil in its head line (its newest version only). Press it and every piece of text becomes editable where it sits: headings, paragraphs, list items, table cells, stat tiles, captions. Leave a piece (click away, Enter) and the change goes into the content; Escape puts a piece back. The quiet line under it counts your changes, and **Done** (the check where the pencil was) keeps them all as one new version, "Edited by you", and shows it. No model is involved, so it costs nothing and is instant. While you edit, the demo, the deck's own playing and notes are off, and Esc on the Foundry page doesn't close it.
+
+How a change finds its place: the frame (`apps/desktop/foundry-kit/edit.js`, put in front of the page instead of the demo and notes) tells what the piece said and what it says now. `placeEdit` in `apps/desktop/workspace/foundry-edit.ts` takes the part that differs and finds it in the Markdown with as much of the text around it as matches, on either side, so the formatting around a change (bold, links) stays and only the words you changed move. Typed formatting characters are escaped. Text that is drawn from a chart, or that repeats so its place can't be told, goes back with a line saying to ask in the chat. Done saves with the version it was made on, so a newer one is never overwritten. `xvfb-run -a bun scripts/check-foundry-edit.ts` checks it in the real app.
+
+Read more: [contenteditable](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/contenteditable) (MDN, including plaintext-only), [Markdown backslash escapes](https://spec.commonmark.org/0.31.2/#backslash-escapes) (CommonMark), [Optimistic concurrency](https://en.wikipedia.org/wiki/Optimistic_concurrency_control) (why Done names its version), [Claude Docs](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (documents you edit in place).
+
 ## More kinds: React, diagrams, code
 
 Besides pages (`html`), graphics, notes and the ready kinds, a mockup can be what the model would write anyway, the way Claude artifacts take React, Mermaid and code:

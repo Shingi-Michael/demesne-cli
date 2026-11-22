@@ -105,8 +105,12 @@ try {
   };
 
   await win.locator("#composer-model").waitFor();
-  await win.locator("textarea").fill("Check that the admin sign-in works.");
-  await win.locator("textarea").press("Enter");
+  // The start screen can take a moment to be ready for typing: send again if nothing started.
+  for (let tries = 0; tries < 3; tries++) {
+    await win.locator("textarea").fill("Check that the admin sign-in works.");
+    await win.locator("textarea").press("Enter");
+    if (await win.locator("#conversation .turn").first().waitFor({ timeout: 4000 }).then(() => true, () => false)) break;
+  }
 
   // The model opens the page: the window splits, and the page itself sits on the split's page area.
   const split = win.locator("#browser-split");
@@ -193,9 +197,16 @@ try {
   assert.equal(await split.locator(".bs-home").isVisible(), false, "the home screen goes once you go somewhere");
   await split.locator(".bs-tab", { hasText: "Cart" }).click();
   await until("a chip switches back to the cart", () => real("/cart"), (page) => Boolean(page?.shown));
+  // Each tab closes with its own ×.
+  await split.locator(".bs-chip:not(.on)").hover();
+  await win.screenshot({ path: join(output, "tabs.png"), clip: { x: 760, y: 40, width: 480, height: 100 } });
+  await split.locator(".bs-chip:not(.on) .bs-tab-x").click();
+  await until("the tab's × closed it", () => real("/admin"), (page) => page === null);
+  await until("one tab left, so no chips", () => split.locator(".bs-tab").count(), (n) => n === 0);
+  await until("the cart is still on show", () => real("/cart"), (page) => Boolean(page?.shown));
   await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
   await win.waitForFunction(() => !document.querySelector("#browser-split")?.classList.contains("yours"));
-  console.log("PASS: a scroll makes the page yours; you can go to your own address, look at an earlier page, open a new tab from its logo home screen, and come back.");
+  console.log("PASS: a scroll makes the page yours; you can go to your own address, look at an earlier page, open a new tab from its logo home screen, close it with its ×, and come back.");
 
   // Settings over the chat, and ×: the real page is put away, and still there for the model.
   await split.locator(".bs-close").click();

@@ -1692,8 +1692,11 @@ function renderSplitHead(aside: HTMLElement, doing: { tone: string; words: strin
 /// One chip per tab, when the chat's browser has more than one. While the page is yours, a chip switches to it.
 function renderSplitTabs(aside: HTMLElement, _yours: boolean) {
   const row = aside.querySelector<HTMLElement>(".bs-tabs")!;
-  const chips = split.tabs.map((tab) => { const on = tab.active && !split.home; return `<button type="button" class="bs-tab${on ? " on" : ""}" data-tab="${tab.n}" ${on ? "disabled" : ""} title="${h(tab.url)}">${h(tabName(tab))}</button>`; });
-  if (split.home) chips.push(`<button type="button" class="bs-tab on" disabled>New tab</button>`);
+  // Each chip closes with its own ×, but the last page: × in the bar closes the browser.
+  const closable = split.tabs.length > 1;
+  const close = (what: string, name: string) => `<button type="button" class="bs-tab-x" data-close-tab="${what}" aria-label="Close ${h(name)}" title="Close tab">${BS_ICONS.close}</button>`;
+  const chips = split.tabs.map((tab) => { const on = tab.active && !split.home, name = tabName(tab); return `<span class="bs-chip${on ? " on" : ""}"><button type="button" class="bs-tab${on ? " on" : ""}" data-tab="${tab.n}" ${on ? "disabled" : ""} title="${h(tab.url)}">${h(name)}</button>${closable ? close(String(tab.n), name) : ""}</span>`; });
+  if (split.home) chips.push(`<span class="bs-chip on"><button type="button" class="bs-tab on" disabled>New tab</button>${close("home", "New tab")}</span>`);
   const html = chips.length > 1 ? chips.join("") : "";
   if (row.dataset.html !== html) { row.innerHTML = html; row.dataset.html = html; }
   row.hidden = !html;
@@ -1833,6 +1836,13 @@ function buildBrowserSplit(aside: HTMLElement) {
     go(what);
   });
   aside.querySelector<HTMLElement>(".bs-tabs")!.addEventListener("click", (event) => {
+    // A chip's ×: the new tab goes back to the page it was opened over; a page's tab closes (closing one is using the browser, so the page is yours).
+    const shut = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-close-tab]");
+    if (shut) {
+      if (shut.dataset.closeTab === "home") { home(false); return; }
+      void (async () => { if (!await own()) return; try { await api("browser-go", { to: `close:${shut.dataset.closeTab}` }); } catch (error) { notice(error instanceof Error ? error.message : String(error)); } })();
+      return;
+    }
     const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-tab]");
     if (!chip || chip.disabled) return;
     void (async () => { if (!split.held) await takeSplit(); if (!split.held) return; split.home = false; showSplitPicture(aside); renderBrowserSplit(); go(`tab:${chip.dataset.tab}`); })();

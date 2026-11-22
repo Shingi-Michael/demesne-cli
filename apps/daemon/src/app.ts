@@ -1753,6 +1753,8 @@ export function createDaemonApp(options: {
           const to = isRecord(body) ? body.to : undefined;
           if (to === "back" || to === "forward" || to === "reload") { const reply = await browser(chat, { action: "go", to }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
           const tab = typeof to === "string" ? /^tab:(\d{1,3})$/.exec(to) : null;
+          const shut = typeof to === "string" ? /^close:(\d{1,3})$/.exec(to) : null;
+          if (shut) { const reply = await browser(chat, { action: "close_tab", tab: Number(shut[1]) }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
           if (tab) { const reply = await browser(chat, { action: "switch", tab: Number(tab[1]) }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
           if (typeof to !== "string" || !to.trim()) return apiError("invalid_request", "Say where to go", 400);
           let address: string;

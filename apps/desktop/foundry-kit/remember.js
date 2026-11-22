@@ -6,6 +6,10 @@
      await demesne.load("items", [])         read it back (or the fallback)
      await demesne.ask("What did I forget?") the model's answer, as text
      await demesne.pick({ accept: "image/*" }) a file you choose: { name, type, size, text | dataURL }
+     await demesne.read("data/sales.csv")    a file in the mockup's project, as text (real data)
+     await demesne.list("data")              the names in a folder of the project
+     await demesne.fetch("https://api…")     live data from the web: { ok, status, type, text, json() };
+                                             the first time for each site, the Foundry page asks you
 
    What a page saves stays with the artifact in Demesne: it survives closing
    the page, reloads and new versions, and goes when the artifact is deleted.
@@ -112,5 +116,52 @@
       input.click();
     });
   }
-  window.demesne = Object.assign(window.demesne || {}, { save: save, load: load, ask: ask, pick: pick });
+  // Real data (Foundry step 5): the project's files, and the web once you allow each site.
+  function outside(name) { return Promise.reject(new Error("demesne." + name + " works when the page is open in Demesne")); }
+  function read(path) {
+    if (typeof path !== "string" || !path.trim()) return Promise.reject(new TypeError("demesne.read takes a path in the project, like \"data/sales.csv\""));
+    if (!inside()) return outside("read");
+    return call("read", { path: path.slice(0, 500) }).then(function (data) { return String(data.text || ""); });
+  }
+  function list(path) {
+    if (!inside()) return outside("list");
+    return call("list", { path: String(path == null ? "" : path).slice(0, 500) }).then(function (data) { return Array.isArray(data.names) ? data.names : []; });
+  }
+  // The Foundry page answers whether you allowed a site (it asks you, under the mockup).
+  var waiting = {}, listening = false;
+  function heard(event) {
+    var data = event.data;
+    if (event.source !== parent || !data || data.demesne !== "site" || typeof data.host !== "string") return;
+    var all = waiting[data.host] || [];
+    delete waiting[data.host];
+    all.forEach(function (done) { done(data.allowed === true); });
+  }
+  function allowed(host) {
+    // Nobody to ask: the model's own look at the page, or a saved copy.
+    if (parent === window) return Promise.resolve(false);
+    if (!listening) { listening = true; window.addEventListener("message", heard); }
+    return new Promise(function (resolve) {
+      (waiting[host] = waiting[host] || []).push(resolve);
+      try { parent.postMessage({ demesne: "site", action: "ask", host: host }, "*"); } catch (error) { resolve(false); }
+      setTimeout(function () { var all = waiting[host] || [], at = all.indexOf(resolve); if (at >= 0) { all.splice(at, 1); resolve(false); } }, 120000);
+    });
+  }
+  function answer(data) {
+    var text = String(data.text || "");
+    return { ok: !!data.ok, status: data.status | 0, type: String(data.type || ""), text: text, json: function () { return JSON.parse(text); } };
+  }
+  function fetchData(url) {
+    var address;
+    try { address = new URL(String(url)); } catch (error) { return Promise.reject(new TypeError("demesne.fetch takes a full https:// address")); }
+    if (address.protocol !== "https:") return Promise.reject(new TypeError("demesne.fetch reads https:// addresses only"));
+    if (!inside()) return outside("fetch");
+    return call("fetch", { url: address.href }).then(answer, function (error) {
+      if (!/^ask:/.test(error.message)) throw error;
+      return allowed(address.hostname).then(function (yes) {
+        if (!yes) throw new Error("Live data from " + address.hostname + " isn't allowed for this page yet");
+        return call("fetch", { url: address.href }).then(answer);
+      });
+    });
+  }
+  window.demesne = Object.assign(window.demesne || {}, { save: save, load: load, ask: ask, pick: pick, read: read, list: list, fetch: fetchData });
 })();

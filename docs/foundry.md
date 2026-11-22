@@ -118,6 +118,18 @@ The frame tells the page (`apps/desktop/foundry-kit/errors.js`, first of the scr
 
 Read more: [Window: error event](https://developer.mozilla.org/en-US/docs/Web/API/Window/error_event) and [unhandledrejection](https://developer.mozilla.org/en-US/docs/Web/API/Window/unhandledrejection_event) (MDN), [Window.postMessage](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage) (how a walled-off frame talks to the page), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (Try fixing).
 
+## Real data in the page
+
+A mockup can show real numbers instead of made-up ones. With no script tag, a page (html or react) can call:
+
+- `await demesne.read("data/sales.csv")`: a file in the mockup's project, as text (up to 2 MB). Only inside the project (symlinks are followed and checked), and never keys, tokens, `.env` files, `.git` or Demesne's own state.
+- `await demesne.list("data")`: the names in a project folder (folders end in `/`, hidden files left out).
+- `await demesne.fetch("https://…")`: live public data from the web, as `{ ok, status, type, text, json() }`. Only https, only public hosts (not this computer or the local network), text answers up to 2 MB, 15 seconds, no redirects. The first time a mockup asks for a site, one quiet line under it on the Foundry page says "This page wants live data from api.example.com" with **Allow** and **Not now**. Allow is kept for that mockup and that site (in the app's own settings folder, `foundry-sites.json`); Not now gives the page an error it can show. The model's own look at a page can't be asked, so it sees the error, not the data.
+
+The runtime is `apps/desktop/foundry-kit/remember.js` (with save, load, ask and pick); the app answers at `foundry://read|list|fetch/<id>` with the page's own key (`electron/main.ts`, checks in `electron/foundry-data.ts`), using Electron's network so the system's proxy and certificates apply. The ask line is `apps/desktop/workspace/foundry-sites.ts`. `xvfb-run -a bun scripts/check-foundry-data.ts` checks it in the real app.
+
+Read more: [Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) (MDN), [CSV](https://en.wikipedia.org/wiki/Comma-separated_values), [Same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy) (why a walled-off page asks Demesne instead of the web directly), [Server-side request forgery](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) (why local and private addresses are refused).
+
 ## Compare two versions
 
 The opened mockup's head line has a compare icon (the split square). Press it and the version before the one shown lies over it, cut by a line down the middle: the earlier one on the left, the shown one on the right, each named at the top. Drag the line (or focus it and use the arrow keys, Shift for bigger steps, Home and End) to sweep across and see exactly what changed where. ‹ › still step through versions, each compared with the one before it. Nothing plays while you compare, and notes wait. A first version has nothing to compare with, so the icon rests.

@@ -37,6 +37,7 @@ import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsV
 import { dayLine } from "./assistant-chat.ts";
 import { foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
 import { placeEdit } from "./foundry-edit.ts";
+import { watchFoundrySites } from "./foundry-sites.ts";
 import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
 import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
@@ -5041,6 +5042,8 @@ let foundryStagesStop: (() => void) | null = null;
 /// Errors a mockup hit while you used it, by "id:version", and the watcher that paints them.
 const foundryErrors = new Map<string, FoundryErrorState>();
 let foundryErrorsWatch: { paint(): void; stop(): void } | null = null;
+/// Real data (Foundry step 5): a mockup that asks for live data from a site asks you first, under it.
+let foundrySitesWatch: { paint(): void; stop(): void } | null = null;
 /// Documents render through the app's sanitizer when they scroll near.
 let foundryDocWatch: IntersectionObserver | null = null;
 function watchFoundryDocs(root: HTMLElement) {
@@ -5126,13 +5129,14 @@ function renderPage() {
     ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
   foundryStagesStop?.(); foundryStagesStop = null;
   foundryErrorsWatch?.stop(); foundryErrorsWatch = null;
+  foundrySitesWatch?.stop(); foundrySitesWatch = null;
   // A note being typed is put by for the redraw, and follows its mockup to a newer version.
   if (foundryNotesWatch) { foundryNotesWatch.stop(); foundryNotesWatch = null; foundryNotesCarry(); }
   root.innerHTML = html;
   root.dataset.html = html;
   if (pageOpen === "foundry") paintFoundrySaid();
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); }
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); foundrySitesWatch = watchFoundrySites(root, (id, host) => api("desktop-foundry-site", { id, host })); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider], [data-anthropic-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.anthropicProvider ?? googleSlot.dataset.googleProvider!;

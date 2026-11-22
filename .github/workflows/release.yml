@@ -4,6 +4,11 @@ on:
   push:
     branches: ["main"]
     tags: ["v*"]
+    # A docs-only merge changes nothing in the app, so it doesn't spend a
+    # release. Tag pushes ignore this filter and always release.
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   workflow_dispatch:
     inputs:
       bump:
@@ -183,16 +188,18 @@ jobs:
             fi
           done
           sudo apt-get update -q || true
-          sudo apt-get install -y "./${{ matrix.artifact }}"
+          # pigz compresses the portable bundle on every core; plain gzip
+          # used one and took about 23s.
+          sudo apt-get install -y "./${{ matrix.artifact }}" pigz
           command -v demesne
           # The portable bundle install.sh unpacks on any x86_64 glibc distro.
           mkdir -p portable && cp -a apps/desktop/release/linux-unpacked portable/demesne
           cp apps/desktop/build/icon.png portable/demesne/icon.png
           # Old installers validate this executable before swapping the app.
           ln -s demesne portable/demesne/demesne-desktop
-          tar -czf demesne-linux-x64.tar.gz -C portable demesne
+          tar -I pigz -cf demesne-linux-x64.tar.gz -C portable demesne
           cp demesne-linux-x64.tar.gz demesne-desktop-linux-x64.tar.gz
-          contents=$(tar -tzf demesne-linux-x64.tar.gz)
+          contents=$(tar -I pigz -tf demesne-linux-x64.tar.gz)
           for file in demesne/demesne demesne/demesne-desktop demesne/icon.png demesne/resources/backend/demesne-host demesne/resources/backend/demesne-desktop-host demesne/resources/backend/demesned demesne/resources/backend/node_modules/sharp/; do
             if ! grep -q "^$file" <<<"$contents"; then
               echo "Missing expected file in tar.gz: $file"

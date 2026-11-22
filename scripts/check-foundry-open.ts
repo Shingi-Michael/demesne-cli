@@ -3,7 +3,8 @@
  * the page's column and as tall as the window, under a quiet head line.
  * ‹ › step through its versions in place, the code icon shows its source,
  * Save a copy writes a file that stands on its own into Downloads, and Esc
- * closes it; the other mockups stay look-only. Run after
+ * closes it; the other mockups stay look-only. A mockup that throws while
+ * you use it says so under it, and Send puts the error in the chat. Run after
  * `bun scripts/prepare-desktop.ts`, under xvfb-run -a. */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
@@ -18,6 +19,7 @@ body{padding:24px}.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:12p
 <div class="cols"><div class="col" id="new"><b>New</b><button class="card">Flat white</button></div><div class="col" id="making"><b>Making</b></div><div class="col"><b>Ready</b></div></div>
 <script>document.addEventListener("click",(e)=>{const c=e.target.closest(".card");if(c)document.getElementById("making").append(c);});</script></body></html>`;
 
+let heardError = "";
 const f = await fixture({
   providerId: "fixture", modelId: "foundry-open",
   async listModels() { return [{ id: "foundry-open", provider: "fixture", contextWindow: 262144 }]; },
@@ -26,6 +28,14 @@ const f = await fixture({
     const request = messages[at]?.content ?? "";
     const done = messages.slice(at + 1).some((message) => message.role === "tool");
     if (done) { yield { type: "text_delta", delta: "Here it is." }; yield { type: "finish", reason: "stop" }; return; }
+    if (/hit this error while I was using it/.test(request)) { heardError = request; yield { type: "text_delta", delta: "Fixing it." }; yield { type: "finish", reason: "stop" }; return; }
+    if (/broken/i.test(request)) {
+      yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
+        title: "Tip jar", kind: "html", description: "A tip button.", note: "First take", why: { direction: "Small.", look_at: "The button.", starts_from: "new" },
+        source: `<!doctype html><html><head><meta charset="utf-8"></head><body><button id="tip">Add a tip</button><script>document.getElementById("tip").onclick=()=>{const order=null;order.total+=1;};</script></body></html>`, surface: { frame: "part", width: 300 } }) };
+      yield { type: "finish", reason: "tool_calls" };
+      return;
+    }
     const blue = /blue/i.test(request);
     const list = blue ? (await f.client.foundryList()).artifacts : [];
     const id = list.find((item) => item.title === "Orders board")?.id;
@@ -124,6 +134,33 @@ try {
   await step(121, async () => (await old.getAttribute("class"))!.includes("fd-open"));
   assert.deepEqual(errors, []);
   console.log("PASS: the mockup you open grows on the long page with ‹ vN ›, code, save a copy and close; the rest stays look-only.");
+
+  // Errors come back: a mockup that throws while you use it says so under it, and Send puts it in the chat.
+  await page.keyboard.press("Escape");
+  await page.locator("#sidebar-sessions .sidebar-session, #sidebar-chats [data-action=select-session]").first().click();
+  await ready(); await page.waitForTimeout(300);
+  await editor.fill("/foundry a broken tip jar"); await editor.press("Enter");
+  await chips.filter({ hasText: "Tip jar" }).waitFor();
+  const jar = (await f.client.foundryList()).artifacts.find((item) => item.title === "Tip jar")!;
+  await ready(); await page.waitForTimeout(300);
+  await chips.filter({ hasText: "Tip jar" }).click();
+  const jarItem = page.locator(`#page [data-fd="${jar.id}:1"]`);
+  await jarItem.locator(".fd-stage").waitFor();
+  const jarFrame = () => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${jar.id}?v=1`) && found.url().includes("stack=1"));
+  await step(140, async () => !!jarFrame() && await jarFrame()!.evaluate(() => !!(window as { __demesneErrors?: boolean }).__demesneErrors).catch(() => false));
+  assert.equal(await jarItem.locator(".fd-err").count(), 0, "nothing to say before it breaks");
+  await jarFrame()!.evaluate(() => (document.getElementById("tip") as HTMLElement).click());
+  await step(143, async () => /This page hit an error:.*Cannot (read|set) properties of null/.test((await jarItem.locator(".fd-err").textContent().catch(() => "")) ?? ""));
+  // The same error again is told once.
+  await jarFrame()!.evaluate(() => (document.getElementById("tip") as HTMLElement).click());
+  await page.waitForTimeout(300);
+  assert.doesNotMatch((await jarItem.locator(".fd-err").textContent())!, /more/);
+  await jarItem.screenshot({ path: join(output, "foundry-error-line.png") });
+  await jarItem.getByRole("button", { name: "Send to the chat" }).click();
+  await step(150, async () => /Sent to/.test((await jarItem.locator(".fd-err").textContent().catch(() => "")) ?? ""), 15000);
+  await step(151, async () => /"Tip jar" \(id [\w-]+, v1\) hit this error/.test(heardError) && /foundry_edit/.test(heardError));
+  assert.deepEqual(errors.filter((error) => !/reading 'total'/.test(error)), [], "only the mockup's own error");
+  console.log("PASS: a mockup that throws while you use it says so under it, and Send puts the error in its chat.");
 } finally {
   await desktop?.close().catch(() => {});
   await f.close();

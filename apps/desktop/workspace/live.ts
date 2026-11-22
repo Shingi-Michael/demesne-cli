@@ -36,6 +36,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
+import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
 import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
@@ -4792,6 +4793,33 @@ async function sendFoundryNotes(key: string) {
   }
   foundryNotesWatch?.paint();
 }
+/// Errors come back: what a mockup hit while you used it goes to the chat
+/// that made it (when that chat is in this project), else the chat that is
+/// open, queued behind a running turn, never steered into it.
+async function sendFoundryError(key: string) {
+  const at = key.lastIndexOf(":"), id = key.slice(0, at), version = Number(key.slice(at + 1));
+  const errors = foundryErrors.get(key), mockup = foundryList?.find((item) => item.id === id);
+  if (!errors?.errors.length || errors.sending || !mockup || !state) return;
+  errors.sending = true; delete errors.failed;
+  foundryErrorsWatch?.paint();
+  try {
+    const made = foundryVersions?.find((item) => item.artifactId === id && item.version === version)?.sessionId ?? null;
+    const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+    const chat = made && made !== state.session?.id ? state.sessions.find((item) => item.id === made && (item.workspace ?? "") === (here ?? "") && !deletedSessions.has(item.id)) : null;
+    if (chat) {
+      await api("select-session", { id: chat.id });
+      for (let tries = 0; tries < 40 && state?.session?.id !== chat.id; tries++) await new Promise((done) => setTimeout(done, 50));
+    }
+    if (!state?.session) throw new Error("Open a chat first: the error goes to it.");
+    const session = state.session;
+    await api("submit", { text: foundryErrorMessage({ id, title: mockup.title, version }, errors.errors), wait: true });
+    errors.sent = `“${state.sessions.find((item) => item.id === session.id)?.title || "the chat"}”`;
+  } catch (error) {
+    errors.failed = `Not sent: ${errorWords(error)}`;
+  }
+  errors.sending = false;
+  foundryErrorsWatch?.paint();
+}
 /// A chat link opens Foundry's long page at that mockup (its newest version
 /// unless the link names one).
 function openFoundry(id: string, version?: number) {
@@ -4891,6 +4919,9 @@ document.addEventListener("keydown", (event) => {
 });
 /// Surfaces, options and demos on the long page (pass 221 A).
 let foundryStagesStop: (() => void) | null = null;
+/// Errors a mockup hit while you used it, by "id:version", and the watcher that paints them.
+const foundryErrors = new Map<string, FoundryErrorState>();
+let foundryErrorsWatch: { paint(): void; stop(): void } | null = null;
 /// Documents render through the app's sanitizer when they scroll near.
 let foundryDocWatch: IntersectionObserver | null = null;
 function watchFoundryDocs(root: HTMLElement) {
@@ -4975,13 +5006,14 @@ function renderPage() {
   const field = !googleFocus && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
     ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
   foundryStagesStop?.(); foundryStagesStop = null;
+  foundryErrorsWatch?.stop(); foundryErrorsWatch = null;
   // A note being typed is put by for the redraw, and follows its mockup to a newer version.
   if (foundryNotesWatch) { foundryNotesWatch.stop(); foundryNotesWatch = null; foundryNotesCarry(); }
   root.innerHTML = html;
   root.dataset.html = html;
   if (pageOpen === "foundry") paintFoundrySaid();
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); }
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider], [data-anthropic-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.anthropicProvider ?? googleSlot.dataset.googleProvider!;

@@ -3398,3 +3398,11 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-said { display: flex; align-items: center; gap: 10px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-said-b { all: unset; padding: 0 7px; margin: 0 -3px; border-radius: 6px; color: var(--t2); cursor: pointer; }
 .fd-said-b:hover, .fd-said-b:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }
+/* Errors come back: a mockup that throws while you use it says so on one quiet
+   line under it, with Send to the chat. A small amber dot is the only colour. */
+.fd-err { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
+.fd-err-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn, #d9a441); align-self: center; }
+.fd-err-what { min-width: 0; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 12px; }
+.fd-err .fd-quiet { color: var(--t3); }
+.fd-err-send { all: unset; padding: 0 7px; margin: 0 -3px; border-radius: 6px; color: var(--t2); cursor: pointer; }
+.fd-err-send:hover, .fd-err-send:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }

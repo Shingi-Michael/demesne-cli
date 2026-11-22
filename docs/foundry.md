@@ -110,6 +110,14 @@ Every other mockup on the page stays as it was: nothing to press but links. `app
 
 Read more: [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) and [Artifacts in Claude Code](https://code.claude.com/docs/en/artifacts) (what this borrows), [CSS container queries](https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries) (how it takes the page's full width), [Electron printToPDF](https://www.electronjs.org/docs/latest/api/web-contents#contentsprinttopdfoptions) (how a deck becomes a PDF).
 
+## Errors come back
+
+A mockup on the Foundry page that throws while you use it says so on one quiet line under it: "This page hit an error:", the error, how many more, and **Send to the chat**. Send puts the error in the chat that made the mockup (when that chat is in this project, else the open one), queued behind a running turn, asking the model to fix only that cause with `foundry_read`, one `foundry_edit` and a `foundry_try` of the path that broke. Like Claude artifacts' Try fixing.
+
+The frame tells the page (`apps/desktop/foundry-kit/errors.js`, first of the scripts Foundry puts in front of a page on the Foundry page): uncaught errors, promises refused with nobody listening, and scripts or stylesheets that didn't load. The same error is told once, at most five, and each load of the frame starts clean. Nothing is drawn inside the mockup; the line is painted in place, so it never reloads the page (`apps/desktop/workspace/foundry-errors.ts`). No line number is shown, because Foundry's own scripts sit in front of the page and the browser's count is off by them. The model's own look and try before you see a page already catch console errors; this is for what breaks in your hands.
+
+Read more: [Window: error event](https://developer.mozilla.org/en-US/docs/Web/API/Window/error_event) and [unhandledrejection](https://developer.mozilla.org/en-US/docs/Web/API/Window/unhandledrejection_event) (MDN), [Window.postMessage](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage) (how a walled-off frame talks to the page), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (Try fixing).
+
 ## The page holds only the thing
 
 A mockup used to carry controls that were not part of the design: Foundry's own option strip and deck buttons were drawn inside it, and since Foundry could not play a demo, models wrote Replay and Next step buttons into the page. Every page also sat in the same tall white box. Now Foundry owns the surface and the demo, and the page holds only what is being made.

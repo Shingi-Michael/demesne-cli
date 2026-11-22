@@ -32,6 +32,7 @@ export async function prepareUi(out: string) {
   cpSync(join(desktop, "foundry-kit/remember.js"), join(out, "kit/remember.js"));
   cpSync(join(desktop, "foundry-kit/demo.js"), join(out, "kit/demo.js"));
   cpSync(join(desktop, "foundry-kit/note.js"), join(out, "kit/note.js"));
+  cpSync(join(desktop, "foundry-kit/errors.js"), join(out, "kit/errors.js"));
   // Demesne's own styles for a mockup of Demesne (pass 220 A): the four sheets the window loads, scoped to <d-app>.
   writeFileSync(join(out, "kit/app.css"), scopeAppStyles(["workspace/ui.css", "workspace/live.css", "desktop.css", "workspace.css"].map((file) => readFileSync(join(desktop, file), "utf8"))));
   mkdirSync(join(out, "vendor/katex"), { recursive: true });

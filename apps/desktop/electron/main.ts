@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
+import { isReadyKind } from "./foundry-kinds.ts";
 import { BROWSER_HOST_FLAG, runBrowserHost } from "./browser-host.ts";
 import { serveBrowser } from "./browser-inapp.ts";
 import { withChanges } from "./foundry-changed.ts";
@@ -14,7 +15,7 @@ import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -212,6 +213,8 @@ if (!lookJob) void app.whenReady().then(async () => {
   // the frame is sandboxed without the app's origin.
   // The first show of a version carries ?first=1: a revision gets the
   // version before it, to outline what changed.
+  /// Copies Foundry saved this run (pass 262 C): the only files "Show" may reveal.
+  const savedCopies = new Set<string>();
   const kitFile = (name: string) => { const file = FOUNDRY_KIT[name]!; return Buffer.concat([readFileSync(join(base, "ui", file.path)), ...(file.then ? [Buffer.from("\n"), readFileSync(join(base, "ui", file.then))] : [])]); };
   // Pages that remember: each page Demesne shows gets a key made from its id
   // and a secret that lives only as long as the app, so a page can reach its
@@ -463,6 +466,35 @@ if (!lookJob) void app.whenReady().then(async () => {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { ...args as Record<string, unknown>, path: selected.filePaths[0] });
     }
+    // Foundry › Save a copy (pass 262 C): straight into Downloads, no dialog,
+    // as the file that suits the kind: a page with the kit inlined, a graphic
+    // as SVG, a document as Markdown; a deck as a PDF, a doc or a dashboard as
+    // the drawn page. "pdf" asks for the PDF of a doc or dashboard instead
+    // (or the drawn page of a deck).
+    if (method === "desktop-foundry-copy") {
+      const { id, version, other } = args as Record<string, unknown>;
+      if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id)) throw new Error("No such mockup");
+      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string; version: number };
+      const ready = isReadyKind(found.kind);
+      const pdf = ready && ((found.kind === "deck") !== (other === true));
+      const extension = pdf ? "pdf" : ready ? "html" : ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
+      const folder = app.getPath("downloads");
+      const path = join(folder, copyName(found.title, found.version, extension, (name) => existsSync(join(folder, name))));
+      if (pdf) await writeFile(path, await foundryPDF(session, id, found.version, found.kind));
+      else {
+        const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
+        await writeFile(path, found.kind === "html" ? exportedSource(found.source, kit) : ready ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit) : found.source, "utf8");
+      }
+      savedCopies.add(path);
+      return { path, name: path.slice(folder.length + 1), pdf, ready };
+    }
+    // Show a saved copy in Finder: only a file Save a copy just wrote.
+    if (method === "desktop-show-copy") {
+      const path = String((args as Record<string, unknown>).path ?? "");
+      if (!savedCopies.has(path)) throw new Error("That file wasn't saved by Foundry");
+      shell.showItemInFolder(path);
+      return null;
+    }
     // Today › Save video: the Friday reel's clip, saved where you choose.
     if (method === "desktop-save-reel") {
       const { id, week } = args as Record<string, unknown>;
@@ -546,3 +578,18 @@ if (!lookJob) void app.whenReady().then(async () => {
   window.show();
 }).catch(error => { log(String(error)); dialog.showErrorBox("Demesne could not start", String(error)); void quit(); });
 
+/// A deck, doc or dashboard as a PDF (pass 262 C, as before #555): drawn off
+/// screen in the window's own session, so foundry:// and the kit load as on
+/// the Foundry page, then printed. A deck prints a slide a page at 16:9
+/// (kinds.css @page); the others on A4.
+async function foundryPDF(session: Electron.Session, id: string, version: number, kind: string) {
+  const win = new BrowserWindow({ show: false, width: 1280, height: 800, webPreferences: { session, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  try {
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    win.webContents.on("will-navigate", (event) => event.preventDefault());
+    await win.loadURL(`foundry://artifact/${encodeURIComponent(id)}?v=${version}`);
+    await Promise.race([win.webContents.executeJavaScript("document.fonts.ready.then(() => true)"), new Promise((done) => setTimeout(done, 3000))]);
+    await new Promise((done) => setTimeout(done, 300));
+    return await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: kind === "deck", ...(kind === "deck" ? {} : { pageSize: "A4" as const, margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } }) });
+  } finally { win.destroy(); }
+}

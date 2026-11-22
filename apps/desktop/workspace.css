@@ -3374,3 +3374,27 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop .approval-row::after, .desktop .ask-card::after { content: ""; position: absolute; inset: 0; border-radius: 18px; padding: 1px; pointer-events: none; background: conic-gradient(from var(--wait-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 55%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 30%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: wait-light 9s linear infinite; }
 @media (prefers-reduced-motion: no-preference) { .ask-card.nudge { animation: none; } .ask-card.nudge::before { animation: ask-nudge 700ms var(--ease); } }
 @media (prefers-reduced-motion: reduce) { .desktop .approval-row::after, .desktop .ask-card::after { animation: none; } }
+/* Pass 262 C, a mockup you can hold: the one you open grows where it sits on
+   Foundry's long page, to the full width the page has (not the column's), and
+   as tall as the window; a quiet head line on its name line steps through its
+   versions, shows its code, saves a copy and closes it. Greys only. The rest
+   of the page stays look-only. */
+#stage:has(> #page[data-kind="foundry"]:not([hidden])) { container-type: inline-size; }
+.fd-item.fd-open { --fd-w: min(calc(100cqw - 56px), 1720px); width: var(--fd-w); margin-left: calc((100% - var(--fd-w)) / 2); }
+.fd-open .fd-stage:not(.fd-s), .fd-open .fd-stage.graphic { height: max(520px, calc(100vh - 170px)); }
+.fd-open .fd-doc { max-width: none; }
+.fd-ln .fd-link { color: inherit; box-shadow: none; }
+.fd-ln b .fd-link:hover { box-shadow: inset 0 -1px 0 var(--hair2); }
+.fd-hd { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-left: 10px; align-self: center; }
+.fd-hd-b { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-sm, 7px); color: var(--t3); cursor: pointer; transition: background 140ms var(--ease), color 140ms var(--ease); }
+.fd-hd-b .ico { width: 15px; height: 15px; }
+.fd-hd-b:hover, .fd-hd-b[aria-pressed="true"] { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }
+.fd-hd-b:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 1px; }
+.fd-hd-b:disabled { opacity: .35; cursor: default; background: none; }
+.fd-hd-v { min-width: 26px; text-align: center; color: var(--t2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.fd-hd-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--hair2, var(--hair)); }
+.fd-code { box-sizing: border-box; margin: 0; height: max(520px, calc(100vh - 170px)); overflow: auto; padding: 18px 20px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--t1) 4%, transparent); box-shadow: 0 0 0 1px var(--hair); color: var(--t2); font: 12.5px/19px "JetBrains Mono", ui-monospace, Menlo, monospace; white-space: pre; tab-size: 2; }
+.fd-code:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; }
+.fd-said { display: flex; align-items: center; gap: 10px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
+.fd-said-b { all: unset; padding: 0 7px; margin: 0 -3px; border-radius: 6px; color: var(--t2); cursor: pointer; }
+.fd-said-b:hover, .fd-said-b:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }

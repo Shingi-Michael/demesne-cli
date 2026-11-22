@@ -125,6 +125,31 @@ export function withRemember(html: string, runtime: string, page?: { id: string;
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   return doctype ? `${doctype[0]}${script}${html.slice(doctype[0].length)}` : `${script}${html}`;
 }
+/** Pass 262 C: a page as it leaves Demesne (Save a copy). The kit it leans
+ * on is inlined so the file stands on its own; a page that remembers keeps
+ * its saves in the browser once it is a file. Fonts fall back to the system's. */
+export function exportedSource(source: string, kit: { style: string; script: string; parts: string; kinds: { style: string; script: string }; remember: string }) {
+  if (usesRemember(source)) source = withRemember(source, kit.remember);
+  const tag = (name: string, address: string) => new RegExp(`<${name}\\b[^>]*\\b(?:href|src)=["']?${address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']?[^>]*>(?:\\s*</${name}>)?`, "gi");
+  const inline = (code: string) => code.replace(/<\//g, "<\\/");
+  const style = kit.style.replace(/@font-face\s*\{[^}]*foundry:\/\/kit\/[^}]*\}\n?/g, "");
+  return source
+    .replace(tag("link", "foundry://kit/base.css"), () => `<style>\n${style}</style>`)
+    .replace(tag("script", "foundry://kit/anime.js"), () => `<script>${inline(kit.script)}</script>`)
+    .replace(tag("script", "foundry://kit/parts.js"), () => `<script>${inline(kit.parts)}</script>`)
+    .replace(tag("link", "foundry://kit/kinds.css"), () => `<style>\n${kit.kinds.style}</style>`)
+    .replace(tag("script", "foundry://kit/kinds.js"), () => `<script>${inline(kit.kinds.script)}</script>`);
+}
+/** Pass 262 C: the file a saved copy gets in Downloads: the artifact's name
+ * made safe, its version, and the extension; a number when that is taken. */
+export function copyName(title: string, version: number, extension: string, taken: (name: string) => boolean) {
+  const base = `${title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "Mockup"} v${version}`;
+  for (let n = 1; n < 1000; n++) {
+    const name = `${base}${n > 1 ? ` (${n})` : ""}.${extension}`;
+    if (!taken(name)) return name;
+  }
+  return `${base} ${Date.now()}.${extension}`;
+}
 /** The kit file a foundry://kit/<file> address names, or null. */
 export function foundryKitFile(value: string): string | null {
   try {

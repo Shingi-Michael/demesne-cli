@@ -97,6 +97,19 @@ Foundry used to keep a small hand-made copy of the app for mockups of Demesne, a
 
 The window is glass over your desktop; in a mockup a still grey backdrop stands in for what is behind it.
 
+## A mockup you can hold
+
+Foundry's long page is for looking. The one mockup you open is for using, the way a Claude artifact is (pass 262 C). A mockup's link in the chat, or its name on the long page, opens it where it sits: it grows to the full width the page has, as tall as the window, and gets one quiet line of grey icons on its name line.
+
+- **‹ vN ›** steps through its versions in place. The other versions stay where they are on the page.
+- **Code** shows its source instead of the page; press it again for the page.
+- **Save a copy** writes it straight into Downloads, with no dialog, as the file that suits the kind: a prototype as an HTML file with the kit inlined so it stands on its own, a graphic as SVG, a document as Markdown, a deck as a PDF, a doc or a dashboard as the drawn page. The quiet line under it says where it went, with **Show**, and for a deck, doc or dashboard the other format once. Saving never reloads the page, so what you did in it stays.
+- **×** or **Esc** closes it, and the long page is look-only again.
+
+Every other mockup on the page stays as it was: nothing to press but links. `apps/desktop/workspace/foundry-page.ts` draws the opened one (`openHead`, `savedLine`); `apps/desktop/electron/main.ts` saves the copy (`desktop-foundry-copy`, `exportedSource` and `copyName` in `policy.ts`). `xvfb-run -a bun scripts/check-foundry-open.ts` checks it in the real app.
+
+Read more: [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) and [Artifacts in Claude Code](https://code.claude.com/docs/en/artifacts) (what this borrows), [CSS container queries](https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries) (how it takes the page's full width), [Electron printToPDF](https://www.electronjs.org/docs/latest/api/web-contents#contentsprinttopdfoptions) (how a deck becomes a PDF).
+
 ## The page holds only the thing
 
 A mockup used to carry controls that were not part of the design: Foundry's own option strip and deck buttons were drawn inside it, and since Foundry could not play a demo, models wrote Replay and Next step buttons into the page. Every page also sat in the same tall white box. Now Foundry owns the surface and the demo, and the page holds only what is being made.

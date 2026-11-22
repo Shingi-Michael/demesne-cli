@@ -161,7 +161,7 @@ try {
   // Pass 218 A: why it looks this way, as quiet lines under the description.
   assert.equal(await item(artifact.id, 1).locator(".fd-why").textContent(), "DirectionCalm and plain, for a quick try.Look atThe main heading.");
   assert.equal(await item(artifact.id, 1).locator('.fd-ln .fd-link[data-action="select-session"]').count(), 1, "from links to its chat");
-  assert.equal(await foundry.locator("button:not([data-action=foundry-day]):not(.fd-link):not(.fn-plus), form, input, .cp-tabs").count(), 0, "nothing to press on Foundry but the day strip and links");
+  assert.equal(await foundry.locator("button:not([data-action=foundry-day]):not(.fd-link):not(.fn-plus):not(.fd-hd-b), form, input, .cp-tabs").count(), 0, "nothing to press on Foundry but the day strip and links");
   await frame.getByRole("button", { name: "Plant an idea" }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   await page.waitForTimeout(300);

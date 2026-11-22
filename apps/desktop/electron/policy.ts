@@ -83,6 +83,8 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "demo.js": { path: "kit/demo.js", type: "application/javascript; charset=utf-8" },
   // Notes on a mockup (pass 233 A): put in front of pages on the Foundry page; it tells the page which part is under the pointer.
   "note.js": { path: "kit/note.js", type: "application/javascript; charset=utf-8" },
+  // Edit in place (step 3): put in front of a deck, doc or dashboard on the Foundry page while you edit its text, instead of the demo and notes.
+  "edit.js": { path: "kit/edit.js", type: "application/javascript; charset=utf-8" },
   // More kinds (foundry-more-kinds.ts): what a React page, a Mermaid diagram runs on, from the app, so they work offline.
   "react.js": { path: "kit/react.js", type: "application/javascript; charset=utf-8" },
   "react-dom.js": { path: "kit/react-dom.js", type: "application/javascript; charset=utf-8" },

@@ -266,7 +266,9 @@ if (!lookJob) void app.whenReady().then(async () => {
       // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
       // note.js (pass 233 A) tells the Foundry page which part is under the pointer, for notes pinned to a part.
       // errors.js, first, tells it when the page throws while you use it (errors come back).
-      if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${kitFile("errors.js").toString("utf8")}\n;${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}\n;${kitFile("note.js").toString("utf8")}`);
+      // edit.js (step 3) instead, while you edit a deck, doc or dashboard's text on the Foundry page: no demo, no notes.
+      if (url.searchParams.get("stack") === "1" && url.searchParams.get("edit") === "1" && isReadyKind(found.kind)) page = withRemember(page, `${kitFile("errors.js").toString("utf8")}\n;${kitFile("edit.js").toString("utf8")}`);
+      else if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${kitFile("errors.js").toString("utf8")}\n;${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}\n;${kitFile("note.js").toString("utf8")}`);
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });

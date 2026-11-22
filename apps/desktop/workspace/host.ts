@@ -2317,7 +2317,8 @@ export class WorkspaceHost {
     }
     if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);
     if (method === "foundry-ask") return this.client.foundryAsk(string(args.id, "artifact", 200), string(args.question, "question", 8000));
-    if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you" });
+    if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you",
+      ...(typeof args.baseVersion === "number" && Number.isSafeInteger(args.baseVersion) && args.baseVersion > 0 ? { baseVersion: args.baseVersion } : {}) });
     if (method === "foundry-create") {
       const text = string(args.text, "request", 4000).trim();
       if (!text) throw new Error("Describe what to make");

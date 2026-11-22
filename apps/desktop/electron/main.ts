@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
 import { isReadyKind } from "./foundry-kinds.ts";
+import { codeExtension } from "./foundry-more-kinds.ts";
 import { BROWSER_HOST_FLAG, runBrowserHost } from "./browser-host.ts";
 import { serveBrowser } from "./browser-inapp.ts";
 import { withChanges } from "./foundry-changed.ts";
@@ -260,7 +261,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       }
       let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
-      if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
+      if ((found.kind === "html" || found.kind === "react") && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
       if (found.kind === "html" && found.shots?.length) page = withShots(page, Object.fromEntries(found.shots.map((one) => [one.id, { url: `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`, width: one.width, height: one.height, scale: one.scale }])));
       // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
       // note.js (pass 233 A) tells the Foundry page which part is under the pointer, for notes pinned to a part.
@@ -477,17 +478,22 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id)) throw new Error("No such mockup");
       const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string; version: number };
       const ready = isReadyKind(found.kind);
+      // More kinds: a React page or a diagram as a page that runs on its own, or (other) its source.
+      const drawn = found.kind === "react" || found.kind === "mermaid", source = drawn && other === true;
       const pdf = ready && ((found.kind === "deck") !== (other === true));
-      const extension = pdf ? "pdf" : ready ? "html" : ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
+      const extension = pdf ? "pdf" : ready ? "html" : source ? (found.kind === "react" ? "jsx" : "mmd") : drawn ? "html"
+        : found.kind === "code" ? codeExtension(found.title) : ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
       const folder = app.getPath("downloads");
       const path = join(folder, copyName(found.title, found.version, extension, (name) => existsSync(join(folder, name))));
       if (pdf) await writeFile(path, await foundryPDF(session, id, found.version, found.kind));
       else {
         const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
-        await writeFile(path, found.kind === "html" ? exportedSource(found.source, kit) : ready ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit) : found.source, "utf8");
+        const libs = drawn && !source ? Object.fromEntries(["react.js", "react-dom.js", "prop-types.js", "lucide.js", "recharts.js", "tailwind.js", "mermaid.js"].map((name) => [name, kitFile(name).toString("utf8")])) : {};
+        await writeFile(path, found.kind === "html" ? exportedSource(found.source, kit) : ready || (drawn && !source) ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit, libs) : found.source, "utf8");
       }
       savedCopies.add(path);
-      return { path, name: path.slice(folder.length + 1), pdf, ready };
+      // ready: there is another format to offer (a deck's page, a doc's PDF, a component's source).
+      return { path, name: path.slice(folder.length + 1), pdf, ready: ready || drawn };
     }
     // Show a saved copy in Finder: only a file Save a copy just wrote.
     if (method === "desktop-show-copy") {

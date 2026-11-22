@@ -11,7 +11,7 @@ const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const icon = (paths: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${paths}</svg>`;
 
-export const KIND_WORD: Record<FoundryKind, string> = { html: "Prototype", svg: "Graphic", markdown: "Document", deck: "Deck", doc: "Doc", dashboard: "Dashboard" };
+export const KIND_WORD: Record<FoundryKind, string> = { html: "Prototype", svg: "Graphic", markdown: "Document", deck: "Deck", doc: "Doc", dashboard: "Dashboard", react: "App", mermaid: "Diagram", code: "Code" };
 export const KIND_ICON: Record<FoundryKind, string> = {
   html: icon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/>'),
   svg: icon('<circle cx="8" cy="9" r="3"/><path d="m4 19 5-5 3 3 3-4 5 6z"/>'),
@@ -19,10 +19,13 @@ export const KIND_ICON: Record<FoundryKind, string> = {
   deck: icon('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/>'),
   doc: icon('<path d="M6 3h12v18H6z"/><path d="M9 7h6M9 11h6M9 15h3"/>'),
   dashboard: icon('<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/>'),
+  react: icon('<circle cx="12" cy="12" r="1.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)"/>'),
+  mermaid: icon('<rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><path d="M10 5.5h4M17.5 8v8"/>'),
+  code: icon('<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>'),
 };
 /// Pass 241 A: a build's record, the pick beside what was built.
 export const BUILT_ICON = icon('<rect x="2.5" y="5" width="8" height="12" rx="1.5"/><rect x="13.5" y="5" width="8" height="12" rx="1.5"/><path d="m15.5 11 1.5 1.5 3-3"/><path d="M6.5 20h11"/>');
-export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", svg: "svg", markdown: "md", deck: "html", doc: "html", dashboard: "html" };
+export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", svg: "svg", markdown: "md", deck: "html", doc: "html", dashboard: "html", react: "jsx", mermaid: "mmd", code: "txt" };
 /// The kinds Demesne draws from content (a deck, a doc, a dashboard).
 export const READY_KIND = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
 export const frameURL = (id: string, version: number) => `foundry://artifact/${encodeURIComponent(id)}?v=${version}`;
@@ -122,12 +125,12 @@ export function savedLine(open: FoundryOpen, kind: FoundryKind) {
   if (!open.said) return "";
   const saved = open.saved;
   const show = saved ? `<button type="button" class="fd-said-b" data-action="foundry-copy-show">Show</button>` : "";
-  const other = saved && saved.ready ? `<button type="button" class="fd-said-b" data-action="foundry-copy" data-args='{"other":true}'>${kind === "deck" ? "Also as a web page" : "Also as PDF"}</button>` : "";
+  const other = saved && saved.ready ? `<button type="button" class="fd-said-b" data-action="foundry-copy" data-args='{"other":true}'>${kind === "deck" ? "Also as a web page" : kind === "react" ? "Also as the .jsx" : kind === "mermaid" ? "Also as the .mmd" : "Also as PDF"}</button>` : "";
   return `${h(open.said)}${show}${other}`;
 }
 
 /// The kinds a note can be pinned to (pass 233 A): the ones drawn in a frame that says what is under the pointer.
-export const NOTE_KINDS = new Set<FoundryKind>(["html", "deck", "doc", "dashboard"]);
+export const NOTE_KINDS = new Set<FoundryKind>(["html", "deck", "doc", "dashboard", "react", "mermaid"]);
 
 /// Pass 219 A: which versions a chat's merged pull request built, as
 /// shelf keys: of each mockup the chat made, its newest version from before

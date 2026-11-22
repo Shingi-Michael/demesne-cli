@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
@@ -77,6 +77,12 @@ export const READY_KINDS_RULES = "Ready kinds: slides are kind deck, a report, b
   + "A deck splits into slides on lines that are only ---: one idea per slide, few words; # 3.1× with a sentence becomes a big-number slide, a lone quote a quote slide, a heading and a chart a chart slide, a list with a chart a split "
   + "(<!-- layout: title|statement|number|quote|split|chart|points --> overrides). A dashboard's ## headings group its stats, charts and tables. Anything interactive or custom is html.";
 
+/// More kinds (apps/desktop/electron/foundry-more-kinds.ts): what the model
+/// would write anyway, drawn by Demesne with libraries from the app.
+export const MORE_KINDS_RULES = "More kinds: an interactive app, tool or game you would write in React is kind react: one component in JSX or TSX with export default, styled with Tailwind classes (no stylesheet needed), importing only "
+  + FOUNDRY_REACT_IMPORTS.filter((name) => name !== "react-dom/client").join(", ") + " (icons and charts). A diagram (flow, sequence, states, entities, timeline, gantt, mind map) is kind mermaid: Mermaid source only. "
+  + "A file of code to read is kind code: the code only, with the file name and extension in the title (orders.ts). Anything else interactive or custom is html.";
+
 /// Pages that remember (apps/desktop/foundry-kit/remember.js): Demesne puts
 /// the runtime in front of any page that calls it, so the page needs no tag.
 export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: await demesne.save(name, jsonValue) and await demesne.load(name, fallback) keep what the person enters with the artifact (across closing, reloads and new versions; 256 KB; localStorage does not work here); "
@@ -90,7 +96,7 @@ export const STAGE_RULES = "The page holds only the thing, with only the control
   + "demo says how it moves: foundry_try steps, each with a short say; Foundry plays them with a pointer, the words under the page. A page with something to press always gets one, of its main path. "
   + "So never put Replay, Play demo, Next step, an option switcher or a state switcher (Empty · Loading · Error, Show error, Simulate) in the page.";
 
-const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
+const GUIDE = READY_KINDS_RULES + " " + MORE_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
 
 /// What stands in for a page's source once its turn is old.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";
@@ -345,6 +351,25 @@ const reviewSaid = (source: string, first: boolean) => `${first && reviewOf(sour
 /// A page that draws a button only a demo needs (Replay, Play demo, Next
 /// step) is sent back once per ask: the demo belongs to Foundry. A second
 /// save goes through, for the page whose real design has one.
+/// A react, mermaid or code artifact that won't draw says why at save, so
+/// the model fixes it before the person sees a broken page.
+const tsx = new Bun.Transpiler({ loader: "tsx" });
+export function checkKindSource(kind: FoundryKind | undefined, source: string) {
+  if (kind === "react") {
+    let scanned: { imports: { path: string }[]; exports: string[] };
+    try { scanned = tsx.scan(source); } catch (error) {
+      throw new Error(`[invalid_input] This component doesn't compile: ${error instanceof Error ? error.message : String(error)}. Hint: one JSX or TSX file`);
+    }
+    const other = scanned.imports.find((one) => !(FOUNDRY_REACT_IMPORTS as readonly string[]).includes(one.path));
+    if (other) throw new Error(`[invalid_input] "${other.path}" can't be imported in a react artifact. Hint: only ${FOUNDRY_REACT_IMPORTS.filter((name) => name !== "react-dom/client").join(", ")}; write anything else in the file`);
+    if (!scanned.exports.includes("default")) throw new Error("[invalid_input] The component needs an export default. Hint: export default function App() { … }");
+  }
+  if (kind === "mermaid") {
+    const type = mermaidType(source);
+    if (!type || !MERMAID_TYPES.includes(type)) throw new Error(`[invalid_input] A mermaid artifact starts with its diagram type${type ? `, not "${type}"` : ""}. Hint: flowchart LR, sequenceDiagram, stateDiagram-v2, erDiagram, gantt, mindmap, timeline…; Mermaid source only, no fences`);
+  }
+}
+
 function checkControls(kind: FoundryKind | undefined, source: string) {
   if (kind !== "html") return;
   const found = demoControls(source);
@@ -499,7 +524,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
         properties: {
           id: { type: "string", description: "Omit to create." },
           title: { type: "string", maxLength: 200 },
-          kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating: deck, doc or dashboard (content Demesne designs), html (a page you design), svg, or markdown (plain notes)." },
+          kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating: deck, doc or dashboard (content Demesne designs), html (a page you design), react (one component), mermaid (a diagram), code (a file of code), svg, or markdown (plain notes)." },
           source: { type: "string", description: "The complete source." },
           base_version: { type: "integer", minimum: 1, description: "When revising: the version you read." },
           note: { type: "string", maxLength: 300, description: "This version's name, a few words." },
@@ -539,6 +564,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const { stage: given, dropped } = stageWithPage(input);
       const stage = reviewStage(given, input.source);
       checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
+      checkKindSource(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       const shots = checkShots(store, id, input.source, context.sessionId);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
@@ -646,6 +672,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const { stage: given, dropped } = stageWithPage(input);
       const stage = given?.surface ? reviewStage(given, source) : given;
       checkControls(current.kind, source);
+      checkKindSource(current.kind, source);
       const shots = checkShots(store, input.id, source, context.sessionId);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
@@ -759,7 +786,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
 }
 
 /// The kinds that render as a page, so the look can see them.
-const LOOKED_KINDS = new Set(["html", "deck", "doc", "dashboard"]);
+const LOOKED_KINDS = new Set(["html", "deck", "doc", "dashboard", "react", "mermaid"]);
 
 /// Pages whose last look found something: their next save in the same ask
 /// carries a critique first (step 3), keyed by turn and artifact.
@@ -846,7 +873,7 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       } else {
         try { steps = parseSteps(args.steps); } catch (error) { throw new Error(`[invalid] ${error instanceof Error ? error.message : String(error)}`); }
       }
-      if (!LOOKED_KINDS.has(found.kind)) throw new Error(`[invalid] A ${found.kind} artifact has nothing to try; only pages, decks, docs and dashboards do`);
+      if (!LOOKED_KINDS.has(found.kind)) throw new Error(`[invalid] A ${found.kind} artifact has nothing to try; only pages, apps, diagrams, decks, docs and dashboards do`);
       const key = `${context.turnId ?? ""}:${found.id}`, seen = tries.get(key) ?? 0;
       if (seen >= TRIES_PER_TURN) throw new Error(`[limit] This page was tried ${TRIES_PER_TURN} times this turn; answer with what you found`);
       tries.set(key, seen + 1);

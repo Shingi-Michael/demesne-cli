@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { handOverAsk, keyInputs, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName } from "../browser-split.ts";
+import { findWords, handOverAsk, keyInputs, localPage, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName, zoomWords } from "../browser-split.ts";
 
 // Pass 248 D: the chat's browser beside the chat. When it opens, where a click
 // lands on the page, and which keys reach a page that is yours.
@@ -79,4 +79,24 @@ test("a ring shows where the model clicked, only while fresh", () => {
 test("tab chips are named by title, else by site", () => {
   expect(tabName({ n: 1, url: "https://accounts.example/o/auth", title: "" })).toBe("accounts.example");
   expect(tabName({ n: 2, url: "x", title: "Sign in with your account to continue shopping" })).toBe("Sign in with your account t…");
+});
+
+test("the find bar counts where you are in the matches, and says when there are none", () => {
+  expect(findWords("", { matches: 3, at: 1 })).toBe("");
+  expect(findWords("price", null)).toBe("");
+  expect(findWords("price", { matches: 12, at: 3 })).toBe("3 of 12");
+  expect(findWords("price", { matches: 2, at: 0 })).toBe("1 of 2");
+  expect(findWords("zzz", { matches: 0, at: 0 })).toBe("No matches");
+});
+
+test("the zoom chip shows only when the page is not at its own size", () => {
+  expect(zoomWords(undefined)).toBe("");
+  expect(zoomWords(1)).toBe("");
+  expect(zoomWords(1.25)).toBe("125%");
+  expect(zoomWords(0.67)).toBe("67%");
+});
+
+test("a page on this computer is looked up in the project's code; a public one is not", () => {
+  for (const url of ["http://localhost:5173/", "http://127.0.0.1:3000/a", "http://app.localhost/", "http://[::1]:8080/"]) expect(localPage(url)).toBe(true);
+  for (const url of ["https://example.com/", "https://localhost.example.com/", "about:blank", "nonsense"]) expect(localPage(url)).toBe(false);
 });

@@ -92,3 +92,13 @@ export function tabName(tab: SplitTab): string {
   if (title) return title.length > 28 ? `${title.slice(0, 27)}…` : title;
   try { return new URL(tab.url).host || tab.url; } catch { return tab.url || `Tab ${tab.n}`; }
 }
+
+/// The find bar's count: "3 of 12", "No matches", or nothing before you type.
+export function findWords(text: string, found: { matches: number; at: number } | null): string {
+  if (!text.trim() || !found) return "";
+  return found.matches > 0 ? `${Math.max(1, found.at)} of ${found.matches}` : "No matches";
+}
+/// The zoom chip's words, shown only when the page is not at its own size.
+export const zoomWords = (zoom: number | undefined) => zoom && Math.abs(zoom - 1) > 0.001 ? `${Math.round(zoom * 100)}%` : "";
+/// A page on this computer (a dev server): what you point at on it is looked up in the project's code.
+export const localPage = (url: string) => { try { return /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(new URL(url).hostname) || /\.localhost$/.test(new URL(url).hostname); } catch { return false; } };

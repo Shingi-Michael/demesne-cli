@@ -33,6 +33,17 @@ describe("point at it", () => {
     expect(deck).toContain('on the Foundry deck "Idea garden"');
   });
 
+  test("a part of the chat's own browser page says so, with its whole address", () => {
+    const one = pointMessage([{ ...pick({ page: "https://example.com/pricing", where: "browser" }), id: "1", source: null }]);
+    expect(one).toStartWith("The element I pointed at on the page in the chat’s browser, beside the chat:");
+    expect(one).toContain("Save button on https://example.com/pricing\n");
+    expect(one).not.toContain("source not found");
+    const local = pointMessage([{ ...pick({ page: "http://localhost:5173/", where: "browser" }), id: "1", source: { path: "src/App.tsx", line: 4 } }]);
+    expect(local).toContain("on http://localhost:5173/ · `src/App.tsx:4`");
+    const mixed = pointMessage([{ ...pick({ where: "browser" }), id: "1", source: null }, { ...pick(), id: "2", source: null }]);
+    expect(mixed).toStartWith("The elements I pointed at:");
+  });
+
   test("a file the page names wins, relative to the project", () => {
     const files = [{ path: "src/Settings.tsx", text: "x" }, { path: "src/other.tsx", text: "<button>Save</button>" }];
     expect(findSource(files, pick({ hint: { file: "/home/me/app/src/Settings.tsx", line: 42 } }), "/home/me/app")).toEqual({ path: "src/Settings.tsx", line: 42 });

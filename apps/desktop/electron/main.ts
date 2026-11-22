@@ -195,7 +195,7 @@ if (!lookJob) void app.whenReady().then(async () => {
   const contents = window.webContents, session = contents.session;
   // The model's browser lives in this window while the app is open, so the split shows the page itself.
   // DEMESNE_BROWSER=hidden keeps it in the hidden copy of the app, as before.
-  if (process.env.DEMESNE_BROWSER !== "hidden") inAppBrowser = serveBrowser({ window, pointer: process.env.DEMESNE_DESKTOP_BROWSER ?? join(homedir(), ".demesne", "desktop-browser.json"), log });
+  if (process.env.DEMESNE_BROWSER !== "hidden") inAppBrowser = serveBrowser({ window, pointer: process.env.DEMESNE_DESKTOP_BROWSER ?? join(homedir(), ".demesne", "desktop-browser.json"), log, tell: (news) => emit("demesne:desktop-action", news) });
   // The page reloading or going down takes what it drew away: the real page goes with it until the split says where it is again.
   contents.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) inAppBrowser?.place("", null); });
   contents.on("render-process-gone", () => inAppBrowser?.place("", null));
@@ -432,6 +432,18 @@ if (!lookJob) void app.whenReady().then(async () => {
       const [wide, high] = window?.getContentSize() ?? [0, 0];
       inAppBrowser?.place(chat, window?.isVisible() ? placeRect(rect, contents.getZoomFactor(), { width: wide, height: high }) : null);
       return null;
+    }
+    // Find on the chat's page, or zoom it; and point at something on it (it goes in the next message).
+    if (method === "desktop-browser-view") {
+      const { chat, ...command } = args as Record<string, unknown>;
+      if (typeof chat !== "string" || chat.length > 200) throw new Error("Invalid chat");
+      return inAppBrowser ? inAppBrowser.view(chat, command) : { error: "No page is open" };
+    }
+    if (method === "desktop-browser-point") {
+      const { chat, cancel } = args as Record<string, unknown>;
+      if (typeof chat !== "string" || chat.length > 200) throw new Error("Invalid chat");
+      if (!inAppBrowser) { if (cancel) return null; throw new Error("The page is not in this window"); }
+      return inAppBrowser.point(chat, cancel === true);
     }
     // A note on a mockup (pass 233 A) carries a picture of its part: that
     // piece of the window as it shows now, as a PNG. The place is in the

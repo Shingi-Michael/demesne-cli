@@ -31,6 +31,8 @@ import { createInterface } from "node:readline";
 import { BROWSER_RUNTIME, OUTLINE_MAX_LINES, PAGE_TEXT_CHARS } from "./browser-runtime.ts";
 import { wentTo } from "./foundry-look.ts";
 import { changed, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint } from "./foundry-try.ts";
+import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
+import { nextZoom, browserKey } from "./policy.ts";
 
 export const BROWSER_HOST_FLAG = "--browser-host";
 /// `--browser-profile=<folder>`: where projects' sign-ins are kept between runs.
@@ -86,7 +88,9 @@ export interface Rect { x: number; y: number; width: number; height: number }
 interface Tab { win: Pane; chat: Chat; n: number; width: "desktop" | "phone"; sites: Set<string>; local: boolean; errors: string[]; failed: string[]; blocked: string[]; downloaded: string[];
   framed: number; frameTimer?: ReturnType<typeof setTimeout>; pointer?: { x: number; y: number; at: number }; requests: Seen[]; popup?: boolean; sized?: boolean; fps?: number;
   /// The page is streaming its pictures (CDP screencast), and the newest one, to send again with news.
-  casting?: boolean; last?: { jpeg: string; ratio: number } }
+  casting?: boolean; last?: { jpeg: string; ratio: number };
+  /// You are pointing at something on it: your clicks pick, they don't take the page.
+  pointing?: boolean }
 /// A chat's browser: its tabs, which one is active, and whether the person has it.
 interface Chat { /** How sharp its tabs draw: device pixels per page pixel (2 on a Retina screen). Fixed when a tab is made. */ sharp: number; id: string; tabs: Map<number, Tab>; active: number; next: number; held: boolean; queue: Promise<unknown>; used: number; profile: unknown; downloads: string | null }
 /// A request this computer's page made, for the model to read the answer of.
@@ -169,7 +173,7 @@ export function runBrowserHost() {
 
 /// One browser: its chats' tabs, and the commands that drive them. `write` takes each answer and event.
 /// With `inApp`, its tabs are real views of that window (the desktop app's), put on show with `place`.
-export function createBrowserHost(options: { profile: string; kept: boolean; write: (line: Record<string, unknown>) => void; inApp?: { window: BrowserWindow } }) {
+export function createBrowserHost(options: { profile: string; kept: boolean; write: (line: Record<string, unknown>) => void; inApp?: { window: BrowserWindow; tell?: (news: Record<string, unknown>) => void } }) {
   const { profile, kept, write } = options, inApp = options.inApp;
   const timers: ReturnType<typeof setInterval>[] = [];
   const chats = new Map<string, Chat>();
@@ -206,7 +210,8 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     write({ event: "frame", chat: tab.chat.id, at: Date.now(), jpeg, ...(inApp ? { live: true } : {}), width: view.width, height: Math.round(view.width * ratio),
       url: contents.getURL(), title: contents.getTitle(), handover: tab.chat.held, tabs: tabList(tab.chat),
       ...(tab.pointer ? { pointer: { x: tab.pointer.x, y: tab.pointer.y, ago: Date.now() - tab.pointer.at } } : {}),
-      back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward(), ...(contents.isLoading() ? { loading: true } : {}) });
+      back: contents.navigationHistory.canGoBack(), forward: contents.navigationHistory.canGoForward(), ...(contents.isLoading() ? { loading: true } : {}),
+      ...(inApp && Math.abs(contents.getZoomFactor() - 1) > 0.001 ? { zoom: Math.round(contents.getZoomFactor() * 100) / 100 } : {}) });
   };
   /// The page streams its own pictures while watched: Chromium draws them small and as JPEG itself, off
   /// this process, and sends the next only once the last is taken, so a busy page can't pile them up.
@@ -375,7 +380,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
   /// model's next step waits until you go back to the chat (the desktop hands it back then).
   const PERSON = new Set(["mouseDown", "mouseWheel", "rawKeyDown", "keyDown", "char"]);
   const taken = (chat: Chat, type: string) => {
-    if (sending || chat.held || !PERSON.has(type)) return;
+    if (sending || chat.held || !PERSON.has(type) || activeTab(chat)?.pointing) return;
     chat.held = true;
     chat.used = Date.now();
     write({ event: "taken", chat: chat.id });
@@ -502,7 +507,18 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       // The page behaves as the one in front, so it draws and types like one; your first scroll, click or key on it makes it yours.
       const front = () => void contents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
       front(); contents.on("did-navigate", front);
-      contents.on("input-event", (_event, input) => taken(tab.chat, input.type));
+      // A shortcut (⌘F, ⌘+, ⌘C) is looking at the page, not using it.
+      contents.on("input-event", (_event, input) => {
+        const shortcut = /key|char/i.test(input.type) && (input.modifiers ?? []).some((one) => /^(meta|control|cmd|ctrl)$/i.test(one));
+        if (!shortcut) taken(tab.chat, input.type);
+      });
+      // Find (⌘F, ⌘G) and zoom (⌘+ ⌘− ⌘0) pressed on the page itself go to the split's bar, not to the page or the app's own zoom.
+      contents.on("before-input-event", (event, input) => {
+        const what = browserKey(input);
+        if (!what) return;
+        event.preventDefault();
+        inApp.tell?.({ action: "browser-key", chat: tab.chat.id, key: what });
+      });
     }
     let n = 0;
     const methods = new Map<string, string>();
@@ -864,9 +880,50 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
   };
   // A chat's browser left alone for 20 minutes closes, unless the person has it.
   { const timer = setInterval(() => { for (const [id, chat] of chats) if (!chat.held && Date.now() - chat.used > IDLE_MS) { for (const tab of [...chat.tabs.values()]) tab.win.destroy(); chats.delete(id); write({ event: "gone", chat: id }); } }, 60_000); timer.unref?.(); timers.push(timer); }
-  return { line, place, shutdown };
+  /// Looking at the page, not using it (the app's own window only): find on it, zoom it. Neither takes it from the model.
+  async function view(id: string, command: { find?: unknown; back?: unknown; again?: unknown; stop?: unknown; zoom?: unknown }): Promise<Record<string, unknown>> {
+    const tab = activeTab(chats.get(id));
+    if (!tab || tab.win.isDestroyed()) return { error: "No page is open" };
+    const contents = tab.win.webContents;
+    if (command.zoom === "in" || command.zoom === "out" || command.zoom === "reset") {
+      const zoom = nextZoom(contents.getZoomFactor(), command.zoom === "in" ? 1 : command.zoom === "out" ? -1 : 0);
+      contents.setZoomFactor(zoom);
+      tab.framed = 0; frameSoon(tab);
+      return { zoom };
+    }
+    const text = typeof command.find === "string" ? command.find.slice(0, 200) : "";
+    if (command.stop === true || !text) { contents.stopFindInPage("clearSelection"); return { matches: 0, at: 0 }; }
+    return await new Promise((resolve) => {
+      let asked = -1;
+      const done = (result: { matches: number; at: number }) => { clearTimeout(timer); contents.off("found-in-page", found); resolve(result); };
+      const found = (_event: unknown, result: Electron.Result) => { if (result.requestId === asked && result.finalUpdate) done({ matches: result.matches, at: result.activeMatchOrdinal }); };
+      const timer = setTimeout(() => done({ matches: 0, at: 0 }), 2000);
+      contents.on("found-in-page", found);
+      asked = contents.findInPage(text, { forward: command.back !== true, findNext: command.again !== true });
+    });
+  }
+  /// Point at it, on the page: the next click picks what is under it (Esc stops), and it goes in your next message.
+  /// A public page is read from a world of its own, so its scripts can't see the picker or change what it reads.
+  async function point(id: string, cancel: boolean): Promise<Record<string, unknown> | null> {
+    const tab = activeTab(chats.get(id));
+    if (!tab || tab.win.isDestroyed()) { if (cancel) return null; throw new Error("No page is open"); }
+    const contents = tab.win.webContents;
+    const runs = (code: string) => tab.local ? contents.executeJavaScript(code, true) : contents.executeJavaScriptInIsolatedWorld(POINT_WORLD, [{ code }], true);
+    if (cancel) { await runs(POINT_CANCEL).catch(() => {}); return null; }
+    tab.pointing = true;
+    contents.focus();
+    try {
+      // Going to another page, or the tab closing, ends it with nothing picked.
+      const away = new Promise<null>((resolve) => { contents.once("did-start-navigation", () => resolve(null)); contents.once("destroyed", () => resolve(null)); });
+      const pick = await Promise.race([runs(POINT_SCRIPT) as Promise<Record<string, unknown> | null>, away]);
+      return pick && typeof pick === "object" ? { ...pick, page: contents.getURL().slice(0, 300), where: "browser" } : null;
+    } finally { tab.pointing = false; }
+  }
+  return { line, place, shutdown, view, point, has: (id: string) => chats.has(id) };
 }
 
+/// The world the picker runs in on a public page: apart from the page's own scripts.
+const POINT_WORLD = 1999;
 function shortUrl(url: string): string {
   try { const parsed = new URL(url); return `${parsed.host === "" ? "" : parsed.pathname}${parsed.search}`.slice(0, 120) || url.slice(0, 120); } catch { return url.slice(0, 120); }
 }

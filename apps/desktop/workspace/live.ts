@@ -35,7 +35,7 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
+import { codeWithFiles, foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
 import { placeEdit } from "./foundry-edit.ts";
 import { watchFoundrySites } from "./foundry-sites.ts";
 import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
@@ -7213,8 +7213,8 @@ function growFoundry(id: string, version?: number) {
 async function foundryCode(open: FoundryOpen) {
   const shown = open.shown;
   try {
-    const found = await api<{ source: string }>("foundry-get", { id: open.id, version: shown });
-    if (foundryOpen === open && open.shown === shown && open.code !== undefined) open.code = found.source;
+    const found = await api<{ source: string; files?: Record<string, string> }>("foundry-get", { id: open.id, version: shown });
+    if (foundryOpen === open && open.shown === shown && open.code !== undefined) open.code = codeWithFiles(found.source, found.files);
   } catch (error) {
     if (foundryOpen === open && open.code !== undefined) open.code = `Couldn't read the code: ${errorWords(error)}`;
   }

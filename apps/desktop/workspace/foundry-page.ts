@@ -25,6 +25,10 @@ export const KIND_ICON: Record<FoundryKind, string> = {
 };
 /// Pass 241 A: a build's record, the pick beside what was built.
 export const BUILT_ICON = icon('<rect x="2.5" y="5" width="8" height="12" rx="1.5"/><rect x="13.5" y="5" width="8" height="12" rx="1.5"/><path d="m15.5 11 1.5 1.5 3-3"/><path d="M6.5 20h11"/>');
+/// Step 6: the code view of a page made of several files: the page, then each file under its name.
+export function codeWithFiles(source: string, files: Record<string, string> | undefined): string {
+  return [source, ...Object.entries(files ?? {}).map(([name, text]) => `\n── ${name} ${"─".repeat(Math.max(4, 56 - name.length))}\n\n${text}`)].join("\n");
+}
 export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", svg: "svg", markdown: "md", deck: "html", doc: "html", dashboard: "html", react: "jsx", mermaid: "mmd", code: "txt" };
 /// The kinds Demesne draws from content (a deck, a doc, a dashboard).
 export const READY_KIND = new Set<FoundryKind>(["deck", "doc", "dashboard"]);

@@ -51,7 +51,7 @@ test("email and money sites never come in", () => {
 test("Chrome's sites are listed newest first, without reading a secret, and lapsed cookies don't count", () => {
   const root = home(); chrome(root);
   expect(cookieFile("chrome", linux(root))).toBe(join(root, ".config", "google-chrome", "Default", "Cookies"));
-  expect(signinSources(linux(root))).toEqual([{ id: "chrome", label: "Chrome", state: "ready" }]);
+  expect(signinSources(linux(root))).toEqual([{ id: "chrome", browser: "chrome", label: "Chrome", state: "ready" }]);
   const sites = signinSites("chrome", linux(root), NOW);
   expect(sites.map((one) => one.site)).toEqual(["chase.com", "vercel.com", "github.com"]);
   expect(sites.find((one) => one.site === "github.com")!.cookies).toBe(2);
@@ -67,6 +67,28 @@ test("the picked sites' cookies come out unlocked, ready for the project's brows
     expect(session).toMatchObject({ url: "https://github.com/", domain: ".github.com", secure: true, httpOnly: true, sameSite: "lax", expirationDate: NOW + 86_400 });
     expect(cookies.find((one) => one.name === "_gh_sess")!.domain).toBeUndefined();
   }
+});
+
+test("every Chrome profile with sign-ins is its own source, named as in Chrome, and reads its own cookies", async () => {
+  const root = home(); chrome(root);
+  const base = join(root, ".config", "google-chrome"), work = join(base, "Profile 2");
+  mkdirSync(work, { recursive: true });
+  const db = new Database(join(work, "Cookies"));
+  db.run("CREATE TABLE meta (key TEXT, value TEXT)"); db.run("INSERT INTO meta VALUES ('version', '24')");
+  db.run("CREATE TABLE cookies (host_key TEXT, name TEXT, value TEXT, encrypted_value BLOB, path TEXT, expires_utc INTEGER, is_secure INTEGER, is_httponly INTEGER, last_access_utc INTEGER, samesite INTEGER)");
+  db.run("INSERT INTO cookies VALUES ('.linear.app', 'session', '', ?, '/', ?, 1, 1, ?, 1)", [lock("work-secret", ".linear.app", 24), chromiumTime(NOW + 86_400), chromiumTime(NOW - 5)]);
+  db.close();
+  mkdirSync(join(base, "Profile 3"), { recursive: true }); // no sign-ins: not listed
+  writeFileSync(join(base, "Local State"), JSON.stringify({ profile: { info_cache: { Default: { name: "Personal" }, "Profile 2": { name: "Work" } } } }));
+  expect(signinSources(linux(root))).toEqual([
+    { id: "chrome", browser: "chrome", label: "Chrome · Personal", state: "ready" },
+    { id: "chrome:Profile 2", browser: "chrome", label: "Chrome · Work", state: "ready" },
+  ]);
+  expect(signinSites("chrome:Profile 2", linux(root), NOW).map((one) => one.site)).toEqual(["linear.app"]);
+  const cookies = await signinCookies("chrome:Profile 2", ["linear.app"], { where: linux(root), now: NOW, key: async (id) => { expect(id).toBe("chrome"); return { v10: KEY }; } });
+  expect(cookies.map((one) => one.value)).toEqual(["work-secret"]);
+  // A profile is only ever a folder inside the browser's own.
+  for (const bad of ["chrome:../../etc", "chrome:/abs", "safari:x", "opera", "chrome:.hidden"]) expect(cookieFile(bad, linux(root))).toBeNull();
 });
 
 test("a value locked with another key is left out, not garbled", () => {
@@ -85,6 +107,25 @@ test("Firefox's sites and cookies are read as they are", async () => {
   expect(signinSites("firefox", linux(root), NOW)).toEqual([{ site: "figma.com", lastUsed: (NOW - 5) * 1000, cookies: 1 }]);
   const [cookie] = await signinCookies("firefox", ["figma.com"], { where: linux(root), now: NOW });
   expect(cookie).toMatchObject({ name: "figma.session", value: "fg", expirationDate: NOW + 3600, sameSite: "no_restriction" });
+});
+
+test("Firefox's other profiles are sources too, named as in its profiles.ini, the one used last first", () => {
+  const root = home(), ff = join(root, ".mozilla", "firefox");
+  const make = (dir: string, host: string) => {
+    mkdirSync(join(ff, dir), { recursive: true });
+    const db = new Database(join(ff, dir, "cookies.sqlite"));
+    db.run("CREATE TABLE moz_cookies (host TEXT, name TEXT, value TEXT, path TEXT, expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, lastAccessed INTEGER, sameSite INTEGER)");
+    db.run("INSERT INTO moz_cookies VALUES (?, 's', 'v', '/', ?, 1, 1, ?, 0)", [host, NOW + 3600, (NOW - 5) * 1e6]);
+    db.close();
+  };
+  make("abc.default-release", ".figma.com");
+  make("xyz.work", ".linear.app");
+  writeFileSync(join(ff, "profiles.ini"), "[Profile0]\nName=default-release\nPath=abc.default-release\n\n[Profile1]\nName=Work\nPath=xyz.work\n");
+  const sources = signinSources(linux(root));
+  expect(sources.map((one) => one.label).sort()).toEqual(["Firefox · Work", "Firefox · default-release"]);
+  expect(sources[0]!.id).toBe("firefox");
+  const work = sources.find((one) => one.label === "Firefox · Work")!;
+  expect(signinSites(work.id, linux(root), NOW).map((one) => one.site)).toEqual(["linear.app"]);
 });
 
 /// One page of Safari's binarycookies with the given cookies.

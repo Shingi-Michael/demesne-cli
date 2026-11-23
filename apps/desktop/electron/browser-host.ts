@@ -428,7 +428,11 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       for (let i = 2; existsSync(path) && i < 100; i++) path = join(folder, name.replace(/(\.[^.]*)?$/, ` (${i})$1`));
       item.setSavePath(path);
       item.on("updated", () => { if (item.getReceivedBytes() > MAX_DOWNLOAD) item.cancel(); });
-      item.once("done", (_event, state) => { if (tab.downloaded.length < 6) tab.downloaded.push(state === "completed" ? `${path} (${Math.ceil(item.getReceivedBytes() / 1024)} KB)` : `${name} did not finish: ${state === "cancelled" ? "it was over 50 MB" : state}`); });
+      item.once("done", (_event, state) => {
+        if (tab.downloaded.length < 6) tab.downloaded.push(state === "completed" ? `${path} (${Math.ceil(item.getReceivedBytes() / 1024)} KB)` : `${name} did not finish: ${state === "cancelled" ? "it was over 50 MB" : state}`);
+        // In the app the browser's bar shows what came down, and shows it in its folder on a click.
+        if (state === "completed") inApp?.tell?.({ action: "browser-download", chat: tab.chat.id, name: basename(path), path, bytes: item.getReceivedBytes() });
+      });
     });
     session.webRequest.onCompleted((details) => {
       const tab = tabOf(details.webContentsId);

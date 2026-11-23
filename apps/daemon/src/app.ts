@@ -1296,7 +1296,7 @@ export function createDaemonApp(options: {
         try { cookies = await signinCookies(from, sites, { ...(where ? { where } : {}), ...(options.signinKey ? { key: options.signinKey } : {}) }); }
         catch (failure) { return apiError("invalid_state", failure instanceof Error ? failure.message : String(failure), 409); }
         const brought = [...new Set(cookies.map((cookie) => sites.find((site) => { const host = (cookie.domain ?? new URL(cookie.url).hostname).replace(/^\./, ""); return host === site || host.endsWith(`.${site}`); })).filter((one): one is string => Boolean(one)))];
-        if (!cookies.length) return apiError("invalid_state", `No sign-ins to bring in from ${signinLabel(from)} for those sites`, 409);
+        if (!cookies.length) return apiError("invalid_state", `No sign-ins to bring in from ${sources.find((one) => one.id === from)?.label ?? signinLabel(from)} for those sites`, 409);
         const reply = await browser("signins", { action: "cookies_set", profile, cookies }, request.signal);
         if (!reply || typeof reply.error === "string") return apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
         signinRecord.add(profile, from, brought);

@@ -102,3 +102,13 @@ export function findWords(text: string, found: { matches: number; at: number } |
 export const zoomWords = (zoom: number | undefined) => zoom && Math.abs(zoom - 1) > 0.001 ? `${Math.round(zoom * 100)}%` : "";
 /// A page on this computer (a dev server): what you point at on it is looked up in the project's code.
 export const localPage = (url: string) => { try { return /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(new URL(url).hostname) || /\.localhost$/.test(new URL(url).hostname); } catch { return false; } };
+/// What the browser downloaded for this chat, newest last.
+export interface SplitDownload { name: string; path: string; bytes: number }
+const sizeWords = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
+/// The bar's download chip: the newest file, how many more, and every one in its tooltip.
+export function downloadWords(list: readonly SplitDownload[]): { text: string; more: number; title: string } | null {
+  const last = list.at(-1);
+  if (!last) return null;
+  const name = last.name.length > 22 ? `${last.name.slice(0, 21).trimEnd()}…` : last.name;
+  return { text: name, more: list.length - 1, title: `${list.map((one) => `${one.name} · ${sizeWords(one.bytes)}`).reverse().join("\n")}\nIn the project’s .demesne/downloads. Click to show it.` };
+}

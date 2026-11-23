@@ -40,6 +40,8 @@ const startupMark = (name: string) => { if (startup.length < 16) startup.push([n
 let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
 /// The model's browser, held in this window while the app is open (browser-inapp.ts).
 let inAppBrowser: ReturnType<typeof serveBrowser> | undefined;
+/// Files the chat's browser downloaded this run: the only ones its bar may show in their folder.
+const browserDownloads = new Set<string>();
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
 /// Real data (Foundry step 5): set where the frames are served, called when you allow a site on the Foundry page.
@@ -198,7 +200,7 @@ if (!lookJob) void app.whenReady().then(async () => {
   const contents = window.webContents, session = contents.session;
   // The model's browser lives in this window while the app is open, so the split shows the page itself.
   // DEMESNE_BROWSER=hidden keeps it in the hidden copy of the app, as before.
-  if (process.env.DEMESNE_BROWSER !== "hidden") inAppBrowser = serveBrowser({ window, pointer: process.env.DEMESNE_DESKTOP_BROWSER ?? join(homedir(), ".demesne", "desktop-browser.json"), log, tell: (news) => emit("demesne:desktop-action", news) });
+  if (process.env.DEMESNE_BROWSER !== "hidden") inAppBrowser = serveBrowser({ window, pointer: process.env.DEMESNE_DESKTOP_BROWSER ?? join(homedir(), ".demesne", "desktop-browser.json"), log, tell: (news) => { if (news.action === "browser-download" && typeof news.path === "string") browserDownloads.add(news.path); emit("demesne:desktop-action", news); } });
   // The page reloading or going down takes what it drew away: the real page goes with it until the split says where it is again.
   contents.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) inAppBrowser?.place("", null); });
   contents.on("render-process-gone", () => inAppBrowser?.place("", null));
@@ -563,6 +565,13 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id) || typeof host !== "string" || !publicAddress(`https://${host}/`)) throw new Error("No such site");
       allowFoundrySite(id, host);
       return { allowed: true };
+    }
+    // Show a file the chat's browser downloaded in its folder: only one it downloaded this run.
+    if (method === "desktop-show-download") {
+      const path = String((args as Record<string, unknown>).path ?? "");
+      if (!browserDownloads.has(path)) throw new Error("That file wasn't downloaded by the browser");
+      shell.showItemInFolder(path);
+      return null;
     }
     // Show a saved copy in Finder: only a file Save a copy just wrote.
     if (method === "desktop-show-copy") {

@@ -3332,6 +3332,13 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop #browser-split .bs-zoom { flex: none; height: 22px; padding: 0 8px; border-radius: 99px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--t2); background: var(--hair); }
 .desktop #browser-split .bs-zoom:hover { color: var(--t1); background: var(--hair2); }
 .desktop #browser-split .bs-zoom[hidden] { display: none; }
+/* What the page downloaded: the newest file, grey, beside the zoom chip; a click shows it in its folder. */
+.desktop #browser-split .bs-down { flex: none; display: flex; align-items: center; gap: 5px; height: 22px; max-width: 180px; padding: 0 8px 0 6px; border-radius: 99px; font-size: 11.5px; color: var(--t2); background: var(--hair); }
+.desktop #browser-split .bs-down svg { flex: none; width: 12px; height: 12px; }
+.desktop #browser-split .bs-down span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop #browser-split .bs-down b { flex: none; font-weight: 500; color: var(--t3); }
+.desktop #browser-split .bs-down:hover { color: var(--t1); background: var(--hair2); }
+.desktop #browser-split .bs-down[hidden] { display: none; }
 /* Find on the page (⌘F): one thin row under the bar, the field, the count, up, down, ×. */
 .desktop #browser-split .bs-find { display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--hair); }
 .desktop #browser-split .bs-find[hidden] { display: none; }

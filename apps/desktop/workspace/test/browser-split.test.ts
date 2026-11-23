@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { findWords, handOverAsk, keyInputs, localPage, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName, zoomWords } from "../browser-split.ts";
+import { downloadWords, findWords, handOverAsk, keyInputs, localPage, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName, zoomWords } from "../browser-split.ts";
 
 // Pass 248 D: the chat's browser beside the chat. When it opens, where a click
 // lands on the page, and which keys reach a page that is yours.
@@ -99,4 +99,16 @@ test("the zoom chip shows only when the page is not at its own size", () => {
 test("a page on this computer is looked up in the project's code; a public one is not", () => {
   for (const url of ["http://localhost:5173/", "http://127.0.0.1:3000/a", "http://app.localhost/", "http://[::1]:8080/"]) expect(localPage(url)).toBe(true);
   for (const url of ["https://example.com/", "https://localhost.example.com/", "about:blank", "nonsense"]) expect(localPage(url)).toBe(false);
+});
+
+test("the bar's download chip shows the newest file, how many more, and each in its tooltip", () => {
+  expect(downloadWords([])).toBeNull();
+  const one = downloadWords([{ name: "report.csv", path: "/p/.demesne/downloads/report.csv", bytes: 2048 }])!;
+  expect(one.text).toBe("report.csv");
+  expect(one.more).toBe(0);
+  expect(one.title).toStartWith("report.csv · 2 KB\n");
+  const two = downloadWords([{ name: "report.csv", path: "/a", bytes: 2048 }, { name: "a-very-long-invoice-name-2026.pdf", path: "/b", bytes: 3 * 1024 * 1024 }])!;
+  expect(two.text).toBe("a-very-long-invoice-n…");
+  expect(two.more).toBe(1);
+  expect(two.title.split("\n").slice(0, 2)).toEqual(["a-very-long-invoice-name-2026.pdf · 3.0 MB", "report.csv · 2 KB"]);
 });

@@ -1,13 +1,13 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wordmark-dark.svg">
-  <img src="docs/assets/wordmark-light.svg" alt="d. Demesne, Cherry Blossom" width="420">
+  <img src="docs/assets/wordmark-light.svg" alt="d. Demesne, Milky Way" width="420">
 </picture>
 
 ### A coding agent that lives on your Mac, starts by reading your project, and keeps working after you close the window.
 
 Ask for a change and watch it read, edit and check. Let Drive find the next thing worth doing. Make a page or a document in Foundry. Everything runs on your machine, on a model you choose.
 
-<a href="docs/assets/demesne-home.png"><img src="docs/assets/demesne-home.png" alt="Demesne’s home: a cherry blossom bough over “What are we building?”, with the composer and Drive’s suggestion for the project" width="100%"></a>
+<a href="docs/assets/demesne-home.png"><img src="docs/assets/demesne-home.png" alt="Demesne’s home in the Milky Way theme: a spiral galaxy and the flagship Demesne on the black of space, over “What are we building?” and the composer" width="100%"></a>
 
 ## Install
 

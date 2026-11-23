@@ -8,7 +8,7 @@ export type AppUpdate =
   | { state: "ready"; version: string; to: string; waiting?: boolean }
   | { state: "failed"; version: string; to?: string; error: string };
 
-export const RELEASE_NAME = "Demesne · Cherry Blossom";
+export const RELEASE_NAME = "Demesne · Milky Way";
 const esc = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /// What an asked-for check found, said on the line for a few seconds:

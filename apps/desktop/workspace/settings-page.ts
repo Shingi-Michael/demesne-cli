@@ -728,7 +728,7 @@ function overview(view: SettingsView): string {
 
 /// Appearance: a small window drawn with the app's own colours, then the themes as cards.
 function appearanceTop(view: SettingsView, themeLabel: string, groups: [string, SettingsTheme[]][]): string {
-  const preview = `<div class="ap-preview" aria-label="Preview of ${h(themeLabel)}"><div class="ap-win"><div class="ap-side"><span class="ap-mark">d.</span><i class="on">Settings page</i><i>Top bar tabs</i><i>Still blossom</i></div><div class="ap-main"><span class="ap-me">Make settings look good</span><p>Here’s an overview of your setup, with what’s <em>worth a look</em> first.</p><div class="ap-box"><span>Ask anything</span><em>${h(view.model.words)}</em></div></div></div></div>`;
+  const preview = `<div class="ap-preview" aria-label="Preview of ${h(themeLabel)}"><div class="ap-win"><div class="ap-side"><span class="ap-mark">d.</span><i class="on">Settings page</i><i>Top bar tabs</i><i>Milky Way</i></div><div class="ap-main"><span class="ap-me">Make settings look good</span><p>Here’s an overview of your setup, with what’s <em>worth a look</em> first.</p><div class="ap-box"><span>Ask anything</span><em>${h(view.model.words)}</em></div></div></div></div>`;
   const card = (theme: SettingsTheme) => {
     const c = theme.colors, on = theme.name === view.appearance.theme;
     const art = c ? `<span class="ap-art" style="--bg:${h(c.bg)};--sf:${h(c.surface)};--ac:${h(c.accent)};--tx:${h(c.text)}"><i></i><b></b></span>` : `<span class="ap-art plain"><i></i><b></b></span>`;

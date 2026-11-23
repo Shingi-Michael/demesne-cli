@@ -77,7 +77,7 @@ try {
   // The name is the button that checks.
   const check = line.locator("button[data-update-check]");
   await check.waitFor();
-  assert.equal((await check.textContent())?.trim(), "Demesne · Cherry Blossom");
+  assert.equal((await check.textContent())?.trim(), "Demesne · Milky Way");
   await check.click();
   await send({ ...idle, checking: true });
   await line.filter({ hasText: "Checking for updates…" }).waitFor();
@@ -86,7 +86,7 @@ try {
   await line.filter({ hasText: "Couldn't reach GitHub" }).waitFor();
   await page.locator(".sidebar").screenshot({ path: join(output, "update-problem.png") }).catch(() => line.screenshot({ path: join(output, "update-problem.png") }));
   // It goes back to the name by itself.
-  await line.locator("button[data-update-check]").filter({ hasText: "Demesne · Cherry Blossom" }).waitFor({ timeout: 8000 });
+  await line.locator("button[data-update-check]").filter({ hasText: "Demesne · Milky Way" }).waitFor({ timeout: 8000 });
   console.log("PASS: the pink line checks when clicked and says why it couldn't.");
   await check.click();
   await send({ ...idle, checking: true });
@@ -94,11 +94,11 @@ try {
   await line.filter({ hasText: "Up to date · 0.8.8" }).waitFor();
   console.log("PASS: an asked check that finds nothing says Up to date.");
   // A plain scheduled check says nothing.
-  await line.locator("button[data-update-check]").filter({ hasText: "Demesne · Cherry Blossom" }).waitFor({ timeout: 8000 });
+  await line.locator("button[data-update-check]").filter({ hasText: "Demesne · Milky Way" }).waitFor({ timeout: 8000 });
   await send({ ...idle, checking: true });
   await send({ ...idle, checked: Date.now() });
   await page.waitForTimeout(300);
-  assert.equal((await line.textContent())?.trim(), "Demesne · Cherry Blossom", "an unasked check is quiet");
+  assert.equal((await line.textContent())?.trim(), "Demesne · Milky Way", "an unasked check is quiet");
   // Settings › General › Updates: when it last looked, and Check now.
   await send(idle);
   await page.locator(".sidebar-settings").click();

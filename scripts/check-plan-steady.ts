@@ -21,8 +21,9 @@ const f = await fixture({
   providerId: "fixture", modelId: "slow",
   async listModels() { return [{ id: "slow", provider: "fixture", contextWindow: 262144 }]; },
   async *stream(messages) {
-    const user = String(messages.findLast(m => m.role === "user")?.content);
-    if (user !== prompt) { yield { type: "text_delta", delta: "Ready." }; yield { type: "finish", reason: "stop" }; return; }
+    // The message may carry more than the words typed (context the app adds).
+    const said = messages.findLast(m => m.role === "user")?.content;
+    if (!(typeof said === "string" ? said : JSON.stringify(said)).includes(prompt)) { yield { type: "text_delta", delta: "Ready." }; yield { type: "finish", reason: "stop" }; return; }
     let at = messages.slice(messages.findLastIndex(m => m.role === "user") + 1).filter(m => m.role === "tool").length;
     // Each round: any words, then one tool call.
     let words = "", n = 0, call: [string, unknown] | undefined;
@@ -55,11 +56,12 @@ try {
       if (r.classList.contains("ended")) return;
       w.ribbons.add(r); w.names.add(r.querySelector(".pr-name")); for (const i of r.querySelectorAll(".pr-segs i")) w.segs.add(i);
     };
-    // The light starts once on each part of the line as it becomes the step
-    // being worked on. A redraw in between must never start it again.
+    // The light round the edge starts once when the ribbon appears, and once
+    // more for its last lap. A redraw in between must never start it again.
+    // Nothing else moves by itself: the step's name has no shimmer.
     w.shines = 0; w.fills = 0; w.folds = 0;
     document.addEventListener("animationstart", (event) => {
-      if ((event as AnimationEvent).animationName === "pr-slide") w.slides++;
+      if ((event as AnimationEvent).animationName === "plan-light") w.slides++;
       if ((event.target as Element).classList.contains("pr-name")) w.shines++;
     }, true);
     // Each part fills (a transition), and the list folds open (another).
@@ -82,8 +84,8 @@ try {
   assert.equal(seen.all, 1, "the ribbon that ran is the element that became the pill (so it shrinks rather than being swapped)");
   assert.equal(seen.names, 1, "the step's name is the same element throughout (so it rolls rather than snaps)");
   assert.equal(seen.segments, STEPS.length, "the parts of its line are the same elements throughout (so they fill rather than snap)");
-  assert(seen.slideStarts <= STEPS.length, `the ribbon's moving light started ${seen.slideStarts} times for ${STEPS.length} steps: a redraw started it over`);
-  assert(seen.shineStarts <= 1, `the shine on the step's name started ${seen.shineStarts} times: a redraw started it over`);
+  assert(seen.slideStarts >= 1 && seen.slideStarts <= 2, `the light round the ribbon's edge started ${seen.slideStarts} times (once running, once for its last lap): a redraw started it over`);
+  assert.equal(seen.shineStarts, 0, "the step's name does not shimmer: the edge light is the one thing that moves");
   assert.equal(seen.fills, STEPS.length, "each part of the line fills as its step is done, rather than snapping to green");
   // Ended, it is a pill that says how many steps and opens the same list.
   await ribbon.locator(".pr-name", { hasText: `${STEPS.length} steps` }).waitFor();

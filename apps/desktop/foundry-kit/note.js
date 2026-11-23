@@ -8,6 +8,7 @@
    works, so a page that is a tool to keep stays one; resting on it shows the +
    beside the pointer, and the Foundry page asks for a pin there ("pin-at").
    Only a page the Foundry page takes notes on pins at all.
+   A picture dropped on the mockup (step 6) is a pin that carries it.
    It draws nothing and changes nothing on the page: the +, the pins and the
    note box are the Foundry page's, outside this frame. */
 (function () {
@@ -129,6 +130,36 @@
   }, true);
   // Off the controls, a press is the start of a pin, not of a selection.
   doc.addEventListener("mousedown", function (event) { if (noting && event.isTrusted && event.button === 0 && !control(event.target)) event.preventDefault(); }, true);
+  /* Step 6: a picture dropped on the mockup is a pin there that carries it,
+     for the chat to put in the page. Only pictures, and one at a time. */
+  function picture(event) {
+    var files = event.dataTransfer && event.dataTransfer.files;
+    for (var i = 0; files && i < files.length; i++) if (/^image\//.test(files[i].type)) return files[i];
+    return null;
+  }
+  function carries(event) { var types = event.dataTransfer && event.dataTransfer.types; return !!types && Array.prototype.indexOf.call(types, "Files") >= 0; }
+  doc.addEventListener("dragover", function (event) {
+    if (!noting || !carries(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }, true);
+  doc.addEventListener("drop", function (event) {
+    if (!noting || !carries(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    var file = picture(event), x = event.clientX, y = event.clientY;
+    if (!file) { tell({ state: "drop", refused: "Only a picture can go on a mockup" }); return; }
+    if (file.size > 25 * 1024 * 1024) { tell({ state: "drop", refused: (file.name || "That picture") + " is over 25 MB" }); return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var el = partOf(doc.elementFromPoint(x, y)), part = el ? describe(el) : page(), r = part.rect;
+      tell({ state: "drop", vw: innerWidth, vh: innerHeight, point: { x: x, y: y }, part: part, fx: r.w > 0 ? (x - r.x) / r.w : 0, fy: r.h > 0 ? (y - r.y) / r.h : 0,
+        name: String(file.name || "picture").slice(0, 120), type: file.type, data: String(reader.result) });
+    };
+    reader.onerror = function () { tell({ state: "drop", refused: (file.name || "That picture") + " couldn't be read" }); };
+    reader.readAsDataURL(file);
+  }, true);
   addEventListener("scroll", soon, true);
   addEventListener("resize", soon);
   // The page moves under a part (a tab switches, a list grows): keep the pins on it.

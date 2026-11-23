@@ -89,7 +89,8 @@ test("the design guide tells the model about learned lines only when there are s
   expect(block.endsWith(LEARNED_HOW)).toBe(true);
 });
 
-const W = { direction: "Warm paper, for people who buy by taste.", look_at: "The total.", starts_from: "new" };
+const WALK = [{ what: "A page for a test.", parts: [{ name: "Heading", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the test." }];
+const W = { direction: "Warm paper, for people who buy by taste.", look_at: "The total.", starts_from: "new", walkthrough: WALK };
 const page = (word: string) => `<!doctype html><html><body><main><h1>${word}</h1></main></body></html>`;
 
 test("a new mockup says which learned likes it follows, asked once", async () => {

@@ -2,7 +2,7 @@
 
 [Documentation index](../README.md) · [Project README](../../README.md)
 
-`wordmark-dark.svg` and `wordmark-light.svg` are the README’s hero: the d. mark with its blossom full stop (the same symbol the app draws), the name, and the release name in pink. The README picks one with `<picture>` by the reader’s colour scheme. They have no external fonts, scripts or remote resources.
+`wordmark-dark.svg` and `wordmark-light.svg` are the README’s hero: the d. mark with its blossom full stop (the same symbol the app draws), the name, and the release name (Milky Way) in starlight. The README picks one with `<picture>` by the reader’s colour scheme. They have no external fonts, scripts or remote resources.
 
 The four `demesne-*.png` images (home, drive, ask, settings) show the desktop interface running a scripted demo. `bun scripts/shoot-desktop.ts --readme` retakes them at 2x: it runs the real desktop host against an isolated daemon, a deterministic model and real workspace tools (an edit, an approval and a passing check), and draws the page in the real Electron window at 1280×800. The screenshots are demo scenarios, not claims about a hosted/local model's output quality or speed. All paths and files belong to a disposable demo workspace in the temp folder; no personal sessions or credentials are used. Run the script without `--readme` to capture every view into a scratch folder.
 

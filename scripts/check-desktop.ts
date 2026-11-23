@@ -507,11 +507,13 @@ try {
   const answerBox = await page.locator(".answer").first().boundingBox().catch(() => null);
   assert(markBox && wordsBox && Math.abs(markBox.width - 20) < 0.5 && Math.abs(wordsBox.x - markBox.x - 32) < 0.5, `the cube has the mark's 20px column, the words start 32px in: ${JSON.stringify({ markBox, wordsBox })}`);
   if (answerBox) assert(Math.abs(answerBox.x - markBox!.x) < 0.5, "the cube sits under the answer's mark");
-  assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "one cube on screen: the sidebar shows a dot");
-  assert(await page.locator("#sidebar-sessions .sidebar-session-mark.working").count() > 0, "the working chat breathes a dot in the sidebar");
+  assert.equal(await page.locator("#sidebar-sessions .cube-mark").count(), 0, "the cube belongs in the conversation");
+  const selectedChat = page.locator("#sidebar-sessions .sidebar-session.selected");
+  assert((await selectedChat.getAttribute("aria-label"))?.includes("working"), "working state remains available to screen readers");
+  assert.equal(await selectedChat.locator(".sidebar-session-mark, .sidebar-say-state").count(), 0, "no duplicate working indicator or label on the selected row");
   assert.equal((await working.locator(".wl-words:not(.wl-copy) .wl-word:not(.out)").innerText()).trim(), "Thinking", "a thought without headings says Thinking");
   await until(() => page.locator("#app").getAttribute("class").then(value => value?.includes("rim-work") ?? false), "a working turn runs a light along the panel's rim");
-  await until(() => page.locator("#workspace-tabs .bar-tab.on .sidebar-session-mark.working").count().then(count => count === 1), "the open tab breathes a working dot");
+  assert.equal(await page.locator("#workspace-tabs .bar-tab.on .sidebar-session-mark.working").count(), 0, "the open tab does not repeat the working indicator");
   assert((await page.locator("#workspace-tabs .bar-tab.on [role=tab]").getAttribute("title"))!.endsWith("· Working"), "the tab's tooltip says it works");
   await capture("01-thinking-cube");
   nextThought();

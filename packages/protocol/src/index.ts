@@ -1229,6 +1229,7 @@ export * from "./foundry-try.ts";
 export * from "./foundry-stage.ts";
 export * from "./foundry-built.ts";
 export * from "./foundry-styles.ts";
+export * from "./foundry-walk.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 
@@ -1321,8 +1322,24 @@ function parseRuleArguments(value: unknown): Record<string, unknown> {
 /// documents). Each save is a new version; the source is text the person can
 /// read, revise and export. A deck, doc or dashboard is content (Markdown
 /// with chart and stats blocks) that Demesne draws with a fixed renderer.
-export type FoundryKind = "html" | "svg" | "markdown" | "deck" | "doc" | "dashboard";
-export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown", "deck", "doc", "dashboard"];
+/// A react artifact is one component (JSX + Tailwind), a mermaid one a
+/// diagram, a code one a file of code (apps/desktop/electron/foundry-more-kinds.ts).
+export type FoundryKind = "html" | "svg" | "markdown" | "deck" | "doc" | "dashboard" | "react" | "mermaid" | "code";
+export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown", "deck", "doc", "dashboard", "react", "mermaid", "code"];
+/// What a react artifact may import (the kit brings each one, so it works offline).
+export const FOUNDRY_REACT_IMPORTS = ["react", "react-dom", "react-dom/client", "lucide-react", "recharts"] as const;
+/// The first word of a Mermaid diagram, which names its type.
+export const MERMAID_TYPES = ["flowchart", "graph", "sequenceDiagram", "classDiagram", "stateDiagram", "stateDiagram-v2", "erDiagram", "journey", "gantt", "pie", "quadrantChart", "requirementDiagram", "gitGraph", "mindmap", "timeline", "sankey-beta", "xychart-beta", "block-beta", "packet-beta", "kanban", "architecture-beta", "C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment", "zenuml", "radar-beta", "treemap-beta"];
+/// A Mermaid diagram's type: its first word after any front matter, %% comments and %%{init}%% lines; null when it has none.
+export function mermaidType(source: string): string | null {
+  const body = source.replace(/^\uFEFF/, "").replace(/^\s*---\n[\s\S]*?\n---[ \t]*\n/, "");
+  for (const line of body.split("\n")) {
+    const text = line.trim();
+    if (!text || text.startsWith("%%")) continue;
+    return /^[A-Za-z][\w-]*/.exec(text)?.[0] ?? null;
+  }
+  return null;
+}
 export const FOUNDRY_MAX_SOURCE_BYTES = 512 * 1024;
 /// What one page may keep with demesne.save, all names together.
 export const FOUNDRY_MAX_DATA_BYTES = 256 * 1024;
@@ -1339,6 +1356,8 @@ export interface FoundryWhy {
   from?: string;
   /// Which of the person's learned likes this version follows (pass 245 A), in a few words each.
   followed?: string;
+  /// Pass 263 A: the walkthrough of each variant, shown under the mockup.
+  walk?: import("./foundry-walk.ts").FoundryWalk[];
 }
 
 export interface FoundryVersion {
@@ -1384,7 +1403,13 @@ export interface FoundryArtifactDetail extends FoundryArtifact {
   versions: FoundryVersion[];
   /// Pass 240 A: the real pictures this mockup shows (<d-shot src>), kept with it.
   shots?: FoundryShot[];
+  /// Step 6: a page's other files (styles.css, app.js, data.json…), by name, with this version.
+  files?: Record<string, string>;
 }
+
+/// Step 6: the files a page (kind html) may keep beside it, named as the page links them.
+export const FOUNDRY_FILE_NAME = /^[A-Za-z0-9][\w.-]{0,79}\.(css|js|mjs|json|svg|csv|txt|md)$/;
+export const FOUNDRY_MAX_FILES = 20;
 
 /// A picture a mockup shows, at its own pixels; scale is pixels per point (2 on a Retina capture).
 export interface FoundryShot { id: string; width: number; height: number; scale: number; mimeType: string }

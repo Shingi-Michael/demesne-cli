@@ -10,10 +10,12 @@ import {
   type FoundryWhy,
   type FoundryStage,
   stageText,
+  cleanWalk,
   stageFromText,
   type FoundryKind,
   FOUNDRY_KINDS,
   FOUNDRY_MAX_DATA_BYTES,
+  FOUNDRY_FILE_NAME,
   FOUNDRY_MAX_SOURCE_BYTES,
   type ImageArtifact,
   type TurnAttachment,
@@ -201,18 +203,33 @@ interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: 
 const whyText = (why: FoundryWhy | null | undefined) => {
   const direction = why?.direction?.trim().slice(0, 300) ?? "", look = why?.look?.trim().slice(0, 300) ?? "", dropped = why?.dropped?.trim().slice(0, 300) ?? "";
   const from = why?.from?.trim().slice(0, 300) ?? "", followed = why?.followed?.trim().slice(0, 300) ?? "";
-  return direction || look || dropped || from ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}), ...(followed ? { followed } : {}) }) : "";
+  const walk = cleanWalk(why?.walk);
+  return direction || look || dropped || from || walk ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}), ...(followed ? { followed } : {}), ...(walk ? { walk } : {}) }) : "";
 };
+const walkOf = (value: unknown) => { const walk = cleanWalk(value); return walk ? { walk } : {}; };
 const parseWhy = (text: string | null | undefined): FoundryWhy | null => {
   if (!text) return null;
   try {
     const value = JSON.parse(text) as Partial<FoundryWhy>;
-    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? ""), ...(value.from ? { from: String(value.from) } : {}), ...(value.followed ? { followed: String(value.followed) } : {}) };
+    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? ""), ...(value.from ? { from: String(value.from) } : {}), ...(value.followed ? { followed: String(value.followed) } : {}), ...walkOf(value.walk) };
   } catch { return null; }
 };
 
 /// Pixels per point: what the picture says (a window capture, the browser), else a guess
 /// from its size (a picture wider than any 1x screen came from a Retina one).
+/// Step 6: a page's other files as kept: JSON {name: text}, or "" for none.
+function filesText(files: Record<string, string> | null): string {
+  const kept = Object.entries(files ?? {}).filter(([name, text]) => FOUNDRY_FILE_NAME.test(name) && typeof text === "string");
+  return kept.length ? JSON.stringify(Object.fromEntries(kept)) : "";
+}
+function filesFrom(text: string | null | undefined): Record<string, string> | undefined {
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const kept = Object.entries(parsed ?? {}).filter((entry): entry is [string, string] => FOUNDRY_FILE_NAME.test(entry[0]) && typeof entry[1] === "string");
+    return kept.length ? Object.fromEntries(kept) : undefined;
+  } catch { return undefined; }
+}
 const foundryShot = (image: ImageArtifact): FoundryShot => {
   const told = image.viewport?.deviceScaleFactor ?? (image.viewport?.width ? image.width / image.viewport.width : 0);
   return { id: image.id, width: image.width, height: image.height, mimeType: image.mimeType,
@@ -307,6 +324,8 @@ export class DemesneStore {
     if (!this.hasColumn("foundry_versions", "stage")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN stage TEXT NOT NULL DEFAULT ''");
     // Pass 241 A: a build's record, kept beside the mockup it was built from.
     if (!this.hasColumn("foundry_artifacts", "built")) this.database.run("ALTER TABLE foundry_artifacts ADD COLUMN built INTEGER NOT NULL DEFAULT 0");
+    // Step 6: a page's other files, as JSON {name: text}, with each version.
+    if (!this.hasColumn("foundry_versions", "files")) this.database.run("ALTER TABLE foundry_versions ADD COLUMN files TEXT NOT NULL DEFAULT ''");
     if (schemaVersion < STORAGE_SCHEMA_VERSION) this.database.run(`PRAGMA user_version = ${STORAGE_SCHEMA_VERSION}`);
     this.recoverInterruptedTurns();
     this.userQuestions.recover();
@@ -358,8 +377,11 @@ export class DemesneStore {
   saveFoundryArtifact(input: { id?: string; title?: string; kind?: FoundryKind; workspace?: string | null; sessionId?: string | null; turnId?: string | null; note?: string;
     description?: string; basedOn?: { id: string; version: number } | null; recommended?: boolean; why?: FoundryWhy | null; stage?: FoundryStage | null; source: string; baseVersion?: number;
     /// A build's record (pass 241 A): set when it is made; a later build moves basedOn to the version it followed.
-    built?: boolean }): FoundryArtifactDetail {
-    if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new InvalidStateError("Foundry source is larger than 512 KB");
+    built?: boolean;
+    /// Step 6: the page's other files; not given, a new version keeps the ones before; null or {} has none.
+    files?: Record<string, string> | null }): FoundryArtifactDetail {
+    const given = input.files === undefined ? undefined : filesText(input.files);
+    if (Buffer.byteLength(input.source) + Buffer.byteLength(given ?? "") > FOUNDRY_MAX_SOURCE_BYTES) throw new InvalidStateError("Foundry source is larger than 512 KB");
     const now = new Date().toISOString();
     const why = whyText(input.why);
     const ask = this.askOf(input.turnId);
@@ -377,8 +399,8 @@ export class DemesneStore {
         const stage = this.stageWith(input.id, row.version, input.stage);
         if (input.turnId && last?.turn_id === input.turnId) {
           this.database.query("UPDATE foundry_artifacts SET updated_at = ?, title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?").run(now, input.title?.trim() || null, description, input.id);
-          this.database.query("UPDATE foundry_versions SET source = ?, created_at = ?, note = CASE WHEN note = '' THEN ? ELSE note END, recommended = ?, why = CASE WHEN ? = '' THEN why ELSE ? END, stage = ? WHERE artifact_id = ? AND version = ?")
-            .run(input.source, now, input.note?.trim() ?? "", input.recommended === undefined ? last.recommended : input.recommended ? 1 : 0, why, why, stage, input.id, row.version);
+          this.database.query("UPDATE foundry_versions SET source = ?, created_at = ?, note = CASE WHEN note = '' THEN ? ELSE note END, recommended = ?, why = CASE WHEN ? = '' THEN why ELSE ? END, stage = ?, files = COALESCE(?, files) WHERE artifact_id = ? AND version = ?")
+            .run(input.source, now, input.note?.trim() ?? "", input.recommended === undefined ? last.recommended : input.recommended ? 1 : 0, why, why, stage, given ?? null, input.id, row.version);
           if (input.recommended) this.onlyRecommended(input.id, row.version, input.turnId);
           if (input.built && input.basedOn) this.database.query("UPDATE foundry_artifacts SET based_on = ?, based_on_version = ? WHERE id = ? AND built = 1").run(input.basedOn.id, input.basedOn.version, input.id);
           return input.id;
@@ -386,8 +408,9 @@ export class DemesneStore {
         const version = row.version + 1;
         this.database.query("UPDATE foundry_artifacts SET version = ?, updated_at = ?, title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?").run(version, now, input.title?.trim() || null, description, input.id);
         if (input.built && input.basedOn) this.database.query("UPDATE foundry_artifacts SET based_on = ?, based_on_version = ? WHERE id = ? AND built = 1").run(input.basedOn.id, input.basedOn.version, input.id);
-        this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask,stage) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-          .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask, stage);
+        const files = given ?? (this.database.query("SELECT files FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(input.id, row.version) as { files: string } | null)?.files ?? "";
+        this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask,stage,files) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+          .run(input.id, version, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask, stage, files);
         if (input.recommended && input.turnId) this.onlyRecommended(input.id, version, input.turnId);
         return input.id;
       }
@@ -397,12 +420,31 @@ export class DemesneStore {
       const created = crypto.randomUUID();
       this.database.query("INSERT INTO foundry_artifacts(id,title,kind,workspace,session_id,created_at,updated_at,version,description,based_on,based_on_version,built) VALUES (?,?,?,?,?,?,?,1,?,?,?,?)")
         .run(created, title.slice(0, 200), input.kind, input.workspace ?? null, input.sessionId ?? null, now, now, (description ?? "").slice(0, 600), input.basedOn?.id ?? null, input.basedOn?.version ?? null, input.built ? 1 : 0);
-      this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask,stage) VALUES (?,1,?,?,?,?,?,?,?,?,?)")
-        .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask, stageText(input.stage));
+      this.database.query("INSERT INTO foundry_versions(artifact_id,version,created_at,session_id,turn_id,note,source,recommended,why,ask,stage,files) VALUES (?,1,?,?,?,?,?,?,?,?,?,?)")
+        .run(created, now, input.sessionId ?? null, input.turnId ?? null, input.note ?? "", input.source, input.recommended ? 1 : 0, why, ask, stageText(input.stage), given ?? "");
       if (input.recommended && input.turnId) this.onlyRecommended(created, 1, input.turnId);
       return created;
     })();
     return this.getFoundryArtifact(id)!;
+  }
+
+  /// Step 7: a new mockup that starts from one version of another: the same
+  /// kind, page, files, pictures, surface and demo, named "<title> 2" (or the
+  /// next free number), based on that version, in the same project. Its
+  /// history starts here; the one it came from is left as it was.
+  copyFoundryArtifact(id: string, version?: number): FoundryArtifactDetail {
+    const from = this.getFoundryArtifact(id, version);
+    if (!from) throw new NotFoundError("Foundry artifact not found");
+    if (from.built) throw new InvalidStateError("A build's record can't start a new mockup");
+    const stem = from.title.replace(/\s+\d+$/, "").slice(0, 190) || "Mockup";
+    const taken = new Set((this.database.query("SELECT title FROM foundry_artifacts").all() as { title: string }[]).map((row) => row.title));
+    let n = 2;
+    while (taken.has(`${stem} ${n}`) && n < 1000) n++;
+    const stage = this.database.query("SELECT stage FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, from.version) as { stage: string } | null;
+    const made = this.saveFoundryArtifact({ kind: from.kind, title: `${stem} ${n}`, workspace: from.workspace, source: from.source, files: from.files ?? null,
+      note: `Started from ${from.title} v${from.version}`.slice(0, 300), description: from.description, basedOn: { id: from.id, version: from.version }, stage: stageFromText(stage?.stage) });
+    for (const shot of this.listFoundryShots(id)) this.keepFoundryShot(made.id, shot);
+    return this.getFoundryArtifact(made.id)!;
   }
 
   /// A version's stage with what a save changed: a surface or a demo not given stays as it was.
@@ -497,13 +539,13 @@ export class DemesneStore {
   getFoundryArtifact(id: string, version?: number): FoundryArtifactDetail | null {
     const row = this.database.query("SELECT * FROM foundry_artifacts WHERE id = ?").get(id) as FoundryRow | null;
     if (!row) return null;
-    const versions = this.database.query("SELECT version, created_at, session_id, turn_id, note, recommended, why, ask, stage, length(CAST(source AS BLOB)) AS bytes FROM foundry_versions WHERE artifact_id = ? ORDER BY version DESC")
+    const versions = this.database.query("SELECT version, created_at, session_id, turn_id, note, recommended, why, ask, stage, length(CAST(source AS BLOB)) + length(CAST(files AS BLOB)) AS bytes FROM foundry_versions WHERE artifact_id = ? ORDER BY version DESC")
       .all(id) as { version: number; created_at: string; session_id: string | null; turn_id: string | null; note: string; recommended: number; why: string; ask: string; stage: string; bytes: number }[];
     const pick = version ?? row.version;
-    const source = this.database.query("SELECT source FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, pick) as { source: string } | null;
+    const source = this.database.query("SELECT source, files FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, pick) as { source: string; files: string } | null;
     if (!source) return null;
-    const shots = this.listFoundryShots(id).map(foundryShot);
-    return { ...foundryArtifact(row), version: pick, source: source.source, ...(shots.length ? { shots } : {}),
+    const shots = this.listFoundryShots(id).map(foundryShot), files = filesFrom(source.files);
+    return { ...foundryArtifact(row), version: pick, source: source.source, ...(shots.length ? { shots } : {}), ...(files ? { files } : {}),
       versions: versions.map((item) => ({ version: item.version, createdAt: item.created_at, sessionId: item.session_id, turnId: item.turn_id, note: item.note, recommended: item.recommended === 1, why: parseWhy(item.why), ...(item.ask ? { ask: item.ask } : {}), stage: stageFromText(item.stage), byteLength: item.bytes })) };
   }
 

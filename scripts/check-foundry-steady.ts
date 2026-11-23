@@ -10,7 +10,7 @@ import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
 
 const prompt = "Mock a calmer tab bar";
 const source = `<!doctype html><link rel="stylesheet" href="foundry://kit/base.css"><main class="container"><h1>Calmer tabs</h1>${Array.from({ length: 40 }, (_, i) => `<button class="pill">Tab ${i}</button>`).join("")}</main>`;
-const args = JSON.stringify({ title: "Calmer tab bar", kind: "html", description: "A calmer tab bar.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading.", starts_from: "new" }, source });
+const args = JSON.stringify({ title: "Calmer tab bar", kind: "html", description: "A calmer tab bar.", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading.", starts_from: "new", walkthrough: [{ what: "A page for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check." }] }, source });
 const PIECES = 30;
 const f = await fixture({
   providerId: "fixture", modelId: "slow",
@@ -18,7 +18,7 @@ const f = await fixture({
   async *stream(messages) {
     const user = String(messages.findLast(m => m.role === "user")?.content);
     const done = messages.slice(messages.findLastIndex(m => m.role === "user") + 1).filter(m => m.role === "tool").length;
-    if (user === prompt && !done) {
+    if (user.startsWith(prompt) && !done) {
       for (const word of "I'll mock it in Foundry so you can try it.".split(" ")) { await Bun.sleep(60); yield { type: "text_delta", delta: `${word} ` }; }
       const step = Math.ceil(args.length / PIECES);
       for (let i = 0; i < args.length; i += step) {

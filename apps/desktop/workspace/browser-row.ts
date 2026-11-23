@@ -14,6 +14,7 @@ const quoted = (what: string) => what.replace(/"([^"]*)"/g, "“$1”");
 export function browserTarget(tool: BrowserStep): string {
   const action = tool.input.action, said = answered(tool.message);
   const control = typeof said.did === "string" && said.did && !said.did.includes("is on the page") ? quoted(said.did) : "";
+  if (action === "hand_over") return typeof tool.input.reason === "string" ? tool.input.reason : "";
   if (action === "click" || action === "hover") return control || tool.detail || "";
   if (action === "type") {
     const text = typeof tool.input.text === "string" && tool.input.text ? `“${tool.input.text.length > 40 ? `${tool.input.text.slice(0, 39)}…` : tool.input.text}”` : "";

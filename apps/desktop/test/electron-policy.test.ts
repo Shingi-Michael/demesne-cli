@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, openTarget, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, browserKey, openTarget, placeRect, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -30,6 +30,23 @@ test("external opening accepts web URLs or absolute files, never executable URL 
   expect(openTarget("https://example.com/a")).toBe("url");
   expect(openTarget(resolve("README.md"))).toBe("file");
   for (const target of ["javascript:alert(1)", "data:text/html,test", "file:///etc/passwd", "mailto:a@example.com", "https://user:password@example.com", "relative.txt"]) expect(() => openTarget(target)).toThrow();
+});
+test("find and zoom keys pressed on the chat's page go to its bar", () => {
+  const key = (k: string, more: Partial<{ meta: boolean; control: boolean; alt: boolean; shift: boolean; type: string }> = {}) => ({ type: "keyDown", key: k, meta: true, control: false, alt: false, shift: false, ...more });
+  expect(browserKey(key("f"), true)).toBe("find");
+  expect(browserKey(key("g"), true)).toBe("find-next");
+  expect(browserKey(key("G", { shift: true }), true)).toBe("find-back");
+  expect(browserKey(key("="), true)).toBe("zoom-in");
+  expect(browserKey(key("+", { shift: true }), true)).toBe("zoom-in");
+  expect(browserKey(key("-"), true)).toBe("zoom-out");
+  expect(browserKey(key("0"), true)).toBe("zoom-reset");
+  // Ctrl is the key off a Mac; ⌘ is on one. Typing and other shortcuts stay the page's.
+  expect(browserKey(key("f", { meta: false, control: true }), false)).toBe("find");
+  expect(browserKey(key("f", { meta: false, control: true }), true)).toBe("");
+  expect(browserKey(key("f", { meta: false }), true)).toBe("");
+  expect(browserKey(key("c"), true)).toBe("");
+  expect(browserKey(key("f", { alt: true }), true)).toBe("");
+  expect(browserKey(key("f", { type: "keyUp" }), true)).toBe("");
 });
 test("zoom preserves the desktop's fixed levels", () => {
   expect(nextZoom(1, 1)).toBe(1.1);
@@ -159,4 +176,32 @@ test("pages that remember: only a page's own data and ask addresses, and the run
   expect(page.startsWith("<!DOCTYPE html><script>window.__demesnePage={\"id\":\"a1\",\"key\":\"k\\u003c\"};</script><script>window.demesne={}<\\/script></script><html>")).toBe(true);
   expect(withRemember("<p>x</p>", "R")).toBe("<script>R</script><p>x</p>");
   expect(FOUNDRY_KIT["remember.js"]?.path).toBe("kit/remember.js");
+});
+
+test("the browser split's page area becomes a place in the window for the real page", () => {
+  const window = { width: 1440, height: 900 };
+  expect(placeRect({ x: 880.4, y: 86, width: 550, height: 752 }, 1, window)).toEqual({ x: 880, y: 86, width: 550, height: 752 });
+  // The page's own pixels times the app's zoom are the window's points.
+  expect(placeRect({ x: 400, y: 40, width: 300, height: 300 }, 1.5, window)).toEqual({ x: 600, y: 60, width: 450, height: 450 });
+  // Kept inside the window; too small to show, or not a place at all, is nothing.
+  expect(placeRect({ x: 1200, y: 700, width: 600, height: 600 }, 1, window)).toEqual({ x: 1200, y: 700, width: 240, height: 200 });
+  expect(placeRect({ x: 1400, y: 86, width: 500, height: 700 }, 1, window)).toBeNull();
+  expect(placeRect({ x: 0, y: 0, width: Number.NaN, height: 300 }, 1, window)).toBeNull();
+  expect(placeRect(null, 1, window)).toBeNull();
+});
+
+test("pass 262 C: a saved copy stands on its own and gets a free name in Downloads", async () => {
+  const { exportedSource, copyName } = await import("../electron/policy.ts");
+  const kit = { style: "@font-face{src:url(foundry://kit/fonts/inter.woff2)}\nbody{margin:0}", script: "anime()", parts: "parts()</script>", kinds: { style: ".deck{}", script: "kinds()" }, remember: "remember()" };
+  const page = `<!doctype html><link rel="stylesheet" href="foundry://kit/base.css"><script src="foundry://kit/parts.js"></script><script>demesne.save("a", 1)</script>`;
+  const out = exportedSource(page, kit);
+  expect(out).not.toContain("foundry://kit/base.css");
+  expect(out).not.toContain("foundry://kit/parts.js");
+  expect(out).toContain("<style>\nbody{margin:0}</style>");
+  expect(out).toContain("<script>parts()<\\/script></script>");
+  expect(out.startsWith("<!doctype html><script>remember()</script>")).toBe(true);
+  const taken = new Set(["Orders board v2.html"]);
+  expect(copyName("Orders/board", 2, "html", () => false)).toBe("Ordersboard v2.html");
+  expect(copyName("Orders board", 2, "html", (name) => taken.has(name))).toBe("Orders board v2 (2).html");
+  expect(copyName("  ", 1, "svg", () => false)).toBe("Mockup v1.svg");
 });

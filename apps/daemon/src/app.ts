@@ -8,9 +8,10 @@ import { parseMailTurn } from "@demesne/protocol";
 import type { AssistantResponse, QuestionState, ReviewScope, RoutinesResponse, TrustedResponse } from "@demesne/protocol";
 import { readArtifact, ingestImage, imageSize, svgToPng, feedPicture } from "./artifacts.ts";
 import { useSkillTool } from "./skills.ts";
-import { webFetchTool, webSearchTool } from "./web.ts";
+import { assertPublic, webFetchTool, webSearchTool } from "./web.ts";
 import { fileText, linkTitle, MAX_COPY_BYTES, SourceError, SourceStore } from "./sources.ts";
 import { rememberTool } from "./remember.ts";
+import { forgetMemory, memoryFile, scopeFor } from "./memory.ts";
 import { routineTool } from "./routine-tool.ts";
 import { runTestsTool } from "./test-run.ts";
 import { updatePlanTool } from "./plan.ts";
@@ -19,12 +20,14 @@ import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } fro
 import { foundryBuiltTool } from "./foundry-built.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
-import { browserTool, electronBrowser, type BrowserDriver } from "./browser.ts";
+import { browserAddress, BrowserHandovers, browserProfile, browserTool, electronBrowser, type BrowserDriver, type WatchableBrowser } from "./browser.ts";
+import { isSigninSource, signinCookies, signinLabel, SigninRecord, signinSites, signinSources, type KeyReader, type SigninWhere } from "./browser-signins.ts";
 import { openTool, showTool } from "./open-show.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
 import {
   encodeServerSentEvent,
   isRecord,
+  browserSiteKey,
   parseCreateSessionRequest,
   parseCompactSessionRequest,
   parseAnswerQuestionsRequest,
@@ -168,6 +171,9 @@ export interface DaemonApp {
 
 export function createDaemonApp(options: {
   databasePath: string;
+  /// Tests: whose home to look for browsers in, and the key that unlocks Chromium cookies.
+  signinWhere?: SigninWhere;
+  signinKey?: KeyReader;
   /// Provider ids served from your own machines (loopback, private or
   /// Tailscale addresses), so the model scoreboard can mark local models.
   localProviders?: string[];
@@ -226,7 +232,11 @@ export function createDaemonApp(options: {
   /// Opens the app being built for look_at_page (tests pass a fake; the daemon uses the desktop app).
   pageLook?: PageLook;
   /// The model's own browser (tests pass a fake; the daemon uses the desktop app). False turns it off.
-  browser?: BrowserDriver | false;
+  browser?: (BrowserDriver & Partial<WatchableBrowser>) | false;
+  /// The file where the open desktop app says its window can hold the browser (browser-inapp.ts); the split then shows the page itself.
+  desktopBrowser?: string;
+  /// How an address you type in the browser split is looked up, to keep it off the local network (tests pass their own).
+  resolveHost?: (host: string) => Promise<string[]>;
   /// The engine's clock (evals step it to make the prompt cache go cold).
   now?: () => Date;
   /// The open and show tools (pass 210 A); on unless false.
@@ -409,9 +419,14 @@ export function createDaemonApp(options: {
   // Seeing the app being built: the same hidden window, opened on a local address.
   const pageLook = options.pageLook ?? (lookWith ? electronPageLook(lookWith) : undefined);
   if (pageLook) tools.register(lookAtPageTool(pageLook));
-  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith) : null;
+  // Its sign-ins are kept per project, beside the database (pass 248 D).
+  const ownBrowser = options.browser === undefined && lookWith ? electronBrowser(lookWith, join(dirname(options.databasePath), "browser-profile"), options.desktopBrowser) : null;
   const browser = options.browser === false ? null : options.browser ?? ownBrowser;
-  if (browser) tools.register(browserTool(browser));
+  const signinRecord = new SigninRecord(join(dirname(options.databasePath), "browser-signins.json"));
+  const handovers = new BrowserHandovers();
+  if (browser) tools.register(browserTool(browser, undefined, undefined, handovers));
+  // You scrolled, clicked or typed on the chat's page: it is yours, and the model's next browser step waits for you.
+  if (browser && browser.frame) browser.onTaken = (chat) => { handovers.take(chat); };
   // Open it behind Demesne, and show it on the right (pass 210 A).
   if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index
@@ -1251,6 +1266,42 @@ export function createDaemonApp(options: {
         catch (error) { return apiError("invalid_state", error instanceof Error ? error.message : "Could not start", 409); }
       }
       // The folders you trust, for Settings; Drive's own worktrees stay out of it.
+      // Sign-ins from your other browsers, for one project's browser (pass 261 A).
+      if (url.pathname === "/v1/browser/signins" || url.pathname === "/v1/browser/signins/remove") {
+        const body = request.method === "POST" ? await readJson(request) : null;
+        const root = request.method === "GET" ? url.searchParams.get("root") : isRecord(body) && typeof body.root === "string" ? body.root : null;
+        const profile = root && isAbsolute(root) ? browserProfile(root) : undefined;
+        if (!profile) return apiError("invalid_request", "Open a project to bring sign-ins into it", 400);
+        const where = options.signinWhere, sources = signinSources(where);
+        if (request.method === "GET") {
+          const asked = url.searchParams.get("from"), from = sources.find((one) => one.id === asked && one.state === "ready") ?? sources.find((one) => one.state === "ready");
+          let sites: ReturnType<typeof signinSites> = [], error = "";
+          if (from) { try { sites = signinSites(from.id, where); } catch (failure) { error = failure instanceof Error ? failure.message : String(failure); } }
+          return json({ sources, from: from?.id ?? null, sites, kept: signinRecord.list(profile), ...(error ? { error } : {}) });
+        }
+        if (!browser) return apiError("invalid_state", "There is no browser on this computer", 409);
+        if (url.pathname.endsWith("/remove")) {
+          const site = isRecord(body) && typeof body.site === "string" ? body.site.trim().toLowerCase() : "";
+          if (!site) return apiError("invalid_request", "Say which site", 400);
+          const reply = await browser("signins", { action: "cookies_remove", profile, sites: [site] }, request.signal);
+          if (!reply || typeof reply.error === "string") return apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
+          signinRecord.remove(profile, site);
+          return json({ removed: Number(reply.removed) || 0, kept: signinRecord.list(profile) });
+        }
+        const from = isRecord(body) ? body.from : undefined;
+        const sites = isRecord(body) && Array.isArray(body.sites) ? body.sites.filter((one): one is string => typeof one === "string").slice(0, 60) : [];
+        if (!isSigninSource(from) || !sources.some((one) => one.id === from && one.state === "ready")) return apiError("invalid_request", "That browser's sign-ins can't be read here", 400);
+        if (!sites.length) return apiError("invalid_request", "Pick at least one site", 400);
+        let cookies: Awaited<ReturnType<typeof signinCookies>>;
+        try { cookies = await signinCookies(from, sites, { ...(where ? { where } : {}), ...(options.signinKey ? { key: options.signinKey } : {}) }); }
+        catch (failure) { return apiError("invalid_state", failure instanceof Error ? failure.message : String(failure), 409); }
+        const brought = [...new Set(cookies.map((cookie) => sites.find((site) => { const host = (cookie.domain ?? new URL(cookie.url).hostname).replace(/^\./, ""); return host === site || host.endsWith(`.${site}`); })).filter((one): one is string => Boolean(one)))];
+        if (!cookies.length) return apiError("invalid_state", `No sign-ins to bring in from ${sources.find((one) => one.id === from)?.label ?? signinLabel(from)} for those sites`, 409);
+        const reply = await browser("signins", { action: "cookies_set", profile, cookies }, request.signal);
+        if (!reply || typeof reply.error === "string") return apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
+        signinRecord.add(profile, from, brought);
+        return json({ set: Number(reply.set) || 0, sites: brought, kept: signinRecord.list(profile) });
+      }
       if (request.method === "GET" && url.pathname === "/v1/trusted") {
         return json({ trusted: trustedRoots() } satisfies TrustedResponse);
       }
@@ -1413,6 +1464,14 @@ export function createDaemonApp(options: {
         try { agentCli.choose(agent, model, effort); }
         catch (error) { return apiError("bad_request", error instanceof Error ? error.message : "Can't pick that model", 400); }
         return json({ runs: agentCli.runsOn(agent, await codexPlan(agent)) });
+      }
+      // Undo on the memory pill (pass 254): drop a line the model just kept.
+      if (url.pathname === "/v1/memory/forget" && request.method === "POST") {
+        const body = await readJson(request) as { session?: unknown; scope?: unknown; text?: unknown };
+        if ((body.scope !== "you" && body.scope !== "project") || typeof body.text !== "string" || !body.text.trim()) return apiError("bad_request", "Say which line to forget", 400);
+        const root = typeof body.session === "string" ? store.getSession(body.session)?.workspace?.root : undefined;
+        const scope = scopeFor(body.scope, root);
+        return json(forgetMemory(memoryFile(scope, root), scope, body.text));
       }
       // What an agent remembers about you: add a line, or forget one (pass 142 B).
       const rememberMatch = url.pathname.match(/^\/v1\/socials\/agents\/([^/]+)\/remember(?:\/([^/]+))?$/);
@@ -1699,6 +1758,63 @@ export function createDaemonApp(options: {
         if (path[7] === "content") return sourceDocumentResponse(context, path[2]!, turn.id, path[6]!, url.searchParams.get("revision"));
       }
 
+      // The chat's browser, beside it (pass 248 D): its newest picture, your input while it is yours, and handing it back.
+      if (path.length === 5 && path[0] === "v1" && path[1] === "sessions" && path[3] === "browser") {
+        const chat = path[2]!;
+        if (!store.getSession(chat)) return apiError("not_found", "Session not found", 404);
+        if (request.method === "GET" && path[4] === "frame") {
+          const after = Number(url.searchParams.get("after") ?? 0) || 0;
+          const aspect = Number(url.searchParams.get("aspect"));
+          const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined, url.searchParams.has("dark") ? url.searchParams.get("dark") === "1" : undefined,
+            Number(url.searchParams.get("w")) > 100 ? { width: Math.min(4000, Number(url.searchParams.get("w"))), dpr: Math.max(1, Math.min(3, Number(url.searchParams.get("dpr")) || 1)) } : undefined) : null;
+          const held = handovers.held(chat);
+          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}) };
+          return json(frame ? { ...frame, ...extra } : { seq: 0, ...extra });
+        }
+        // You take the page without being asked: the model's browser steps wait until you give it back.
+        if (request.method === "POST" && path[4] === "take") {
+          if (!browser) return apiError("invalid_state", "There is no browser", 409);
+          if (handovers.held(chat)) return json({ taken: true });
+          if (!handovers.take(chat)) return json({ taken: true });
+          const reply = await browser(chat, { action: "handover", on: true }, request.signal);
+          if (!reply || typeof reply.error === "string") { handovers.handBack(chat); return apiError("invalid_state", typeof reply?.error === "string" ? reply.error : "The browser did not answer", 409); }
+          return json({ taken: true });
+        }
+        // Your own address, back, forward and reload, while the page is yours.
+        if (request.method === "POST" && path[4] === "go") {
+          if (!browser || !handovers.held(chat)) return apiError("invalid_state", "The page is not yours right now", 409);
+          const body = await readJson(request);
+          const to = isRecord(body) ? body.to : undefined;
+          if (to === "back" || to === "forward" || to === "reload") { const reply = await browser(chat, { action: "go", to }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
+          const tab = typeof to === "string" ? /^tab:(\d{1,3})$/.exec(to) : null;
+          const shut = typeof to === "string" ? /^close:(\d{1,3})$/.exec(to) : null;
+          if (shut) { const reply = await browser(chat, { action: "close_tab", tab: Number(shut[1]) }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
+          if (tab) { const reply = await browser(chat, { action: "switch", tab: Number(tab[1]) }, request.signal); return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409); }
+          if (typeof to !== "string" || !to.trim()) return apiError("invalid_request", "Say where to go", 400);
+          let address: string;
+          try { address = browserAddress(to.trim(), store.getSession(chat)?.workspace?.root ?? null); }
+          catch (error) { return apiError("invalid_request", error instanceof Error ? error.message.replace(/^\[[A-Z_]+\]\s*/, "") : String(error), 400); }
+          const site = browserSiteKey({ action: "open", url: address });
+          if (site) { try { await assertPublic(new URL(address), options.resolveHost ?? (async (host) => (await import("node:dns/promises").then((dns) => dns.lookup(host, { all: true }))).map((entry) => entry.address))); } catch { return apiError("invalid_request", "That address is on your local network; the browser opens this computer and public sites", 400); } }
+          // A new tab you opened goes there in a tab of its own; the page it was opened over stays.
+          const reply = await browser(chat, { action: "go", url: address, ...(site ? { site } : {}), ...(isRecord(body) && body.newTab === true ? { new_tab: true } : {}) }, request.signal);
+          return reply && typeof reply.error !== "string" ? json({ ok: true, url: reply.url }) : apiError("invalid_state", String(reply?.error ?? "The browser did not answer"), 409);
+        }
+        if (request.method === "POST" && path[4] === "input") {
+          if (!browser || !handovers.held(chat)) return apiError("invalid_state", "The page is not yours right now", 409);
+          const body = await readJson(request);
+          const events = isRecord(body) && Array.isArray(body.events) ? body.events.slice(0, 40) : [];
+          const reply = await browser(chat, { action: "input", events }, request.signal);
+          return reply && typeof reply.error !== "string" ? json({ ok: true }) : apiError("invalid_state", typeof reply?.error === "string" ? reply.error : "The browser did not answer", 409);
+        }
+        if (request.method === "POST" && path[4] === "hand-back") {
+          const held = handovers.held(chat);
+          // A page you took goes back to the model here; one it asked for, the model takes back itself.
+          if (held?.by === "person" && browser) await browser(chat, { action: "handover", on: false }, request.signal);
+          return json({ handedBack: handovers.handBack(chat) });
+        }
+      }
+
       if (request.method === "PATCH" && path.length === 3 && path[0] === "v1" && path[1] === "sessions") {
         const body = parseUpdateSessionRequest(await readJson(request));
         let session = store.getSession(path[2]!);
@@ -1784,7 +1900,9 @@ export function createDaemonApp(options: {
             return json(store.saveFoundryArtifact({ id: typeof body.id === "string" ? body.id : undefined, title: typeof body.title === "string" ? body.title : undefined,
               kind: typeof body.kind === "string" ? body.kind as never : undefined, workspace: typeof body.workspace === "string" ? body.workspace : null,
               note: typeof body.note === "string" ? body.note.slice(0, 300) : "Edited by you", source: body.source,
-              ...(typeof body.description === "string" ? { description: body.description.slice(0, 600) } : {}) }), 201);
+              ...(typeof body.description === "string" ? { description: body.description.slice(0, 600) } : {}),
+              // Edit in place (Foundry step 3): the version the changes were made on, so a newer one isn't overwritten.
+              ...(typeof body.baseVersion === "number" && Number.isSafeInteger(body.baseVersion) ? { baseVersion: body.baseVersion } : {}) }), 201);
           } catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
         }
         if (id && path.length === 3 && request.method === "GET") {
@@ -1799,6 +1917,13 @@ export function createDaemonApp(options: {
           catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
         }
         if (id && path.length === 3 && request.method === "DELETE") return store.deleteFoundryArtifact(id) ? json({ deleted: true }) : apiError("not_found", "Foundry artifact not found", 404);
+        // Step 7: a new mockup that starts from one version of this one.
+        if (id && path.length === 4 && path[3] === "copy" && request.method === "POST") {
+          const body = await readJson(request).catch(() => ({}));
+          const version = isRecord(body) && typeof body.version === "number" && Number.isSafeInteger(body.version) && body.version > 0 ? body.version : undefined;
+          try { return json(store.copyFoundryArtifact(id, version), 201); }
+          catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
+        }
         // Pages that remember: what a page saved, one named value at a time,
         // and a question the page asks the chat's model (thinking off, no tools).
         if (id && path.length === 4 && path[3] === "data") {

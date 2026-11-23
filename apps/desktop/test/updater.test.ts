@@ -174,8 +174,25 @@ test("the swap script moves the new app in, deletes the old one once it starts, 
   }
 });
 
+test("the swap script first ends anything still running from the old app, like the hidden browser", async () => {
+  const dir = temp(), root = join(dir, "demesne"), staged = join(dir, "staged");
+  mkdirSync(root); mkdirSync(staged); writeFileSync(join(staged, "which"), "new");
+  // A leftover copy of the old app, as the daemon's hidden browser would be.
+  const leftover = join(root, "demesne-browser.sh");
+  writeFileSync(leftover, "#!/bin/sh\nwhile true; do sleep 0.2; done\n", { mode: 0o755 });
+  const browser = Bun.spawn(["sh", leftover]);
+  const started = join(dir, "started"), failed = join(dir, "failed"), launcher = join(dir, "launch.sh");
+  writeFileSync(launcher, `#!/bin/sh\necho 0.4.52 > ${started}\n`, { mode: 0o755 });
+  const script = swapScript({ kind: "linux-portable", pid: 999999, root, staged, version: "0.4.52", started, failed, relaunch: [launcher] })
+    .replace(/-lt \d+/, "-lt 4");
+  writeFileSync(join(dir, "swap.sh"), script);
+  expect(Bun.spawnSync(["sh", join(dir, "swap.sh")]).exitCode).toBe(0);
+  expect(await Promise.race([browser.exited.then(() => true), Bun.sleep(3000).then(() => false)])).toBe(true);
+  expect(readFileSync(join(root, "which"), "utf8")).toBe("new");
+});
+
 test("the release line shows the name, the download, then Restart", () => {
-  expect(releaseLine(null).html).toBe("Demesne · Cherry Blossom");
+  expect(releaseLine(null).html).toBe("Demesne · Milky Way");
   expect(releaseLine({ state: "downloading", version: "0.4.51", to: "0.4.52", progress: 0.45 }).html).toContain('width:45%');
   expect(releaseLine({ state: "ready", version: "0.4.51", to: "0.4.52" }).html).toContain("data-update-restart");
   expect(releaseLine({ state: "ready", version: "0.4.51", to: "0.4.52", waiting: true }).html).toContain("restarts when this finishes");

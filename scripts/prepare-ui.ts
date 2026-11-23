@@ -32,6 +32,11 @@ export async function prepareUi(out: string) {
   cpSync(join(desktop, "foundry-kit/remember.js"), join(out, "kit/remember.js"));
   cpSync(join(desktop, "foundry-kit/demo.js"), join(out, "kit/demo.js"));
   cpSync(join(desktop, "foundry-kit/note.js"), join(out, "kit/note.js"));
+  cpSync(join(desktop, "foundry-kit/marks.js"), join(out, "kit/marks.js"));
+  cpSync(join(desktop, "foundry-kit/errors.js"), join(out, "kit/errors.js"));
+  cpSync(join(desktop, "foundry-kit/edit.js"), join(out, "kit/edit.js"));
+  // More kinds (electron/foundry-more-kinds.ts): React, its icons and charts, Tailwind and Mermaid, from the app so they work offline.
+  for (const [from, to] of [["react/umd/react.production.min.js", "react.js"], ["react-dom/umd/react-dom.production.min.js", "react-dom.js"], ["prop-types/prop-types.min.js", "prop-types.js"], ["lucide-react/dist/umd/lucide-react.min.js", "lucide.js"], ["recharts/umd/Recharts.js", "recharts.js"], ["@tailwindcss/browser/dist/index.global.js", "tailwind.js"], ["mermaid/dist/mermaid.min.js", "mermaid.js"]]) cpSync(join(desktop, "node_modules", from!), join(out, "kit", to!));
   // Demesne's own styles for a mockup of Demesne (pass 220 A): the four sheets the window loads, scoped to <d-app>.
   writeFileSync(join(out, "kit/app.css"), scopeAppStyles(["workspace/ui.css", "workspace/live.css", "desktop.css", "workspace.css"].map((file) => readFileSync(join(desktop, file), "utf8"))));
   mkdirSync(join(out, "vendor/katex"), { recursive: true });

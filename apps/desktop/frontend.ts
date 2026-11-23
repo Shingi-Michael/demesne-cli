@@ -2,6 +2,7 @@ import { createDesktopBridge, type DesktopInvoke } from "./frontend-bridge.ts";
 performance.mark("demesne-script");
 import type { WorkspaceSnapshot, StateUpdate } from "./workspace/state-wire.ts";
 import { checkResult, releaseLine, type AppUpdate } from "./workspace/release-line.ts";
+import { pills } from "./workspace/pill.ts";
 
 interface DesktopBootstrap {
   workspace: string | null;
@@ -87,10 +88,7 @@ function showActionError(error: unknown) {
     setBusy(false, errorMessage(error));
     startStatus.dataset.error = "true";
   } else {
-    const notice = el("notice");
-    notice.textContent = errorMessage(error);
-    notice.hidden = false;
-    setTimeout(() => { notice.hidden = true; }, 6000);
+    pills.show({ seat: "middle", mark: "bang", need: true, words: errorMessage(error), seconds: 6 });
   }
 }
 function renderProjects() {
@@ -123,6 +121,7 @@ async function applyBootstrap(result: DesktopBootstrap) {
     performance.mark("demesne-ui");
   }
   setBusy(false, "");
+  syncReadyNotice(); // A folded startup now has its composer to anchor the notice.
 }
 /// `fresh` opens a new chat there carrying `draft`: Home's where word.
 async function openProject(path?: string, sessionId?: string, fresh?: { draft: string }) {
@@ -174,7 +173,7 @@ async function start() {
     listeners.push(...await Promise.all([
       native.event.listen<StateUpdate>("demesne:update", (event) => bridge.update(event.payload)),
       native.event.listen<unknown>("demesne:desktop-error", (event) => showError(event.payload)),
-      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab" | "notify-answer" | "window-shot"; sessionId?: string; path?: string; on?: boolean; top?: number; dark?: boolean; key?: string; index?: number; text?: string }>("demesne:desktop-action", (event) => {
+      native.event.listen<{ action: "open-project" | "settings" | "open-chat" | "fullscreen" | "appearance" | "close-tab" | "notify-answer" | "window-shot" | "browser-key" | "browser-download"; chat?: string; name?: string; bytes?: number; sessionId?: string; path?: string; on?: boolean; top?: number; dark?: boolean; key?: string; index?: number; text?: string }>("demesne:desktop-action", (event) => {
         if(event.payload.action==="appearance")void updateAppearance(event.payload.dark===true).catch(showActionError);
         else if (event.payload.action === "fullscreen") {
           document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
@@ -189,6 +188,10 @@ async function start() {
           document.dispatchEvent(new CustomEvent("demesne:notify-answer", { detail: { key: event.payload.key, index: event.payload.index, text: event.payload.text } }));
         else if (event.payload.action === "window-shot" && mounted && !fatal)
           document.dispatchEvent(new CustomEvent("demesne:window-shot", { detail: event.payload }));
+        else if (event.payload.action === "browser-download" && mounted && !fatal)
+          document.dispatchEvent(new CustomEvent("demesne:browser-download", { detail: { chat: event.payload.chat, name: event.payload.name, path: event.payload.path, bytes: event.payload.bytes } }));
+        else if (event.payload.action === "browser-key" && mounted && !fatal)
+          document.dispatchEvent(new CustomEvent("demesne:browser-key", { detail: { chat: event.payload.chat, key: event.payload.key } }));
         else if (event.payload.action === "close-tab" && mounted && !fatal)
           document.dispatchEvent(new Event("demesne:close-tab"));
         else if (event.payload.action === "settings" && mounted && !fatal && !busy)
@@ -209,8 +212,22 @@ async function start() {
 const releaseEl = document.querySelector<HTMLElement>(".sidebar-release");
 let lastUpdate: AppUpdate | null = null, updateAsked = false, updateSaid: ReturnType<typeof checkResult> = null;
 let saidTimer: ReturnType<typeof setTimeout> | undefined;
+// The sidebar owns Restart. Only while folded, lend the composer a brief status
+// notice. Repeated status events and folds share one eight-second window.
+let noticeVersion: string | undefined, noticeUntil = 0, dismissReady: (() => void) | undefined;
+function syncReadyNotice() {
+  const version = lastUpdate?.state === "ready" && !lastUpdate.waiting ? lastUpdate.to : undefined;
+  const folded = shell.classList.contains("sidebar-collapsed");
+  if (version !== noticeVersion || !folded) { dismissReady?.(); dismissReady = undefined; }
+  if (version !== noticeVersion) { noticeVersion = version; noticeUntil = 0; }
+  if (!version || !folded || !mounted || busy || dismissReady) return;
+  const now = performance.now();
+  noticeUntil ||= now + 8000;
+  if (noticeUntil > now) dismissReady = pills.show({ seat: "middle", mark: "up", words: `${version} is ready`, seconds: (noticeUntil - now) / 1000 });
+}
 function showAppUpdate(update: AppUpdate) {
   lastUpdate = update;
+  syncReadyNotice();
   if (updateAsked && update.state !== "off" && !(update.state === "idle" && update.checking)) {
     updateAsked = false;
     updateSaid = checkResult(update);
@@ -235,8 +252,11 @@ releaseEl?.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   if (target.closest("[data-update-check]")) { checkForUpdate(); return; }
   if (!target.closest("[data-update-restart]")) return;
-  void request<AppUpdate>("desktop-update", { action: "restart" }).then(showAppUpdate, showActionError);
+  restartIntoUpdate();
 });
+function restartIntoUpdate() {
+  void request<AppUpdate>("desktop-update", { action: "restart" }).then(showAppUpdate, showActionError);
+}
 setBusy(true);
 void start();
 
@@ -247,6 +267,7 @@ const sidebarToggle = el<HTMLButtonElement>("desktop-toggle-sidebar");
 function setSidebarCollapsed(collapsed: boolean) {
   shell.classList.toggle("sidebar-collapsed", collapsed);
   sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+  syncReadyNotice();
   try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
 }
 try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}

@@ -47,7 +47,7 @@ export interface SettingsInfo {
   restart: string[];
 }
 
-export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "agents" | "providers" | "connectors" | "heartbeat" | "data";
+export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "agents" | "providers" | "connectors" | "browser" | "heartbeat" | "data";
 const icon = (path: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${path}</svg>`;
 /// Settings › the list (pass 154 B; Agents from pass 206 A): ten pages, each worth opening. The
 /// sections that held a row or two live inside another page now, and their
@@ -71,6 +71,7 @@ export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = 
   ]],
   ["Integrations", [
     ["connectors", "Connections", '<path d="M9 7 4 12l5 5M15 7l5 5-5 5"/>'],
+    ["browser", "Browser", '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.5 5.2 3.5 8.5s-1.1 6.2-3.5 8.5c-2.4-2.3-3.5-5.2-3.5-8.5s1.1-6.2 3.5-8.5z"/>'],
   ]],
   ["This computer", [
     ["usage", "Usage", '<path d="M4 20V11M10 20V5M16 20v-6M21 20H3"/>'],
@@ -83,13 +84,13 @@ export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = 
 export const PAGE_TONES: Record<SettingsSection, string> = {
   overview: "#f2b6c8", general: "#9fb4c8", notifications: "#ef8b8b", appearance: "#b79cf0", keys: "#9fb4c8",
   models: "#7eaef0", providers: "#71c994", agents: "#f2b6c8", permissions: "#e7b96a", drive: "#5fb0c8",
-  connectors: "#a488ee", heartbeat: "#a488ee", usage: "#71c994", archived: "#7eaef0", data: "#9fb4c8",
+  connectors: "#a488ee", browser: "#9fb4c8", heartbeat: "#a488ee", usage: "#71c994", archived: "#7eaef0", data: "#9fb4c8",
 };
 export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { heartbeat: "connectors" };
 /// The page a section is drawn on.
 export const settingsHome = (id: SettingsSection): SettingsSection => SETTINGS_HOME[id] ?? id;
 export const SETTINGS_ORDER = SETTINGS_GROUPS.flatMap(([, items]) => items.map(([id]) => id));
-const ALL_SECTIONS: SettingsSection[] = ["overview", "general", "notifications", "appearance", "keys", "archived", "usage", "permissions", "drive", "models", "agents", "providers", "connectors", "heartbeat", "data"];
+const ALL_SECTIONS: SettingsSection[] = ["overview", "general", "notifications", "appearance", "keys", "archived", "usage", "permissions", "drive", "models", "agents", "providers", "connectors", "browser", "heartbeat", "data"];
 export const isSettingsSection = (value: unknown): value is SettingsSection => ALL_SECTIONS.includes(value as SettingsSection);
 
 /// Native desktop notifications, each kind with its own switch.
@@ -199,7 +200,30 @@ export interface SettingsView {
   online: boolean;
   /// What each plan has left, for the model's provider first.
   plans: PlanLimits[];
+  /// Settings › Browser: sign-ins from your other browsers, for the project open now (pass 261 A).
+  browser: BrowserSigninsView;
 }
+
+/// Settings › Browser. `data` is null while it reads; `picked` are the sites ticked to bring in.
+export interface BrowserSigninsView {
+  project: string;
+  root: string | null;
+  data: { sources: { id: string; label: string; state: "ready" | "missing" | "disk" | "locked" }[]; from: string | null; sites: { site: string; lastUsed: number; cookies: number; never?: true }[]; kept: { site: string; from: string; at: number }[]; error?: string } | null;
+  picked: string[];
+  busy: "" | "list" | "bring";
+  said: string;
+}
+/// How long ago, in a few words.
+export function agoWords(at: number, now = Date.now()): string {
+  if (!at) return "";
+  const days = Math.floor((now - at) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  return `${Math.round(days / 30)} months ago`;
+}
+const SITES_SHOWN = 12;
 
 /// A theme as Settings draws its card: the background, the panel, the accent and the text.
 export interface SettingsTheme { name: string; label: string; light?: boolean; colors?: { bg: string; surface: string; accent: string; text: string } }
@@ -443,6 +467,7 @@ function pages(view: SettingsView): Page[] {
       { title: "Add a server", line: "A name, and the command that starts it", control: "", keywords: "add mcp server connector", fold: `<form class="st-add" id="mcp-new"><input name="name" placeholder="github" aria-label="Server name" autocomplete="off" spellcheck="false"><input name="command" placeholder="npx @modelcontextprotocol/server-github" aria-label="Command" autocomplete="off" spellcheck="false"><button type="submit" class="st-link">Add</button></form>` },
     ] },
   ] });
+  out.push(browserPage(view));
   out.push({ id: "heartbeat", title: "Heartbeat", sub: "Agents on this computer and paired ones, like Claude Code and Codex, can message your chats.", note: restartNote(["heartbeat."]), groups: [
     { name: "Heartbeat", rows: [
       { title: "Talk to agents nearby", line: view.connectors.heartbeat ? "On: each chat has an address and mail arrives as a turn" : info?.heartbeat ? "On, but the Heartbeat daemon isn't answering" : "Off", control: info ? toggle(info.heartbeat, "settings-config", { key: "heartbeat.enabled", value: !info.heartbeat }, "Talk to agents nearby") : "", keywords: "heartbeat agents mail claude code codex" },
@@ -464,6 +489,40 @@ function pages(view: SettingsView): Page[] {
     ] },
   ] });
   return merged(sorted(out, view));
+}
+
+/// Settings › Browser (pass 261 A): the sites you're signed in to in another browser, ticked to bring
+/// into this project's browser, and what it already has. Email and money sites show, greyed, and can't be ticked.
+function browserPage(view: SettingsView): Page {
+  const b = view.browser, data = b.data, sub = "Bring the sign-ins you need in from your other browsers, so the model doesn't have to sign in. Only the sites you pick come in.";
+  if (!b.root) return { id: "browser", title: "Browser", sub, groups: [{ name: "Sign-ins", rows: [{ title: "Open a project first", line: "Sign-ins go into one project's browser, shared by its chats", keywords: "browser sign in cookies import chrome safari firefox arc" }] }] };
+  if (!data) return { id: "browser", title: "Browser", sub, groups: [{ name: "Sign-ins", rows: [{ title: "Reading your browsers…", keywords: "browser sign in cookies import" }] }] };
+  const from = data.sources.find((one) => one.id === data.from), keywords = "browser sign in cookies import chrome arc brave edge safari firefox";
+  const ready = data.sources.filter((one) => one.state === "ready"), other = data.sources.filter((one) => one.state !== "ready");
+  const groups: Group[] = [];
+  const sourceRow: SettingsRow = { title: "From", line: ready.length ? ready.some((one) => one.label.includes(" · ")) ? "The browser, and which of its profiles, to bring sign-ins in from" : "The browser to bring sign-ins in from" : "No browser whose sign-ins Demesne can read", control: ready.length > 1 ? segments(ready.map((one) => [one.label, one.id === data.from, "signins-from", { from: one.id }]), "From") : ready[0] ? value(ready[0].label) : "", keywords };
+  const otherRows: SettingsRow[] = other.map((one) => one.state === "disk"
+    ? { title: one.label, line: "Its sign-ins sit in a protected folder: turn on Full Disk Access for Demesne, then come back", control: link("open-link", "Open ↗", { url: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" }, " quiet"), keywords }
+    : { title: one.label, line: "On Windows it locks its sign-ins to itself, so they can't be brought in", keywords });
+  groups.push({ name: "Sign-ins", rows: [sourceRow, ...otherRows] });
+  if (from) {
+    const kept = new Set(data.kept.map((one) => one.site));
+    // Email and money sites sit at the end, greyed: they show so you know why they never come in.
+    const sites = data.sites.filter((one) => !kept.has(one.site)).sort((a, b) => Number(Boolean(a.never)) - Number(Boolean(b.never)));
+    const all = view.fold === "signins", shown = all ? sites : sites.slice(0, SITES_SHOWN);
+    const rows: SettingsRow[] = shown.map((one) => one.never
+      ? { title: one.site, line: "Email and money sites never come in", keywords: `${keywords} ${one.site}` }
+      : { title: one.site, line: [agoWords(one.lastUsed) && `Used ${agoWords(one.lastUsed)}`, `${one.cookies} ${one.cookies === 1 ? "cookie" : "cookies"}`].filter(Boolean).join(" · "), control: toggle(b.picked.includes(one.site), "signins-pick", { site: one.site }, `Bring in ${one.site}`), keywords: `${keywords} ${one.site}` });
+    if (sites.length > SITES_SHOWN) rows.push({ title: all ? "Show fewer" : `Show all ${sites.length}`, control: link("settings-fold", all ? "Fewer" : "All", { fold: "signins" }, " quiet") });
+    if (!sites.length) rows.push({ title: data.error ? "Couldn't read them" : "Nothing to bring in", line: data.error ?? `Every site you're signed in to in ${from.label} is here already`, ...(data.error ? { tone: "bad" as const } : {}) });
+    const n = b.picked.length, mac = view.mac && from.id !== "firefox" && from.id !== "safari";
+    if (sites.length) rows.push({ title: b.busy === "bring" ? "Bringing them in…" : n ? `Bring in ${n} ${n === 1 ? "sign-in" : "sign-ins"}` : "Tick the sites this project needs", line: b.said || (mac ? `The Mac asks once to share ${from.label.split(" · ")[0]}'s key. A copy is taken now: signing out in ${from.label} later doesn't sign Demesne out` : `A copy is taken now: signing out in ${from.label} later doesn't sign Demesne out`), ...(b.said.startsWith("!") ? { tone: "bad" as const, line: b.said.slice(1) } : {}), control: n && b.busy !== "bring" ? link("signins-bring", "Bring in") : "" });
+    groups.push({ name: `Signed in, in ${from.label}`, right: n ? `${n} ticked` : "", rows });
+  }
+  groups.push({ name: `In ${b.project || "this project"}`, right: data.kept.length ? String(data.kept.length) : "", rows: data.kept.length
+    ? data.kept.map((one) => ({ title: one.site, line: `From ${data.sources.find((source) => source.id === one.from)?.label ?? one.from} · ${agoWords(one.at)}`, control: link("signins-remove", "Remove", { site: one.site }, " quiet"), keywords: `${keywords} ${one.site}` }))
+    : [{ title: "Nothing brought in yet", line: "Its chats share whatever you bring in, and it stays after a restart" }], hint: "Another project doesn't get these. Remove one to sign the browser out of that site." });
+  return { id: "browser", title: "Browser", sub, groups };
 }
 
 /// Pass 207: each row on the page it's about. Side work joins Agents, your
@@ -555,6 +614,10 @@ function summary(view: SettingsView, id: SettingsSection): string {
       const ready = view.connectors.servers.filter((server) => server.state === "ready"), tools = ready.reduce((sum, server) => sum + server.tools, 0), failed = view.connectors.servers.some((server) => server.state === "failed");
       const servers = info?.mcp.length ?? view.connectors.servers.length;
       return card(servers ? `${servers} ${servers === 1 ? "server" : "servers"}${tools ? ` · ${tools} tools` : ""}` : "No servers yet", `${failed ? "One didn't start. " : ""}Heartbeat is ${view.connectors.heartbeat ? "on" : info?.heartbeat ? "on, not answering" : "off"}${view.agents.length ? ` · ${view.agents.length} ${view.agents.length === 1 ? "agent" : "agents"} nearby` : ""}`, failed ? chip("Look below", "bad") : ready.length ? chip("Ready", "ok") : "");
+    }
+    case "browser": {
+      const kept = view.browser.data?.kept.length ?? 0;
+      return card(!view.browser.root ? "Sign-ins go into a project" : kept ? `${kept} ${kept === 1 ? "sign-in" : "sign-ins"} in ${view.browser.project || "this project"}` : "No sign-ins brought in yet", "From Chrome, Arc, Brave, Edge, Safari or Firefox · only the sites you pick", kept ? chip("Signed in", "ok") : "");
     }
     case "usage": {
       const scores = (view.usage ?? []).filter((score) => score.turns > 0), turns = scores.reduce((sum, score) => sum + score.turns, 0), daily = dailyTotal(scores), top = Math.max(1, ...daily);
@@ -665,7 +728,7 @@ function overview(view: SettingsView): string {
 
 /// Appearance: a small window drawn with the app's own colours, then the themes as cards.
 function appearanceTop(view: SettingsView, themeLabel: string, groups: [string, SettingsTheme[]][]): string {
-  const preview = `<div class="ap-preview" aria-label="Preview of ${h(themeLabel)}"><div class="ap-win"><div class="ap-side"><span class="ap-mark">d.</span><i class="on">Settings page</i><i>Top bar tabs</i><i>Still blossom</i></div><div class="ap-main"><span class="ap-me">Make settings look good</span><p>Here’s an overview of your setup, with what’s <em>worth a look</em> first.</p><div class="ap-box"><span>Ask anything</span><em>${h(view.model.words)}</em></div></div></div></div>`;
+  const preview = `<div class="ap-preview" aria-label="Preview of ${h(themeLabel)}"><div class="ap-win"><div class="ap-side"><span class="ap-mark">d.</span><i class="on">Settings page</i><i>Top bar tabs</i><i>Milky Way</i></div><div class="ap-main"><span class="ap-me">Make settings look good</span><p>Here’s an overview of your setup, with what’s <em>worth a look</em> first.</p><div class="ap-box"><span>Ask anything</span><em>${h(view.model.words)}</em></div></div></div></div>`;
   const card = (theme: SettingsTheme) => {
     const c = theme.colors, on = theme.name === view.appearance.theme;
     const art = c ? `<span class="ap-art" style="--bg:${h(c.bg)};--sf:${h(c.surface)};--ac:${h(c.accent)};--tx:${h(c.text)}"><i></i><b></b></span>` : `<span class="ap-art plain"><i></i><b></b></span>`;

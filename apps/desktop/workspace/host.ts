@@ -2265,6 +2265,7 @@ export class WorkspaceHost {
     if (method === "socials-profile") return (await this.client.socialProfile(string(args.agent, "agent", 40))).profile;
     if (method === "socials-model") return (await this.client.setAgentModel(string(args.agent, "agent", 40), args.model ? string(args.model, "model", 80) : null, args.effort ? string(args.effort, "thinking level", 10) : null)).runs;
     if (method === "socials-remember") return (await this.client.socialRemember(string(args.agent, "agent", 40), string(args.text, "memory", 140))).remembers;
+    if (method === "memory-forget") return await this.client.forgetMemory(string(args.session, "session", 200), args.scope === "you" ? "you" : "project", string(args.text, "memory", 400));
     if (method === "socials-forget") return (await this.client.socialForget(string(args.agent, "agent", 40), string(args.id, "memory", 80))).remembers;
     if (method === "socials-share") return (await this.client.sharePost(typeof args.text === "string" ? args.text.slice(0, 1000) : "", typeof args.image === "string" && args.image ? args.image : null)).post;
     if (method === "socials-comment") return (await this.client.commentOnPost(string(args.id, "post", 200), string(args.text, "comment", 1000))).post;
@@ -2281,6 +2282,19 @@ export class WorkspaceHost {
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
     if (method === "foundry-shelf") return await this.client.foundryList();
+    // The chat's browser in the split (pass 248 D): its newest picture, your input while it is yours, handing it back.
+    if (method === "browser-frame") {
+      const frame = await this.client.browserFrame(String(args.sessionId), Number(args.after) || 0, Number(args.aspect) || undefined, typeof args.dark === "boolean" ? args.dark : undefined, Number(args.width) > 0 ? { width: Number(args.width), dpr: Number(args.dpr) || 1 } : undefined);
+      const { jpeg, ...rest } = frame;
+      return { ...rest, ...(typeof jpeg === "string" && jpeg ? { src: `data:image/jpeg;base64,${jpeg}` } : {}) };
+    }
+    if (method === "browser-input") return this.client.browserInput(String(args.sessionId), Array.isArray(args.events) ? args.events.slice(0, 40) : []);
+    if (method === "browser-hand-back") return this.client.browserHandBack(String(args.sessionId));
+    if (method === "browser-take") return this.client.browserTake(String(args.sessionId));
+    if (method === "browser-signins") return this.client.browserSignins(string(args.root, "project", 4000), typeof args.from === "string" ? args.from : undefined);
+    if (method === "browser-signins-bring") return this.client.browserSigninsBring(string(args.root, "project", 4000), string(args.from, "browser", 40), Array.isArray(args.sites) ? args.sites.filter((one): one is string => typeof one === "string").slice(0, 60) : []);
+    if (method === "browser-signins-remove") return this.client.browserSigninsRemove(string(args.root, "project", 4000), string(args.site, "site", 300));
+    if (method === "browser-go") return this.client.browserGo(String(args.sessionId), string(args.to, "address", 2000), args.newTab === true);
     // A picture a tool took this chat (look_at_page), for its step in the turn.
     if (method === "tool-picture") {
       const id = string(args.id, "picture", 64);
@@ -2303,7 +2317,12 @@ export class WorkspaceHost {
     }
     if (method === "foundry-data-set") return this.client.foundrySetData(string(args.id, "artifact", 200), string(args.name, "name", 200), args.value ?? null);
     if (method === "foundry-ask") return this.client.foundryAsk(string(args.id, "artifact", 200), string(args.question, "question", 8000));
-    if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you" });
+    if (method === "foundry-branch") {
+      const made = await this.client.foundryCopy(string(args.id, "artifact", 200), typeof args.version === "number" && Number.isSafeInteger(args.version) && args.version > 0 ? args.version : undefined);
+      return { id: made.id, title: made.title, version: made.version };
+    }
+    if (method === "foundry-save") return this.client.foundrySave({ id: string(args.id, "artifact", 200), source: string(args.source, "source", 520_000), note: "Edited by you",
+      ...(typeof args.baseVersion === "number" && Number.isSafeInteger(args.baseVersion) && args.baseVersion > 0 ? { baseVersion: args.baseVersion } : {}) });
     if (method === "foundry-create") {
       const text = string(args.text, "request", 4000).trim();
       if (!text) throw new Error("Describe what to make");

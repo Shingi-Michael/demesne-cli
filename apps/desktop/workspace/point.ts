@@ -14,6 +14,8 @@ export interface PointPick {
   hint?: { file: string; line?: number };
   /// Picked on a Foundry page in the pane: which artifact and version.
   foundry?: { id: string; title: string; version: number; kind: string };
+  /// Picked on the chat's own browser page (the split): `page` is its whole address.
+  where?: "browser";
 }
 export interface PointSource { path: string; line: number }
 export interface Pointed extends PointPick { id: string; source: PointSource | null }
@@ -38,12 +40,15 @@ export function pointMessage(points: readonly Pointed[]): string {
   const lines = points.map((point) => {
     const markup = `  selector \`${point.selector}\`\n  \`\`\`html\n  ${point.html}\n  \`\`\``;
     if (point.foundry) return `- ${pointLabel(point)} on the Foundry ${point.foundry.kind === "html" ? "page" : point.foundry.kind} "${point.foundry.title}" (id ${point.foundry.id}, v${point.foundry.version})\n${markup}`;
+    if (point.where === "browser") return `- ${pointLabel(point)} on ${point.page}${point.source ? ` · \`${point.source.path}:${point.source.line}\`` : ""}${point.component ? ` · component ${point.component}` : ""}\n${markup}`;
     const where = point.source ? `\`${point.source.path}:${point.source.line}\`` : "source not found";
     const component = point.component ? ` · component ${point.component}` : "";
     return `- ${pointLabel(point)} on ${point.page} · ${where}${component}\n${markup}`;
   });
-  const many = points.length > 1, foundry = points.every((point) => point.foundry);
+  const many = points.length > 1, foundry = points.every((point) => point.foundry), browser = points.filter((point) => point.where === "browser").length;
   const head = foundry ? `${many ? "The parts" : "The part"} I pointed at on the Foundry page (change only ${many ? "these" : "this"}: foundry_read it, then foundry_edit):`
+    : browser === points.length ? `${many ? "The elements I pointed at" : "The element I pointed at"} on the page in the chat’s browser, beside the chat:`
+    : browser ? "The elements I pointed at:"
     : `${many ? "The elements I pointed at" : "The element I pointed at"} in the live preview:`;
   return `${head}\n${lines.join("\n")}`;
 }

@@ -24,6 +24,7 @@ export function toolTarget(name: string, input: Record<string, unknown>): string
     if (input.action === "type") return [text(input.text, 40) ? `“${text(input.text, 40)}”` : undefined, named ? `into ${named}` : undefined].filter(Boolean).join(" ") || undefined;
     if (input.action === "key") return text(input.key);
     if (input.action === "wait") return text(input.for, 40) ? `for “${text(input.for, 40)}”` : undefined;
+    if (input.action === "hand_over") return text(input.reason, 80);
     return named;
   }
   // message_thread: who was told, and what for.

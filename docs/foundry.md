@@ -97,6 +97,120 @@ Foundry used to keep a small hand-made copy of the app for mockups of Demesne, a
 
 The window is glass over your desktop; in a mockup a still grey backdrop stands in for what is behind it.
 
+## A mockup you can hold
+
+Foundry's long page is for looking. The one mockup you open is for using, the way a Claude artifact is (pass 262 C). A mockup's link in the chat, or its name on the long page, opens it where it sits: it grows to the full width the page has, as tall as the window, and gets one quiet line of grey icons on its name line.
+
+- **‹ vN ›** steps through its versions in place. The other versions stay where they are on the page.
+- **Code** shows its source instead of the page; press it again for the page.
+- **Save a copy** writes it straight into Downloads, with no dialog, as the file that suits the kind: a prototype as an HTML file with the kit inlined so it stands on its own, a graphic as SVG, a document as Markdown, a deck as a PDF, a doc or a dashboard as the drawn page. The quiet line under it says where it went, with **Show**, and for a deck, doc or dashboard the other format once. Saving never reloads the page, so what you did in it stays.
+- **×** or **Esc** closes it, and the long page is look-only again.
+
+Every other mockup on the page stays as it was: nothing to press but links. `apps/desktop/workspace/foundry-page.ts` draws the opened one (`openHead`, `savedLine`); `apps/desktop/electron/main.ts` saves the copy (`desktop-foundry-copy`, `exportedSource` and `copyName` in `policy.ts`). `xvfb-run -a bun scripts/check-foundry-open.ts` checks it in the real app.
+
+Read more: [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) and [Artifacts in Claude Code](https://code.claude.com/docs/en/artifacts) (what this borrows), [CSS container queries](https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries) (how it takes the page's full width), [Electron printToPDF](https://www.electronjs.org/docs/latest/api/web-contents#contentsprinttopdfoptions) (how a deck becomes a PDF).
+
+## Errors come back
+
+A mockup on the Foundry page that throws while you use it says so on one quiet line under it: "This page hit an error:", the error, how many more, and **Send to the chat**. Send puts the error in the chat that made the mockup (when that chat is in this project, else the open one), queued behind a running turn, asking the model to fix only that cause with `foundry_read`, one `foundry_edit` and a `foundry_try` of the path that broke. Like Claude artifacts' Try fixing.
+
+The frame tells the page (`apps/desktop/foundry-kit/errors.js`, first of the scripts Foundry puts in front of a page on the Foundry page): uncaught errors, promises refused with nobody listening, and scripts or stylesheets that didn't load. The same error is told once, at most five, and each load of the frame starts clean. Nothing is drawn inside the mockup; the line is painted in place, so it never reloads the page (`apps/desktop/workspace/foundry-errors.ts`). No line number is shown, because Foundry's own scripts sit in front of the page and the browser's count is off by them. The model's own look and try before you see a page already catch console errors; this is for what breaks in your hands.
+
+Read more: [Window: error event](https://developer.mozilla.org/en-US/docs/Web/API/Window/error_event) and [unhandledrejection](https://developer.mozilla.org/en-US/docs/Web/API/Window/unhandledrejection_event) (MDN), [Window.postMessage](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage) (how a walled-off frame talks to the page), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (Try fixing).
+
+## Real data in the page
+
+A mockup can show real numbers instead of made-up ones. With no script tag, a page (html or react) can call:
+
+- `await demesne.read("data/sales.csv")`: a file in the mockup's project, as text (up to 2 MB). Only inside the project (symlinks are followed and checked), and never keys, tokens, `.env` files, `.git` or Demesne's own state.
+- `await demesne.list("data")`: the names in a project folder (folders end in `/`, hidden files left out).
+- `await demesne.fetch("https://…")`: live public data from the web, as `{ ok, status, type, text, json() }`. Only https, only public hosts (not this computer or the local network), text answers up to 2 MB, 15 seconds, no redirects. The first time a mockup asks for a site, one quiet line under it on the Foundry page says "This page wants live data from api.example.com" with **Allow** and **Not now**. Allow is kept for that mockup and that site (in the app's own settings folder, `foundry-sites.json`); Not now gives the page an error it can show. The model's own look at a page can't be asked, so it sees the error, not the data.
+
+The runtime is `apps/desktop/foundry-kit/remember.js` (with save, load, ask and pick); the app answers at `foundry://read|list|fetch/<id>` with the page's own key (`electron/main.ts`, checks in `electron/foundry-data.ts`), using Electron's network so the system's proxy and certificates apply. The ask line is `apps/desktop/workspace/foundry-sites.ts`. `xvfb-run -a bun scripts/check-foundry-data.ts` checks it in the real app.
+
+Read more: [Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) (MDN), [CSV](https://en.wikipedia.org/wiki/Comma-separated_values), [Same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy) (why a walled-off page asks Demesne instead of the web directly), [Server-side request forgery](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) (why local and private addresses are refused).
+
+## Variants as tabs, every one explained
+
+A mockup can hold two to five variants of the same thing (`<d-compare>` with a `data-option` each; it used to be three). On Foundry they are tabs over one stage, the model's pick first with a small dot. A tab shows that variant in the stage and its walkthrough under it. The tabs only change what you look at; you still answer in the chat. A page of styles keeps its own row and stages.
+
+Every html mockup comes with a walkthrough, one per variant (`why.walkthrough` on `foundry_save`): what it is and who it is for, its parts by number, why it is shaped so, how it differs from the other variants, and what the model would do next. Each part can name the piece of the page it is about (`at`, a CSS selector), and Foundry draws its number there (`foundry-kit/marks.js`); resting on a line rings that piece, and resting on the piece lights its line. A save without a walkthrough, or with a variant left out, is refused and told what is missing. A later fix that sends none keeps the one before while it still covers the variants, and `foundry_read` hands it back. When there is a walkthrough, the quiet why lines above the mockup keep only what was dropped and your taste.
+
+When it is done, the model writes a full answer in the chat, the way a designer hands work over: what it made and for whom, each variant in a line, its pick and why, and what to decide next. It no longer ends with two or three sentences.
+
+The opened mockup runs edge to edge across Foundry, with no box around it; its name, words and walkthrough keep a margin.
+
+`packages/protocol/src/foundry-walk.ts` holds the walkthrough's shape and its checks; `walkHTML` in `workspace/foundry-page.ts` draws it, `variantTabs` and `tabbed` in `workspace/foundry-stage.ts` make the tabs. `xvfb-run -a bun scripts/check-foundry-walk.ts` checks it in the real app.
+
+Read more: [Parallel and iterative design](https://www.nngroup.com/articles/parallel-and-iterative-design/) (why several different takes beat polishing one), [Tabs, used right](https://www.nngroup.com/articles/tabs-used-right/) (tabs for things that are alike), [Design rationale](https://en.wikipedia.org/wiki/Design_rationale) (writing down why, next to the design), [Artifacts in Claude Code](https://code.claude.com/docs/en/artifacts) (what this borrows).
+
+## Pictures in a mockup
+
+A mockup can show your real logo, photo or product shot instead of a drawn stand-in. Two ways in:
+
+- **Attach a picture to the chat** and ask for a mockup with it. The model puts it in any kind as `picture:IMAGE_ID` where an address goes: `<img src="picture:…">` or CSS `url(picture:…)` in a page, a Markdown image `![Logo](picture:…)` in a deck, doc or dashboard, a `src` prop in a React component.
+- **Drop a picture on a mockup** on the Foundry page. It becomes a note pinned exactly where you dropped it, saying "Use this picture here" and naming the file. Type more if you like, then send it with the other notes: the picture goes to the chat under its own name, with the words to put it in at that pin. Anything that isn't a picture is refused on the notes line. A GIF or SVG is drawn again as a PNG, and a big photo is fitted, the same as attaching.
+
+Foundry checks that every picture a mockup names is one its chat has, and keeps it with the mockup, so an edit from another chat still shows it. Demesne serves it to the page from `foundry://shot/<id>/<picture>` (the same store as a review's real screen), the model's own look gets it as data, and Save a copy puts it inside the file so the copy stands on its own.
+
+`picturesOf` (`packages/protocol/src/foundry-stage.ts`) finds them, `checkShots` (`apps/daemon/src/foundry.ts`) checks and keeps them, `withPictures` (`apps/desktop/electron/policy.ts`) puts their addresses in; the drop is `apps/desktop/foundry-kit/note.js` and `watchFoundryNotes` in `apps/desktop/workspace/foundry-notes.ts`. `xvfb-run -a bun scripts/check-foundry-pictures.ts` checks it in the real app.
+
+Read more: [HTML Drag and Drop API](https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API) (MDN), [Data URLs](https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/data) (how a saved copy carries its pictures), [Images in Markdown](https://spec.commonmark.org/0.31.2/#images) (CommonMark).
+
+## A page made of several files
+
+A bigger prototype (kind html) can be more than one file, the way a small site is: `foundry_save` takes `files`, by name (`styles.css`, `app.js`, `data.json`; also `.mjs`, `.svg`, `.csv`, `.txt`, `.md`, up to 20, no folders, 512 KB with the page), and the page links them as it would on the web: `<link rel="stylesheet" href="styles.css">`, `<script src="app.js">`, data in `<script type="application/json" id="data" src="data.json">`, a drawing in `<img src="logo.svg">` or `url(logo.svg)`. A save without `files` keeps the ones before, and `foundry_edit` changes one with `file` on an edit, so a small change to the styles doesn't resend the page. `foundry_read` hands them back with the source.
+
+Foundry puts each file in where it is linked (`withFoundryFiles`, `packages/protocol/src/foundry-stage.ts`), so the page runs the same in its frame, in the model's own look and try, and as a saved copy, which stands on its own. The code view on the Foundry page shows the page, then each file under its name. A link to a name the page doesn't keep stays as written. `xvfb-run -a bun scripts/check-foundry-files.ts` checks it in the real app.
+
+Read more: [The script element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script) (including data blocks), [The link element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/link) (MDN).
+
+## Start a new one from this
+
+The opened mockup's head line has a branch icon, "Start a new one from vN". Press it and Foundry makes a new mockup from the version shown: the same kind, page, files, pictures, surface and demo, named after the first with the next free number ("Orders 2"), in the same project, based on that version (the "based on" link under it goes back). It opens in place of the first, with a quiet line saying where it came from. From there it is a mockup like any other: pin notes on it, or name it in the chat (@Orders 2) to take it another way. The first one and its versions stay exactly as they were, so one good page can branch into a second idea without losing the first. No model is involved.
+
+`copyFoundryArtifact` in `packages/storage/src/index.ts` makes it (through `POST /v1/foundry/<id>/copy`); the icon is in `openHead` (`apps/desktop/workspace/foundry-page.ts`). `xvfb-run -a bun scripts/check-foundry-files.ts` checks it in the real app.
+
+Read more: [Fork (software development)](https://en.wikipedia.org/wiki/Fork_(software_development)) (the idea it borrows), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (remixing an artifact).
+
+## Share outside Demesne
+
+The opened mockup's head line has a link icon, "Share vN as a link". The first time you press it on a mockup, the quiet line under it asks: "Publish vN to a link anyone can open, on your GitHub Pages?" with **Publish** and **Not now**. Nothing leaves the computer until you say Publish. Then Demesne puts the page, standing on its own the way Save a copy makes it (kit, libraries, files and pictures inside), in a repository named `demesne-shares` in your own GitHub account, which it makes the first time (public, with GitHub Pages on), at a folder named by 20 random letters and digits. The line shows the link with **Copy link**, **Open** and **Stop sharing**. A new site can take a minute to appear.
+
+Pressing share again on the same mockup puts the version shown at the same link, without asking. **Stop sharing** takes the page down. Shared pages tell search engines to stay away (`noindex`), but anyone who has the link can open it, so share only what you would send. Every kind can be shared: a deck, doc or dashboard as its drawn page, a graphic, notes or code as Foundry draws them. A page that remembers keeps its saves in the visitor's browser; reading project files and asking the chat only work inside Demesne.
+
+It uses the computer's own GitHub login (`gh auth login`, or `GH_TOKEN`), the same one updates use, and GitHub's REST API through Electron's network. What each mockup shares is kept in the app's settings folder (`foundry-shares.json`). `apps/desktop/electron/foundry-share.ts` publishes and takes down; `desktop-foundry-share` in `electron/main.ts` builds the page. `xvfb-run -a bun scripts/check-foundry-share.ts` checks it in the real app against a stand-in GitHub.
+
+Read more: [What is GitHub Pages?](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages), [REST API endpoints for repository contents](https://docs.github.com/en/rest/repos/contents), [Robots meta tag](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta/name#robots) (why shared pages stay out of search), [Publishing artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (what this borrows).
+
+## Compare two versions
+
+The opened mockup's head line has a compare icon (the split square). Press it and the version before the one shown lies over it, cut by a line down the middle: the earlier one on the left, the shown one on the right, each named at the top. Drag the line (or focus it and use the arrow keys, Shift for bigger steps, Home and End) to sweep across and see exactly what changed where. ‹ › still step through versions, each compared with the one before it. Nothing plays while you compare, and notes wait. A first version has nothing to compare with, so the icon rests.
+
+Both versions are live pages in their own frames (`wipeHTML` and `earlierOf` in `apps/desktop/workspace/foundry-page.ts`); the cut is a CSS `clip-path` on the earlier one, moved in place by `live.ts` without reloading either page. While you drag, the frames let the pointer through so the line follows it. `xvfb-run -a bun scripts/check-foundry-open.ts` checks it in the real app.
+
+Read more: [clip-path](https://developer.mozilla.org/en-US/docs/Web/CSS/clip-path) (MDN), [ARIA slider pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/) (how the line works from the keyboard).
+
+## Edit docs and decks in place
+
+The opened deck, doc or dashboard has a pencil in its head line (its newest version only). Press it and every piece of text becomes editable where it sits: headings, paragraphs, list items, table cells, stat tiles, captions. Leave a piece (click away, Enter) and the change goes into the content; Escape puts a piece back. The quiet line under it counts your changes, and **Done** (the check where the pencil was) keeps them all as one new version, "Edited by you", and shows it. No model is involved, so it costs nothing and is instant. While you edit, the demo, the deck's own playing and notes are off, and Esc on the Foundry page doesn't close it.
+
+How a change finds its place: the frame (`apps/desktop/foundry-kit/edit.js`, put in front of the page instead of the demo and notes) tells what the piece said and what it says now. `placeEdit` in `apps/desktop/workspace/foundry-edit.ts` takes the part that differs and finds it in the Markdown with as much of the text around it as matches, on either side, so the formatting around a change (bold, links) stays and only the words you changed move. Typed formatting characters are escaped. Text that is drawn from a chart, or that repeats so its place can't be told, goes back with a line saying to ask in the chat. Done saves with the version it was made on, so a newer one is never overwritten. `xvfb-run -a bun scripts/check-foundry-edit.ts` checks it in the real app.
+
+Read more: [contenteditable](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/contenteditable) (MDN, including plaintext-only), [Markdown backslash escapes](https://spec.commonmark.org/0.31.2/#backslash-escapes) (CommonMark), [Optimistic concurrency](https://en.wikipedia.org/wiki/Optimistic_concurrency_control) (why Done names its version), [Claude Docs](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (documents you edit in place).
+
+## More kinds: React, diagrams, code
+
+Besides pages (`html`), graphics, notes and the ready kinds, a mockup can be what the model would write anyway, the way Claude artifacts take React, Mermaid and code:
+
+- **`react`**: one component in JSX or TSX with `export default`, styled with Tailwind classes, importing only `react`, `react-dom`, `lucide-react` (icons) and `recharts` (charts). Demesne compiles it with Sucrase and runs it with React 18, Tailwind 4 and those libraries from the app's own kit (`foundry://kit/react.js` and so on), so it works offline and nothing is fetched. `demesne.save` / `load` / `ask` / `pick` work in it as in a page.
+- **`mermaid`**: a Mermaid diagram (flowchart, sequence, class, state, ER, gantt, journey, pie, mind map, timeline…), drawn in the page in calm greys, light or dark like the app.
+- **`code`**: a file of code, highlighted with a row per line. The title's extension (`orders.ts`) picks the language, else it is guessed.
+
+A component that doesn't compile, imports anything else or has no default export, and a diagram that doesn't start with its type, are refused at save with why, so the model fixes them before you see them (`checkKindSource` in `apps/daemon/src/foundry.ts`). A diagram that still doesn't parse says so on the error line under it. On the Foundry page they read **App**, **Diagram** and **Code**; Save a copy writes an App or a Diagram as a page that runs on its own with its libraries inlined (then **Also as the .jsx** / **.mmd** for the source), and Code as the file itself. The pages are drawn in `apps/desktop/electron/foundry-more-kinds.ts`; `xvfb-run -a bun scripts/check-foundry-kinds.ts` checks all three in the real app.
+
+Read more: [React: your first component](https://react.dev/learn/your-first-component), [Writing markup with JSX](https://react.dev/learn/writing-markup-with-jsx), [Tailwind: styling with utility classes](https://tailwindcss.com/docs/styling-with-utility-classes), [Lucide icons](https://lucide.dev/icons/), [Recharts](https://recharts.github.io/en-US/guide/getting-started/), [Mermaid syntax](https://mermaid.js.org/intro/syntax-reference.html), [Sucrase](https://github.com/alangpierce/sucrase) (the compiler), [highlight.js](https://highlightjs.org/), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (the kinds Claude makes).
+
 ## The page holds only the thing
 
 A mockup used to carry controls that were not part of the design: Foundry's own option strip and deck buttons were drawn inside it, and since Foundry could not play a demo, models wrote Replay and Next step buttons into the page. Every page also sat in the same tall white box. Now Foundry owns the surface and the demo, and the page holds only what is being made.

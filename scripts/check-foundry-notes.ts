@@ -60,7 +60,7 @@ const f = await fixture({
     if (current.length) { yield { type: "text_delta", delta: "Here it is." }; yield { type: "finish", reason: "stop" }; return; }
     const options = /options/i.test(request);
     yield call("foundry_save", { title: options ? "Plans page, two ways" : "Plans page", kind: "html", description: "The plans page of a coffee subscription.", note: "First take",
-      why: { direction: "Warm and plain.", look_at: "The switch and the Daily plan.", starts_from: "new" }, source: options ? optionsPage : plansPage, surface: options ? { frame: "window", width: 760, height: 420, title: "Slow Pour" } : { frame: "part", width: 720 } });
+      why: { direction: "Warm and plain.", look_at: "The switch and the Daily plan.", starts_from: "new", walkthrough: [{ option: "A · Yearly first", what: "A · Yearly first, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }, { option: "B · Monthly first", what: "B · Monthly first, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }] }, source: options ? optionsPage : plansPage, surface: options ? { frame: "window", width: 760, height: 420, title: "Slow Pour" } : { frame: "part", width: 720 } });
     yield { type: "finish", reason: "tool_calls" };
   },
 });
@@ -95,7 +95,7 @@ try {
   // At rest the page shows nothing new, and the mockup has no pink edge.
   await page.mouse.move(5, 5);
   await page.waitForTimeout(400);
-  assert.equal(await page.locator("#page").locator("button:not(.fd-link):visible, form:visible, input:visible").count(), 0, "nothing to press on Foundry at rest");
+  assert.equal(await page.locator("#page").locator("button:not(.fd-link):not(.fd-hd-b):visible, form:visible, input:visible").count(), 0, "nothing to press on Foundry at rest");
   assert.equal(await line.isHidden(), true, "no notes line at rest");
   assert.equal(await page.locator("#page .fn-layer").count(), 0, "nothing is added to the page at rest");
   assert.doesNotMatch(await stage.evaluate((el) => getComputedStyle(el).boxShadow), /242, 182, 200|228, 138, 166/, "no pink frame around the mockup");
@@ -265,11 +265,13 @@ try {
   await eventually(async () => (await f.client.getSessionState(mockup.sessionId!)).session.turns.at(-1)?.status === "completed");
   await chips.filter({ hasText: "Plans page, two ways" }).click();
   const both = page.locator(`#page [data-fd="${two.id}:1"]`);
-  await step(209, async () => await both.locator(".fd-stage").count() === 2);
+  // Pass 263 A: the variants are tabs over one stage; the second tab loads the second option there.
+  await step(209, async () => await both.locator(".fd-tabs [role=tab]").count() === 2);
+  await both.locator(".fd-tabs [role=tab]").nth(1).click();
   const second = (): Frame => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${two.id}?v=1`) && found.url().endsWith("&option=1"))!;
   await step(211, async () => !!second() && await second().evaluate(() => !!(window as { __demesneNote?: boolean }).__demesneNote && !!document.querySelector("d-compare > section:not([hidden]) .plan")).catch(() => false));
   assert.equal(await both.locator(".fd-stage").first().evaluate((el) => /242, 182, 200/.test(getComputedStyle(el).boxShadow)), false, "the recommended option has no pink edge");
-  await both.locator(".fd-stage").nth(1).scrollIntoViewIfNeeded();
+  await both.locator(".fd-stage").first().scrollIntoViewIfNeeded();
   await page.waitForTimeout(400);
   const daily = (await second().locator("section:not([hidden]) .plan.best h4").boundingBox())!;
   await page.mouse.click(daily.x + daily.width / 2, daily.y + daily.height / 2);

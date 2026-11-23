@@ -15,7 +15,7 @@ test("the plan is the newest update_plan call that reads cleanly", () => {
 test("while it runs: the step it is on, which step that is, and the line, with the list shut", () => {
   const html = planRibbonHTML(plan as never, { runId: "t1", live: true, open: false });
   expect(html).toStartWith('<div class="plan-ribbon"><div class="pr-card">');
-  expect(html).toContain('<i class="d"><b></b></i><i class="n"><b></b></i><i class=""><b></b></i>');
+  expect(html).toContain('<i class="d"></i><i class="n"></i><i class=""></i>');
   expect(html).toContain('<span class="pr-was" aria-hidden="true">Find it</span><span class="pr-name">Fix &lt;it&gt;</span>');
   expect(html).toContain('<span class="pr-ct">2 of 3</span>');
   expect(html).toContain('title="1 of 3 steps done"');

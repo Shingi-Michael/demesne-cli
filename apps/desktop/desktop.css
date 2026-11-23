@@ -89,12 +89,14 @@ body.desktop {
   --ok: var(--citron);
   --bad: var(--signal);
   --warn: var(--thinking);
-  /* Cherry Blossom: a soft pink beside the blue. Blue stays on what you press; pink marks where you are. */
+  /* The mark beside the blue: blue stays on what you press; this one marks where you are. Pink in
+     most themes; Demesne's own themes (Milky Way) make it starlight below. */
   --blossom: #f2b6c8; --dusk: linear-gradient(135deg, var(--acc), var(--blossom)); --on-dusk: #14151a;
   --acc-soft: color-mix(in srgb, var(--acc) 12%, transparent); --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent); --bad-soft: color-mix(in srgb, var(--bad) 12%, transparent); --warn-soft: color-mix(in srgb, var(--warn) 13%, transparent);
 }
-/* Demesne's own desktop appearance: graphite, with one blue accent. The
-   terminal keeps the brand palette; the desktop maps the same roles here. */
+/* Demesne's own desktop appearance (Milky Way): the dark of space, starlight
+   where you are and one blue for what you press. The terminal keeps the
+   brand palette; the desktop maps the same roles here. */
 html[data-theme="demesne"] body.desktop {
   --ink: #121315; --side: #161719; --surface: #1b1c1f; --surface2: #212226; --surface3: #27292d;
   --hair: rgba(255, 255, 255, 0.08); --hair2: rgba(255, 255, 255, 0.13); --tone: rgba(255, 255, 255, 0.04); --tone2: rgba(255, 255, 255, 0.07);
@@ -102,14 +104,15 @@ html[data-theme="demesne"] body.desktop {
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.3); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.5);
   --t1: #ededef; --t2: #b3b7bd; --t3: #80858c; --t4: #595e65;
   --strong: #ededef; --paper: #dcdee2; --secondary: #b3b7bd; --muted: #80858c;
-  --acc: #7eaef0; --ok: #71c994; --bad: #ef8b8b; --warn: #e7b96a;
-  --acc-soft: rgba(126, 174, 240, 0.12); --ok-soft: rgba(113, 201, 148, 0.12); --bad-soft: rgba(239, 139, 139, 0.12); --warn-soft: rgba(231, 185, 106, 0.13);
-  --electric: #7eaef0; --electricBright: #8fc3ff; --citron: #71c994; --signal: #ef8b8b; --thinking: #e7b96a; --inspect: #7eaef0; --execute: #e7b96a;
-  --accentSurface: #1f2a3a; --menuSelection: #212226; --tileSelection: #26303d; --thinkingSurface: #26241d; --errorSurface: #2a1f1f;
+  --acc: #8fb0fb; --ok: #71c994; --bad: #ef8b8b; --warn: #e7b96a;
+  --blossom: #d5dbf0;
+  --acc-soft: rgba(143, 176, 251, 0.12); --ok-soft: rgba(113, 201, 148, 0.12); --bad-soft: rgba(239, 139, 139, 0.12); --warn-soft: rgba(231, 185, 106, 0.13);
+  --electric: #8fb0fb; --electricBright: #a9c4ff; --citron: #71c994; --signal: #ef8b8b; --thinking: #e7b96a; --inspect: #8fb0fb; --execute: #e7b96a;
+  --accentSurface: #141a2e; --menuSelection: #212226; --tileSelection: #1b2340; --thinkingSurface: #26241d; --errorSurface: #2a1f1f;
   --userSurface: #1b1c1f; --toolSurface: #1b1c1f; --toolActive: #212226;
   --diffAddedSurface: #182319; --diffRemovedSurface: #2a1b1d;
-  --syntaxKeyword: #c3a6ff; --syntaxString: #9ed59a; --syntaxNumber: #e7b96a; --syntaxComment: #6f757c; --syntaxType: #7fc8d8; --syntaxFunction: #8fc3ff;
-  --contextMessages: #7eaef0; --contextTools: #c3a6ff; --contextReserved: #e7b96a; --contextFree: #595e65;
+  --syntaxKeyword: #b9a8f8; --syntaxString: #93d4b3; --syntaxNumber: #ecc98f; --syntaxComment: #6f757c; --syntaxType: #86c9e8; --syntaxFunction: #a9c4ff;
+  --contextMessages: #8fb0fb; --contextTools: #b9a8f8; --contextReserved: #e7b96a; --contextFree: #595e65;
   --composerQueuedBorder: #5a4a2c; --composerStoppedBorder: #6a3535; --composerRestoredBorder: #2c4a6e;
 }
 html[data-theme="demesne-light"] body.desktop {
@@ -119,14 +122,14 @@ html[data-theme="demesne-light"] body.desktop {
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.1); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.18);
   --t1: #1b1c1f; --t2: #4a4e55; --t3: #7a7f86; --t4: #a3a7ad;
   --strong: #1b1c1f; --paper: #2a2d33; --secondary: #4a4e55; --muted: #7a7f86;
-  --acc: #2f6fd0; --ok: #2f9e5e; --bad: #d64e4e; --warn: #b87a12;
-  --blossom: #c76a8c; --on-dusk: #ffffff;
-  --acc-soft: rgba(47, 111, 208, 0.1); --ok-soft: rgba(47, 158, 94, 0.12); --bad-soft: rgba(214, 78, 78, 0.1); --warn-soft: rgba(184, 122, 18, 0.12);
-  --electric: #2f6fd0; --electricBright: #1f63c9; --citron: #2f9e5e; --signal: #d64e4e; --thinking: #b87a12; --inspect: #2f6fd0; --execute: #b87a12;
-  --accentSurface: #e4ecf8; --menuSelection: #f3f2ef; --tileSelection: #e4ecf8; --thinkingSurface: #f5efe2; --errorSurface: #f8e8e8;
+  --acc: #3a62d2; --ok: #2f9e5e; --bad: #d64e4e; --warn: #b87a12;
+  --blossom: #5f6bb0; --on-dusk: #ffffff;
+  --acc-soft: rgba(58, 98, 210, 0.1); --ok-soft: rgba(47, 158, 94, 0.12); --bad-soft: rgba(214, 78, 78, 0.1); --warn-soft: rgba(184, 122, 18, 0.12);
+  --electric: #3a62d2; --electricBright: #2f55c0; --citron: #2f9e5e; --signal: #d64e4e; --thinking: #b87a12; --inspect: #3a62d2; --execute: #b87a12;
+  --accentSurface: #e3e8f8; --menuSelection: #f3f2ef; --tileSelection: #e3e8f8; --thinkingSurface: #f5efe2; --errorSurface: #f8e8e8;
   --userSurface: #ffffff; --toolSurface: #ffffff; --toolActive: #f3f2ef;
   --diffAddedSurface: #e6f3ea; --diffRemovedSurface: #f8e8e8;
-  --syntaxKeyword: #7b4fd6; --syntaxString: #2e8a4a; --syntaxNumber: #b87a12; --syntaxComment: #8a8f96; --syntaxType: #1d7f94; --syntaxFunction: #1f63c9;
-  --contextMessages: #2f6fd0; --contextTools: #7b4fd6; --contextReserved: #b87a12; --contextFree: #a3a7ad;
+  --syntaxKeyword: #6a4fd0; --syntaxString: #2e8a4a; --syntaxNumber: #b87a12; --syntaxComment: #8a8f96; --syntaxType: #1d7f94; --syntaxFunction: #2f55c0;
+  --contextMessages: #3a62d2; --contextTools: #6a4fd0; --contextReserved: #b87a12; --contextFree: #a3a7ad;
   --composerQueuedBorder: #e0c48a; --composerStoppedBorder: #e8a0a0; --composerRestoredBorder: #a9c4ea;
 }

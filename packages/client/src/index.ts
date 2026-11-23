@@ -3,6 +3,14 @@ import type { ThemeLibrary } from "@demesne/brand";
 
 /// An agent tool Demesne runs itself (Claude Code, Codex, Gemini).
 /// Which agents may work, and where (the daemon's agent-choice.ts).
+/// Settings › Browser: the browsers found, one browser's sites, and what a project already brought in.
+export interface BrowserSignins {
+  sources: { id: string; label: string; state: "ready" | "missing" | "disk" | "locked" }[];
+  from: string | null;
+  sites: { site: string; lastUsed: number; cookies: number; never?: true }[];
+  kept: { site: string; from: string; at: number }[];
+  error?: string;
+}
 export interface AgentChoiceView { off: boolean; agents: { id: string; name: string; mode: "every" | "some" | "off"; projects: string[]; runs?: AgentRunsOn }[] }
 /// Agent socials (the daemon's socials.ts): posts, likes and comments.
 export interface SocialComment { id: string; by: string; at: string; text: string; request?: boolean; callback?: string }
@@ -246,8 +254,12 @@ export class DemesneClient {
   async foundryGet(id: string, version?: number): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}`);
   }
-  async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; description?: string; source: string }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
+  async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; description?: string; source: string; baseVersion?: number }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request("/v1/foundry", { method: "POST", body: JSON.stringify(body) });
+  }
+  /// Step 7: a new mockup that starts from one version of this one.
+  async foundryCopy(id: string, version?: number): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/copy`, { method: "POST", body: JSON.stringify(version ? { version } : {}) });
   }
   async foundryRename(id: string, title: string): Promise<import("@demesne/protocol").FoundryArtifact> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
@@ -423,6 +435,8 @@ export class DemesneClient {
   /// Pick the model an agent runs on (null: its tool's default), and Codex's thinking level.
   async setAgentModel(agent: string, model: string | null, effort: string | null): Promise<{ runs: AgentRunsOn }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/model`, { method: "POST", body: JSON.stringify({ model, effort }) }); }
   async socialRemember(agent: string, text: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember`, { method: "POST", body: JSON.stringify({ text }) }); }
+  /// Drops a line Demesne's memory just kept (the Undo on the memory pill).
+  async forgetMemory(session: string, scope: "you" | "project", text: string): Promise<{ forgotten: boolean; text?: string; left: string[] }> { return this.request("/v1/memory/forget", { method: "POST", body: JSON.stringify({ session, scope, text }) }); }
   async socialForget(agent: string, id: string): Promise<{ remembers: SocialRemembered[] }> { return this.request(`/v1/socials/agents/${encodeURIComponent(agent)}/remember/${encodeURIComponent(id)}`, { method: "DELETE" }); }
   /// The weekly checkups, newest first.
   async socialCheckups(): Promise<{ checkups: SocialCheckup[] }> { return this.request("/v1/socials/checkups"); }
@@ -432,6 +446,36 @@ export class DemesneClient {
   /// The agent's chat in the project, made the first time.
   async openAgent(agent: string, workspacePath: string): Promise<{ session: { id: string }; address: string | null }> {
     return this.request("/v1/agents/open", { method: "POST", body: JSON.stringify({ agent, workspacePath }) });
+  }
+  /// The chat's browser, beside it (pass 248 D): the newest picture after `after` (waits up to 1.5 s for one).
+  async browserFrame(sessionId: string, after: number, aspect?: number, dark?: boolean, box?: { width: number; dpr: number }): Promise<{ seq: number; jpeg?: string; width?: number; height?: number; url?: string; title?: string; handover?: boolean; asked?: string; held?: "model" | "person";
+    tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; live?: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/frame?after=${Math.max(0, Math.floor(after))}${aspect ? `&aspect=${aspect.toFixed(3)}` : ""}${dark === undefined ? "" : `&dark=${dark ? 1 : 0}`}${box ? `&w=${Math.round(box.width)}&dpr=${box.dpr}` : ""}`);
+  }
+  /// Your clicks and keys on a page the model handed you.
+  async browserInput(sessionId: string, events: unknown[]): Promise<{ ok: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/input`, { method: "POST", body: JSON.stringify({ events }) });
+  }
+  /// You take the page without being asked; the model's browser steps wait until you hand it back.
+  async browserTake(sessionId: string): Promise<{ taken: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/take`, { method: "POST", body: "{}" });
+  }
+  /// Sign-ins from your other browsers, for a project's browser (pass 261 A).
+  async browserSignins(root: string, from?: string): Promise<BrowserSignins> {
+    return this.request(`/v1/browser/signins?root=${encodeURIComponent(root)}${from ? `&from=${encodeURIComponent(from)}` : ""}`);
+  }
+  async browserSigninsBring(root: string, from: string, sites: string[]): Promise<{ set: number; sites: string[]; kept: BrowserSignins["kept"] }> {
+    return this.request("/v1/browser/signins", { method: "POST", body: JSON.stringify({ root, from, sites }) });
+  }
+  async browserSigninsRemove(root: string, site: string): Promise<{ removed: number; kept: BrowserSignins["kept"] }> {
+    return this.request("/v1/browser/signins/remove", { method: "POST", body: JSON.stringify({ root, site }) });
+  }
+  /// Your own address, or back, forward, reload, while the page is yours.
+  async browserGo(sessionId: string, to: string, newTab = false): Promise<{ ok: boolean; url?: string }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/go`, { method: "POST", body: JSON.stringify({ to, ...(newTab ? { newTab: true } : {}) }) });
+  }
+  async browserHandBack(sessionId: string): Promise<{ handedBack: boolean }> {
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/hand-back`, { method: "POST", body: "{}" });
   }
   async commands(sessionId:string,output="all"):Promise<CommandsResponse>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands?output=${encodeURIComponent(output)}`);}
   async stopCommand(sessionId:string,id:string):Promise<{stopping:boolean}>{return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(id)}/stop`,{method:"POST",body:"{}"});}

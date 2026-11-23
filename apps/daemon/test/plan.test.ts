@@ -27,3 +27,17 @@ test("a plan needs steps, and not too many", async () => {
   await expect(run({ steps: [{ step: " ", status: "pending" }] })).rejects.toThrow("MISSING_STEPS");
   await expect(run({ steps: Array.from({ length: 21 }, (_, i) => ({ step: `Step ${i}`, status: "pending" })) })).rejects.toThrow("TOO_MANY_STEPS");
 });
+
+test("the plan's size is the model's call: no step count is named anywhere it reads", async () => {
+  const { defaultSystemPrompt } = await import("../src/engine.ts");
+  const description = updatePlanTool().definition.description;
+  const prompt = defaultSystemPrompt("/repo");
+  for (const words of [description, prompt]) {
+    // A threshold like "3 or more steps" anchored every plan at three.
+    expect(words).not.toMatch(/\b(3|three) or more\b/i);
+  }
+  expect(description).toContain("no target count");
+  expect(prompt).toContain("there is no set number");
+  // A single step still draws; the schema only bars an empty list.
+  expect(planSteps({ steps: [{ step: "Fix it", status: "in_progress" }] })).toHaveLength(1);
+});

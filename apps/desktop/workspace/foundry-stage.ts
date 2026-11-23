@@ -6,7 +6,7 @@
 /// leave, it starts again from a fresh page. Nothing here adds a control:
 /// the demo's words go on the quiet line under the stage.
 
-import { isStyleColour } from "@demesne/protocol";
+import { FOUNDRY_MAX_VARIANTS, isStyleColour } from "@demesne/protocol";
 
 const STEADY = 1800, AGAIN = 1400;
 const h = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -33,6 +33,25 @@ export interface StageOption { name: string; note: string; colors?: string[] }
 export function optionHead(option: StageOption, pick: boolean) {
   const dots = option.colors?.length ? `<span class="fd-sw" aria-hidden="true">${option.colors.map((colour) => `<i style="background:${h(colour)}"></i>`).join("")}</span>` : "";
   return `<div class="fd-opt"><b>${h(option.name)}</b>${pick ? '<span class="fd-rec-pill">recommended</span>' : ""}${dots}${option.note ? `<span>${h(option.note)}</span>` : ""}</div>`;
+}
+
+/// Pass 263 A, variants as tabs: the names over one stage, the pick first
+/// with a small dot. Choosing one shows that variant in the stage and its
+/// walkthrough under it; it only changes what you look at.
+export function variantTabs(options: readonly StageOption[], shown: number, rec: number) {
+  return `<div class="fd-tabs" role="tablist" aria-label="Variants">${options.map((option, index) =>
+    `<button type="button" role="tab" class="fd-tab${index === shown ? " on" : ""}" data-variant="${index}" aria-selected="${index === shown}"${option.note ? ` title="${h(option.note)}"` : ""}>${h(option.name)}${index === rec ? '<i class="fd-tab-pick" aria-label="recommended" title="Recommended"></i>' : ""}</button>`).join("")}</div>`;
+}
+
+/// The walkthrough section for a variant: the one naming it (or the start of its name), else the only one.
+export function walkSection(walk: Element | null | undefined, name: string | undefined): HTMLElement | null {
+  if (!walk) return null;
+  const all = [...walk.querySelectorAll<HTMLElement>(".fd-walk-v")];
+  if (!name) return all[0] ?? null;
+  const said = name.trim().toLowerCase();
+  return all.find((item) => item.dataset.option?.toLowerCase() === said)
+    ?? all.find((item) => { const option = item.dataset.option?.toLowerCase(); return !!option && (said.startsWith(option) || option.startsWith(said)); })
+    ?? (all.length === 1 ? all[0]! : null);
 }
 
 /// At most this much of a tall page shows in the row of small ones: three quarters of its width.
@@ -137,6 +156,7 @@ export function watchFoundryStages(root: HTMLElement): () => void {
   function split(stage: HTMLElement, options: StageOption[], shown: number, rec: number, styles = false) {
     if (stage.dataset.split !== undefined || options.length < 2) return;
     stage.dataset.split = String(shown);
+    if (!styles) { tabbed(stage, options, shown, rec); return; }
     const head = (option: StageOption, index: number) => optionHead(option, index === rec);
     const first = frameOf(stage);
     if (styles && first) {
@@ -165,6 +185,48 @@ export function watchFoundryStages(root: HTMLElement): () => void {
     });
   }
 
+  /// Pass 263 A: the variants as tabs over the one stage; a tab loads its variant there.
+  const walkOf = (stage: HTMLElement) => stage.closest(".fd-item")?.querySelector(":scope > .fd-walk") ?? null;
+  const names = new WeakMap<HTMLElement, StageOption[]>();
+  function showWalk(stage: HTMLElement, name: string | undefined) {
+    const walk = walkOf(stage), section = walkSection(walk, name);
+    if (!walk) return;
+    for (const item of walk.querySelectorAll<HTMLElement>(".fd-walk-v")) item.hidden = item !== section;
+  }
+  function tabbed(stage: HTMLElement, options: StageOption[], shown: number, rec: number) {
+    names.set(stage, options);
+    stage.insertAdjacentHTML("beforebegin", variantTabs(options, shown, rec));
+    const tabs = stage.previousElementSibling as HTMLElement;
+    showWalk(stage, options[shown]?.name);
+    tabs.addEventListener("click", (event) => {
+      const tab = (event.target as Element).closest<HTMLElement>("[data-variant]");
+      const frame = frameOf(stage), index = Number(tab?.dataset.variant);
+      if (!tab || !frame || String(index) === stage.dataset.split) return;
+      stage.dataset.split = String(index);
+      for (const item of tabs.querySelectorAll<HTMLElement>("[data-variant]")) { const on = item === tab; item.classList.toggle("on", on); item.setAttribute("aria-selected", String(on)); }
+      const state = live(stage);
+      state.ready = false; state.dirty = false; state.lost = false;
+      frame.src = `${(frame.getAttribute("src") ?? "").replace(/&option=\d+/, "").replace("&first=1", "")}&option=${index}`;
+      showWalk(stage, options[index]?.name);
+    });
+  }
+  /// The numbers of the shown variant's parts, for its page to draw where they point.
+  function marks(stage: HTMLElement) {
+    const options = names.get(stage), name = options?.[Number(stage.dataset.split) || 0]?.name;
+    const section = walkSection(walkOf(stage), options ? name : undefined);
+    const list = section ? [...section.querySelectorAll<HTMLElement>("li[data-at]")].map((item) => ({ n: Number(item.dataset.n), at: item.dataset.at! })) : [];
+    try { frameOf(stage)?.contentWindow?.postMessage({ demesne: "marks", marks: list }, "*"); } catch {}
+  }
+  const lit = (event: Event) => {
+    const item = (event.target as Element).closest?.<HTMLElement>(".fd-walk-parts li[data-n]");
+    const walk = (event.target as Element).closest?.(".fd-walk");
+    const stage = walk?.closest(".fd-item")?.querySelector<HTMLElement>(".fd-stage");
+    if (!stage) return;
+    try { frameOf(stage)?.contentWindow?.postMessage({ demesne: "marks", hl: event.type === "pointerover" && item ? Number(item.dataset.n) : 0 }, "*"); } catch {}
+  };
+  root.addEventListener("pointerover", lit);
+  root.addEventListener("pointerout", lit);
+
   const stageFor = (source: MessageEventSource | null) => stages().find((stage) => frameOf(stage)?.contentWindow === source) ?? null;
   const heard = (event: MessageEvent) => {
     const data = event.data as Record<string, unknown> | null;
@@ -186,10 +248,18 @@ export function watchFoundryStages(root: HTMLElement): () => void {
     }
     if (data.demesne === "options" && Array.isArray(data.options)) {
       const options = (data.options as unknown[]).filter((item): item is { name: string; note: string; colors?: unknown } => !!item && typeof (item as { name?: unknown }).name === "string")
-        .slice(0, 3).map((item): StageOption => ({ name: item.name.slice(0, 120), note: typeof item.note === "string" ? item.note.slice(0, 200) : "",
+        .slice(0, FOUNDRY_MAX_VARIANTS).map((item): StageOption => ({ name: item.name.slice(0, 120), note: typeof item.note === "string" ? item.note.slice(0, 200) : "",
           // The colours come from the page, so only plain colour values are drawn.
           ...(Array.isArray(item.colors) ? { colors: item.colors.filter(isStyleColour).slice(0, 5) } : {}) }));
       split(stage, options, Number(data.shown) || 0, typeof data.rec === "number" ? data.rec : -1, data.styles === true);
+      return;
+    }
+    if (data.demesne === "marks") {
+      if (data.state === "ready") marks(stage);
+      else if (typeof data.over === "number") {
+        const section = walkSection(walkOf(stage), names.get(stage)?.[Number(stage.dataset.split) || 0]?.name);
+        for (const item of walkOf(stage)?.querySelectorAll<HTMLElement>(".fd-walk-parts li") ?? []) item.classList.toggle("lit", item.closest(".fd-walk-v") === section && Number(item.dataset.n) === data.over);
+      }
       return;
     }
     if (data.demesne !== "demo") return;
@@ -204,5 +274,5 @@ export function watchFoundryStages(root: HTMLElement): () => void {
   const resized = new ResizeObserver(() => { stages().forEach(fit); glances().forEach(fitGlance); });
   resized.observe(root);
   stages().forEach(watch);
-  return () => { window.removeEventListener("message", heard); seen.disconnect(); resized.disconnect(); };
+  return () => { window.removeEventListener("message", heard); root.removeEventListener("pointerover", lit); root.removeEventListener("pointerout", lit); seen.disconnect(); resized.disconnect(); };
 }

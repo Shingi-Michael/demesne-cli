@@ -14,11 +14,12 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
+import { browserSteps, downloadWords, findWords, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
-import { mountSakura, type Sakura } from "./sakura.ts";
+import { mountMilkyWay, type MilkyWay } from "./milkyway.ts";
 import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
@@ -34,8 +35,11 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { foundryOrder, foundryPage, shelfKey } from "./foundry-page.ts";
-import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
+import { codeWithFiles, foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
+import { placeEdit } from "./foundry-edit.ts";
+import { watchFoundrySites } from "./foundry-sites.ts";
+import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
+import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, notePictureFile, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
@@ -47,7 +51,7 @@ import { researchRowHTML } from "./research-row.ts";
 import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, partsLabel, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
-import { fitImage } from "./fit-image.ts";
+import { fitImage, type FitOptions } from "./fit-image.ts";
 import { chatPile, pileHTML, showPile, stepPicture, stepShotHTML, type PileShot } from "./shot-pile.ts";
 import { chatRoutines, routinesCardHTML, routineTarget, ROUTINE_TOOL, ROUTINE_VERBS, ROUTINES_CARD } from "./routine-card.ts";
 import { chatShown, latestShown, shownCardHTML, SHOWN_CARD, type Shown } from "./shown-card.ts";
@@ -63,7 +67,7 @@ import { deferredChanges } from "./display-runs.ts";
 import { animate, spring, stagger } from "animejs";
 import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
-import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
+import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type BrowserSigninsView, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
 import type { ChatCache, FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, Routine } from "@demesne/protocol";
 import { cacheHalfHTML } from "./cache-line.ts";
@@ -82,6 +86,10 @@ import { GoogleAIForm } from "./google-ai-form.ts";
 import { handleTabStripKey, updateTabStrip } from "./tab-strip.ts";
 import { updateCheckLine, type AppUpdate } from "./release-line.ts";
 import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-icons.ts";
+import { MemoryPill } from "./memory-pill.ts";
+import { pills, type PillSpec } from "./pill.ts";
+import { lightRows } from "./row-light.ts";
+import { brokeNews, brokeSeen, type BrokeSeen } from "./broke-news.ts";
 import type {
   ToolEntry,
 } from "@demesne/workbench/entries.ts";
@@ -333,7 +341,7 @@ const verb = (tool: ToolEntry) =>
   })[tool.name] ?? (tool.name === "heartbeat" ? HEARTBEAT_VERBS[String(tool.input.action)] ?? "Heartbeat" : tool.name.replaceAll("_", " "));
 /// The model's own browser, as the step rows name what it did there.
 const BROWSER_VERBS: Record<string, string> = { open: "Opened", read: "Read the page", text: "Read the page", click: "Clicked", type: "Typed", key: "Pressed", scroll: "Scrolled", hover: "Pointed at",
-  back: "Went back", forward: "Went forward", reload: "Reloaded", wait: "Waited", picture: "Looked at the page", close: "Closed its browser" };
+  back: "Went back", forward: "Went forward", reload: "Reloaded", wait: "Waited", picture: "Looked at the page", hand_over: "Handed you the page", close: "Closed its browser" };
 /// The heartbeat tool's actions, as the step rows name them.
 const HEARTBEAT_VERBS: Record<string, string> = { send: "Send", inbox: "Inbox", agents: "Agents", approve: "Approve pairing", deny: "Deny pairing" };
 const tools = (run: WorkspaceRun) =>
@@ -378,7 +386,6 @@ let completionItems: {
 let follow = true,
   stopArmed = 0,
   draftTimer: ReturnType<typeof setTimeout> | undefined,
-  noticeTimer: ReturnType<typeof setTimeout> | undefined,
   lastDraftVersion = -1,
   lastSession = "";
 /// Turns whose plan checklist is open; closed until you click Checklist.
@@ -462,10 +469,12 @@ async function api<T = unknown>(
   const entry = { method, at: Date.now(), outcome: "pending" };
   if (recentRequests.push(entry) > 20) recentRequests.shift();
   try {
+    const allowed = method === "permission" && args.decision === "allow_always" ? state?.approvals.find((approval) => approval.id === args.id)?.rule : undefined;
     const result = await window.demesne.request<T>(method, {
       ...args,
       sessionId: state?.session?.id,
     });
+    if (allowed) ruleLearned(allowed);
     entry.outcome = "ok";
     return result;
   } catch (error) {
@@ -473,19 +482,29 @@ async function api<T = unknown>(
     throw error;
   }
 }
-function notice(message: string) {
-  el("notice").textContent = message;
-  el("notice").hidden = false;
-  clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => (el("notice").hidden = true), 4000);
+/// A passing notice is a silver pill in its place (pass 260 A): the middle
+/// seat on the composer unless `how` names another seat or mark.
+function notice(message: string, how: Partial<PillSpec> = {}) {
+  pills.show({ seat: "middle", mark: "note", words: message, ...how });
+}
+/// Something failed: the same pill, with the amber dot.
+function fail(error: unknown, how: Partial<PillSpec> = {}) {
+  notice(error instanceof Error ? error.message : String(error), { mark: "bang", need: true, ...how });
 }
 async function act(task: () => Promise<unknown>) {
   try {
     return await task();
   } catch (error) {
-    notice(error instanceof Error ? error.message : String(error));
+    fail(error);
     return null;
   }
+}
+/// "Always" taught Demesne a rule: the middle seat says so, and Ask again
+/// takes the rule back out of your config.
+function ruleLearned(rule: string) {
+  const what = rule.slice(rule.indexOf(":") + 1).replace(/ \*$/, " …");
+  const words = rule.startsWith("edit") || rule.startsWith("write") ? `Demesne will edit ${what && what !== "." ? what : "this project"} without asking` : `Demesne will run ${what} without asking`;
+  notice(words, { mark: "rule", seconds: 6, action: { label: "Ask again", run: () => void api("allow-rule-remove", { rule }).catch(fail) } });
 }
 /// The same model, whether or not either id carries its provider prefix.
 const sameModel = (a: string | undefined, b: string | undefined) =>
@@ -511,6 +530,8 @@ function context() {
   };
 }
 let sidebarSignature = "";
+/// Each chat's state at the last draw, and the rows lit with their news (pass 260 A).
+let rowTones = new Map<string, string>(), rowLit = new Map<string, number>(), rowLitTimer: ReturnType<typeof setTimeout> | undefined;
 /// The full time, for a row's tooltip.
 const fullTime = (date: string) => new Date(date).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 /// When each chat was last looked at (its updatedAt then): a chat that has
@@ -745,12 +766,12 @@ function renderAssistantRow() {
   row.classList.toggle("on", open);
   if (open) row.setAttribute("aria-current", "page"); else row.removeAttribute("aria-current");
   const mark = row.querySelector<HTMLElement>(".sidebar-session-mark");
-  if (mark) { mark.className = `sidebar-session-mark ${tone}`; mark.hidden = !tone; }
+  if (mark) { mark.className = `sidebar-session-mark ${tone}`; mark.hidden = !tone || (open && tone === "working"); }
   const about = STATE_WORDS[tone] ?? "";
   row.title = about ? `Assistant, ${about}` : "Assistant";
   row.setAttribute("aria-label", row.title);
   const badge = rail?.querySelector<HTMLElement>(".rail-badge");
-  if (badge) { badge.hidden = !tone; badge.classList.toggle("blue", tone !== "warn"); }
+  if (badge) { badge.hidden = !tone || (open && tone === "working"); badge.classList.toggle("blue", tone !== "warn"); }
 }
 /// What Scheduled and Foundry say on their rows (pass 213): when the next
 /// routine runs, and how many mockups arrived since you last looked.
@@ -855,6 +876,11 @@ function renderSidebar() {
   const focused = focusedRow ? [...nav.querySelectorAll(".sidebar-session")].indexOf(focusedRow) : -1;
   const titleOf = (item: typeof sessions[number]) => item.id === current?.id ? inSession() ? current!.title : "New chat" : item.turns ? item.title : "New chat";
   const tones = new Map(sessions.map((item) => [item.id, chatTone(item)] as const));
+  // A chat that just finished or asks, while you are elsewhere, lights its own row.
+  rowLit = lightRows(rowTones, tones, pageOpen ? null : current?.id ?? null, rowLit, Date.now());
+  rowTones = tones;
+  clearTimeout(rowLitTimer);
+  if (rowLit.size) rowLitTimer = setTimeout(() => { sidebarSignature = ""; renderSidebar(); }, Math.max(50, Math.min(...rowLit.values()) - Date.now() + 20));
   // Drive's own chats stay off the list: its work unfolds from its line in
   // your chat and lands as a branch to review. One you open shows while open.
   // An empty chat is the composer itself, and the New chat row above already
@@ -873,13 +899,15 @@ function renderSidebar() {
     const about = STATE_WORDS[tone] ?? "";
     const project = projectFor(item);
     const here = project === projectWorkspace || project === null;
-    const mark = tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
+    // The conversation already shows this turn working; keep the state in its accessible name.
+    const quietWork = selected && tone === "working";
+    const mark = quietWork ? "" : tone || !item.pinned ? dot(tone) : `<span class="sidebar-pin-mark" aria-hidden="true">${ICON_PIN}</span>`;
     const pr = pullRequests.get(id);
     // A chat that needs you says so where its time was, in its state's
     // colour: asks you, working, finished, failed, back now.
     const back = backOf(item) === "back" && !selected;
-    const say = back ? "back now" : selected && tone !== "working" && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
-    const side = say || (pr || (id === current?.id && !inSession()) ? "" : right);
+    const say = back ? "back now" : selected && tone !== "warn" ? "" : STATE_SAYS[tone] ?? "";
+    const side = say || (quietWork || pr || (id === current?.id && !inSession()) ? "" : right);
     const open = btn(here ? "select-session" : "project-session", `${mark}<span class="sidebar-session-name">${h(title)}</span>${side ? `<span class="sidebar-session-age${say ? ` sidebar-say-state ${back ? "warn" : tone}` : ""}">${h(side)}</span>` : ""}`, { id, ...(project ? { path: project } : {}) }, `sidebar-session${selected ? " selected" : ""}${side ? " has-side" : ""}`)
       .replace("<button ", `<button data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" aria-label="${h(about ? `${title}, ${about}` : title)}" aria-keyshortcuts="Delete"${selected ? ' aria-current="page"' : ""} `);
     // Pin and Archive sit on the row itself: no menu, no dialog. The keyboard
@@ -904,8 +932,8 @@ function renderSidebar() {
       const hand = prHandable(pr, prOpenSince) ? btn("pr-hand", "Hand it to the chat", { id }, "sidebar-back-opt key") : "";
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
-    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
-    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
+    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${quietWork ? "" : dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
+    return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}${rowLit.has(id) ? " lit" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
   // The agents: a letter tile, the name, and how it is (a dot
@@ -1560,7 +1588,7 @@ async function dropSources(event: DragEvent) {
     for (const file of files) {
       const path = pathFor?.(file) ?? "";
       if (path) await keepSource({ path });
-      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`);
+      else notice(`${file.name || "That file"} couldn't be kept: its place on disk isn't known.`, { mark: "bang", need: true });
     }
     return;
   }
@@ -1571,7 +1599,484 @@ function card(name: keyof typeof CARD_ICON, line: string, right: string, body: s
   const open = cardsOpen.has(name);
   return `<section class="card${open ? " open" : ""}${need ? " need" : ""}" data-card="${name}"><button type="button" class="card-head" data-action="card-fold" data-args='${JSON.stringify({ name })}' aria-expanded="${open}">${CARD_ICON[name]}<span class="card-line">${line}</span>${need ? '<i class="card-need" title="Needs you"></i>' : ""}<span class="card-sum">${right}</span></button><div class="card-body">${body}</div></section>`;
 }
+// The chat's browser, beside the chat (pass 248 D) ---------------------------
+
+/// The split's own state: which chat, whether it is open, what you closed, the newest picture.
+type SplitFrame = { src: string; /** The page itself is on show (a real view the app puts over the split), not a picture. */ live?: boolean; width: number; height: number; url: string; title: string; back: boolean; forward: boolean; /** The page is still loading: a thin silver line runs along the bar. */ loading?: boolean; /** How far you zoomed it, when not 100%. */ zoom?: number };
+const split = {
+  session: "", open: false, openedTurn: null as string | null, closedTurn: null as string | null, closedAsk: null as string | null,
+  seq: 0, frame: null as null | SplitFrame,
+  /// Who holds the page: the model asked ("model"), you took it ("person"), or nobody.
+  held: null as null | "model" | "person", heldAt: 0, handedAsk: "",
+  tabs: [] as SplitTab[],
+  /// A new tab you opened: the home screen (just the Demesne logo) shows until you go somewhere.
+  home: false,
+  ringAt: 0,
+  /// Find on the page (⌘F): the bar under the toolbar, what you typed, and where it is in the matches.
+  find: { open: false, text: "", found: null as null | { matches: number; at: number } },
+  pumping: false, width: (() => { try { return Number(localStorage.getItem("demesne-browser-split")) || 0; } catch { return 0; } })(),
+};
+const BROWSER_SPLIT_LABEL = "The chat’s browser";
+const BS_ICONS = {
+  back: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  forward: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  reload: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.6H9.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  plus: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  out: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5v3a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  close: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  point: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75v2.5M8 11.75v2.5M1.75 8h2.5M11.75 8h2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  up: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  down: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  saved: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M4.75 7 8 10.25 11.25 7M3 13h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+/// What each chat's browser downloaded while the app was open: the bar shows the newest, and shows it in its folder on a click.
+const splitDownloads = new Map<string, SplitDownload[]>();
+const splitButton = (go: string, label: string, icon: keyof typeof BS_ICONS = go as keyof typeof BS_ICONS) => `<button type="button" class="bs-icon" data-go="${go}" aria-label="${label}" title="${label}">${BS_ICONS[icon]}</button>`;
+/// The page reaches your mouse and keys only while you hold it.
+const splitYours = () => Boolean(split.held && split.frame && !split.home);
+/// Draws the split, or takes it away. Called with the cards, on every change of the chat.
+function renderBrowserSplit() {
+  const aside = el("browser-split"), app = el("app");
+  const s = state;
+  if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; placeSplitView(); return; }
+  if (split.session !== s.session.id) {
+    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0, find: { open: false, text: "", found: null } });
+    // Another chat's page does not stay up while this one's first picture comes.
+    splitDrawn = splitWanted = ""; const old = aside.querySelector<HTMLCanvasElement>(".bs-page"); if (old) old.hidden = true;
+  }
+  const run = s.runs.find((one) => one.id === s.activeTurnId && active(one));
+  const next = splitOpen(split, run);
+  split.open = next.open; split.openedTurn = next.openedTurn;
+  app.classList.toggle("browser-split-on", split.open);
+  aside.hidden = !split.open;
+  if (!split.open) { placeSplitView(); return; }
+  if (!aside.firstElementChild) buildBrowserSplit(aside);
+  const total = el("workspace").clientWidth || innerWidth;
+  aside.style.width = `${splitWidth(split.width || Math.round(total * 0.48), total)}px`;
+  const ask = handOverAsk(run), last = browserSteps(run).at(-1);
+  if (ask && !split.held && split.handedAsk !== ask.toolCallId) split.held = "model";
+  const took = split.held === "person" && !ask;
+  const working = run && last && last.state === "running" && !ask ? `${verb(last as unknown as ToolEntry)} ${stepTarget(last as unknown as ToolEntry)}`.trim() : null;
+  // A page you hand back stops being a new tab: the model carries on where it was.
+  if (split.home && !split.held) split.home = false;
+  const doing = splitDoing(ask, took ? null : working, took);
+  const yours = splitYours();
+  aside.classList.toggle("yours", yours && !split.home);
+  aside.classList.toggle("done", !run);
+  aside.classList.toggle("home", split.home || !split.frame);
+  renderSplitHead(aside, doing);
+  renderSplitTabs(aside, yours);
+  renderSplitFind(aside);
+  const view = aside.querySelector<HTMLElement>(".bs-view")!;
+  view.tabIndex = yours ? 0 : -1;
+  view.setAttribute("aria-label", yours ? (ask ? `The page is yours: ${ask.reason}` : "The page is yours") : "The page the model is on");
+  placeSplitView();
+  void pumpBrowserFrames();
+}
+/// In the desktop app the chat's page is a real view of the window, not a picture: the app is told where
+/// the split's page area is, and puts the page there. It is put away whenever the area is not on show,
+/// or is covered by something of ours.
+let splitPlaced = "";
+function placeSplitView() {
+  const aside = el("browser-split"), view = aside.querySelector<HTMLElement>(".bs-view");
+  let rect: { x: number; y: number; width: number; height: number } | null = null;
+  if (view && split.open && !aside.hidden && split.frame?.live && !split.home && document.visibilityState === "visible") {
+    const box = view.getBoundingClientRect();
+    // While the page is yours its amber edge stays in sight around it.
+    const edge = aside.classList.contains("yours") ? 2 : 0;
+    // Anything of ours over the area (a notice, a card) would be under the real page: it steps aside instead.
+    const clear = [0.06, 0.5, 0.94].every((kx) => [0.06, 0.5, 0.94].every((ky) => { const top = document.elementFromPoint(box.left + box.width * kx, box.top + box.height * ky); return Boolean(top && view.contains(top)); }));
+    if (clear && box.width >= 160 && box.height >= 160) rect = { x: box.left + edge, y: box.top + edge, width: box.width - edge * 2, height: box.height - edge * 2 };
+  }
+  const key = rect ? `${split.session}|${[rect.x, rect.y, rect.width, rect.height].map(Math.round).join()}` : "";
+  if (key === splitPlaced) return;
+  splitPlaced = key;
+  void api("desktop-browser-place", { chat: split.session, rect }).catch(() => {});
+}
+/// The bar over the page (pass 256 A): back, forward, reload, the address, a new tab, open in your own browser and ×,
+/// always there. Using any of them makes the page yours. What the model is doing shows as a few words at the end of the address.
+function renderSplitHead(aside: HTMLElement, doing: { tone: string; words: string } | null) {
+  const url = aside.querySelector<HTMLInputElement>(".bs-url")!;
+  const page = Boolean(split.frame);
+  aside.querySelector<HTMLButtonElement>('[data-go="back"]')!.disabled = !page || !(split.home || split.frame?.back);
+  aside.querySelector<HTMLButtonElement>('[data-go="forward"]')!.disabled = !page || split.home || !split.frame?.forward;
+  aside.querySelector<HTMLButtonElement>('[data-go="reload"]')!.disabled = !page || split.home;
+  aside.querySelector<HTMLButtonElement>('[data-go="new"]')!.disabled = !page;
+  aside.querySelector<HTMLButtonElement>('[data-go="outside"]')!.disabled = split.home || !openableOutside(split.frame?.url);
+  url.readOnly = !page;
+  url.tabIndex = page ? 0 : -1;
+  url.placeholder = split.home ? "Type an address" : "";
+  const shown = split.home ? "" : split.frame?.url ?? "";
+  if (document.activeElement !== url) url.value = shown.replace(/^https?:\/\//, "").replace(/^about:blank$/, "");
+  url.title = split.frame?.title ?? "";
+  const words = aside.querySelector<HTMLElement>(".bs-doing")!;
+  const html = doing ? `<i></i><span>${h(doing.words)}</span>` : "";
+  if (words.dataset.html !== html) { words.innerHTML = html; words.dataset.html = html; }
+  words.className = `bs-doing ${doing?.tone ?? ""}`;
+  words.hidden = !doing || split.home;
+  aside.querySelector<HTMLElement>(".bs-load")!.hidden = !(split.frame?.loading && !split.home);
+  // Pointing works on the page itself (the real view in the window), and doesn't take it from the model.
+  const aim = aside.querySelector<HTMLButtonElement>('[data-go="point"]')!, aiming = pointing === "browser";
+  aim.disabled = !split.frame?.live || split.home;
+  aim.classList.toggle("on", aiming);
+  aim.setAttribute("aria-pressed", String(aiming));
+  aim.title = aiming ? "Pointing: click something on the page, Esc to stop" : "Point at something on the page; it goes in your next message";
+  const saved = aside.querySelector<HTMLButtonElement>(".bs-down")!, got = downloadWords(splitDownloads.get(split.session) ?? []);
+  const savedHtml = got ? `${BS_ICONS.saved}<span>${h(got.text)}</span>${got.more ? `<b>+${got.more}</b>` : ""}` : "";
+  if (saved.dataset.html !== savedHtml) { saved.innerHTML = savedHtml; saved.dataset.html = savedHtml; }
+  saved.hidden = !got || split.home;
+  saved.title = got?.title ?? "";
+  saved.setAttribute("aria-label", got ? `Downloaded ${got.text}${got.more ? ` and ${got.more} more` : ""}: show it in its folder` : "");
+  const zoom = aside.querySelector<HTMLButtonElement>(".bs-zoom")!, zoomed = split.home ? "" : zoomWords(split.frame?.zoom);
+  if (zoom.textContent !== zoomed) zoom.textContent = zoomed;
+  zoom.hidden = !zoomed;
+}
+/// The find bar (⌘F): under the toolbar, it pushes the page down a little rather than covering it.
+function renderSplitFind(aside: HTMLElement) {
+  const bar = aside.querySelector<HTMLElement>(".bs-find")!, open = split.find.open && Boolean(split.frame?.live) && !split.home;
+  if (bar.hidden === open) { bar.hidden = !open; placeSplitView(); }
+  const input = bar.querySelector<HTMLInputElement>(".bs-find-text")!;
+  if (document.activeElement !== input && input.value !== split.find.text) input.value = split.find.text;
+  const count = bar.querySelector<HTMLElement>(".bs-find-count")!, words = findWords(split.find.text, split.find.found);
+  if (count.textContent !== words) count.textContent = words;
+  count.classList.toggle("none", split.find.found?.matches === 0);
+  for (const button of bar.querySelectorAll<HTMLButtonElement>('[data-find="back"], [data-find="next"]')) button.disabled = !split.find.found?.matches;
+}
+function openFind() {
+  if (!split.open || !split.frame?.live || split.home) return;
+  const aside = el("browser-split");
+  split.find.open = true;
+  renderSplitFind(aside);
+  const input = aside.querySelector<HTMLInputElement>(".bs-find-text")!;
+  input.focus(); input.select();
+  if (split.find.text) void findOnPage(true);
+}
+function closeFind() {
+  if (!split.find.open) return;
+  split.find = { open: false, text: "", found: null };
+  void api("desktop-browser-view", { chat: split.session, stop: true }).catch(() => {});
+  renderSplitFind(el("browser-split"));
+}
+/// Looks for the words on the page; `again` goes to the next match (or the one before, `back`).
+async function findOnPage(again: boolean, back = false) {
+  const text = split.find.text, chat = split.session;
+  if (!text.trim()) {
+    split.find.found = null;
+    renderSplitFind(el("browser-split"));
+    void api("desktop-browser-view", { chat, stop: true }).catch(() => {});
+    return;
+  }
+  let found: { matches: number; at: number } | null = null;
+  try { const got = await api<{ matches?: number; at?: number }>("desktop-browser-view", { chat, find: text, again, back }); found = { matches: Number(got?.matches) || 0, at: Number(got?.at) || 0 }; }
+  catch { /* the page went: no count */ }
+  if (split.session !== chat || split.find.text !== text || !split.find.open) return;
+  split.find.found = found;
+  renderSplitFind(el("browser-split"));
+}
+/// ⌘+ ⌘− ⌘0 on the page: its own zoom, not the app's. The chip in the bar shows it, and a click on it goes back to 100%.
+async function zoomPage(way: "in" | "out" | "reset") {
+  if (!split.open || !split.frame?.live || split.home) return;
+  try {
+    const got = await api<{ zoom?: number }>("desktop-browser-view", { chat: split.session, zoom: way });
+    if (split.frame && typeof got?.zoom === "number") { split.frame.zoom = got.zoom; renderBrowserSplit(); }
+  } catch (error) { fail(error); }
+}
+/// Point at it, on the chat's page: your next click there picks what is under it, and it rides with your next
+/// message as a chip, like a pick in a live preview. A page on this computer is looked up in the project's code too.
+let pointingPage = "";
+async function pointAtPage() {
+  if (pointing === "browser") return void stopPointing();
+  stopPointing();
+  const chat = split.session;
+  pointing = "browser"; pointingPage = chat;
+  renderBrowserSplit();
+  let pick: PointPick | null = null;
+  try { pick = await api<PointPick | null>("desktop-browser-point", { chat }); }
+  catch (error) { fail(error); }
+  finally { if (pointing === "browser" && pointingPage === chat) { pointing = null; pointingPage = ""; } renderBrowserSplit(); }
+  if (!pick || state?.session?.id !== chat) return;
+  let source: PointSource | null = null;
+  if (localPage(pick.page)) try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
+  pointed.push({ ...pick, id: `${Date.now()}:${pointed.length}`, source });
+  renderComposer();
+  editor.focus();
+}
+function stopPointing() {
+  if (pointing === "browser") void api("desktop-browser-point", { chat: pointingPage, cancel: true }).catch(() => {});
+  else if (pointing) void api("desktop-point", { cancel: true }).catch(() => {});
+}
+// A file the page downloaded (into the project's .demesne/downloads) shows in the bar.
+document.addEventListener("demesne:browser-download", (event) => {
+  const { chat, name, path, bytes } = (event as CustomEvent<{ chat?: string; name?: string; path?: string; bytes?: number }>).detail ?? {};
+  if (!chat || !name || !path) return;
+  const list = splitDownloads.get(chat) ?? [];
+  list.push({ name, path, bytes: Number(bytes) || 0 });
+  splitDownloads.set(chat, list.slice(-8));
+  if (chat === split.session) renderBrowserSplit();
+});
+// Find and zoom keys pressed on the page itself come from the window.
+document.addEventListener("demesne:browser-key", (event) => {
+  const { chat, key } = (event as CustomEvent<{ chat?: string; key?: string }>).detail ?? {};
+  if (!chat || chat !== split.session || !split.open) return;
+  if (key === "find") openFind();
+  else if (key === "find-next" || key === "find-back") { if (split.find.open) void findOnPage(true, key === "find-back"); else openFind(); }
+  else if (key === "zoom-in" || key === "zoom-out" || key === "zoom-reset") void zoomPage(key === "zoom-in" ? "in" : key === "zoom-out" ? "out" : "reset");
+});
+/// One chip per tab, when the chat's browser has more than one. While the page is yours, a chip switches to it.
+function renderSplitTabs(aside: HTMLElement, _yours: boolean) {
+  const row = aside.querySelector<HTMLElement>(".bs-tabs")!;
+  // Each chip closes with its own ×, but the last page: × in the bar closes the browser.
+  const closable = split.tabs.length > 1;
+  const close = (what: string, name: string) => `<button type="button" class="bs-tab-x" data-close-tab="${what}" aria-label="Close ${h(name)}" title="Close tab">${BS_ICONS.close}</button>`;
+  const chips = split.tabs.map((tab) => { const on = tab.active && !split.home, name = tabName(tab); return `<span class="bs-chip${on ? " on" : ""}"><button type="button" class="bs-tab${on ? " on" : ""}" data-tab="${tab.n}" ${on ? "disabled" : ""} title="${h(tab.url)}">${h(name)}</button>${closable ? close(String(tab.n), name) : ""}</span>`; });
+  if (split.home) chips.push(`<span class="bs-chip on"><button type="button" class="bs-tab on" disabled>New tab</button>${close("home", "New tab")}</span>`);
+  const html = chips.length > 1 ? chips.join("") : "";
+  if (row.dataset.html !== html) { row.innerHTML = html; row.dataset.html = html; }
+  row.hidden = !html;
+}
+/// Shows the picture of the page (the hidden browser; the real page in the window needs none).
+/// The picture is drawn on a canvas, and only once it is ready: the last one stays up meanwhile.
+/// (An <img> whose src changes ten times a second goes blank between pictures, which flickers.)
+let splitDrawing = "", splitWanted = "", splitDrawn = "";
+function showSplitPicture(aside: HTMLElement) {
+  const page = aside.querySelector<HTMLCanvasElement>(".bs-page"), src = split.frame?.src;
+  // The page itself is on show: no picture to draw.
+  if (page && (split.frame?.live || split.home)) { page.hidden = true; splitDrawn = splitWanted = ""; placeSplitView(); return; }
+  if (!page || !src) return;
+  placeSplitView();
+  // The page is as wide as the split, so it shows at its own size. A phone-width page keeps its width, in the middle.
+  const room = aside.querySelector<HTMLElement>(".bs-view")?.clientWidth ?? 0;
+  page.style.width = split.frame && split.frame.width < room - 24 ? `${split.frame.width}px` : "";
+  if (src === splitDrawn) return;
+  splitWanted = src;
+  if (splitDrawing) return;
+  const draw = async (): Promise<void> => {
+    const now = splitWanted;
+    splitDrawing = now;
+    try {
+      const image = new Image();
+      image.src = now;
+      await image.decode();
+      if (page.width !== image.naturalWidth || page.height !== image.naturalHeight) {
+        // A new size clears a canvas: draw on a spare one first, so the swap is one step.
+        const spare = document.createElement("canvas");
+        spare.width = image.naturalWidth; spare.height = image.naturalHeight;
+        spare.getContext("2d")!.drawImage(image, 0, 0);
+        page.width = spare.width; page.height = spare.height;
+        page.getContext("2d")!.drawImage(spare, 0, 0);
+      } else page.getContext("2d")!.drawImage(image, 0, 0);
+      splitDrawn = now;
+      page.hidden = false;
+    } catch { /* a picture that would not decode: the last one stays */ }
+    splitDrawing = "";
+    // Newer ones came meanwhile: only the newest is drawn.
+    if (splitWanted !== now && splitWanted !== splitDrawn) return draw();
+  };
+  void draw();
+}
+/// A soft ring where the model last clicked or typed, fading out.
+function showSplitRing(aside: HTMLElement, pointer: { x: number; y: number; ago: number } | undefined) {
+  const ring = aside.querySelector<HTMLElement>(".bs-ring")!;
+  const spot = split.frame && !split.frame.live ? ringSpot(pointer, split.frame) : null;
+  if (!spot || !pointer) { if (!pointer) ring.hidden = true; return; }
+  const at = Date.now() - pointer.ago;
+  if (Math.abs(at - split.ringAt) < 120) return;
+  split.ringAt = at;
+  ring.style.left = `${spot.left}%`; ring.style.top = `${spot.top}%`;
+  ring.hidden = false;
+  ring.classList.remove("on"); void ring.offsetWidth; ring.classList.add("on");
+  setTimeout(() => { if (split.ringAt === at) ring.hidden = true; }, RING_MS);
+}
+function buildBrowserSplit(aside: HTMLElement) {
+  aside.setAttribute("aria-label", BROWSER_SPLIT_LABEL);
+  aside.innerHTML = `<div class="bs-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize"></div>`
+    + `<div class="bs-head"><span class="bs-nav">${splitButton("back", "Back")}${splitButton("forward", "Forward")}${splitButton("reload", "Reload")}</span>`
+    + `<label class="bs-addr"><input class="bs-url" readonly spellcheck="false" autocomplete="off" aria-label="Address"><span class="bs-doing" hidden></span></label>`
+    + `<button type="button" class="bs-down" data-go="downloads" hidden></button><button type="button" class="bs-zoom" data-go="zoom-reset" title="Back to 100%" hidden></button>${splitButton("point", "Point at something on the page", "point")}${splitButton("new", "New tab", "plus")}${splitButton("outside", "Open in your browser", "out")}<button type="button" class="bs-icon bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close the browser">${BS_ICONS.close}</button><i class="bs-load" hidden></i></div>`
+    + `<div class="bs-tabs" hidden></div>`
+    + `<div class="bs-find" role="search" hidden><input class="bs-find-text" spellcheck="false" autocomplete="off" placeholder="Find on page" aria-label="Find on page"><span class="bs-find-count" aria-live="polite"></span>`
+    + `<button type="button" class="bs-icon" data-find="back" aria-label="Previous match" title="Previous match">${BS_ICONS.up}</button><button type="button" class="bs-icon" data-find="next" aria-label="Next match" title="Next match">${BS_ICONS.down}</button><button type="button" class="bs-icon" data-find="close" aria-label="Close find" title="Close (Esc)">${BS_ICONS.close}</button></div>`
+    + `<div class="bs-view"><div class="bs-stage"><canvas class="bs-page" aria-hidden="true" hidden></canvas><i class="bs-ring" hidden></i></div><div class="bs-home"><svg viewBox="0 0 100 100" role="img" aria-label="Demesne"><use href="#demesne-mark"/></svg></div></div>`;
+  const view = aside.querySelector<HTMLElement>(".bs-view")!, img = aside.querySelector<HTMLCanvasElement>(".bs-page")!;
+  const yours = splitYours;
+  const send = (events: unknown[]) => { if (events.length) void api("browser-input", { events }).catch(() => {}); };
+  const at = (event: MouseEvent) => pagePoint(event.clientX, event.clientY, img.getBoundingClientRect(), split.frame!);
+  const go = (to: string) => void api("browser-go", { to }).catch((error) => fail(error));
+  const BUTTONS = ["left", "middle", "right"] as const;
+  let moved = 0;
+  const mine = () => { if (!yours() && split.frame) void takeSplit(); return yours(); };
+  img.addEventListener("mousedown", (event) => { if (!mine()) return; event.preventDefault(); view.focus({ preventScroll: true }); send([{ type: "mouseDown", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
+  img.addEventListener("mouseup", (event) => { if (!yours()) return; send([{ type: "mouseUp", ...at(event), button: BUTTONS[event.button] ?? "left", clickCount: event.detail || 1 }]); });
+  img.addEventListener("mousemove", (event) => { if (!yours() || Date.now() - moved < 60) return; moved = Date.now(); send([{ type: "mouseMove", ...at(event) }]); });
+  img.addEventListener("contextmenu", (event) => { if (yours()) event.preventDefault(); });
+  view.addEventListener("wheel", (event) => {
+    if (!mine()) return;
+    event.preventDefault();
+    send([{ type: "mouseWheel", ...at(event), deltaX: -event.deltaX, deltaY: -event.deltaY }]);
+  }, { passive: false });
+  view.addEventListener("keydown", (event) => {
+    if (event.isComposing || !keyInputs(event).length || !mine()) return;
+    const events = keyInputs(event);
+    if (!events.length) return;
+    event.preventDefault();
+    send(events);
+  });
+  view.addEventListener("paste", (event) => {
+    if (!yours()) return;
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    event.preventDefault();
+    if (text) send([{ type: "text", text: text.slice(0, 4000) }]);
+  });
+  // The bar's buttons and the address work any time; using one makes the page yours, as scrolling it does.
+  const url = aside.querySelector<HTMLInputElement>(".bs-url")!;
+  const own = async () => { if (!split.held) await takeSplit(); return Boolean(split.held); };
+  const home = (on: boolean) => { split.home = on; showSplitPicture(aside); renderBrowserSplit(); };
+  url.addEventListener("keydown", async (event) => {
+    if (event.key === "Escape") { url.blur(); if (split.home) home(false); else renderBrowserSplit(); return; }
+    if (event.key !== "Enter" || url.readOnly || !url.value.trim()) return;
+    event.preventDefault();
+    const to = url.value.trim(), fresh = split.home;
+    url.blur();
+    if (!await own()) return;
+    split.home = false;
+    try { await api("browser-go", { to, ...(fresh ? { newTab: true } : {}) }); }
+    catch (error) { fail(error); }
+    showSplitPicture(aside); renderBrowserSplit();
+  });
+  url.addEventListener("focus", () => {
+    if (url.readOnly) return;
+    // The whole address while you edit it.
+    if (!split.home) url.value = split.frame?.url ?? url.value;
+    url.select();
+  });
+  url.addEventListener("blur", () => renderBrowserSplit());
+  aside.querySelector<HTMLElement>(".bs-head")!.addEventListener("click", async (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-go]");
+    if (!button || button.disabled) return;
+    const what = button.dataset.go!;
+    // Pointing and zoom are looking at the page, not using it: the model keeps it.
+    if (what === "point") { void pointAtPage(); return; }
+    if (what === "zoom-reset") { void zoomPage("reset"); return; }
+    if (what === "downloads") { const last = splitDownloads.get(split.session)?.at(-1); if (last) void api("desktop-show-download", { path: last.path }).catch((error) => fail(error)); return; }
+    if (what === "outside") { const address = split.frame?.url; if (openableOutside(address)) void api("open-link", { url: address }).catch(() => {}); return; }
+    if (!await own()) return;
+    if (what === "new") { home(true); url.focus(); return; }
+    // Back from a new tab is the page it was opened over.
+    if (what === "back" && split.home) { home(false); return; }
+    go(what);
+  });
+  aside.querySelector<HTMLElement>(".bs-tabs")!.addEventListener("click", (event) => {
+    // A chip's ×: the new tab goes back to the page it was opened over; a page's tab closes (closing one is using the browser, so the page is yours).
+    const shut = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-close-tab]");
+    if (shut) {
+      if (shut.dataset.closeTab === "home") { home(false); return; }
+      void (async () => { if (!await own()) return; try { await api("browser-go", { to: `close:${shut.dataset.closeTab}` }); } catch (error) { fail(error); } })();
+      return;
+    }
+    const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-tab]");
+    if (!chip || chip.disabled) return;
+    void (async () => { if (!split.held) await takeSplit(); if (!split.held) return; split.home = false; showSplitPicture(aside); renderBrowserSplit(); go(`tab:${chip.dataset.tab}`); })();
+  });
+  // The find bar: typing finds as you go, Enter is the next match (Shift+Enter the one before), Esc closes it.
+  const find = aside.querySelector<HTMLElement>(".bs-find")!, findText = find.querySelector<HTMLInputElement>(".bs-find-text")!;
+  findText.addEventListener("input", () => { split.find.text = findText.value; void findOnPage(false); });
+  findText.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Enter") { event.preventDefault(); void findOnPage(true, event.shiftKey); }
+    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeFind(); }
+  });
+  find.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-find]");
+    if (!button || button.disabled) return;
+    if (button.dataset.find === "close") closeFind();
+    else void findOnPage(true, button.dataset.find === "back");
+  });
+  // The line between chat and browser moves either way; the width is kept.
+  const grip = aside.querySelector<HTMLElement>(".bs-grip")!;
+  grip.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    grip.setPointerCapture(event.pointerId);
+    aside.classList.add("resizing");
+    const right = el("workspace").getBoundingClientRect().right, total = el("workspace").clientWidth;
+    const move = (e: PointerEvent) => { split.width = splitWidth(right - e.clientX, total); aside.style.width = `${split.width}px`; placeSplitView(); };
+    const up = () => {
+      grip.removeEventListener("pointermove", move); aside.classList.remove("resizing");
+      try { localStorage.setItem("demesne-browser-split", String(split.width)); } catch {}
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up, { once: true });
+    grip.addEventListener("pointercancel", up, { once: true });
+  });
+  // The real page follows its place as the window changes around it.
+  addEventListener("resize", placeSplitView);
+  document.addEventListener("visibilitychange", placeSplitView);
+  setInterval(placeSplitView, 400);
+}
+/// You go back to the chat (a click in it, or the composer taking your typing): the page goes back to the model.
+async function handSplitBack() {
+  if (!split.held) return;
+  split.handedAsk = handOverAsk(state?.runs.find((one) => one.id === state?.activeTurnId))?.toolCallId ?? "";
+  split.held = null; split.heldAt = Date.now();
+  renderCards();
+  await api("browser-hand-back", {}).catch(() => {});
+}
+/// You scroll, click or type on the picture of the page (the hidden browser): it is yours from then on.
+/// (The real page in the window makes itself yours, and the daemon says so.)
+async function takeSplit() {
+  if (split.held || !split.frame) return;
+  split.held = "person"; split.heldAt = Date.now();
+  renderCards();
+  await api("browser-take", {}).catch(() => {});
+}
+const backToChat = (event: Event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (split.held && split.open && target?.closest("#main") && !target.closest("#browser-split")) void handSplitBack();
+};
+document.addEventListener("pointerdown", backToChat, true);
+document.addEventListener("focusin", (event) => { if (event.target instanceof HTMLTextAreaElement) backToChat(event); }, true);
+/// Asks for newer pictures while the split shows; the daemon waits a moment for one.
+async function pumpBrowserFrames() {
+  if (split.pumping) return;
+  split.pumping = true;
+  try {
+    while (split.open && state?.session?.id === split.session && !pageOpen) {
+      if (document.visibilityState !== "visible") { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
+      const session = split.session;
+      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number } };
+      let got: Got | null = null;
+      // The view's shape, so the page is drawn as tall as the split shows it.
+      const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
+      const aspect = view && view.clientWidth > 0 ? view.clientHeight / view.clientWidth : undefined;
+      const askedAt = Date.now();
+      try { got = await api("browser-frame", { after: split.seq, ...(aspect ? { aspect } : {}), dark: document.documentElement.dataset.appearance !== "light", ...(view && view.clientWidth > 0 ? { width: view.clientWidth, dpr: devicePixelRatio || 1 } : {}) }); } catch { await new Promise((resolve) => setTimeout(resolve, 1000)); continue; }
+      if (split.session !== session || !got) continue;
+      const aside = el("browser-split");
+      let redraw = false;
+      const held = got.held ?? null;
+      // An answer asked for before you took or handed back the page is out of date about who holds it.
+      if (held !== split.held && askedAt > split.heldAt) { split.held = held; redraw = true; }
+      if ((got.src || got.live) && Number(got.seq) > split.seq) {
+        (window as unknown as { __at?: number }).__at = Number((got as { at?: number }).at) || 0;
+        split.seq = Number(got.seq);
+        const first = !split.frame, before = split.frame;
+        split.frame = { src: got.src ?? "", ...(got.live ? { live: true } : {}), width: Number(got.width) || 1280, height: Number(got.height) || 800, url: String(got.url ?? ""), title: String(got.title ?? ""), back: Boolean(got.back), forward: Boolean(got.forward), ...(got.loading ? { loading: true } : {}), ...(typeof got.zoom === "number" && got.zoom > 0 ? { zoom: got.zoom } : {}) };
+        const tabs = Array.isArray(got.tabs) ? got.tabs : [];
+        if (JSON.stringify(tabs) !== JSON.stringify(split.tabs)) { split.tabs = tabs; redraw = true; }
+        showSplitPicture(aside);
+        showSplitRing(aside, got.pointer);
+        if (first || before?.url !== split.frame.url || before?.title !== split.frame.title || before?.back !== split.frame.back || before?.forward !== split.frame.forward || Boolean(before?.loading) !== Boolean(split.frame.loading) || before?.zoom !== split.frame.zoom) redraw = true;
+        // A new page: what you are finding is looked for on it.
+        if (before && before.url !== split.frame.url && split.find.open && split.find.text) void findOnPage(false);
+      }
+      if (redraw) renderBrowserSplit();
+      // While the page is yours the next picture is asked for at once; watching can breathe.
+      if (!split.held) await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+  } finally { split.pumping = false; }
+}
+
 function renderCards() {
+  renderBrowserSplit();
   // A page in place of the chat (Settings, Customize…) hides the chat's cards.
   const aside = el("cards"), app = el("app");
   const hide = () => { app.classList.remove("cards-on", "cards-context"); aside.hidden = true; cardsSignature = ""; };
@@ -1815,7 +2320,7 @@ function landWhenSeen(node: HTMLElement, shot: WindowShot) {
 /// The capture keys took a window (electron/capture-keys.ts).
 document.addEventListener("demesne:window-shot", (event) => {
   const shot = (event as CustomEvent<{ app?: string; title?: string; data?: string; text?: string; textNote?: string; from?: Rect; error?: string }>).detail;
-  if (shot.error) { notice(shot.error); return; }
+  if (shot.error) { fail(shot.error); return; }
   if (!state?.session || !shot.data) { notice("Open a chat, then press the keys again to add the window."); return; }
   const sessionId = state.session.id;
   void act(async () => {
@@ -2066,7 +2571,7 @@ function renderRailChats(open: { item: Chat; tone: string; on: boolean }[]) {
     const title = item.title || "New chat", about = STATE_WORDS[tone] ?? "";
     const [action, args] = chatTarget(item.id);
     const letter = (/[\p{L}\p{N}]/u.exec(title)?.[0] ?? "·").toUpperCase();
-    return `<button type="button" class="rail-chat${on ? " on" : ""}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-tip="${h(about ? `${title} · ${about}` : title)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${on ? ' aria-current="page"' : ""}>${h(letter)}${tone ? `<i class="rail-chat-dot ${tone}" aria-hidden="true"></i>` : ""}</button>`;
+    return `<button type="button" class="rail-chat${on ? " on" : ""}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-tip="${h(about ? `${title} · ${about}` : title)}" aria-label="${h(about ? `${title}, ${about}` : title)}"${on ? ' aria-current="page"' : ""}>${h(letter)}${tone && !(on && tone === "working") ? `<i class="rail-chat-dot ${tone}" aria-hidden="true"></i>` : ""}</button>`;
   }).join("");
 }
 function renderTabs() {
@@ -2107,7 +2612,7 @@ function renderTabs() {
       : `<span class="bar-tab-words"><span class="bar-tab-name"${on ? ' id="workspace-title"' : ""}>${h(title)}</span><span class="bar-tab-sub" aria-hidden="true">${h(sub)}</span></span>`;
     // The close slot is always kept, so a name never moves when × shows.
     const close = pinned ? "" : btn("tab-close", "×", { id }, "bar-tab-close").replace("<button ", `<button title="Close tab" aria-label="Close ${h(title)}" tabindex="-1" `);
-    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-light" aria-hidden="true">${threadLight(thread)}</span>` : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
+    return `<div class="bar-tab${on ? " on" : ""}${pinned ? " pinned" : ""}${tone ? ` t-${tone}` : ""}" draggable="true" data-tab-key="chat:${h(id)}" data-tab="${h(id)}"><button type="button" role="tab" id="workspace-tab-${h(encodeURIComponent(id))}" aria-controls="workspace" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-action="${action}" data-args="${h(JSON.stringify(args))}" data-about="${h(about)}" data-when="${h(fullTime(item.updatedAt))}" data-updated="${h(item.updatedAt)}" title="${h(pinned ? `${tip} (pinned)` : tip)}" aria-label="${h(about ? `${title}, ${about}` : title)}${pinned ? ", pinned" : ""}">${thread ? `<span class="tab-light" aria-hidden="true">${threadLight(thread)}</span>` : on && tone === "working" ? "" : `<span class="sidebar-session-mark ${tone}" aria-hidden="true"></span>`}${words}</button>${close}</div>`;
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
@@ -2504,7 +3009,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
   const key = `${run.id}:${tool.id}`, open = hasFileEdit(tool) ? fileEditsOpen.has(key) : stepOpen.has(key), canFold = foldable(tool);
   const now = tool.state === "running" || tool.drafting, served = serving(tool)?.serves;
   const cli = cliAgent(tool);
-  const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.waiting
+  const meta = served ? `<span class="pv-live" aria-hidden="true"></span>${h(new URL(served).host)}` : tool.name === "browser" && tool.input.action === "hand_over" && now ? `<span class="amber">waiting for you</span>` : tool.waiting
     ? `<span class="amber">${tool.name === "ask_user" || state?.questions.some((q) => q.toolCallId === tool.toolCallId) ? "waiting for your answer" : "waiting for you"}</span>`
     : tool.phase === "change"
       ? tool.drafting ? "writing…" : tool.state === "done" ? counts(totals(run, tool)) : `<span class="${tone(tool.state)}">${h(tool.state)}</span>`
@@ -2822,7 +3327,7 @@ const working = () => Boolean(state?.activeTurnId || state?.busy || state?.sessi
 function rebuildWhenIdle() {
   if (!rebuildAsked || state?.selfBuild.state !== "ready" || working()) return;
   rebuildAsked = false;
-  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => fail(error));
 }
 /// A sent message, its big pastes shown folded as they were in the composer.
 function requestText(content: string) {
@@ -3585,9 +4090,9 @@ window.addEventListener("pagehide", () => seenStore.write(seen));
 const reviewJobs = () =>
   state ? [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job) && (job!.status === "ready" || job!.status === "failed")) : [];
 let reviewShown = false;
-/// Home's cherry blossom lives behind the start screen only, and sleeps while
-/// a chat or a page is showing.
-let sakura: Sakura | null = null, sakuraTried = false, sakuraDark: boolean | null = null;
+/// Home's sky (the galaxy and the flagship) lives behind the start screen
+/// only, and is left alone while a chat or a page is showing.
+let homeSky: MilkyWay | null = null, homeSkyTried = false, homeSkyDark: boolean | null = null;
 const colorProbe = document.createElement("canvas").getContext("2d");
 function inkIsDark() {
   if (!colorProbe) return true;
@@ -3596,23 +4101,22 @@ function inkIsDark() {
   const hex = String(colorProbe.fillStyle), [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0);
   return .2126 * r! + .7152 * g! + .0722 * b! < 128;
 }
-function renderSakura(show: boolean) {
-  const host = document.getElementById("sakura");
+function renderHomeSky(show: boolean) {
+  const host = document.getElementById("home-sky");
   if (!host) return;
-  if (show && !sakuraTried) {
-    sakuraTried = true;
+  if (show && !homeSkyTried) {
+    homeSkyTried = true;
     // the picture ends just above the greeting
     const floor = () => { const eyebrow = el("hero").querySelector(".hero-eyebrow, h1"); return eyebrow ? eyebrow.getBoundingClientRect().top - host.getBoundingClientRect().top : host.clientHeight * .47; };
-    try { sakura = mountSakura(host, inkIsDark(), floor); } catch { sakura = null; }
+    try { homeSkyDark = inkIsDark(); homeSky = mountMilkyWay(host, homeSkyDark, floor); } catch { homeSky = null; }
   }
-  host.hidden = !show || !sakura;
-  if (!sakura) return;
+  host.hidden = !show || !homeSky;
   // Hidden, it only rests: reading the ink's colour asks the browser for
   // styles, which in a chat cost more than anything else on each update.
-  if (!show) { sakura.pause(); return; }
+  if (!homeSky || !show) return;
   const dark = inkIsDark();
-  if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
-  sakura.resume(); sakura.refit();
+  if (dark !== homeSkyDark) { homeSkyDark = dark; homeSky.setDark(dark); }
+  homeSky.refit();
 }
 /// When the window was last in front of you, kept on this computer: Home
 /// says what happened since.
@@ -3700,8 +4204,8 @@ function renderHero() {
   attention.hidden = !attention.childElementCount;
   after.innerHTML = paragraph(sentences.slice(waiting.length ? 1 : 0)) + pick;
   after.hidden = !after.childElementCount;
-  // Refit the blossom above the greeting, not behind the text.
-  if (sakura && !document.getElementById("sakura")?.hidden) sakura.refit();
+  // Keep the sky above the greeting when Home gains or loses lines.
+  if (homeSky && !document.getElementById("home-sky")?.hidden) homeSky.refit();
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
 /// (Active or Archived), Scheduled, Customize or Settings. "" when closed.
@@ -3943,6 +4447,8 @@ function ensureMockupNames() {
 }
 /// The version a chat link asked for: the long page scrolls to it once drawn.
 let foundryFocus: { id: string; version?: number; quiet?: boolean } | null = null;
+/// Pass 262 C: the one mockup grown to full width on the long page, if any.
+let foundryOpen: FoundryOpen | null = null;
 /// Documents on the long page, rendered once they scroll near ("id:version").
 const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
 const foundryUi = { error: "" };
@@ -4009,8 +4515,9 @@ async function carryFoundryNotes(keys: string[]): Promise<string> {
     const pictured: number[] = [];
     for (const [index, note] of notes.entries()) {
       if (!note.picture || state.attachments.length >= 10) continue;
-      const sent = await api<{ id: string } | undefined>("attach", { name: `note-${index + 1}.png`, mimeType: "image/png", data: note.picture }).catch(() => undefined);
-      if (sent?.id) { pictured.push(index); attachmentPreviews.set(sent.id, `data:image/png;base64,${note.picture}`); }
+      const file = notePictureFile(note, index);
+      const sent = await api<{ id: string } | undefined>("attach", { ...file, data: note.picture }).catch(() => undefined);
+      if (sent?.id) { pictured.push(index); attachmentPreviews.set(sent.id, `data:${file.mimeType};base64,${note.picture}`); }
     }
     parts.push(foundryNotesMessage({ id, title: mockup.title, version }, notes, pictured));
     foundryNotes.waiting.delete(key);
@@ -4063,6 +4570,22 @@ async function editCustomizable(path: string) {
 /// Settings: the section shown, the search, the row whose words are unfolded,
 /// and what the host read from config.toml and the daemon.
 const settingsUi = { section: "overview" as SettingsSection, query: "", fold: "", error: "" };
+/// Settings › Browser (pass 261 A): sign-ins from your other browsers, for the project open now.
+const signins = { root: "", from: "", data: null as BrowserSigninsView["data"], picked: [] as string[], busy: "" as BrowserSigninsView["busy"], said: "" };
+const signinsRoot = () => { const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace || ""; return isPlain() || !here ? "" : here; };
+async function loadSignins(from?: string) {
+  const root = signinsRoot();
+  if (root !== signins.root) Object.assign(signins, { root, data: null, picked: [], said: "", from: "" });
+  if (!root) return renderPage();
+  signins.busy = "list"; renderPage();
+  try {
+    signins.data = await api<NonNullable<BrowserSigninsView["data"]>>("browser-signins", { root, ...(from ?? signins.from ? { from: from ?? signins.from } : {}) });
+    signins.from = signins.data.from ?? "";
+    // The sites you ticked stay ticked while they are still there to bring.
+    signins.picked = signins.picked.filter((site) => signins.data!.sites.some((one) => one.site === site && !one.never));
+  } catch (error) { signins.data = { sources: [], from: null, sites: [], kept: [], error: error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error) }; }
+  signins.busy = ""; renderPage();
+}
 let googleAIForm: GoogleAIForm | null = null;
 function clearGoogleAIForm() {
   if (!googleAIForm) return;
@@ -4164,6 +4687,7 @@ function settingsView(): SettingsView {
     chats: { here: s.sessions.filter((item) => item.workspace === here && item.turns).length, all: s.sessions.filter((item) => item.turns).length },
     online: s.connection === "online",
     plans: [...planLimits].sort((a, b) => Number(b.provider === s.model.provider) - Number(a.provider === s.model.provider)),
+    browser: { project: signins.root ? projectLabel(signins.root) : "", root: signins.root || null, data: signins.data, picked: signins.picked, busy: signins.busy, said: signins.said },
   };
 }
 /// The sidebar holds Settings' list while it is open; the search keeps the
@@ -4189,6 +4713,7 @@ function settingsSection(id: SettingsSection) {
   const search = document.getElementById("settings-search") as HTMLInputElement | null;
   if (search) search.value = "";
   if (id === "overview" || id === "permissions" || id === "data") loadSettings();
+  if (id === "browser") void loadSignins();
   renderPage();
   document.getElementById("page")?.scrollTo?.({ top: 0 });
 }
@@ -4370,8 +4895,9 @@ async function sendFoundryNotes(key: string) {
     const pictured: number[] = [], had = state.attachments.length;
     for (const [index, note] of notes.entries()) {
       if (!note.picture || had + pictured.length >= 10) continue;
-      const sent = await api<{ id: string } | undefined>("attach", { name: `note-${index + 1}.png`, mimeType: "image/png", data: note.picture }).catch(() => undefined);
-      if (sent?.id) { pictured.push(index); pictures.push(sent.id); attachmentPreviews.set(sent.id, `data:image/png;base64,${note.picture}`); }
+      const file = notePictureFile(note, index);
+      const sent = await api<{ id: string } | undefined>("attach", { ...file, data: note.picture }).catch(() => undefined);
+      if (sent?.id) { pictured.push(index); pictures.push(sent.id); attachmentPreviews.set(sent.id, `data:${file.mimeType};base64,${note.picture}`); }
     }
     // Queued behind a turn that is still running, never steered into it; the line under the mockup says where they went.
     const session = state.session;
@@ -4393,10 +4919,38 @@ async function sendFoundryNotes(key: string) {
   }
   foundryNotesWatch?.paint();
 }
+/// Errors come back: what a mockup hit while you used it goes to the chat
+/// that made it (when that chat is in this project), else the chat that is
+/// open, queued behind a running turn, never steered into it.
+async function sendFoundryError(key: string) {
+  const at = key.lastIndexOf(":"), id = key.slice(0, at), version = Number(key.slice(at + 1));
+  const errors = foundryErrors.get(key), mockup = foundryList?.find((item) => item.id === id);
+  if (!errors?.errors.length || errors.sending || !mockup || !state) return;
+  errors.sending = true; delete errors.failed;
+  foundryErrorsWatch?.paint();
+  try {
+    const made = foundryVersions?.find((item) => item.artifactId === id && item.version === version)?.sessionId ?? null;
+    const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+    const chat = made && made !== state.session?.id ? state.sessions.find((item) => item.id === made && (item.workspace ?? "") === (here ?? "") && !deletedSessions.has(item.id)) : null;
+    if (chat) {
+      await api("select-session", { id: chat.id });
+      for (let tries = 0; tries < 40 && state?.session?.id !== chat.id; tries++) await new Promise((done) => setTimeout(done, 50));
+    }
+    if (!state?.session) throw new Error("Open a chat first: the error goes to it.");
+    const session = state.session;
+    await api("submit", { text: foundryErrorMessage({ id, title: mockup.title, version }, errors.errors), wait: true });
+    errors.sent = `“${state.sessions.find((item) => item.id === session.id)?.title || "the chat"}”`;
+  } catch (error) {
+    errors.failed = `Not sent: ${errorWords(error)}`;
+  }
+  errors.sending = false;
+  foundryErrorsWatch?.paint();
+}
 /// A chat link opens Foundry's long page at that mockup (its newest version
 /// unless the link names one).
 function openFoundry(id: string, version?: number) {
   foundryFocus = { id, ...(version ? { version } : {}) };
+  growFoundry(id, version);
   if (pageOpen !== "foundry") openPage("foundry"); else { renderPage(); showFoundryFocus(); }
 }
 function showFoundryFocus() {
@@ -4491,6 +5045,11 @@ document.addEventListener("keydown", (event) => {
 });
 /// Surfaces, options and demos on the long page (pass 221 A).
 let foundryStagesStop: (() => void) | null = null;
+/// Errors a mockup hit while you used it, by "id:version", and the watcher that paints them.
+const foundryErrors = new Map<string, FoundryErrorState>();
+let foundryErrorsWatch: { paint(): void; stop(): void } | null = null;
+/// Real data (Foundry step 5): a mockup that asks for live data from a site asks you first, under it.
+let foundrySitesWatch: { paint(): void; stop(): void } | null = null;
 /// Documents render through the app's sanitizer when they scroll near.
 let foundryDocWatch: IntersectionObserver | null = null;
 function watchFoundryDocs(root: HTMLElement) {
@@ -4552,7 +5111,7 @@ function renderPage() {
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
     foundryNotesTick();
-    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
+    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, open: foundryOpen, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
       builtIn: (id) => { const pr = pullRequests.get(id); return pr?.state === "merged" ? { number: pr.number, createdAt: pr.createdAt } : null; } });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
@@ -4575,12 +5134,15 @@ function renderPage() {
   const field = !googleFocus && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && root.contains(active)
     ? { form: active.closest("form")?.className ?? "", kind: (active.closest("form") as HTMLElement | null)?.dataset.kind ?? "", value: active.value, at: active.selectionStart ?? 0, scroll: active.scrollTop } : null;
   foundryStagesStop?.(); foundryStagesStop = null;
+  foundryErrorsWatch?.stop(); foundryErrorsWatch = null;
+  foundrySitesWatch?.stop(); foundrySitesWatch = null;
   // A note being typed is put by for the redraw, and follows its mockup to a newer version.
   if (foundryNotesWatch) { foundryNotesWatch.stop(); foundryNotesWatch = null; foundryNotesCarry(); }
   root.innerHTML = html;
   root.dataset.html = html;
+  if (pageOpen === "foundry") paintFoundrySaid();
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); }
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow, fitDropped); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); foundrySitesWatch = watchFoundrySites(root, (id, host) => api("desktop-foundry-site", { id, host })); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider], [data-anthropic-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.anthropicProvider ?? googleSlot.dataset.googleProvider!;
@@ -4770,12 +5332,24 @@ async function answerQuestion(value: string | null, source: "typed" | "suggestio
 const attachmentPreviews = new Map<string, string>();
 /// A picture fitted for sending (fit-image.ts). An iPhone photo (HEIC) the
 /// window can't draw is turned into a JPEG by the Mac first.
-async function readPicture(file: File, options: { side: number; bytes: number }): Promise<{ url: string; type: string }> {
+async function readPicture(file: File, options: FitOptions): Promise<{ url: string; type: string }> {
   if (!/^image\/hei[cf]$/.test(file.type) && !/\.hei[cf]$/i.test(file.name)) return fitImage(file, options);
   if (file.size > 24 * 1024 * 1024) throw new Error("too big");
   const raw = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
   const jpeg = await api<string>("image-convert", { data: raw });
   return fitImage(await (await fetch(jpeg)).blob(), options);
+}
+/// Step 6: a picture dropped on a mockup, made one the chat can take (as attaching does): its base64 and type.
+async function fitDropped(url: string): Promise<{ data: string; type: string } | null> {
+  try {
+    // Read here, not fetched: the window's own rules keep data: addresses from fetch.
+    const comma = url.indexOf(","), type = /^data:([\w/.+-]+);base64$/.exec(url.slice(0, comma))?.[1] ?? "";
+    const blob = new Blob([Uint8Array.from(atob(url.slice(comma + 1)), (char) => char.charCodeAt(0))], { type });
+    // A GIF or an SVG is drawn again as a PNG: the chat takes PNG, JPEG and WebP.
+    const plain = /^image\/(png|jpeg|webp)$/.test(blob.type);
+    const fitted = await readPicture(new File([blob], "dropped", { type: blob.type }), plain ? { side: 4096, bytes: 15 * 1024 * 1024 } : { side: 4096, bytes: 0, type: "image/png" });
+    return /^data:image\/(png|jpeg|webp);base64,/.test(fitted.url) ? { data: fitted.url.slice(fitted.url.indexOf(",") + 1), type: fitted.type } : null;
+  } catch { return null; }
 }
 /// Files the daemon couldn't read: their chips say why, and they aren't sent.
 let refusedFiles: { id: string; filename: string; why: string }[] = [];
@@ -4800,7 +5374,7 @@ async function attachFiles(files: File[]) {
     // Big photos and screenshots are redrawn to fit (fit-image.ts), never refused for size.
     let fitted: { url: string; type: string };
     try { fitted = await readPicture(file, { side: 4096, bytes: 15 * 1024 * 1024 }); }
-    catch { notice(`${file.name || "That image"} couldn't be read.`); continue; }
+    catch { notice(`${file.name || "That image"} couldn't be read.`, { mark: "bang", need: true }); continue; }
     const url = fitted.url;
     const image = await api("attach", { name: file.name || "pasted-image.png", mimeType: fitted.type, data: url.slice(url.indexOf(",") + 1) }) as { id: string } | undefined;
     if (image?.id) { attachmentPreviews.set(image.id, url); composerSignature = ""; renderComposer(); renderConversation(); }
@@ -5064,7 +5638,7 @@ function composerDraft(width: number) {
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
-  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
+  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : point.where === "browser" ? `On ${point.page}; the page and selector go with your message` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
   // Notes pinned on Foundry and not sent: they go with the next message here (a click shows them).
   const foundryChips = question ? "" : ridingNotes().map((key) => {
     const id = key.slice(0, key.lastIndexOf(":")), mockup = foundryList?.find((item) => item.id === id), count = foundryNotes.waiting.get(key)?.length ?? 0;
@@ -5847,7 +6421,7 @@ document.addEventListener("demesne:notify-answer", (event) => {
   const done = ask.kind === "permission"
     ? (choice ? (ask.sessionId ? api("away-permission", { session: ask.sessionId, id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" }) : api("permission", { id: ask.id, decision: choice === "Deny" ? "deny" : "allow_once" })) : null)
     : (typed || choice) ? (ask.sessionId ? api("away-answer", { session: ask.sessionId, id: ask.id, answer: typed || choice, source: typed ? "typed" : "suggestion" }) : answerQuestion(typed || choice!, typed ? "typed" : "suggestion", questionById(ask.id))) : null;
-  void Promise.resolve(done).catch((error) => notice(error instanceof Error ? error.message : String(error)));
+  void Promise.resolve(done).catch((error) => fail(error));
 });
 // A banner's click comes back here and opens its chat.
 document.addEventListener("demesne:open-chat", (event) => {
@@ -5875,7 +6449,7 @@ async function driveAction(method: string, args: Record<string, unknown> = {}): 
   try {
     return await run;
   } catch (error) {
-    notice(error instanceof Error ? error.message : String(error));
+    fail(error);
     throw error;
   } finally {
     driveActionPending = "";
@@ -6350,12 +6924,12 @@ function pointButton(key: string) {
 }
 async function pointAt(key: string) {
   if (pointing === key) return void api("desktop-point", { cancel: true }).catch(() => {});
-  if (pointing) await api("desktop-point", { cancel: true }).catch(() => {});
+  if (pointing) stopPointing();
   pointing = key;
   pointButton(key);
   let pick: PointPick | null = null;
   try { pick = await api<PointPick | null>("desktop-point", { frame: `pv-${key}` }); }
-  catch (error) { notice(error instanceof Error ? error.message : String(error)); }
+  catch (error) { fail(error); }
   finally { if (pointing === key) pointing = null; pointButton(key); }
   if (!pick) return;
   let source: PointSource | null = null;
@@ -6425,7 +6999,7 @@ async function submitText(value = editor.value, wait = false) {
         command.name === name || command.aliases.includes(name as never),
     )?.id;
     if (!id) {
-      notice(`Unknown command: ${name}`);
+      notice(`Unknown command: ${name}`, { mark: "bang", need: true });
       return;
     }
     const known = state.commands.find((command) => command.id === id);
@@ -6574,7 +7148,7 @@ async function submitText(value = editor.value, wait = false) {
       const result = await api<{ path: string }>("export", {
         format: argument === "json" ? "json" : "md",
       });
-      notice(`Saved ${result.path}`);
+      notice(`Saved ${result.path}`, { mark: "tray" });
       clear();
       return;
     }
@@ -6604,8 +7178,211 @@ function followLatest() {
   const stage = el("stage");
   stage.scrollTop = stage.scrollHeight;
 }
+/// Pass 262 C: the mockup you open grows where it sits on the long page,
+/// its newest version unless a link names one. Everything else stays look-only.
+function growFoundry(id: string, version?: number) {
+  const at = version ?? foundryList?.find((item) => item.id === id)?.version ?? foundryVersions?.find((item) => item.artifactId === id)?.version;
+  foundryOpen = at ? { id, at, shown: at } : null;
+}
+/// The opened mockup's source, for its code view: read for the version it shows.
+async function foundryCode(open: FoundryOpen) {
+  const shown = open.shown;
+  try {
+    const found = await api<{ source: string; files?: Record<string, string> }>("foundry-get", { id: open.id, version: shown });
+    if (foundryOpen === open && open.shown === shown && open.code !== undefined) open.code = codeWithFiles(found.source, found.files);
+  } catch (error) {
+    if (foundryOpen === open && open.code !== undefined) open.code = `Couldn't read the code: ${errorWords(error)}`;
+  }
+  renderPage();
+}
+let foundrySaidTimer = 0;
+/// The opened mockup's quiet line after a save, painted in place.
+function paintFoundrySaid() {
+  const line = document.querySelector<HTMLElement>("#page .fd-open .fd-said");
+  if (!line) return;
+  const inner = foundryOpen ? savedLine(foundryOpen, (line.dataset.kind ?? "html") as FoundryArtifact["kind"]) : "";
+  line.innerHTML = inner;
+  line.hidden = !inner;
+}
+async function foundryOpenAction(action: string, args: Record<string, any>) {
+  if (action === "foundry-grow") {
+    growFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
+    foundryFocus = foundryOpen ? { id: foundryOpen.id, version: foundryOpen.at, quiet: true } : null;
+    renderPage(); showFoundryFocus();
+    return true;
+  }
+  const open = foundryOpen;
+  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit" || action === "foundry-compare" || action === "foundry-branch" || action.startsWith("foundry-share");
+  if (action === "foundry-compare") { open.compare = !open.compare; if (open.compare) delete open.code; renderPage(); return true; }
+  if (action === "foundry-edit") { await foundryEdit(open); return true; }
+  if (action === "foundry-shrink") {
+    foundryOpen = null;
+    foundryFocus = { id: open.id, version: open.at, quiet: true };
+    renderPage(); showFoundryFocus();
+    return true;
+  }
+  if (action === "foundry-shown") {
+    const all = foundryVersionsOf(foundryVersions ?? [], open.id);
+    if (!all.includes(args.version)) return true;
+    open.shown = args.version; open.said = ""; open.saved = null;
+    if (open.code !== undefined) { open.code = null; void foundryCode(open); }
+    renderPage();
+    return true;
+  }
+  if (action === "foundry-code") {
+    if (open.code !== undefined) { delete open.code; renderPage(); return true; }
+    open.code = null; renderPage(); void foundryCode(open);
+    return true;
+  }
+  if (action === "foundry-copy") {
+    open.said = "Saving a copy…"; open.saved = null; paintFoundrySaid();
+    try {
+      const saved = await api<{ path: string; name: string; pdf: boolean; ready: boolean }>("desktop-foundry-copy", { id: open.id, version: open.shown, ...(args.other ? { other: true } : {}) });
+      open.said = `Saved ${saved.name} to Downloads`;
+      open.saved = { path: saved.path, pdf: saved.pdf, ready: saved.ready && !args.other };
+    } catch (error) { open.said = `Couldn't save a copy: ${errorWords(error)}`; open.saved = null; }
+    clearTimeout(foundrySaidTimer);
+    foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === open) { open.said = ""; open.saved = null; paintFoundrySaid(); } }, 12_000);
+    paintFoundrySaid();
+    return true;
+  }
+  // Step 7: a new mockup that starts from the version shown; it opens in place of this one.
+  if (action === "foundry-branch") {
+    const from = open.shown;
+    open.said = "Starting a new one…"; open.saved = null; paintFoundrySaid();
+    try {
+      const made = await api<{ id: string; title: string; version: number }>("foundry-branch", { id: open.id, version: from });
+      if (foundryOpen !== open) return true;
+      const kept: FoundryOpen = { id: made.id, at: made.version, shown: made.version, said: `Started “${made.title}” from v${from}. Pin notes on it or name it in the chat to take it another way; the first stays as it was.` };
+      foundryOpen = kept;
+      foundryFocus = { id: made.id, version: made.version, quiet: true };
+      clearTimeout(foundrySaidTimer);
+      foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === kept) { kept.said = ""; paintFoundrySaid(); } }, 15_000);
+      await loadFoundry();
+    } catch (error) { open.said = `Couldn't start a new one: ${errorWords(error)}`; paintFoundrySaid(); }
+    return true;
+  }
+  // Step 8: share the version shown as a link (a first share asks), copy or open it, or take it down.
+  if (action === "foundry-share") {
+    const version = open.shown;
+    open.saved = null; open.share = null; open.said = "Sharing…";
+    paintFoundrySaid();
+    try {
+      const shared = await api<{ ask?: boolean; url?: string; version?: number; first?: boolean }>("desktop-foundry-share", { id: open.id, version, ...(args.yes ? { yes: true } : {}) });
+      if (foundryOpen !== open) return true;
+      clearTimeout(foundrySaidTimer);
+      if (shared.ask) { open.said = ""; open.share = { asking: true }; }
+      else { open.share = { url: shared.url!, version: shared.version ?? version }; open.said = `Shared v${shared.version ?? version}${shared.first ? " (a new link can take a minute to open)" : ""}:`; }
+    } catch (error) { open.share = null; open.said = `Couldn't share it: ${errorWords(error)}`; }
+    paintFoundrySaid();
+    return true;
+  }
+  if (action === "foundry-share-no") { open.share = null; open.said = ""; paintFoundrySaid(); return true; }
+  if (action === "foundry-share-copy" && open.share?.url) { await api("copy", { text: open.share.url }).catch(() => {}); open.said = "Link copied:"; paintFoundrySaid(); return true; }
+  if (action === "foundry-share-open" && open.share?.url) { await api("open-link", { url: open.share.url }).catch(() => {}); return true; }
+  if (action === "foundry-share-stop") {
+    try {
+      await api("desktop-foundry-unshare", { id: open.id });
+      open.share = null; open.said = "Stopped sharing: the page is taken down (GitHub can take a minute).";
+    } catch (error) { open.said = `Couldn't stop sharing: ${errorWords(error)}`; }
+    paintFoundrySaid();
+    return true;
+  }
+  if (action === "foundry-copy-show") {
+    if (open.saved) await api("desktop-show-copy", { path: open.saved.path }).catch((error) => { open.said = `Couldn't show it: ${errorWords(error)}`; paintFoundrySaid(); });
+    return true;
+  }
+  return false;
+}
+/// Step 3, edit in place: the pencil starts editing the opened deck, doc or
+/// dashboard's newest version where it sits; Done keeps every change you
+/// made as one new version, "Edited by you", and shows it.
+const EDIT_SAID = "Click any text to change it. Done keeps your changes as a new version.";
+async function foundryEdit(open: FoundryOpen) {
+  if (!open.editing) {
+    open.said = "Reading…"; open.saved = null; paintFoundrySaid();
+    try {
+      const found = await api<{ source: string; version: number }>("foundry-get", { id: open.id, version: open.shown });
+      if (foundryOpen !== open) return;
+      open.editing = { source: found.source, base: found.version, changes: 0 };
+      open.said = EDIT_SAID;
+    } catch (error) { open.said = `Couldn't start editing: ${errorWords(error)}`; }
+    renderPage();
+    return;
+  }
+  // Pressing Done takes the focus out of the piece you were typing in: let its change arrive first.
+  await new Promise((done) => setTimeout(done, 80));
+  const editing = open.editing;
+  if (!editing || foundryOpen !== open) return;
+  if (!editing.changes) { open.editing = null; open.said = ""; renderPage(); return; }
+  open.said = "Saving your changes…"; paintFoundrySaid();
+  try {
+    const saved = await api<{ version: number }>("foundry-save", { id: open.id, source: editing.source, baseVersion: editing.base });
+    if (foundryOpen !== open) return;
+    foundryOpen = { id: open.id, at: saved.version, shown: saved.version, said: `Kept your ${editing.changes === 1 ? "change" : `${editing.changes} changes`} as v${saved.version}` };
+    foundryFocus = { id: open.id, version: saved.version, quiet: true };
+    const kept = foundryOpen;
+    clearTimeout(foundrySaidTimer);
+    foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === kept) { kept.said = ""; paintFoundrySaid(); } }, 12_000);
+    await loadFoundry();
+  } catch (error) { open.said = `Couldn't keep your changes: ${errorWords(error)}`; paintFoundrySaid(); }
+}
+/// Step 4, compare: drag the line (or use the arrow keys on it) to move the cut, in place.
+function moveWipe(bar: HTMLElement, percent: number) {
+  const wipe = bar.closest<HTMLElement>(".fd-wipe");
+  if (!wipe) return;
+  const value = Math.max(0, Math.min(100, percent));
+  wipe.style.setProperty("--wipe", `${value}%`);
+  bar.setAttribute("aria-valuenow", String(Math.round(value)));
+}
+document.addEventListener("pointerdown", (event) => {
+  const bar = (event.target as HTMLElement | null)?.closest?.<HTMLElement>(".fd-wipe-bar");
+  if (!bar || event.button !== 0) return;
+  event.preventDefault();
+  bar.focus({ preventScroll: true });
+  // The frames under the line would take the pointer as it moves (they are other pages): they let it through while you drag.
+  const wipe = bar.closest<HTMLElement>(".fd-wipe")!;
+  wipe.classList.add("dragging");
+  const move = (at: PointerEvent) => { const box = wipe.getBoundingClientRect(); moveWipe(bar, ((at.clientX - box.left) / box.width) * 100); };
+  const done = () => { wipe.classList.remove("dragging"); document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", done); document.removeEventListener("pointercancel", done); };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", done);
+  document.addEventListener("pointercancel", done);
+});
+document.addEventListener("keydown", (event) => {
+  const bar = (event.target as HTMLElement | null)?.closest?.<HTMLElement>(".fd-wipe-bar");
+  if (!bar || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const now = Number(bar.getAttribute("aria-valuenow")) || 50;
+  moveWipe(bar, event.key === "Home" ? 0 : event.key === "End" ? 100 : now + (event.key === "ArrowLeft" ? -5 : 5) * (event.shiftKey ? 4 : 1));
+});
+/// A piece of text the frame says you changed: placed in the content, or put back.
+window.addEventListener("message", (event) => {
+  const data = event.data as { demesne?: unknown; action?: unknown; piece?: unknown; before?: unknown; after?: unknown } | null;
+  if (!data || data.demesne !== "edit" || data.action !== "change" || typeof data.before !== "string" || typeof data.after !== "string" || typeof data.piece !== "number") return;
+  const open = foundryOpen, frame = document.querySelector<HTMLIFrameElement>("#page .fd-open iframe.fd-frame");
+  if (!open?.editing || !frame || frame.contentWindow !== event.source) return;
+  const next = placeEdit(open.editing.source, data.before.slice(0, 4000), data.after.slice(0, 4000));
+  if (next === null) {
+    frame.contentWindow?.postMessage({ demesne: "edit", action: "back", piece: data.piece }, "*");
+    open.said = "That text comes from a chart or repeats here, so it went back. Ask for it in the chat.";
+  } else {
+    open.editing.source = next;
+    open.editing.changes++;
+    open.said = `${open.editing.changes === 1 ? "1 change" : `${open.editing.changes} changes`}. Done keeps ${open.editing.changes === 1 ? "it" : "them"} as a new version.`;
+  }
+  paintFoundrySaid();
+});
+document.addEventListener("keydown", (event) => {
+  // While you edit, Esc belongs to the text (it puts a piece back); Done or × end editing.
+  if (event.key !== "Escape" || pageOpen !== "foundry" || !foundryOpen || foundryOpen.editing || event.defaultPrevented || event.isComposing) return;
+  if ((event.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable], #composer")) return;
+  event.preventDefault();
+  void foundryOpenAction("foundry-shrink", {});
+});
 /// Foundry's long page: links from the chat, and the day strip. You only look here.
 async function foundryAction(action: string, args: Record<string, any>) {
+  if (await foundryOpenAction(action, args)) return;
   if (action === "foundry-open") return openFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
   if (action === "foundry-open-step") {
     // A new artifact's id is in the tool's result; a revision names it in its input.
@@ -6729,6 +7506,24 @@ async function dispatch(
     return renderPage();
   }
   if (action === "notify-kind") { setNotifyKind(args.kind as NotifyKind, args.on === true); return renderPage(); }
+  if (action === "signins-from") { signins.picked = []; signins.said = ""; return loadSignins(String(args.from)); }
+  if (action === "signins-pick") { const site = String(args.site); signins.picked = signins.picked.includes(site) ? signins.picked.filter((one) => one !== site) : [...signins.picked, site]; signins.said = ""; return renderPage(); }
+  if (action === "signins-bring") {
+    if (!signins.picked.length || !signins.from || signins.busy) return;
+    signins.busy = "bring"; signins.said = ""; renderPage();
+    try {
+      const done = await api<{ set: number; sites: string[] }>("browser-signins-bring", { root: signins.root, from: signins.from, sites: signins.picked });
+      signins.picked = [];
+      signins.said = `Brought in ${done.sites.length} ${done.sites.length === 1 ? "site" : "sites"}: ${done.sites.join(", ")}`;
+    } catch (error) { signins.said = `!${error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error)}`; }
+    signins.busy = "";
+    return loadSignins();
+  }
+  if (action === "signins-remove") {
+    try { await api("browser-signins-remove", { root: signins.root, site: String(args.site) }); }
+    catch (error) { settingsUi.error = error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error); }
+    return loadSignins();
+  }
   // A setting changes in place; the page stays to show it took.
   if (action === "settings-set") {
     const result = await api<{ zoom?: number } | null>(String(args.method), args.args ?? {});
@@ -6744,7 +7539,7 @@ async function dispatch(
   if (["settings-config", "allow-rule-remove", "trusted-forget", "mcp-remove"].includes(action)) return settingsCall(action, args);
   if (action === "restart-daemon") {
     settingsUi.error = "";
-    notice("Restarting the daemon…");
+    notice("Restarting the daemon…", { seat: "left", mark: "up" });
     return settingsCall("restart-daemon");
   }
   if (action === "routine-set" || action === "routine-remove") return loadRoutines(action, args);
@@ -6878,6 +7673,18 @@ async function dispatch(
   if (action === "agent-message") return setDraft(`Message ${String(args.name)} at ${String(args.address)}: `);
   if (action === "project-session") {
     document.dispatchEvent(new CustomEvent("demesne:open-project", { detail: { path: args.path, ...(action === "project-session" ? { sessionId: args.id } : {}) } }));
+    return;
+  }
+  if (action === "browser-split-close") {
+    const run = state?.runs.find((one) => one.id === state?.activeTurnId);
+    split.open = false; split.closedTurn = run?.id ?? split.openedTurn; split.closedAsk = handOverAsk(run)?.toolCallId ?? null;
+    renderCards();
+    return;
+  }
+  // A browser step opens the split again.
+  if (action === "tool") {
+    const step = state?.runs.find((run) => run.id === args.runId)?.entries.find((entry) => entry.id === args.id);
+    if (step?.type === "tool" && step.name === "browser") { split.open = true; split.closedTurn = null; renderCards(); }
     return;
   }
   if (action === "card-fold") {
@@ -7165,9 +7972,10 @@ async function dispatch(
     try {
       const done = await api<{ handoff: { status: string; error?: string } }>("handoff-act", { id, action: verb });
       handoffNow.set(id, { ...handoffNow.get(id), status: done.handoff.status, error: undefined });
-      notice(verb === "apply" ? "Brought in: the change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded");
+      // About your files, so it speaks from the right seat, under the cards.
+      notice(verb === "apply" ? "The change is in your files" : verb === "undo" ? "Taken back out of your files" : "Discarded", { seat: "right", mark: verb === "apply" ? "tray" : "tick" });
     } catch (error) {
-      notice(error instanceof Error ? error.message.replace(/^.*?: /, "") : String(error));
+      fail(error instanceof Error ? error.message.replace(/^.*?: /, "") : error, { seat: "right" });
     } finally {
       handoffBusy.delete(id);
       renderConversation();
@@ -7184,6 +7992,7 @@ async function dispatch(
   if (action === "step") {
     const key = `${args.runId}:${args.id}`;
     const edit = state!.runs.find(run => run.id === args.runId)?.entries.find(entry => entry.id === args.id);
+    if (edit?.type === "tool" && edit.name === "browser" && !split.open) { split.open = true; split.closedTurn = null; renderCards(); }
     if (edit?.type === "tool" && hasFileEdit(edit)) fileEditsOpen.has(key) ? fileEditsOpen.delete(key) : fileEditsOpen.add(key);
     else stepOpen.has(key) ? stepOpen.delete(key) : stepOpen.add(key);
     follow = false;
@@ -7427,7 +8236,7 @@ async function dispatch(
           .map((e) => splitNextPrompt((e as any).raw).text)
           .join("\n\n") ?? "",
     });
-    notice("Copied");
+    notice("Copied", { seat: "at", mark: "copy", anchor: target });
     return;
   }
   if (
@@ -7588,6 +8397,12 @@ function threadPeek(): ThreadsLook["peek"] {
     return { of: open, say: words.length > 260 ? `${words.slice(0, 259).trimEnd()}…` : words, steps };
   });
 }
+/// The silver pill above the composer when a turn kept something in memory (pass 255).
+const memoryPill = new MemoryPill(() => document.getElementById("composer-slot"), (session, line) => api("memory-forget", { session, scope: line.scope, text: line.text }));
+function renderMemoryPill() {
+  const here = state && inSession(state) && !pageOpen && !inAssistant() ? state.session?.id ?? null : null;
+  memoryPill.sync(here, here ? state!.runs : []);
+}
 function renderThreads() {
   if (!state) return;
   const view = state.threads, mine = inSession(state) && !pageOpen && state.session?.id === view.from;
@@ -7633,6 +8448,21 @@ function fillThreadLists() {
     if (slot.dataset.html !== html) { slot.innerHTML = html; slot.dataset.html = html; }
   }
 }
+/// Something just broke in this project: a pill in the project's seat, at
+/// the foot of the cards (pass 260 A). The line and its fold stay the place
+/// to act; "Show" unfolds them.
+let brokeBefore: BrokeSeen | null = null;
+function sayBroke(next: Snapshot) {
+  const signals = next.breakage.signals, fixing = Boolean(next.breakage.fix && ["starting", "running"].includes(next.breakage.fix.status));
+  const words = fixing ? null : brokeNews(brokeBefore, next.workspace, signals);
+  brokeBefore = brokeSeen(next.workspace, signals);
+  if (!words) return;
+  pills.show({ seat: "right", mark: "bang", need: true, words, seconds: 8, action: { label: "Show", run: () => {
+    brokeShown = true;
+    heroSignature = briefingSignature = "";
+    if (inSession()) renderBriefing(); else renderHero();
+  } } });
+}
 function renderState(next: Snapshot) {
   if (state && next.revision < state.revision) return;
   if (!notesLoaded) void loadWaitingNotes();
@@ -7645,11 +8475,12 @@ function renderState(next: Snapshot) {
   const wasStart = !state?.runs.length;
   const editorFocused = document.activeElement === editor;
   state = next;
+  sayBroke(next);
   if (lastSession !== next.session?.id) {
     lastSession = next.session?.id ?? "";
     reviewOpen.clear(); reviewFiles.clear(); diffNotes.clear(); noteEditing = null;
     pointed.length = 0;
-    if (pointing) { pointing = null; void api("desktop-point", { cancel: true }).catch(() => {}); }
+    if (pointing) { stopPointing(); pointing = null; pointingPage = ""; }
     follow = true;
     overlay = null;
     driveShown = ideasShown = brokeShown = false;
@@ -7707,10 +8538,11 @@ function renderState(next: Snapshot) {
   renderLastChat();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
-  renderSakura(start);
+  renderHomeSky(start);
   renderStatus();
   renderConversation();
   renderThreads();
+  renderMemoryPill();
   // The assistant's chat has its own empty look.
   el("conversation").classList.toggle("assistant", inAssistant());
   renderComposer();
@@ -8054,7 +8886,8 @@ document.addEventListener("dragenter", (event) => {
   if (!carriesSource(event) || !state?.session) return;
   dragDepth++;
   dragging(true);
-  if (carriesFiles(event)) el("drop-zone").hidden = false;
+  // On Foundry (step 6) a picture goes on a mockup, as a note that carries it.
+  if (carriesFiles(event)) { const zone = el("drop-zone"); zone.textContent = pageOpen === "foundry" ? "Drop a picture on a mockup to use it there" : "Drop files to attach"; zone.hidden = false; }
 });
 document.addEventListener("dragleave", (event) => {
   if (!carriesSource(event)) return;
@@ -8101,8 +8934,14 @@ document.addEventListener("keydown", (event) => {
   if (!state || event.isComposing) return;
   if (pointing && event.key === "Escape") {
     event.preventDefault();
-    void api("desktop-point", { cancel: true }).catch(() => {});
+    stopPointing();
     return;
+  }
+  // ⌘F and ⌘G while you are in the chat's browser (its bar, the find field): find on its page.
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.target instanceof Element && event.target.closest("#browser-split")) {
+    const pressed = event.key.toLowerCase();
+    if (pressed === "f" && !event.shiftKey) { event.preventDefault(); openFind(); return; }
+    if (pressed === "g" && split.find.open) { event.preventDefault(); void findOnPage(true, event.shiftKey); return; }
   }
   const field =
     event.target instanceof HTMLInputElement ||
@@ -8403,7 +9242,7 @@ document.addEventListener("keydown", (event) => {
 });
 window.demesneInspect = () => ({
   // What the host last published: the session, its turn, queue and draft.
-  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, questionDraft: state?.questions[0]?.draft, restored: state?.restored, connection: state?.connection, notice: el("notice").hidden ? "" : el("notice").textContent, requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
+  host: { session: state?.session?.id, active: state?.activeTurnId, busy: state?.busy, queue: state?.queue, draft: state?.draft, questionDraft: state?.questions[0]?.draft, restored: state?.restored, connection: state?.connection, notice: (() => { const notice = document.getElementById("notice"); return !notice || notice.hidden ? "" : notice.textContent; })(), requests: recentRequests.map((entry) => `${entry.method} ${entry.outcome}`) },
   // Whether the conversation follows new text, and where it is scrolled.
   stage: { follow, top: Math.round(el("stage").scrollTop), bottom: Math.round(el("stage").scrollHeight - el("stage").clientHeight) },
   selection: getSelection()?.toString() ?? "",
@@ -8518,7 +9357,7 @@ function resyncState() {
       const next = stateReceiver.seed(snapshot);
       if (next) renderState(next);
     })
-    .catch((error) => notice(String(error)))
+    .catch(fail)
     .finally(() => {
       resyncing = false;
       if (received && stateReceiver.needsReset) resyncState();
@@ -8566,7 +9405,7 @@ void window.demesne
     window.demesne.ready();
   })
   .catch((error) => {
-    notice(String(error));
+    fail(error);
     window.demesne.ready();
   });
 // Spinners and thinking sub-agents' phrases advance in place; the DOM (and

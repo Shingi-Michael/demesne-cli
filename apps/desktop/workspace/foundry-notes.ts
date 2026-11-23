@@ -20,11 +20,14 @@ export interface NoteSpot { fx: number; fy: number }
 /// `keep` is a note on what the person likes: it stays as it is. `spot` is where on the part the pin is.
 /// `picture` is the place around the pin as the person saw it: a PNG in base64, cropped from the window,
 /// with the pin `around` this far across and down it, in percent. `picturing` ends when the picture has been taken (or could not be).
-export interface FoundryNote { part: NotePart; name: string; text: string; keep?: boolean; spot?: NoteSpot; option?: { index: number; name: string }; picture?: string; around?: { x: number; y: number }; picturing?: Promise<void> }
-/// A picture around a pin, and where the pin is in it.
-export interface NotePicture { data: string; around: { x: number; y: number } }
+/// `given` (step 6): the picture is one the person dropped at the pin, to use in the mockup, not the place around it.
+export interface FoundryNote { part: NotePart; name: string; text: string; keep?: boolean; spot?: NoteSpot; option?: { index: number; name: string }; picture?: string; around?: { x: number; y: number }; given?: NoteGiven; picturing?: Promise<void> }
+/// A picture the person dropped on a mockup: its file's name and the type it is kept as.
+export interface NoteGiven { name: string; type: string }
+/// A picture around a pin, and where the pin is in it (or, `type`, a dropped picture's type).
+export interface NotePicture { data: string; around: { x: number; y: number }; type?: string }
 /// A note being typed when the page was redrawn, so it comes back.
-export interface NoteDraft { key: string; part: NotePart; name: string; text: string; index: number; spot: NoteSpot; keep: boolean | null; option?: { index: number; name: string }; picture?: Promise<NotePicture | null> }
+export interface NoteDraft { key: string; part: NotePart; name: string; text: string; index: number; spot: NoteSpot; keep: boolean | null; option?: { index: number; name: string }; picture?: Promise<NotePicture | null>; given?: NoteGiven }
 /// Where sent notes went: the chat's name, and whether they wait behind a turn still running there.
 export interface NotesSentTo { session: string; chat: string; queued: boolean }
 /// Notes by mockup version ("id:version"): waiting to be sent, being worked on (and where), and a quiet word when sending failed.
@@ -94,16 +97,27 @@ export function notesMessage(mockup: { id: string; title: string; version: numbe
     : `Nothing to change: the person marked what they like. Keep ${kept > 1 ? "these" : "this"} as ${kept > 1 ? "they are" : "it is"} in every later version, make no new version now, and say so in one line.`;
   // Pass 245 A: what they like is taste that carries over to later mockups of the project.
   const taste = kept ? ` What they like is their taste too: when a ${KEEP_MARK} note says something general, keep it as one short rule with remember {design: true, learned_from: "${KEEP_MARK} on ${mockup.title}"}, unless their design guide already says it.` : "";
-  const pictures = pictured.length ? ` The attached picture${pictured.length > 1 ? "s show" : " shows"} the place around ${pictured.length > 1 ? "pins" : "pin"} ${pictured.map((index) => marks[index]).join(", ")} as the person saw ${pictured.length > 1 ? "them" : "it"}, in that order.` : "";
+  const around = pictured.filter((index) => !notes[index]?.given), given = pictured.filter((index) => notes[index]?.given);
+  const pictures = (around.length ? ` The attached picture${around.length > 1 ? "s" : ""}${given.length ? " named note-…" : ""} ${around.length > 1 ? "show" : "shows"} the place around ${around.length > 1 ? "pins" : "pin"} ${around.map((index) => marks[index]).join(", ")} as the person saw ${around.length > 1 ? "them" : "it"}, in that order.` : "")
+    // Step 6: a picture dropped on the mockup is one to use there, by its id.
+    + (given.length ? ` The person dropped ${given.length > 1 ? "pictures" : "a picture"} on the mockup at ${given.length > 1 ? "pins" : "pin"} ${given.map((index) => marks[index]).join(", ")} to use there, attached under ${given.length > 1 ? "their own file names" : "its own file name"}: put ${given.length > 1 ? "each" : "it"} in at ${given.length > 1 ? "its" : "the"} pin as picture:IMAGE_ID, with the image artifact id of that attachment.` : "");
   const detail = [`Notes pinned on the Foundry mockup "${mockup.title}" (id ${mockup.id}, v${mockup.version}). ${asked}${taste}${pictures}`,
     ...notes.map((note, index) => {
       const spot = note.spot ? `, pinned ${percent(note.spot.fx)} across and ${percent(note.spot.fy)} down ${note.part.selector === PAGE_SELECTOR ? "the page" : "it"}` : "";
-      const around = note.around && pictured.includes(index) ? `\n   in its picture the pin is ${Math.round(note.around.x)}% across and ${Math.round(note.around.y)}% down` : "";
+      const around = note.given && pictured.includes(index) ? `\n   dropped picture: attached as ${notePictureFile(note, index).name}`
+        : note.around && pictured.includes(index) ? `\n   in its picture the pin is ${Math.round(note.around.x)}% across and ${Math.round(note.around.y)}% down` : "";
       return `${marks[index]}. ${note.keep ? "keep" : "change"}, ${where(note)}: ${note.text}\n   selector \`${note.part.selector}\`${spot}${around}${note.part.html ? `\n   ${note.part.html}` : ""}`;
     })].join("\n");
   return `On “${mockup.title}”:\n${said}\n\n${fenced(detail, "parts")}`;
 }
 
+/// The file a note's picture goes to the chat as: the place around pin N as
+/// note-N.png, a dropped picture under its own name (its extension as kept).
+export function notePictureFile(note: FoundryNote, index: number): { name: string; mimeType: string } {
+  if (!note.given) return { name: `note-${index + 1}.png`, mimeType: "image/png" };
+  const extension = ({ "image/jpeg": "jpg", "image/webp": "webp" } as Record<string, string>)[note.given.type] ?? "png";
+  return { name: `${note.given.name.replace(/\.[A-Za-z0-9]{1,5}$/, "") || "picture"}.${extension}`, mimeType: note.given.type };
+}
 /// A note as it is kept outside the window (the daemon): everything but the picture still being taken.
 export function keptNote(note: FoundryNote): Record<string, unknown> {
   const { picturing: _, ...kept } = note;
@@ -122,12 +136,22 @@ export function readKeptNote(value: unknown): FoundryNote | null {
     ...(spot && typeof spot.fx === "number" && typeof spot.fy === "number" ? { spot: { fx: unit(spot.fx), fy: unit(spot.fy) } } : {}),
     ...(option && typeof option.index === "number" && typeof option.name === "string" ? { option: { index: Math.max(0, Math.floor(option.index)), name: option.name.slice(0, 60) } } : {}),
     ...(typeof note.picture === "string" && /^[A-Za-z0-9+/=]+$/.test(note.picture.slice(0, 200)) ? { picture: note.picture } : {}),
-    ...(around && typeof around.x === "number" && typeof around.y === "number" ? { around: { x: around.x, y: around.y } } : {}) };
+    ...(around && typeof around.x === "number" && typeof around.y === "number" ? { around: { x: around.x, y: around.y } } : {}),
+    ...(readGiven(note.given) ? { given: readGiven(note.given)! } : {}) };
+}
+/// A dropped picture's name and type, read back: a file name with no path, a picture type.
+export function readGiven(value: unknown): NoteGiven | null {
+  const given = value as { name?: unknown; type?: unknown } | null;
+  if (!given || typeof given !== "object" || typeof given.name !== "string" || typeof given.type !== "string" || !/^image\/(png|jpeg|webp)$/.test(given.type)) return null;
+  const name = given.name.replace(/^.*[\\/]/, "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120);
+  return name ? { name, type: given.type } : null;
 }
 
 const count = (n: number) => `${n} note${n === 1 ? "" : "s"}`;
 const MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
 export const SEND_KEY = MAC ? "⌘↵" : "Ctrl ↵";
+/// What a dropped picture's note says until the person says more.
+export const DROPPED_SAYS = "Use this picture here";
 const HEART = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10.2 1.9 6.3a2.3 2.3 0 0 1 3.3-3.2L6 3.9l.8-.8a2.3 2.3 0 0 1 3.3 3.2z"/></svg>';
 
 /// The quiet line under a mockup: what waits (changes and keeps) and the key
@@ -161,7 +185,7 @@ export function readPart(value: unknown): (NotePart & { rect: NoteRect }) | null
 }
 
 interface Seen { vw: number; vh: number; point: { x: number; y: number } | null; pins: Map<number, NoteRect> }
-interface Open { section: HTMLElement; stage: HTMLElement; part: NotePart; name: string; index: number; spot: NoteSpot; rect: NoteRect; form: HTMLFormElement; flip: boolean | null; picture?: Promise<NotePicture | null> }
+interface Open { section: HTMLElement; stage: HTMLElement; part: NotePart; name: string; index: number; spot: NoteSpot; rect: NoteRect; form: HTMLFormElement; flip: boolean | null; picture?: Promise<NotePicture | null>; given?: NoteGiven }
 /// A place in the window, in its own pixels.
 export interface ShotRect { x: number; y: number; width: number; height: number }
 /// REST: how long the pointer stays still before the + shows. The picture around a pin, in the frame's pixels.
@@ -169,7 +193,8 @@ const DRAFT = -1, REST = 420, AROUND = { w: 360, h: 220 };
 const frames = (count: number) => new Promise<void>((done) => { const next = (left: number) => left ? requestAnimationFrame(() => next(left - 1)) : done(); next(count); });
 const spotIn = (rect: NoteRect, spot: NoteSpot) => ({ x: rect.x + spot.fx * rect.w, y: rect.y + spot.fy * rect.h });
 
-export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (key: string) => void, shot?: (rect: ShotRect) => Promise<string | null>): { stop(): void; paint(): void } {
+/// `fit` (step 6) makes a dropped picture (a data URL) one the chat can take: its base64 and type, or null.
+export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (key: string) => void, shot?: (rect: ShotRect) => Promise<string | null>, fit?: (dataURL: string) => Promise<{ data: string; type: string } | null>): { stop(): void; paint(): void } {
   const seen = new WeakMap<HTMLElement, Seen>();
   let open: Open | null = null, rest: { stage: HTMLElement; timer: number; at?: { x: number; y: number } } | null = null;
   const sections = () => [...root.querySelectorAll<HTMLElement>(".fd-item")].filter((section) => section.querySelector(":scope > .fd-notes"));
@@ -177,11 +202,13 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
   const stagesOf = (section: HTMLElement) => [...section.querySelectorAll<HTMLElement>(".fd-stage")];
   const frameOf = (stage: HTMLElement) => stage.querySelector<HTMLIFrameElement>("iframe.fd-frame");
   const sectionOf = (stage: HTMLElement) => { const section = stage.closest<HTMLElement>(".fd-item"); return section?.querySelector(":scope > .fd-notes") ? section : null; };
-  /// A mockup with options has a stage per option, each named on the line above it.
+  /// A mockup with options shows the one its tab names (pass 263 A); a style has a stage of its own, named on the line above it.
   const optionOf = (stage: HTMLElement) => {
     if (stage.dataset.split === undefined) return undefined;
-    const head = stage.previousElementSibling;
-    return { index: Number(stage.dataset.split) || 0, name: cut(head?.classList.contains("fd-opt") ? head.querySelector("b")?.textContent ?? "" : "", 60) || `option ${(Number(stage.dataset.split) || 0) + 1}` };
+    const head = stage.previousElementSibling, index = Number(stage.dataset.split) || 0;
+    const named = head?.classList.contains("fd-tabs") ? head.querySelector(`[data-variant="${index}"]`)?.firstChild?.textContent ?? ""
+      : head?.classList.contains("fd-opt") ? head.querySelector("b")?.textContent ?? "" : "";
+    return { index, name: cut(named, 60) || `option ${index + 1}` };
   };
   const onStage = (stage: HTMLElement, option: { index: number } | undefined) => (option?.index ?? -1) === (stage.dataset.split === undefined ? -1 : Number(stage.dataset.split) || 0);
   const layerOf = (section: HTMLElement) => {
@@ -332,18 +359,18 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
     } catch { return null; }
     finally { layer.classList.remove("fn-shot"); }
   }
-  function openBox(section: HTMLElement, stage: HTMLElement, part: NotePart, rect: NoteRect, spot: NoteSpot, name: string, index: number, typed?: string, picture?: Promise<NotePicture | null>, flip: boolean | null = null) {
+  function openBox(section: HTMLElement, stage: HTMLElement, part: NotePart, rect: NoteRect, spot: NoteSpot, name: string, index: number, typed?: string, picture?: Promise<NotePicture | null>, flip: boolean | null = null, given?: NoteGiven) {
     closeBox();
     hidePlus();
     const note = index >= 0 ? store.waiting.get(keyOf(section))?.[index] : undefined;
     const form = document.createElement("form");
     form.className = "fn-box";
     form.noValidate = true;
-    form.innerHTML = `<label for="fn-input"><span class="fn-kind"></span><span class="fn-on">${h(name)}</span></label><input id="fn-input" name="note" autocomplete="off" spellcheck="true" maxlength="600" placeholder="What you like, or what to change" value="${h(typed ?? note?.text ?? "")}">`
+    form.innerHTML = `<label for="fn-input"><span class="fn-kind"></span><span class="fn-on">${h(name)}</span>${given ? `<span class="fn-on">· ${h(cut(given.name, 40))}</span>` : ""}</label><input id="fn-input" name="note" autocomplete="off" spellcheck="true" maxlength="600" placeholder="What you like, or what to change" value="${h(typed ?? note?.text ?? "")}">`
       + `<div class="fn-keys"><span><kbd>↵</kbd> add</span><span><kbd>tab</kbd> flips</span><span><kbd>${SEND_KEY}</kbd> send</span><span><kbd>esc</kbd></span></div>`;
     layerOf(section).append(form);
     section.classList.add("fn-noting");
-    open = { section, stage, part, name, index, spot, rect, form, flip: flip ?? (note ? !!note.keep : null), picture: picture ?? (index < 0 ? pictureOf(section, stage, spotIn(rect, spot)) : undefined) };
+    open = { section, stage, part, name, index, spot, rect, form, flip: flip ?? (note ? !!note.keep : null), picture: picture ?? (index < 0 ? pictureOf(section, stage, spotIn(rect, spot)) : undefined), ...(given ? { given } : {}) };
     showKind();
     placeOpen();
     watch(stage);
@@ -353,15 +380,20 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
   /// Enter adds the note at its pin; with the send key it goes at once, with every other waiting note.
   function keep(now: boolean) {
     if (!open) return;
-    const { section, stage, part, name, index, form, picture, spot, flip } = open, key = keyOf(section);
+    const { section, stage, part, name, index, form, picture, spot, flip, given } = open, key = keyOf(section);
     const said = form.querySelector("input")!.value.replace(/\s+/g, " ").trim(), liked = keeps(form, flip);
     const notes = [...(store.waiting.get(key) ?? [])], option = optionOf(stage);
     if (index >= 0 && notes[index]) { if (said) { notes[index]!.text = said; notes[index]!.keep = liked; } else notes.splice(index, 1); }
     else if (said) {
       const note: FoundryNote = { part, name, text: said, keep: liked, spot, ...(option ? { option } : {}) };
       notes.push(note);
-      // Kept again once its picture is taken.
-      note.picturing = picture?.then((taken) => { if (taken) { note.picture = taken.data; note.around = taken.around; store.changed?.(); } });
+      // Kept again once its picture is taken (or, dropped, made one the chat can take).
+      note.picturing = picture?.then((taken) => {
+        if (!taken) return;
+        note.picture = taken.data;
+        if (given) note.given = { name: given.name, type: taken.type ?? given.type }; else note.around = taken.around;
+        store.changed?.();
+      });
     }
     if (notes.length) store.waiting.set(key, notes); else store.waiting.delete(key);
     store.said.delete(key);
@@ -392,6 +424,26 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
       openBox(section, stage, part, part.rect, { fx: unit(data.fx), fy: unit(data.fy) }, partName(part), -1);
       return;
     }
+    if (data.state === "drop") {
+      // Step 6: a picture dropped on the mockup is a pin there that carries it.
+      const key = keyOf(section);
+      if (typeof data.refused === "string") { store.said.set(key, cut(data.refused, 120)); paintSection(section); return; }
+      const part = readPart(data.part), point = pointOf(data.point), dropped = typeof data.data === "string" && /^data:image\/[\w.+-]+;base64,/.test(data.data) ? data.data : null;
+      if (!part || !point || !dropped || !fit) return;
+      const before = seen.get(stage);
+      seen.set(stage, { vw: Number(data.vw) || before?.vw || 0, vh: Number(data.vh) || before?.vh || 0, point, pins: before?.pins ?? new Map() });
+      if (open && open.form.querySelector("input")!.value.trim()) keep(false);
+      const name = (typeof data.name === "string" ? data.name : "").replace(/^.*[\\/]/, "").trim().slice(0, 120) || "picture";
+      const picture = fit(dropped).catch(() => null).then((fitted) => {
+        if (fitted) return { data: fitted.data, around: { x: 50, y: 50 }, type: fitted.type };
+        store.said.set(key, `${name} couldn't be read as a picture`);
+        paintSection(section);
+        return null;
+      });
+      store.said.delete(key);
+      openBox(section, stage, part, part.rect, { fx: unit(data.fx), fy: unit(data.fy) }, partName(part), -1, DROPPED_SAYS, picture, false, { name, type: "image/png" });
+      return;
+    }
     if (data.state !== "at") return;
     const pins = new Map<number, NoteRect>();
     for (const pin of Array.isArray(data.pins) ? data.pins.slice(0, 60) as { n?: unknown; rect?: unknown }[] : []) { const rect = rectOf(pin?.rect); if (typeof pin?.n === "number" && rect) pins.set(pin.n, rect); }
@@ -401,7 +453,7 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
     const draft = store.draft, back = pins.get(DRAFT);
     if (draft && !open && back && draft.key === keyOf(section) && onStage(stage, draft.option)) {
       store.draft = null;
-      openBox(section, stage, draft.part, back, draft.spot, draft.name, draft.index, draft.text, draft.picture ?? Promise.resolve(null), draft.keep);
+      openBox(section, stage, draft.part, back, draft.spot, draft.name, draft.index, draft.text, draft.picture ?? Promise.resolve(null), draft.keep, draft.given);
       return;
     }
     if (open && open.stage === stage) { const moved = pins.get(open.index >= 0 ? open.index : DRAFT); if (moved) open.rect = moved; placeOpen(); }
@@ -478,7 +530,7 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
       // A note being typed survives the redraw.
       if (open) {
         const option = optionOf(open.stage);
-        store.draft = { key: keyOf(open.section), part: open.part, name: open.name, text: open.form.querySelector("input")!.value, index: open.index, spot: open.spot, keep: open.flip, ...(option ? { option } : {}), ...(open.picture ? { picture: open.picture } : {}) };
+        store.draft = { key: keyOf(open.section), part: open.part, name: open.name, text: open.form.querySelector("input")!.value, index: open.index, spot: open.spot, keep: open.flip, ...(option ? { option } : {}), ...(open.picture ? { picture: open.picture } : {}), ...(open.given ? { given: open.given } : {}) };
       }
       hidePlus();
       window.removeEventListener("message", heard);

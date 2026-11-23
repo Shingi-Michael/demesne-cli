@@ -221,6 +221,44 @@ export function shotsOf(source: string): ShotUse[] {
   return [...body.matchAll(TAG("d-shot"))].map((match) => ({ src: attribute(match[0], "src") ?? "", box: attribute(match[0], "box"),
     marks: (attribute(match[0], "marks") ?? "").split("|").map((item) => item.trim()).filter(Boolean) }));
 }
+/// Step 6: a picture from the chat in any mockup, as picture:IMAGE_ID where
+/// an address goes (<img src>, CSS url(), a Markdown image, a React prop).
+/// Foundry keeps the picture with the mockup and serves it there.
+export const PICTURE_REF = /\bpicture:([A-Za-z0-9_-]{1,200})/g;
+/// The pictures a source names that way, once each, in order.
+export function picturesOf(source: string): string[] {
+  return [...new Set([...source.matchAll(PICTURE_REF)].map((match) => match[1]!))];
+}
+/// Step 6: a page (kind html) made of several files. The page links its
+/// files by name, as a site would (<link rel="stylesheet" href="styles.css">,
+/// <script src="app.js">, <script type="application/json" id="data"
+/// src="data.json">, <img src="logo.svg">, url(logo.svg)), and Foundry puts
+/// them in where they are linked, so the page runs the same in its frame,
+/// in the look and as a saved copy. Names it doesn't keep stay as written.
+export function withFoundryFiles(html: string, files: Record<string, string> | undefined): string {
+  const names = Object.keys(files ?? {});
+  if (!names.length) return html;
+  const kept = (address: string) => { const name = address.replace(/^\.\//, ""); return Object.hasOwn(files!, name) ? name : null; };
+  const svg = (name: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(files![name]!)}`;
+  const urls = (css: string) => css.replace(/url\(\s*(["']?)([^"')\s]+)\1\s*\)/g, (whole, _quote: string, address: string) => { const name = kept(address); return name && /\.svg$/i.test(name) ? `url("${svg(name)}")` : whole; });
+  const attribute = (tag: string, name: string) => new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
+  return html
+    // Stylesheets: the file's CSS where the link was.
+    .replace(/<link\b[^>]*>/gi, (tag) => {
+      const href = attribute(tag, "href"), name = href && kept(href[1] ?? href[2] ?? href[3] ?? "");
+      if (!name || !/\.css$/i.test(name) || !/\brel\s*=\s*["']?stylesheet/i.test(tag)) return tag;
+      return `<style data-file="${name}">${urls(files![name]!).replace(/<\/style/gi, "<\\/style")}</style>`;
+    })
+    // Scripts (and data in a script tag): the file's text inside the tag, its other attributes kept.
+    .replace(/<script\b([^>]*)>\s*<\/script>/gi, (whole, attributes: string) => {
+      const src = attribute(` ${attributes}`, "src"), name = src && kept(src[1] ?? src[2] ?? src[3] ?? "");
+      if (!name) return whole;
+      return `<script${attributes.replace(src[0], "")} data-file="${name}">${files![name]!.replace(/<\/script/gi, "<\\/script")}</script>`;
+    })
+    // A drawing as a picture, and in the page's own styles.
+    .replace(/(<img\b[^>]*\ssrc\s*=\s*)(["'])([^"']+)\2/gi, (whole, start: string, quote: string, address: string) => { const name = kept(address); return name && /\.svg$/i.test(name) ? `${start}${quote}${svg(name)}${quote}` : whole; })
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, (block) => block.includes('data-file="') ? block : urls(block));
+}
 /// A box written x,y,w,h (commas or spaces), or null.
 export function shotBox(text: string): { x: number; y: number; width: number; height: number } | null {
   const n = text.trim().split(/[\s,]+/).map(Number);

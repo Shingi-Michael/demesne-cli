@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { isRecord, pickOption, styleLines, stylesOf } from "@demesne/protocol";
 import { forgetLearnedRule, saveDesignRule, saveLearnedRule, saveStyle } from "./design-guide.ts";
 import { INSTRUCTION_FILE_NAMES } from "./instructions.ts";
+import { addMemory, forgetMemory, memoryFile, scopeFor, type MemoryScope } from "./memory.ts";
 import { toolError, type AgentTool } from "./tools.ts";
 
 /// "Always run the tests with bun": a standing rule you give in a chat, saved
@@ -41,18 +42,21 @@ export function withRule(content: string, rule: string): string {
 /// A Foundry mockup by id, for keeping the style the person picked from it (pass 246 A).
 export type MockupReader = (id: string) => { title: string; source: string } | null;
 
-export function rememberTool(mockup?: MockupReader): AgentTool {
+const learnedScope = (input: unknown): MemoryScope | null => isRecord(input) && (input.learned === "you" || input.learned === "project") ? input.learned : null;
+
+export function rememberTool(mockup?: MockupReader, memoryHome?: string): AgentTool {
   return {
     definition: {
       name: "remember",
-      description: "Save a standing rule the user gives for this project (\"always…\", \"never…\", \"from now on…\", \"remember that…\") to the project's DEMESNE.md, so every later chat here follows it. One short line, in the user's words. Not for facts about the task at hand, and not for things the code or git history already shows. A rule about how mockups and pages should look (colours, type, spacing, layout, what never to draw) takes design: true and goes to the design guide (.demesne/design.md) that every Foundry page follows.",
+      description: "Save a standing rule the user gives for this project (\"always…\", \"never…\", \"from now on…\", \"remember that…\") to the project's DEMESNE.md, so every later chat here follows it. One short line, in the user's words. Not for facts about the task at hand, and not for things the code or git history already shows. A rule about how mockups and pages should look (colours, type, spacing, layout, what never to draw) takes design: true and goes to the design guide (.demesne/design.md) that every Foundry page follows. Something you learned from what they said rather than a rule they asked you to keep takes learned (\"you\" or \"project\") and goes to Demesne's memory, quietly.",
       inputSchema: {
         type: "object",
         properties: { rule: { type: "string", minLength: 1, maxLength: RULE_MAX }, design: { type: "boolean", description: "True for a rule about how things should look." },
           learned_from: { type: "string", maxLength: 120, description: "With design: taste you learned from their Foundry notes or picks, not said as a rule. Where it came from: \"♥ on Plans page\", \"picked on Plans page\", \"noted twice: Plans page, Gift page\"." },
           replaces: { type: "string", maxLength: 120, description: "With learned_from: words of an older learned line this one replaces." },
           forget: { type: "boolean", description: "With design: the person asked to forget a learned line; rule is some of its words." },
-          style_of: { type: "string", maxLength: 80, description: "With design: the id of a Foundry page of styles the person picked a style from; rule is that style's name. Keeps it as the project's style." } },
+          style_of: { type: "string", maxLength: 80, description: "With design: the id of a Foundry page of styles the person picked a style from; rule is that style's name. Keeps it as the project's style." },
+          learned: { type: "string", enum: ["you", "project"], description: "Learned from what they said, not asked to be kept: \"you\" for how the person likes to work (goes with them to every project), \"project\" for a fact about this project. Saved quietly to Demesne's memory; the person sees it and can undo it. With forget: true, drops that line instead." } },
         required: ["rule"],
         additionalProperties: false,
       },
@@ -60,6 +64,8 @@ export function rememberTool(mockup?: MockupReader): AgentTool {
     permission(input) {
       // Taste learned from the person's own notes is Foundry's bookkeeping, like a save: it never asks.
       // Forgetting one is the person's own ask, and only ever takes a learned line away.
+      // What it learned goes to Demesne's memory quietly: the window shows it and can undo it (pass 254).
+      if (learnedScope(input) && (!isRecord(input) || input.design !== true)) return null;
       if (isRecord(input) && input.design === true && (input.forget === true || (typeof input.learned_from === "string" && input.learned_from.trim()) || (typeof input.style_of === "string" && input.style_of.trim()))) return null;
       const rule = isRecord(input) && typeof input.rule === "string" ? input.rule : "";
       return { kind: "write", summary: `${isRecord(input) && input.design === true ? "Design rule" : "Remember"}: ${rule.slice(0, 100)}` };
@@ -69,6 +75,17 @@ export function rememberTool(mockup?: MockupReader): AgentTool {
       const rule = input.rule.replace(/\s+/g, " ").trim().replace(/^[-*]\s+/, "");
       if (!rule) throw toolError("MISSING_RULE", "the rule is empty", "pass the rule as one short line");
       if (rule.length > RULE_MAX) throw toolError("RULE_TOO_LONG", `the rule is over ${RULE_MAX} characters`, "say it in one short line");
+      const learned = learnedScope(input);
+      if (learned && input.design !== true) {
+        const scope = scopeFor(learned, context.workspaceRoot, memoryHome);
+        const path = memoryFile(scope, context.workspaceRoot, memoryHome)!;
+        if (input.forget === true) {
+          const gone = forgetMemory(path, scope, rule);
+          return JSON.stringify(gone.forgotten ? { memory: scope, forgotten: true, text: gone.text } : { memory: scope, forgotten: false, remembered: gone.left, note: "No remembered line holds those words. Use words from one of these lines." });
+        }
+        const kept = addMemory(path, scope, rule, "", new Date().toISOString().slice(0, 10));
+        return JSON.stringify({ memory: scope, saved: kept.saved, text: kept.text, note: kept.saved ? "Kept. Demesne shows the person; don't mention it." : "Already remembered." });
+      }
       // The style they picked from a page of styles: its values are read from the page, never retyped.
       if (input.design === true && typeof input.style_of === "string" && input.style_of.trim()) {
         const found = mockup?.(input.style_of.trim());

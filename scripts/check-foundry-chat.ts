@@ -56,7 +56,7 @@ const f = await fixture({
       assert(tools.some(tool => tool.name === "foundry_save"));
       const graphic = /graphic/i.test(request), document = /document/i.test(request), deck = /slide deck/i.test(request);
       const save = call("foundry_save", { title: graphic ? "A simple badge" : document ? "Project brief" : deck ? "Q1 launch" : "Idea garden",
-        description: "A small page to try in the chat.", note: "First take", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading.", starts_from: "new" },
+        description: "A small page to try in the chat.", note: "First take", why: { direction: "Calm and plain, for a quick try.", look_at: "The main heading.", starts_from: "new", walkthrough: [{ option: "A · Pills", what: "A · Pills, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }, { option: "B · Joined", what: "B · Joined, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }] },
         kind: graphic ? "svg" : document ? "markdown" : deck ? "deck" : "html",
         source: deck ? "---\ntheme: forest\n---\n# Q1 launch\nWhat the free tier did.\n\n---\n\n# 3.1×\nSign-ups a week.\n\n---\n\n## Sign-ups\n```chart\nlabels: W1, W2, W3\nvalues: 1200, 2400, 3700\n```"
           : graphic ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#285b48"/></svg>'
@@ -158,10 +158,11 @@ try {
   // Pass 208 A: what it is, the version's name, and a link to its chat.
   assert.equal(await item(artifact.id, 1).locator(".fd-desc").textContent(), "A small page to try in the chat.");
   assert.equal(await item(artifact.id, 1).locator(".fd-ver b").textContent(), "v1 · First take");
-  // Pass 218 A: why it looks this way, as quiet lines under the description.
-  assert.equal(await item(artifact.id, 1).locator(".fd-why").textContent(), "DirectionCalm and plain, for a quick try.Look atThe main heading.");
+  // Pass 263 A: what it is and why, as a walkthrough under the mockup; the why lines above keep only what was dropped.
+  assert.equal(await item(artifact.id, 1).locator(".fd-why").count(), 0);
+  assert.equal(await item(artifact.id, 1).locator(".fd-walk-v:not([hidden]) .fd-walk-what").textContent(), "A · Pills, for a check.");
   assert.equal(await item(artifact.id, 1).locator('.fd-ln .fd-link[data-action="select-session"]').count(), 1, "from links to its chat");
-  assert.equal(await foundry.locator("button:not([data-action=foundry-day]):not(.fd-link):not(.fn-plus), form, input, .cp-tabs").count(), 0, "nothing to press on Foundry but the day strip and links");
+  assert.equal(await foundry.locator("button:not([data-action=foundry-day]):not(.fd-link):not(.fn-plus):not(.fd-hd-b), form, input, .cp-tabs").count(), 0, "nothing to press on Foundry but the day strip and links");
   await frame.getByRole("button", { name: "Plant an idea" }).click();
   await frame.getByRole("button", { name: "Planted 1" }).waitFor();
   await page.waitForTimeout(300);
@@ -188,11 +189,13 @@ try {
   const order = await foundry.locator(".fd-item").evaluateAll((items) => items.map((node) => (node as HTMLElement).dataset.fd));
   assert.deepEqual(order, [`${artifact.id}:2`, `${artifact.id}:1`], "every version, newest first");
   assert.equal(await item(artifact.id, 2).locator(".fd-ver b").textContent(), "v2 · Blue");
-  assert.equal(await item(artifact.id, 2).locator(".fd-why dd").first().textContent(), "Same page, cooler.", "each version says its own why");
+  // Pass 263 A: a fix that sends no walkthrough keeps the one before; the why lines above keep what it follows.
+  assert.equal(await item(artifact.id, 2).locator(".fd-why dd").first().textContent(), "One accent colour, on the badge only", "each version says its own why");
+  assert.equal(await item(artifact.id, 2).locator(".fd-walk-v").count(), 2, "the walkthrough is kept");
   // Pass 245 A: a version that follows what the person liked on earlier mockups says so in a fourth line; one that does not has none.
   assert.equal(await item(artifact.id, 2).locator(".fd-why dt").last().textContent(), "Your taste");
   assert.equal(await item(artifact.id, 2).locator(".fd-why dd").last().textContent(), "One accent colour, on the badge only", "the version says which likes it followed");
-  assert.equal(await item(artifact.id, 1).locator(".fd-why dt").count(), 2, "no taste line where nothing was followed");
+  assert.equal(await item(artifact.id, 1).locator(".fd-why dt").count(), 0, "no taste line where nothing was followed");
   // Pass 219 A: each version quotes the ask that made it.
   assert.equal(await item(artifact.id, 2).locator(".fd-ask q").textContent(), "Make it blue", "the ask is quoted");
   await item(artifact.id, 2).screenshot({ path: join(output, "foundry-why.png") });

@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, FOUNDRY_FILE_NAME, FOUNDRY_MAX_FILES, withFoundryFiles, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, cleanWalk, walkProblem, optionNames, FOUNDRY_MAX_VARIANTS, FOUNDRY_MAX_WALK_PARTS, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
@@ -47,7 +47,7 @@ Anywhere:
 - <d-avatar name="Amara Okafor" size="28"> initials on a steady colour. demesne.sample.people(n) gives 12 names; demesne.sample.series(n, start, drift, seed) a believable number series.
 - <d-chart type="line|area|bar|donut" values="4,6,5,8" labels="Mon,Tue,Wed,Thu" height="200"> in --accent.
 - <d-stat label="This week" value="32.4 km" delta="+12%">.
-- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: on the Foundry page each option gets its own stage, named on the line above it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
+- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> two to five variants to choose between, each a different shape: on the Foundry page they are tabs over one stage, each with its walkthrough (why.walkthrough) under it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
 - <d-styles recommended="Clean counter"><d-style name="Clean counter" made="Inter throughout · 8px corners · hairlines" vars="${STYLE_NEEDS.map((name) => `${name}:…`).join("; ")}"></d-style>…</d-styles> a range of styles, for when they ask for styles or looks: write the page ONCE on those variables (the kit already is: --paper background, --ink text, --accent the one thing to press, --font body type, --radius corners; --head is the heading type), then two or three styles, each a name, one plain line on what it is made of, and its values (add your own variables, the same set in every style). Foundry draws the page in each: a row of small ones, then each at full size under its name, colours and that line. The styles must be told apart at a glance: different paper, type and corners, not one look three times. No <d-compare> on such a page. Typefaces a machine has: Inter and JetBrains Mono (the kit's), Georgia, Times New Roman, Helvetica, Arial, Courier New, system-ui, ui-serif, ui-rounded. When the project has a look already (its Style in the design guide, or the real thing you looked at), that look is one of the styles, named for what it is. What they taught you about words and order holds in every style; what they taught you about colour and type holds only in the style that is theirs today. When they choose one, keep it: remember {design: true, style_of: "<this mockup's id>", rule: "<style name>"}.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
 A review of something that exists ("look at this and show me what needs work"), one page:
@@ -61,7 +61,8 @@ const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet"
   + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime). `
   + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
   + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>, <d-review> for a review of what exists); foundry_read id "kit:parts" lists them. `
-  + "SVG is one <svg> with a viewBox. Under 512 KB.";
+  + "A bigger page may split into files: pass files {\"styles.css\": …, \"app.js\": …, \"data.json\": …} and link them by name (<link rel=\"stylesheet\" href=\"styles.css\">, <script src=\"app.js\">, <script type=\"application/json\" id=\"data\" src=\"data.json\">). "
+  + "SVG is one <svg> with a viewBox. Under 512 KB in all.";
 
 /// How a page should look is not here: the design guide (design-guide.ts)
 /// rides in the system prompt with the person's own rules, and this
@@ -77,11 +78,23 @@ export const READY_KINDS_RULES = "Ready kinds: slides are kind deck, a report, b
   + "A deck splits into slides on lines that are only ---: one idea per slide, few words; # 3.1× with a sentence becomes a big-number slide, a lone quote a quote slide, a heading and a chart a chart slide, a list with a chart a split "
   + "(<!-- layout: title|statement|number|quote|split|chart|points --> overrides). A dashboard's ## headings group its stats, charts and tables. Anything interactive or custom is html.";
 
+/// More kinds (apps/desktop/electron/foundry-more-kinds.ts): what the model
+/// would write anyway, drawn by Demesne with libraries from the app.
+export const MORE_KINDS_RULES = "More kinds: an interactive app, tool or game you would write in React is kind react: one component in JSX or TSX with export default, styled with Tailwind classes (no stylesheet needed), importing only "
+  + FOUNDRY_REACT_IMPORTS.filter((name) => name !== "react-dom/client").join(", ") + " (icons and charts). A diagram (flow, sequence, states, entities, timeline, gantt, mind map) is kind mermaid: Mermaid source only. "
+  + "A file of code to read is kind code: the code only, with the file name and extension in the title (orders.ts). Anything else interactive or custom is html.";
+
 /// Pages that remember (apps/desktop/foundry-kit/remember.js): Demesne puts
 /// the runtime in front of any page that calls it, so the page needs no tag.
 export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: await demesne.save(name, jsonValue) and await demesne.load(name, fallback) keep what the person enters with the artifact (across closing, reloads and new versions; 256 KB; localStorage does not work here); "
   + "await demesne.ask(question) returns the chat model's answer as text, for a button the person presses (never on load or in a loop; a few a minute); await demesne.pick({accept}) lets them choose a file ({name, type, text} or {name, type, dataURL}). "
-  + "Use them when the page is a tool to keep (a tracker, checklist, planner, journal, quiz): load on start, save on every change, show a saved state.";
+  + "Use them when the page is a tool to keep (a tracker, checklist, planner, journal, quiz): load on start, save on every change, show a saved state. "
+  + "Real data: await demesne.read(path) returns a file in this project as text (a CSV, JSON or log to chart; never .env or keys), await demesne.list(folder) its names (folders end in /), "
+  + "await demesne.fetch(httpsUrl) live public data ({ok, status, type, text, json()}; the person allows each site once, so fetch on load is fine and a refusal comes back as an error). "
+  + "Use them when the person asks for their real numbers or files; show a quiet loading state, and on an error say what was missing in the page (your own look sees the error, not the data).";
+
+/// Step 6: pictures from the chat in any mockup (picture:IMAGE_ID).
+export const PICTURE_RULES = "Pictures the person attached or dropped on a mockup go in any kind as picture:IMAGE_ID where an address goes (<img src>, CSS url(), a Markdown image ![Logo](picture:IMAGE_ID)), with the id the message gave; use them instead of a drawn stand-in.";
 
 /// Pass 221 A: Foundry draws the surface and plays the demo, so the page
 /// holds only the thing being made.
@@ -90,7 +103,7 @@ export const STAGE_RULES = "The page holds only the thing, with only the control
   + "demo says how it moves: foundry_try steps, each with a short say; Foundry plays them with a pointer, the words under the page. A page with something to press always gets one, of its main path. "
   + "So never put Replay, Play demo, Next step, an option switcher or a state switcher (Empty · Loading · Error, Show error, Simulate) in the page.";
 
-const GUIDE = READY_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
+const GUIDE = READY_KINDS_RULES + " " + MORE_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + PICTURE_RULES + " " + DESIGN_POINTER;
 
 /// What stands in for a page's source once its turn is old.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";
@@ -173,10 +186,16 @@ export function chatPictures(store: DemesneStore, sessionId: string | undefined)
 }
 
 export function checkShots(store: DemesneStore, id: string | undefined, source: string, sessionId: string | undefined): ImageArtifact[] {
-  const uses = shotsOf(source);
-  if (!uses.length) return [];
+  const uses = shotsOf(source), named = picturesOf(source);
+  if (!uses.length && !named.length) return [];
   const found = new Map<string, ImageArtifact>();
   const pictures = () => chatPictures(store, sessionId);
+  // Step 6: picture:IMAGE_ID, a picture from this chat anywhere in any mockup.
+  for (const src of named) {
+    const image = (sessionId ? store.getImageArtifact(sessionId, src) : null) ?? (id ? store.getFoundryShot(id, src) : null);
+    if (!image) throw new Error(`[picture] "picture:${src}" is not a picture this chat has. Hint: picture:IMAGE_ID takes the image artifact id an attached or dropped picture gave${pictures()}`);
+    found.set(src, image);
+  }
   for (const use of uses) {
     const image = found.get(use.src) ?? (use.src && sessionId ? store.getImageArtifact(sessionId, use.src) : null) ?? (use.src && id ? store.getFoundryShot(id, use.src) : null);
     if (!image) throw new Error(`[review_shot] ${use.src ? `"${use.src}" is not a picture this chat has.` : "A <d-shot> names no picture."} Hint: src is the image artifact id a capture or an attached picture gave${pictures()}`);
@@ -204,8 +223,8 @@ export async function lookShots(store: DemesneStore, id: string): Promise<Record
   return Object.keys(shots).length ? shots : undefined;
 }
 
-/// At most three options in a page (pass 197 A): best of three, not eight.
-export const MAX_OPTIONS = 3;
+/// At most five variants in a page (pass 197 A had three; pass 263 A shows them as tabs).
+export const MAX_OPTIONS = FOUNDRY_MAX_VARIANTS;
 function checkOptions(kind: string | undefined, source: string) {
   if (kind !== undefined && kind !== "html") return;
   // A review (pass 223 A) holds up to three parts, each with its own Today, options and pick.
@@ -345,6 +364,25 @@ const reviewSaid = (source: string, first: boolean) => `${first && reviewOf(sour
 /// A page that draws a button only a demo needs (Replay, Play demo, Next
 /// step) is sent back once per ask: the demo belongs to Foundry. A second
 /// save goes through, for the page whose real design has one.
+/// A react, mermaid or code artifact that won't draw says why at save, so
+/// the model fixes it before the person sees a broken page.
+const tsx = new Bun.Transpiler({ loader: "tsx" });
+export function checkKindSource(kind: FoundryKind | undefined, source: string) {
+  if (kind === "react") {
+    let scanned: { imports: { path: string }[]; exports: string[] };
+    try { scanned = tsx.scan(source); } catch (error) {
+      throw new Error(`[invalid_input] This component doesn't compile: ${error instanceof Error ? error.message : String(error)}. Hint: one JSX or TSX file`);
+    }
+    const other = scanned.imports.find((one) => !(FOUNDRY_REACT_IMPORTS as readonly string[]).includes(one.path));
+    if (other) throw new Error(`[invalid_input] "${other.path}" can't be imported in a react artifact. Hint: only ${FOUNDRY_REACT_IMPORTS.filter((name) => name !== "react-dom/client").join(", ")}; write anything else in the file`);
+    if (!scanned.exports.includes("default")) throw new Error("[invalid_input] The component needs an export default. Hint: export default function App() { … }");
+  }
+  if (kind === "mermaid") {
+    const type = mermaidType(source);
+    if (!type || !MERMAID_TYPES.includes(type)) throw new Error(`[invalid_input] A mermaid artifact starts with its diagram type${type ? `, not "${type}"` : ""}. Hint: flowchart LR, sequenceDiagram, stateDiagram-v2, erDiagram, gantt, mindmap, timeline…; Mermaid source only, no fences`);
+  }
+}
+
 function checkControls(kind: FoundryKind | undefined, source: string) {
   if (kind !== "html") return;
   const found = demoControls(source);
@@ -377,20 +415,56 @@ const WHY_SCHEMA = {
     dropped: { type: "string", maxLength: 300, description: "What you left out, and why." },
     starts_from: { type: "string", maxLength: 300, description: "New mockups: the real thing you looked at (window, files), or \"new\"." },
     followed: { type: "string", maxLength: 300, description: "Which of their learned likes (design guide) this follows, a few words each; \"none\" when none apply." },
+    walkthrough: {
+      type: "array", maxItems: FOUNDRY_MAX_VARIANTS,
+      description: "Required on html mockups: one entry per variant (per data-option; one entry when there is a single page), shown under it on Foundry. Omit on a fix to keep the one before.",
+      items: {
+        type: "object",
+        properties: {
+          option: { type: "string", description: "The variant's name (its data-option)." },
+          what: { type: "string", maxLength: 500, description: "What it is and who it is for, a sentence or two." },
+          parts: { type: "array", minItems: 2, maxItems: FOUNDRY_MAX_WALK_PARTS, items: { type: "object", properties: {
+            name: { type: "string", maxLength: 80 }, says: { type: "string", maxLength: 300, description: "What it does and why it is there." },
+            at: { type: "string", maxLength: 200, description: "CSS selector of that piece, inside the variant; Foundry numbers it on the page." } }, required: ["name", "says"], additionalProperties: false } },
+          why: { type: "string", maxLength: 500, description: "Why it is shaped this way." },
+          differs: { type: "string", maxLength: 400, description: "How it differs from the other variants (several variants)." },
+          next: { type: "string", maxLength: 400, description: "What you would do next with it." },
+        },
+        required: ["what", "parts", "why"],
+        additionalProperties: false,
+      },
+    },
   },
   required: ["direction", "look_at"],
   additionalProperties: false,
 } as const;
 
-const WHY_ANSWER = "In your answer, say the same why in plain words: the direction, what to look at first, and what you dropped.";
+const WHY_ANSWER = "Foundry shows the walkthrough under each variant. In your answer, hand the work over in full: what you made and who it is for, each variant in a line with how it differs, your pick and why, what you dropped, and what they should decide next.";
 
 function whyOf(value: unknown): FoundryWhy | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new Error("[invalid_input] why is an object: {direction, look_at, dropped}");
   const text = (key: string) => typeof value[key] === "string" ? (value[key] as string).trim().slice(0, 300) : "";
   const from = text("starts_from"), followed = text("followed");
-  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped"), ...(from ? { from } : {}), ...(followed ? { followed } : {}) };
-  return why.direction || why.look || why.dropped ? why : undefined;
+  const walk = cleanWalk(value.walkthrough);
+  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped"), ...(from ? { from } : {}), ...(followed ? { followed } : {}), ...(walk ? { walk } : {}) };
+  return why.direction || why.look || why.dropped || walk ? why : undefined;
+}
+
+/// Pass 263 A: an html mockup comes with a walkthrough of each variant. A
+/// save or edit that gives none keeps the one the version before had, as
+/// long as it still covers the variants; otherwise it is refused, with what
+/// is missing. A review (pass 223 A) explains itself part by part instead.
+function withWalk(store: DemesneStore, kind: FoundryKind | undefined, id: string | undefined, why: FoundryWhy | undefined, source: string): FoundryWhy | undefined {
+  if (kind !== "html" || REVIEW_PAGE.test(source)) return why;
+  const before = id ? store.getFoundryArtifact(id) : null;
+  const kept = before?.versions.find((item) => item.version === before.version)?.why?.walk;
+  // A page of styles is one page in two or three looks: one walkthrough explains it.
+  const variants = STYLES_PAGE.test(source) ? [] : optionNames(source);
+  if (!why?.walk && kept && !walkProblem(kept, variants)) return why ? { ...why, walk: kept } : why;
+  const problem = walkProblem(why?.walk ?? kept, variants);
+  if (problem) throw new Error(problem);
+  return why;
 }
 
 /// A review says why part by part, on the sheet: of the save's own why only
@@ -487,6 +561,22 @@ function conflict(error: unknown): never {
   throw error;
 }
 
+/// Step 6: the files a page keeps beside it, as given to a save: undefined when
+/// not given (a new version keeps the ones before), {} to drop them.
+export function filesOf(value: unknown, kind: string | undefined): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('[invalid_input] files is an object of file name to text. Hint: {"styles.css": "…", "app.js": "…"}');
+  const entries = Object.entries(value);
+  if (entries.length && kind !== "html") throw new Error("[invalid_input] Only an html page keeps other files. Hint: put everything in the source");
+  if (entries.length > FOUNDRY_MAX_FILES) throw new Error(`[invalid_input] A page keeps up to ${FOUNDRY_MAX_FILES} files. Hint: join the small ones`);
+  for (const [name, text] of entries) {
+    if (!FOUNDRY_FILE_NAME.test(name)) throw new Error(`[invalid_input] "${name}" can't be a file of a page. Hint: a plain name with .css, .js, .mjs, .json, .svg, .csv, .txt or .md, no folders`);
+    if (typeof text !== "string") throw new Error(`[invalid_input] The file "${name}" needs its text`);
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+const bytesOf = (source: string, files: Record<string, string> | undefined) => Buffer.byteLength(source) + Object.entries(files ?? {}).reduce((sum, [name, text]) => sum + Buffer.byteLength(name) + Buffer.byteLength(text), 0);
+
 export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks = new Map<string, number>()): AgentTool {
   const tool: AgentTool = {
     definition: {
@@ -499,7 +589,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
         properties: {
           id: { type: "string", description: "Omit to create." },
           title: { type: "string", maxLength: 200 },
-          kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating: deck, doc or dashboard (content Demesne designs), html (a page you design), svg, or markdown (plain notes)." },
+          kind: { type: "string", enum: [...FOUNDRY_KINDS], description: "Required when creating: deck, doc or dashboard (content Demesne designs), html (a page you design), react (one component), mermaid (a diagram), code (a file of code), svg, or markdown (plain notes)." },
           source: { type: "string", description: "The complete source." },
           base_version: { type: "integer", minimum: 1, description: "When revising: the version you read." },
           note: { type: "string", maxLength: 300, description: "This version's name, a few words." },
@@ -509,6 +599,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           why: WHY_SCHEMA,
           surface: SURFACE_SCHEMA,
           demo: DEMO_SCHEMA,
+          files: { type: "object", additionalProperties: { type: "string" }, description: "An html page's other files by name (styles.css, app.js, data.json), linked from the page. Omit to keep the ones before." },
         },
         required: ["source"],
         additionalProperties: false,
@@ -517,9 +608,10 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
     permission: () => null,
     async execute(input, context) {
       if (!isRecord(input) || typeof input.source !== "string" || !input.source.trim()) throw new Error("[invalid_input] foundry_save needs the complete source. Hint: send the whole file as source");
-      if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] Source is over 512 KB. Hint: simplify or split it");
       const id = typeof input.id === "string" && input.id ? input.id : undefined;
       const kind = typeof input.kind === "string" ? input.kind as FoundryKind : undefined;
+      const files = filesOf(input.files, id ? store.getFoundryArtifact(id)?.kind : kind);
+      if (bytesOf(input.source, files) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] Source is over 512 KB. Hint: simplify or split it");
       if (!id && (!kind || !FOUNDRY_KINDS.includes(kind))) throw new Error(`[invalid_input] kind must be one of ${FOUNDRY_KINDS.join(", ")} when creating. Hint: deck, doc or dashboard for slides, a report or numbers; html for anything else`);
       if (!id && (typeof input.title !== "string" || !input.title.trim())) throw new Error("[invalid_input] A new artifact needs a title. Hint: name it in a few words");
       if (!id && (typeof input.description !== "string" || !input.description.trim())) throw new Error("[invalid_input] A new artifact needs a description. Hint: one or two sentences on what it is and what to look at");
@@ -531,21 +623,23 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const basedOn = id ? null : read && store.getFoundryArtifact(read.id) ? read : basedOnOf(store, input.based_on);
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       if (!id) checkPick(store, context.turnId, recommended);
-      const why = whyFor(input.why, input.source);
-      if (!(why && REVIEW_PAGE.test(input.source))) checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
-      if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
-      if (!REVIEW_PAGE.test(input.source)) checkTaste(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, why, context);
+      const said = whyFor(input.why, input.source);
+      if (!(said && REVIEW_PAGE.test(input.source))) checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, said);
+      if (!id) checkStart(store, kind, input.source, said, !!basedOn, context);
+      if (!REVIEW_PAGE.test(input.source)) checkTaste(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, said, context);
+      const why = withWalk(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, said, input.source);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
       const { stage: given, dropped } = stageWithPage(input);
       const stage = reviewStage(given, input.source);
       checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
+      checkKindSource(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       const shots = checkShots(store, id, input.source, context.sessionId);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
       try {
-        saved = store.saveFoundryArtifact({ id, kind, title: clean(input.title, 200), source: input.source, note: clean(input.note, 300) ?? "", baseVersion,
+        saved = store.saveFoundryArtifact({ id, kind, title: clean(input.title, 200), source: input.source, note: clean(input.note, 300) ?? "", baseVersion, ...(files !== undefined ? { files } : {}),
           description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
@@ -591,6 +685,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
               type: "object",
               properties: {
                 find: { type: "string", minLength: 1, description: "Exact text from the current source." },
+                file: { type: "string", description: "One of the page's files to edit instead of the page (styles.css)." },
                 replace: { type: "string" },
                 all: { type: "boolean", description: "Replace every occurrence." },
               },
@@ -619,7 +714,8 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       // Names and words only: no new version, no look.
       if (input.edits === undefined || (Array.isArray(input.edits) && input.edits.length === 0)) {
-        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended, why: whyOf(input.why), stage: stageOf(input) };
+        const newWhy = whyOf(input.why), kept = newWhy && !newWhy.walk ? store.getFoundryArtifact(input.id)?.versions[0]?.why?.walk : undefined;
+        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended, why: kept ? { ...newWhy!, walk: kept } : newWhy, stage: stageOf(input) };
         if (!words.title?.trim() && !words.description?.trim() && !words.note?.trim() && recommended === undefined && !words.why && !words.stage) throw new Error("[invalid_input] foundry_edit needs edits, or a title, note, description, recommended, why, surface or demo to change. Hint: pass edits to change the page");
         if (!store.getFoundryArtifact(input.id)) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
         const saved = store.describeFoundryArtifact(input.id, words);
@@ -628,30 +724,38 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const baseVersion = baseVersionOf(input);
       if (baseVersion === undefined) throw new Error("[invalid_input] foundry_edit needs base_version. Hint: pass the version you read");
       if (!Array.isArray(input.edits) || input.edits.length > 50) throw new Error("[invalid_input] edits must be 1 to 50 {find, replace} items");
-      const edits: FoundryEdit[] = input.edits.map((edit, index) => {
+      const edits: (FoundryEdit & { file?: string })[] = input.edits.map((edit, index) => {
         if (!isRecord(edit) || typeof edit.find !== "string" || !edit.find || typeof edit.replace !== "string") throw new Error(`[invalid_input] Edit ${index + 1} needs find (non-empty) and replace strings`);
-        return { find: edit.find, replace: edit.replace, all: edit.all === true };
+        return { find: edit.find, replace: edit.replace, all: edit.all === true, ...(typeof edit.file === "string" && edit.file ? { file: edit.file } : {}) };
       });
       const current = store.getFoundryArtifact(input.id);
       if (!current) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
       if (current.version !== baseVersion) conflict(new Error(`Foundry artifact is at version ${current.version}, not ${baseVersion}`));
-      const source = applyFoundryEdits(current.source, edits);
+      // Step 6: an edit may name one of the page's files; the rest change the page.
+      const source = applyFoundryEdits(current.source, edits.filter((edit) => !edit.file));
+      let files: Record<string, string> | undefined;
+      for (const name of new Set(edits.flatMap((edit) => edit.file ? [edit.file] : []))) {
+        if (!current.files || !Object.hasOwn(current.files, name)) throw new Error(`[no_match] "${name}" is not one of this page's files. Hint: ${current.files ? `its files are ${Object.keys(current.files).join(", ")}` : "it has none; edit the page"}`);
+        files = { ...(files ?? current.files), [name]: applyFoundryEdits(current.files[name]!, edits.filter((edit) => edit.file === name)) };
+      }
       checkNotBuilt(store, undefined, source);
-      if (Buffer.byteLength(source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
+      if (bytesOf(source, files ?? current.files) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
       checkOptions(current.kind, source);
-      const why = whyFor(input.why, source);
-      if (!(why && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, why);
-      if (!REVIEW_PAGE.test(source)) checkTaste(store, current.kind, input.id, why, context);
+      const said = whyFor(input.why, source);
+      if (!(said && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, said);
+      if (!REVIEW_PAGE.test(source)) checkTaste(store, current.kind, input.id, said, context);
+      const why = withWalk(store, current.kind, input.id, said, source);
       checkCritique(input.id, context.turnId, input.critique);
       const { stage: given, dropped } = stageWithPage(input);
       const stage = given?.surface ? reviewStage(given, source) : given;
       checkControls(current.kind, source);
+      checkKindSource(current.kind, source);
       const shots = checkShots(store, input.id, source, context.sessionId);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();
       let saved;
       try {
-        saved = store.saveFoundryArtifact({ id: input.id, title: clean(input.title, 200), source, note: clean(input.note, 300) ?? "", baseVersion,
+        saved = store.saveFoundryArtifact({ id: input.id, title: clean(input.title, 200), source, note: clean(input.note, 300) ?? "", baseVersion, ...(files ? { files } : {}),
           description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
@@ -682,6 +786,12 @@ export function briefOf(found: FoundryArtifactDetail): { brief?: Record<string, 
   return { brief: kept.map(({ version, ask, why }) => ({ version, ...(ask ? { asked: ask.slice(0, 300) } : {}),
     ...(why?.direction ? { direction: why.direction } : {}), ...(why?.look ? { look_at: why.look } : {}),
     ...(why?.dropped ? { dropped: why.dropped } : {}), ...(why?.from ? { starts_from: why.from } : {}), ...(why?.followed && !NO_TASTE.test(why.followed) ? { followed: why.followed } : {}) })), keep: BRIEF_KEEP };
+}
+
+/// Pass 263 A: the shown version's walkthrough, as the model gave it, so a change keeps it true (or sends a new one).
+function walkRead(found: FoundryArtifactDetail) {
+  const walk = found.versions.find((item) => item.version === found.version)?.why?.walk;
+  return walk ? { walkthrough: walk, walkthrough_rule: "Kept with the next version while it still holds; when the change makes it wrong, send why.walkthrough again." } : {};
 }
 
 /// Pass 242 A: what the person pinned as liked on this mockup, kept across
@@ -752,14 +862,14 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
-        ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), source: found.source,
+        ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), ...walkRead(found), source: found.source, ...(found.files ? { files: found.files } : {}),
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };
 }
 
 /// The kinds that render as a page, so the look can see them.
-const LOOKED_KINDS = new Set(["html", "deck", "doc", "dashboard"]);
+const LOOKED_KINDS = new Set(["html", "deck", "doc", "dashboard", "react", "mermaid"]);
 
 /// Pages whose last look found something: their next save in the same ask
 /// carries a critique first (step 3), keyed by turn and artifact.
@@ -789,7 +899,7 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (!artifact) return text;
   const phone = (saved.surface as { frame?: unknown } | undefined)?.frame === "phone";
   const shots = await lookShots(store, artifact.id);
-  const result = await look({ kind: artifact.kind, source: artifact.source, title: artifact.title, ...(phone ? { phone } : {}), ...(shots ? { shots } : {}) }, context.signal).catch(() => null);
+  const result = await look({ kind: artifact.kind, source: withFoundryFiles(artifact.source, artifact.files), title: artifact.title, ...(phone ? { phone } : {}), ...(shots ? { shots } : {}) }, context.signal).catch(() => null);
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
@@ -846,7 +956,7 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       } else {
         try { steps = parseSteps(args.steps); } catch (error) { throw new Error(`[invalid] ${error instanceof Error ? error.message : String(error)}`); }
       }
-      if (!LOOKED_KINDS.has(found.kind)) throw new Error(`[invalid] A ${found.kind} artifact has nothing to try; only pages, decks, docs and dashboards do`);
+      if (!LOOKED_KINDS.has(found.kind)) throw new Error(`[invalid] A ${found.kind} artifact has nothing to try; only pages, apps, diagrams, decks, docs and dashboards do`);
       const key = `${context.turnId ?? ""}:${found.id}`, seen = tries.get(key) ?? 0;
       if (seen >= TRIES_PER_TURN) throw new Error(`[limit] This page was tried ${TRIES_PER_TURN} times this turn; answer with what you found`);
       tries.set(key, seen + 1);
@@ -854,7 +964,7 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       // Tried at the size it is drawn for: a phone screen at a phone's width, everything else at the desktop's.
       const phone = found.versions.find((item) => item.version === found.version)?.stage?.surface?.frame === "phone";
       const shots = await lookShots(store, found.id);
-      const result = await tryer({ kind: found.kind, source: found.source, title: found.title, ...(shots ? { shots } : {}) }, { width: phone ? 390 : 1280, steps }, context.signal);
+      const result = await tryer({ kind: found.kind, source: withFoundryFiles(found.source, found.files), title: found.title, ...(shots ? { shots } : {}) }, { width: phone ? 390 : 1280, steps }, context.signal);
       if (!result) throw new Error("[unavailable] The page could not be tried just now");
       if (!result.steps.length && result.errors.length) throw new Error(`[unavailable] ${result.errors.join("; ")}`);
       const report = tryReport(result);

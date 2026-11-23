@@ -21,7 +21,8 @@ const LABEL = "--paper:#1d1613; --ink:#f3e9da; --accent:#e0a93b; --head:'JetBrai
 const PAPER = "--paper:#fbf7f2; --ink:#2a211b; --accent:#b9643c; --head:Georgia,serif; --font:Inter,sans-serif; --radius:14px";
 const page = (styles: string, word = "Checkout") => `<!doctype html><html><head><link rel="stylesheet" href="foundry://kit/base.css"><script src="foundry://kit/parts.js"></script></head><body><d-styles recommended="Clean counter">${styles}</d-styles><main><h1>${word}</h1><button class="primary">Pay €200</button></main></body></html>`;
 const THREE = style("Clean counter", CLEAN) + style("Roastery label", LABEL) + style("Warm paper", PAPER);
-const W = { direction: "One checkout in three styles.", look_at: "The price and the Pay button.", starts_from: "new" };
+const WALK = [{ what: "A page for a test.", parts: [{ name: "Heading", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the test." }];
+const W = { direction: "One checkout in three styles.", look_at: "The price and the Pay button.", starts_from: "new", walkthrough: WALK };
 
 test("a page of styles is saved when the styles differ, and turned back when they are one look twice", async () => {
   const store = new DemesneStore(":memory:"), root = project();

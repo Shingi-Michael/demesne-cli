@@ -8,6 +8,17 @@ test("at rest the cube shows three faces of each visible cubelet, lit from one s
   expect(new Set(svg.match(/var\(--t1\) \d+%/g)).size).toBe(3);
 });
 
+test("the viewport contains the parted faces without scaling or moving the cube", () => {
+  for (const axis of [0, 1, 2]) for (const sign of [-1, 1]) {
+    for (let time = 0; time < BEAT_MS; time += 40) {
+      const svg = cubeSvg({ ...restingCube(), axis, sign }, time);
+      expect(svg).toContain('viewBox="-13 -13 26 26" width="26" height="26"');
+      const coords = [...svg.matchAll(/points="([^"]+)"/g)].flatMap(match => match[1]!.split(/[ ,]/).map(Number));
+      expect(Math.max(...coords.map(Math.abs))).toBeLessThan(13);
+    }
+  }
+});
+
 test("each beat settles a quarter turn into the base and rests before the next", () => {
   let picks = [0.1, 0.9, 0.5, 0.2];
   const random = () => picks.shift() ?? 0.5;

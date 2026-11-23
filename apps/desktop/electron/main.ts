@@ -1,20 +1,25 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, Notification, powerSaveBlocker, protocol, screen, shell } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createHmac, randomBytes } from "node:crypto";
 import { homedir, release } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Backend } from "./backend.ts";
 import { lookJobPath, runFoundryLook } from "./foundry-look.ts";
+import { isReadyKind } from "./foundry-kinds.ts";
+import { codeExtension } from "./foundry-more-kinds.ts";
+import { allowSite, FETCH_TIMEOUT_MS, LIST_MAX, limitedText, projectPath, publicAddress, READ_MAX_BYTES, readSites, secretPath, siteAllowed, type AllowedSites } from "./foundry-data.ts";
 import { BROWSER_HOST_FLAG, runBrowserHost } from "./browser-host.ts";
+import { serveBrowser } from "./browser-inapp.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
-
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { withFoundryFiles } from "../../../packages/protocol/src/foundry-stage.ts";
+import { readShares, sharePage, unsharePage, type GitHubCall, type Shared, type Shares } from "./foundry-share.ts";
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
@@ -34,8 +39,35 @@ let stopCaptureKeys: (() => void) | undefined;
 const startup: Array<[string, number]> = [];
 const startupMark = (name: string) => { if (startup.length < 16) startup.push([name, Math.round(performance.now())]); };
 let window: BrowserWindow | undefined, backend: Backend | undefined, updater: Updater | undefined, quitting = false, exited = false;
+/// The model's browser, held in this window while the app is open (browser-inapp.ts).
+let inAppBrowser: ReturnType<typeof serveBrowser> | undefined;
+/// Files the chat's browser downloaded this run: the only ones its bar may show in their folder.
+const browserDownloads = new Set<string>();
 /// The power-save blocker held while something runs, or null.
 let awakeBlocker: number | null = null;
+/// Real data (Foundry step 5): set where the frames are served, called when you allow a site on the Foundry page.
+let allowFoundrySite: (id: string, host: string) => void = () => { throw new Error("Foundry isn't ready"); };
+/// Share outside Demesne (step 8): what each mockup shares, kept in the app's settings folder.
+const sharesFile = () => join(app.getPath("userData"), "foundry-shares.json");
+const foundryShares = (): Shares => readShares(existsSync(sharesFile()) ? readFileSync(sharesFile(), "utf8") : null);
+const keepFoundryShare = (id: string, one: Shared | null) => {
+  const all = foundryShares();
+  if (one) all[id] = one; else delete all[id];
+  writeFileSync(sharesFile(), JSON.stringify(all, null, 2));
+};
+/// GitHub's REST API with the computer's own GitHub login, through Electron's network.
+async function gitHubCall(): Promise<GitHubCall> {
+  const token = await githubToken();
+  if (!token) throw new Error("Sign in to GitHub on this computer first (gh auth login), then share again");
+  return async (method, path, body) => {
+    // DEMESNE_GITHUB_API: a stand-in GitHub for the real-app check (scripts/check-foundry-share.ts).
+    const answer = await net.fetch(`${process.env.DEMESNE_GITHUB_API || "https://api.github.com"}${path}`, { method, headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Demesne", ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const text = await answer.text();
+    let json: unknown = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    return { status: answer.status, json };
+  };
+}
 // Keep native notifications alive until the OS closes them or they are clicked.
 const notifications = new Set<Notification>();
 // Where the Mac window's own red, yellow and green buttons sit.
@@ -54,6 +86,7 @@ async function quit() {
   try { unlinkSync(join(homedir(), ".demesne", "desktop.pid")); } catch {}
   updater?.stop();
   stopCaptureKeys?.();
+  await inAppBrowser?.close().catch(() => {});
   await backend?.close();
   exited = true;
   app.quit();
@@ -169,7 +202,7 @@ if (!lookJob) void app.whenReady().then(async () => {
   const liquid = clear && process.env.DEMESNE_GLASS_VARIANT !== undefined && Number.isInteger(liquidVariant) && liquidVariant >= 0 && existsSync(liquidAddon);
   startupMark("window");
   window = new BrowserWindow({
-    width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#161617",
+    width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#08090d",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
@@ -187,6 +220,12 @@ if (!lookJob) void app.whenReady().then(async () => {
     webPreferences: { additionalArguments: glass ? [blurs ? "--demesne-glass" : "--demesne-glass=sharp"] : [], preload: join(base, "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, webSecurity: true, backgroundThrottling: false },
   });
   const contents = window.webContents, session = contents.session;
+  // The model's browser lives in this window while the app is open, so the split shows the page itself.
+  // DEMESNE_BROWSER=hidden keeps it in the hidden copy of the app, as before.
+  if (process.env.DEMESNE_BROWSER !== "hidden") inAppBrowser = serveBrowser({ window, pointer: process.env.DEMESNE_DESKTOP_BROWSER ?? join(homedir(), ".demesne", "desktop-browser.json"), log, tell: (news) => { if (news.action === "browser-download" && typeof news.path === "string") browserDownloads.add(news.path); emit("demesne:desktop-action", news); } });
+  // The page reloading or going down takes what it drew away: the real page goes with it until the split says where it is again.
+  contents.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) inAppBrowser?.place("", null); });
+  contents.on("render-process-gone", () => inAppBrowser?.place("", null));
   nativeTheme.on("updated", () => {
     if(nativeTheme.themeSource==="system")emit("demesne:desktop-action",{action:"appearance",dark:nativeTheme.shouldUseDarkColors});
   });
@@ -202,12 +241,44 @@ if (!lookJob) void app.whenReady().then(async () => {
   // the frame is sandboxed without the app's origin.
   // The first show of a version carries ?first=1: a revision gets the
   // version before it, to outline what changed.
+  /// Copies Foundry saved this run (pass 262 C): the only files "Show" may reveal.
+  const savedCopies = new Set<string>();
   const kitFile = (name: string) => { const file = FOUNDRY_KIT[name]!; return Buffer.concat([readFileSync(join(base, "ui", file.path)), ...(file.then ? [Buffer.from("\n"), readFileSync(join(base, "ui", file.then))] : [])]); };
   // Pages that remember: each page Demesne shows gets a key made from its id
   // and a secret that lives only as long as the app, so a page can reach its
   // own saves and asks and no other artifact's.
   const pageSecret = randomBytes(32), pageKey = (id: string) => createHmac("sha256", pageSecret).update(id).digest("base64url");
-  const pageCall = async (call: { what: "data" | "ask"; id: string }, request: Request) => {
+  // Real data (Foundry step 5): the sites each mockup may read, kept beside the app's settings.
+  const sitesFile = join(app.getPath("userData"), "foundry-sites.json");
+  let sites: AllowedSites = readSites(existsSync(sitesFile) ? readFileSync(sitesFile, "utf8") : null);
+  allowFoundrySite = (id, host) => { sites = allowSite(sites, id, host); writeFileSync(sitesFile, JSON.stringify(sites, null, 2)); };
+  const realData = async (call: { what: "read" | "list" | "fetch"; id: string }, body: Record<string, unknown>) => {
+    if (call.what === "fetch") {
+      const url = publicAddress(String(body.url ?? ""));
+      if (!url) throw new Error("demesne.fetch reads public https:// addresses only");
+      if (!siteAllowed(sites, call.id, url.hostname)) throw new Error(`ask:${url.hostname}`);
+      // Electron's own network, so the system's proxy and certificates apply as in the browser.
+      const response = await net.fetch(url.href, { redirect: "error", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { Accept: "application/json, text/*;q=0.9, */*;q=0.5" } });
+      const type = response.headers.get("content-type") ?? "";
+      if (type && !/json|text|xml|csv|javascript|yaml/i.test(type)) throw new Error(`${url.hostname} sent ${type.split(";")[0]}, not text a page can read`);
+      return { ok: response.ok, status: response.status, type, text: await limitedText(response) };
+    }
+    const found = await backend!.request("foundry-get", { id: call.id }) as { workspace: string | null };
+    const place = projectPath(found.workspace, String(body.path ?? ""));
+    if ("error" in place) throw new Error(place.error);
+    if (call.what === "list") {
+      const names = (await readdir(place.path, { withFileTypes: true })).filter((entry) => !entry.name.startsWith(".") && !secretPath(entry.name))
+        .slice(0, LIST_MAX).map((entry) => entry.isDirectory() ? `${entry.name}/` : entry.name).sort();
+      return { names };
+    }
+    const info = await stat(place.path);
+    if (info.isDirectory()) throw new Error(`${String(body.path)} is a folder: demesne.list it`);
+    if (info.size > READ_MAX_BYTES) throw new Error(`${String(body.path)} is bigger than 2 MB`);
+    const bytes = await readFile(place.path);
+    if (bytes.subarray(0, 8000).includes(0)) throw new Error(`${String(body.path)} isn't text`);
+    return { text: bytes.toString("utf8") };
+  };
+  const pageCall = async (call: { what: PageCall; id: string }, request: Request) => {
     const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     if (request.method !== "POST") return reply({ error: "Not found" }, 404);
     let body: Record<string, unknown>;
@@ -216,6 +287,7 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (!body || typeof body !== "object" || body.page !== pageKey(call.id)) return reply({ error: "This page can't reach Demesne" }, 403);
     try {
       if (call.what === "ask") return reply(await backend!.request("foundry-ask", { id: call.id, question: String(body.question ?? "") }));
+      if (call.what === "read" || call.what === "list" || call.what === "fetch") return reply(await realData({ what: call.what, id: call.id }, body));
       if (typeof body.name === "string") return reply(await backend!.request("foundry-data-set", { id: call.id, name: body.name, value: body.value ?? null }));
       return reply(await backend!.request("foundry-data", { id: call.id }));
     } catch (error) { return reply({ error: error instanceof Error ? error.message : String(error) }, 400); }
@@ -238,20 +310,27 @@ if (!lookJob) void app.whenReady().then(async () => {
     try {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
       const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
-      const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[] };
+      const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[]; files?: Record<string, string> };
+      // Step 6: a page made of several files has them put in where it links them.
+      if (found.files) found.source = withFoundryFiles(found.source, found.files);
       // A new version's first show: the previous version rides along, for outlining what changed.
       const first = url.searchParams.get("first") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
       let before: { kind: string; source: string; title: string } | null = null;
       if (first && drawn && found.version > 1) {
-        try { before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string; title: string }; } catch {}
+        try { before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string; title: string; files?: Record<string, string> }; before = { ...before, source: withFoundryFiles(before.source, (before as { files?: Record<string, string> }).files) }; } catch {}
       }
       let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
-      if (found.kind === "html" && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
+      if ((found.kind === "html" || found.kind === "react") && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
+      if (found.shots?.length) page = withPictures(page, Object.fromEntries(found.shots.map((one) => [one.id, `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`])));
       if (found.kind === "html" && found.shots?.length) page = withShots(page, Object.fromEntries(found.shots.map((one) => [one.id, { url: `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`, width: one.width, height: one.height, scale: one.scale }])));
       // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
       // note.js (pass 233 A) tells the Foundry page which part is under the pointer, for notes pinned to a part.
-      if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}\n;${kitFile("note.js").toString("utf8")}`);
+      // errors.js, first, tells it when the page throws while you use it (errors come back).
+      // marks.js (pass 263 A) numbers the parts its walkthrough names.
+      // edit.js (step 3) instead, while you edit a deck, doc or dashboard's text on the Foundry page: no demo, no notes.
+      if (url.searchParams.get("stack") === "1" && url.searchParams.get("edit") === "1" && isReadyKind(found.kind)) page = withRemember(page, `${kitFile("errors.js").toString("utf8")}\n;${kitFile("edit.js").toString("utf8")}`);
+      else if (url.searchParams.get("stack") === "1" && FOUNDRY_DEMO_KINDS.has(found.kind)) page = withRemember(page, `${kitFile("errors.js").toString("utf8")}\n;${TRY_RUNTIME};\n${kitFile("demo.js").toString("utf8")}\n;${kitFile("note.js").toString("utf8")}\n;${kitFile("marks.js").toString("utf8")}`);
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" } });
     } catch (error) { return new Response(`Unavailable: ${String(error)}`, { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }); }
   });
@@ -304,12 +383,16 @@ if (!lookJob) void app.whenReady().then(async () => {
     window.on("maximize", () => simpleFullScreen(true, "green button"));
   }
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
-  let readied = false;
+  let readied = false, opened = false;
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
     if (method === "desktop-ready") {
+      // On the Mac the app opens in full screen, already at its size when it
+      // first shows, rather than showing the small window and growing.
+      if (process.platform === "darwin" && !opened) simpleFullScreen(true, "launch");
+      opened = true;
       window?.show(); window?.focus(); launchToFront();
       if (startup.length && !readied) {
         startupMark("shown");
@@ -404,6 +487,26 @@ if (!lookJob) void app.whenReady().then(async () => {
       if (typeof name !== "string" || !frames[0]) throw new Error("The preview is not showing");
       return frames[0].executeJavaScript(POINT_SCRIPT, true);
     }
+    // The browser split says where its page area is: the chat's real page is put there, or put away.
+    if (method === "desktop-browser-place") {
+      const { chat, rect } = args as Record<string, unknown>;
+      if (typeof chat !== "string" || chat.length > 200) return null;
+      const [wide, high] = window?.getContentSize() ?? [0, 0];
+      inAppBrowser?.place(chat, window?.isVisible() ? placeRect(rect, contents.getZoomFactor(), { width: wide, height: high }) : null);
+      return null;
+    }
+    // Find on the chat's page, or zoom it; and point at something on it (it goes in the next message).
+    if (method === "desktop-browser-view") {
+      const { chat, ...command } = args as Record<string, unknown>;
+      if (typeof chat !== "string" || chat.length > 200) throw new Error("Invalid chat");
+      return inAppBrowser ? inAppBrowser.view(chat, command) : { error: "No page is open" };
+    }
+    if (method === "desktop-browser-point") {
+      const { chat, cancel } = args as Record<string, unknown>;
+      if (typeof chat !== "string" || chat.length > 200) throw new Error("Invalid chat");
+      if (!inAppBrowser) { if (cancel) return null; throw new Error("The page is not in this window"); }
+      return inAppBrowser.point(chat, cancel === true);
+    }
     // A note on a mockup (pass 233 A) carries a picture of its part: that
     // piece of the window as it shows now, as a PNG. The place is in the
     // page's own pixels.
@@ -440,6 +543,102 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (method === "desktop-select-project") {
       const selected = await dialog.showOpenDialog(window!, { title: "Open a Demesne project", properties: ["openDirectory"] });
       return selected.canceled ? backend!.request("desktop-bootstrap") : backend!.request("desktop-open-project", { ...args as Record<string, unknown>, path: selected.filePaths[0] });
+    }
+    // Foundry › Save a copy (pass 262 C): straight into Downloads, no dialog,
+    // as the file that suits the kind: a page with the kit inlined, a graphic
+    // as SVG, a document as Markdown; a deck as a PDF, a doc or a dashboard as
+    // the drawn page. "pdf" asks for the PDF of a doc or dashboard instead
+    // (or the drawn page of a deck).
+    // A mockup's version as a page that stands on its own (Save a copy, Share):
+    // the kit, its libraries, its files and its pictures inside it. `page`
+    // makes every kind a page (a graphic, notes or code drawn as Foundry draws them).
+    type Found = { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[]; files?: Record<string, string> };
+    const foundryFound = async (id: unknown, version: unknown) => {
+      if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id)) throw new Error("No such mockup");
+      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as Found;
+      if (found.files) found.source = withFoundryFiles(found.source, found.files);
+      return { id, found };
+    };
+    const standalone = async (id: string, found: Found, page: boolean) => {
+      const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
+      const drawn = found.kind === "react" || found.kind === "mermaid";
+      const libs = drawn ? Object.fromEntries(["react.js", "react-dom.js", "prop-types.js", "lucide.js", "recharts.js", "tailwind.js", "mermaid.js"].map((name) => [name, kitFile(name).toString("utf8")])) : {};
+      // Step 6: the pictures it shows go inside the file.
+      const pictures: Record<string, string> = {}, places: Record<string, ShotPlace> = {};
+      if (page || (found.kind !== "code" && found.kind !== "markdown")) for (const one of found.shots ?? []) {
+        try {
+          const shot = await backend!.request("foundry-shot", { id, shot: one.id }) as { mimeType: string; data: string };
+          pictures[one.id] = `data:${shot.mimeType};base64,${shot.data}`;
+          places[one.id] = { url: pictures[one.id]!, width: one.width, height: one.height, scale: one.scale };
+        } catch {}
+      }
+      const html = found.kind === "html" ? exportedSource(withShots(found.source, places), kit)
+        : page || isReadyKind(found.kind) || drawn ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit, libs) : found.source;
+      return withPictures(html, pictures);
+    };
+    if (method === "desktop-foundry-copy") {
+      const { version, other } = args as Record<string, unknown>;
+      const { id, found } = await foundryFound((args as Record<string, unknown>).id, version);
+      const ready = isReadyKind(found.kind);
+      // More kinds: a React page or a diagram as a page that runs on its own, or (other) its source.
+      const drawn = found.kind === "react" || found.kind === "mermaid", source = drawn && other === true;
+      const pdf = ready && ((found.kind === "deck") !== (other === true));
+      const extension = pdf ? "pdf" : ready ? "html" : source ? (found.kind === "react" ? "jsx" : "mmd") : drawn ? "html"
+        : found.kind === "code" ? codeExtension(found.title) : ({ html: "html", svg: "svg", markdown: "md" } as Record<string, string>)[found.kind] ?? "txt";
+      const folder = app.getPath("downloads");
+      const path = join(folder, copyName(found.title, found.version, extension, (name) => existsSync(join(folder, name))));
+      if (pdf) await writeFile(path, await foundryPDF(session, id, found.version, found.kind));
+      else await writeFile(path, source ? found.source : await standalone(id, found, false), "utf8");
+      savedCopies.add(path);
+      // ready: there is another format to offer (a deck's page, a doc's PDF, a component's source).
+      return { path, name: path.slice(folder.length + 1), pdf, ready: ready || drawn };
+    }
+    // Share outside Demesne (step 8): the version as a page on your GitHub
+    // Pages, at a link nobody can guess. A mockup not shared before asks
+    // first (`yes` is the answer); shared again, its new version goes to the same link.
+    if (method === "desktop-foundry-share") {
+      const { version, yes } = args as Record<string, unknown>;
+      const { id, found } = await foundryFound((args as Record<string, unknown>).id, version);
+      const before = foundryShares()[id];
+      if (!before && yes !== true) return { ask: true };
+      const call = await gitHubCall();
+      const shared = await sharePage(call, { html: await standalone(id, found, true), title: found.title, version: found.version, ...(before ? { slug: before.slug } : {}) });
+      keepFoundryShare(id, { ...shared, version: found.version });
+      return { url: shared.url, version: found.version, first: !before };
+    }
+    if (method === "desktop-foundry-unshare") {
+      const id = String((args as Record<string, unknown>).id ?? "");
+      const before = foundryShares()[id];
+      if (!before) return { gone: true };
+      await unsharePage(await gitHubCall(), before.slug);
+      keepFoundryShare(id, null);
+      return { gone: true };
+    }
+    if (method === "desktop-foundry-shared") {
+      const id = String((args as Record<string, unknown>).id ?? "");
+      const one = foundryShares()[id];
+      return one ? { url: one.url, version: one.version } : null;
+    }
+    // Real data (Foundry step 5): you allowed a mockup to read a site, on the Foundry page.
+    if (method === "desktop-foundry-site") {
+      const { id, host } = args as Record<string, unknown>;
+      if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id) || typeof host !== "string" || !publicAddress(`https://${host}/`)) throw new Error("No such site");
+      allowFoundrySite(id, host);
+      return { allowed: true };
+    }
+    // Show a file the chat's browser downloaded in its folder: only one it downloaded this run.
+    if (method === "desktop-show-download") {
+      const path = String((args as Record<string, unknown>).path ?? "");
+      if (!browserDownloads.has(path)) throw new Error("That file wasn't downloaded by the browser");
+      shell.showItemInFolder(path);
+      return null;
+    }
+    // Show a saved copy in Finder: only a file Save a copy just wrote.
+    if (method === "desktop-show-copy") {
+      const path = String((args as Record<string, unknown>).path ?? "");
+      if (!savedCopies.has(path)) throw new Error("That file wasn't saved by Foundry");
+      shell.showItemInFolder(path);
+      return null;
     }
     // Today › Save video: the Friday reel's clip, saved where you choose.
     if (method === "desktop-save-reel") {
@@ -524,3 +723,18 @@ if (!lookJob) void app.whenReady().then(async () => {
   window.show();
 }).catch(error => { log(String(error)); dialog.showErrorBox("Demesne could not start", String(error)); void quit(); });
 
+/// A deck, doc or dashboard as a PDF (pass 262 C, as before #555): drawn off
+/// screen in the window's own session, so foundry:// and the kit load as on
+/// the Foundry page, then printed. A deck prints a slide a page at 16:9
+/// (kinds.css @page); the others on A4.
+async function foundryPDF(session: Electron.Session, id: string, version: number, kind: string) {
+  const win = new BrowserWindow({ show: false, width: 1280, height: 800, webPreferences: { session, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  try {
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    win.webContents.on("will-navigate", (event) => event.preventDefault());
+    await win.loadURL(`foundry://artifact/${encodeURIComponent(id)}?v=${version}`);
+    await Promise.race([win.webContents.executeJavaScript("document.fonts.ready.then(() => true)"), new Promise((done) => setTimeout(done, 3000))]);
+    await new Promise((done) => setTimeout(done, 300));
+    return await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: kind === "deck", ...(kind === "deck" ? {} : { pageSize: "A4" as const, margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } }) });
+  } finally { win.destroy(); }
+}

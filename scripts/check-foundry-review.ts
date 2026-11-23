@@ -43,7 +43,7 @@ const f = await fixture({
     const shot = /image artifact ([\w-]+)\]/.exec(String(messages[at]!.content))?.[1] ?? "none";
     yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
       title: "Demesne, what needs work", kind: "html", description: "The two parts of the window that most need work.", note: "First review",
-      why: { direction: "Keep the window, fix two parts.", look_at: "The top bar.", starts_from: "the picture of the window you attached" },
+      why: { direction: "Keep the window, fix two parts.", look_at: "The top bar.", starts_from: "the picture of the window you attached", walkthrough: [{ what: "A page for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check." }] },
       // Whatever surface a review names, it is one sheet that grows.
       source: reviewPage(shot), surface: { frame: "window", width: 900, height: 600 } }) };
     yield { type: "finish", reason: "tool_calls" };

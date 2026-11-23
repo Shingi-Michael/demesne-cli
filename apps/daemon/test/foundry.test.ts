@@ -21,7 +21,10 @@ function picture(store: DemesneStore, sessionId: string, turnId: string, id = `s
 }
 
 /// Why a test page looks the way it does (pass 218 A).
-const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new" };
+const WALK = [{ what: "A page for a test.", parts: [{ name: "Heading", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the test." }];
+const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new", walkthrough: WALK };
+/// A why whose walkthrough explains each of these variants (pass 263 A).
+const WV = (...names: string[]) => ({ ...W, walkthrough: names.map((option) => ({ ...WALK[0], option, differs: `${option} is shaped its own way.` })) });
 
 const context = { workspaceRoot: "/tmp", signal: new AbortController().signal };
 
@@ -423,16 +426,16 @@ test("one ask, one version: saves in the turn that made the latest version chang
   } finally { store.close(); }
 });
 
-test("a page holds at most three options", async () => {
+test("a page holds at most five variants (pass 263 A, was three)", async () => {
   const store = new DemesneStore(":memory:");
   try {
     const save = foundrySaveTool(store), edit = foundryEditTool(store);
     const option = (name: string) => `<section data-option="${name}">x</section>`;
-    const four = `<d-compare recommended="A">${["A", "B", "C", "D"].map(option).join("")}</d-compare>`;
-    await expect(save.execute({ title: "Too many", kind: "html", description: "A test page.", why: W, source: four }, context)).rejects.toThrow("too_many_options");
-    const three = `<d-compare recommended="A">${["A", "B", "C"].map(option).join("")}</d-compare>`;
-    const made = JSON.parse(await save.execute({ title: "Three", kind: "html", description: "A test page.", why: W, source: three }, context));
-    await expect(edit.execute({ id: made.id, base_version: 1, why: W, edits: [{ find: "</d-compare>", replace: `${option("D")}</d-compare>` }] }, context)).rejects.toThrow("at most 3");
+    const six = `<d-compare recommended="A">${["A", "B", "C", "D", "E", "F"].map(option).join("")}</d-compare>`;
+    await expect(save.execute({ title: "Too many", kind: "html", description: "A test page.", why: WV("A", "B", "C", "D", "E", "F"), source: six }, context)).rejects.toThrow("too_many_options");
+    const five = `<d-compare recommended="A">${["A", "B", "C", "D", "E"].map(option).join("")}</d-compare>`;
+    const made = JSON.parse(await save.execute({ title: "Five", kind: "html", description: "A test page.", why: WV("A", "B", "C", "D", "E"), source: five }, context));
+    await expect(edit.execute({ id: made.id, base_version: 1, why: WV("A", "B", "C", "D", "E", "F"), edits: [{ find: "</d-compare>", replace: `${option("F")}</d-compare>` }] }, context)).rejects.toThrow("at most 5");
   } finally { store.close(); }
 });
 
@@ -486,10 +489,10 @@ test("a page with several options names the one it would use (pass 208 A)", asyn
   try {
     const save = foundrySaveTool(store);
     const options = `<section data-option="A · Pills">a</section><section data-option="B · Tabs">b</section>`;
-    await expect(save.execute({ title: "No pick", kind: "html", description: "x", why: W, source: `<d-compare>${options}</d-compare>` }, context)).rejects.toThrow("no_recommendation");
-    expect(JSON.parse(await save.execute({ title: "Pick", kind: "html", description: "x", why: W, source: `<d-compare recommended="A">${options}</d-compare>` }, context)).version).toBe(1);
+    await expect(save.execute({ title: "No pick", kind: "html", description: "x", why: WV("A", "B"), source: `<d-compare>${options}</d-compare>` }, context)).rejects.toThrow("no_recommendation");
+    expect(JSON.parse(await save.execute({ title: "Pick", kind: "html", description: "x", why: WV("A", "B"), source: `<d-compare recommended="A">${options}</d-compare>` }, context)).version).toBe(1);
     // A page drawn without the part marks its pick on the option.
-    expect(JSON.parse(await save.execute({ title: "Own", kind: "html", description: "x", why: W, source: options.replace('data-option="A · Pills"', 'data-option="A · Pills" data-recommended') }, context)).version).toBe(1);
+    expect(JSON.parse(await save.execute({ title: "Own", kind: "html", description: "x", why: WV("A", "B"), source: options.replace('data-option="A · Pills"', 'data-option="A · Pills" data-recommended') }, context)).version).toBe(1);
     // One option needs no pick.
     expect(JSON.parse(await save.execute({ title: "One", kind: "html", description: "x", why: W, source: `<d-compare><section data-option="A">a</section></d-compare>` }, context)).version).toBe(1);
   } finally { store.close(); }
@@ -526,10 +529,10 @@ test("every new page version says why it looks that way, and keeps it (pass 218 
     await expect(save.execute({ title: "Mark", kind: "svg", description: "Mark.", why: { direction: "Warm." }, source: "<svg/>" }, t1)).rejects.toThrow("Say why");
     // Content Demesne designs needs none.
     expect(JSON.parse(await save.execute({ title: "Brief", kind: "doc", description: "A brief.", source: "# Brief" }, { ...context, turnId: "t0" })).version).toBe(1);
-    const why = { direction: "Warm paper and a serif, for people who buy by taste.", look_at: "The dark middle plan.", starts_from: "new", dropped: "A comparison table; it felt like homework." };
+    const why = { direction: "Warm paper and a serif, for people who buy by taste.", look_at: "The dark middle plan.", starts_from: "new", dropped: "A comparison table; it felt like homework.", walkthrough: WALK };
     const saved = JSON.parse(await save.execute({ title: "Plans", kind: "html", description: "Plans.", why, source: "<p>a</p>" }, t1));
-    expect(saved.why).toEqual({ direction: why.direction, look: why.look_at, dropped: why.dropped, from: "new" });
-    expect(saved.message).toContain("say the same why");
+    expect(saved.why).toEqual({ direction: why.direction, look: why.look_at, dropped: why.dropped, from: "new", walk: WALK });
+    expect(saved.message).toContain("hand the work over in full");
     // Fixing its own page in the same ask keeps the why it gave.
     expect(JSON.parse(await edit.execute({ id: saved.id, base_version: 1, edits: [{ find: "a", replace: "b" }] }, t1)).why.look).toBe("The dark middle plan.");
     // A later ask makes a new version, which needs its own why.
@@ -590,7 +593,7 @@ describe("a mockup of something that exists starts from it", () => {
     return { session, context: { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: turn.id } };
   };
   const input = (from: string | undefined, source = page) => ({ title: "Calmer settings rows", kind: "html", description: "Settings with calmer rows.", source,
-    why: { direction: "Calm.", look_at: "The rows.", ...(from ? { starts_from: from } : {}) } });
+    why: { direction: "Calm.", look_at: "The rows.", ...(from ? { starts_from: from } : {}), walkthrough: WALK } });
 
   test("a new mockup says what it starts from", async () => {
     const store = new DemesneStore(":memory:");
@@ -634,7 +637,8 @@ describe("a mockup of something that exists starts from it", () => {
     const store = new DemesneStore(":memory:");
     const { context } = make(store);
     const options = ["Today", "A", "B", "C"].map((name) => `<section data-option="${name}">x</section>`).join("");
-    await foundrySaveTool(store).execute(input("could not look: test", `${page}<d-compare recommended="A">${options}</d-compare>`), context);
+    const given = input("could not look: test", `${page}<d-compare recommended="A">${options}</d-compare>`);
+    await foundrySaveTool(store).execute({ ...given, why: { ...given.why, walkthrough: WV("A", "B", "C").walkthrough } }, context);
   });
 });
 
@@ -758,7 +762,7 @@ test("reading a mockup hands back its brief: each ask, its direction and what wa
     const base = { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id };
     const first = store.createTurn(session.id, "show me a pricing page").turn;
     const saved = JSON.parse(await foundrySaveTool(store).execute({ title: "Pricing page", kind: "html", description: "Three plans.", source: "<p>a</p>",
-      why: { direction: "Warm paper, for small shops.", look_at: "The middle plan.", dropped: "A comparison table.", starts_from: "new" } }, { ...base, turnId: first.id }));
+      why: { direction: "Warm paper, for small shops.", look_at: "The middle plan.", dropped: "A comparison table.", starts_from: "new", walkthrough: WALK } }, { ...base, turnId: first.id }));
     const second = store.createTurn(store.createSession("Brief, later").session.id, "make the price bigger").turn;
     await foundryEditTool(store).execute({ id: saved.id, base_version: 1, why: { direction: "Same paper.", look_at: "The price.", dropped: "Bold red." }, edits: [{ find: "a", replace: "b" }] }, { ...base, turnId: second.id });
     const read = JSON.parse(await foundryReadTool(store).execute({ id: saved.id }, { ...base, turnId: "t3" }));
@@ -850,7 +854,7 @@ describe("Foundry sets the surface and plays the demo (pass 221 A)", () => {
     const store = new DemesneStore(":memory:");
     const words = foundrySaveTool(store).definition.description;
     expect(words).toContain("never put Replay, Play demo, Next step, an option switcher or a state switcher");
-    expect(PARTS_GUIDE).toContain("each option gets its own stage");
+    expect(PARTS_GUIDE).toContain("they are tabs over one stage");
     const schema = foundrySaveTool(store).definition.inputSchema as { properties: Record<string, unknown> };
     expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(["surface", "demo"]));
     store.close();

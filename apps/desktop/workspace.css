@@ -3497,3 +3497,19 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) #sidebar-projects 
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-stars { display: block; margin-top: auto; padding: 36px 0 26px 18px; color: var(--t1); opacity: .2; pointer-events: none; }
 .sidebar-stars svg { display: block; width: 190px; height: 70px; }
 #desktop-shell.sidebar-collapsed .sidebar-stars { display: none; }
+
+/* The cards in the pill's glass (pass 271 A). At rest each card is still one
+   quiet line. The card you open (rest on it, click it, tab into it) lifts
+   into the pill's silver glass with a still edge. A card that says something
+   new takes the glass for one lap of silver light, then settles back. Greys
+   from the theme. Read more:
+   https://www.nngroup.com/articles/progressive-disclosure/ */
+@property --card-a { syntax: "<angle>"; inherits: false; initial-value: -90deg; }
+@keyframes card-light { from { --card-a: -90deg; } to { --card-a: 270deg; } }
+.desktop #cards .card:has(> button.card-head):is(:hover, :focus-within, .open, .lap) { border-radius: 18px; color: var(--t2); background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 8%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / 0.85); }
+.desktop #cards .card:has(> button.card-head):is(:hover, :focus-within, .open, .lap)::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: linear-gradient(180deg, color-mix(in srgb, var(--t1) 16%, transparent), color-mix(in srgb, var(--t1) 5%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.desktop #cards .card:has(> button.card-head):is(:hover, :focus-within, .open, .lap) .card-head { border-radius: 18px; }
+.desktop #cards .card:has(> button.card-head).lap::before { background: conic-gradient(from var(--card-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 58%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 32%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #cards .card:has(> button.card-head).lap::before { animation: card-light 6s linear 1 both; animation-delay: var(--lap-at, 0ms); }
+}

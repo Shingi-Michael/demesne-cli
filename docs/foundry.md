@@ -151,6 +151,14 @@ Foundry puts each file in where it is linked (`withFoundryFiles`, `packages/prot
 
 Read more: [The script element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script) (including data blocks), [The link element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/link) (MDN).
 
+## Start a new one from this
+
+The opened mockup's head line has a branch icon, "Start a new one from vN". Press it and Foundry makes a new mockup from the version shown: the same kind, page, files, pictures, surface and demo, named after the first with the next free number ("Orders 2"), in the same project, based on that version (the "based on" link under it goes back). It opens in place of the first, with a quiet line saying where it came from. From there it is a mockup like any other: pin notes on it, or name it in the chat (@Orders 2) to take it another way. The first one and its versions stay exactly as they were, so one good page can branch into a second idea without losing the first. No model is involved.
+
+`copyFoundryArtifact` in `packages/storage/src/index.ts` makes it (through `POST /v1/foundry/<id>/copy`); the icon is in `openHead` (`apps/desktop/workspace/foundry-page.ts`). `xvfb-run -a bun scripts/check-foundry-files.ts` checks it in the real app.
+
+Read more: [Fork (software development)](https://en.wikipedia.org/wiki/Fork_(software_development)) (the idea it borrows), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (remixing an artifact).
+
 ## Compare two versions
 
 The opened mockup's head line has a compare icon (the split square). Press it and the version before the one shown lies over it, cut by a line down the middle: the earlier one on the left, the shown one on the right, each named at the top. Drag the line (or focus it and use the arrow keys, Shift for bigger steps, Home and End) to sweep across and see exactly what changed where. ‹ › still step through versions, each compared with the one before it. Nothing plays while you compare, and notes wait. A first version has nothing to compare with, so the icon rests.

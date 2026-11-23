@@ -227,3 +227,10 @@ test("step 4: compare lays the version before over the shown one", () => {
   expect(wipe).toContain('aria-label="Drag to compare v1 and v2"');
   expect(stageHTML({ id: "d", title: "Plan", kind: "deck" }, { version: 1, createdAt: "2026-11-22T10:00:00Z", stage: null }, false, false, true)).not.toContain("data-deck");
 });
+
+test("step 7: a new mockup can start from the version shown, but not while you edit", () => {
+  const open = { id: "d", at: 3, shown: 2 };
+  expect(openHead(open, [1, 2, 3], "html")).toContain('data-action="foundry-branch"');
+  expect(openHead(open, [1, 2, 3], "html")).toContain('aria-label="Start a new one from v2"');
+  expect(openHead({ ...open, shown: 3, editing: { source: "# Hi", base: 3, changes: 0 } }, [1, 2, 3], "doc")).not.toContain("foundry-branch");
+});

@@ -1917,6 +1917,13 @@ export function createDaemonApp(options: {
           catch (error) { return apiError("invalid_request", error instanceof Error ? error.message : String(error), 400); }
         }
         if (id && path.length === 3 && request.method === "DELETE") return store.deleteFoundryArtifact(id) ? json({ deleted: true }) : apiError("not_found", "Foundry artifact not found", 404);
+        // Step 7: a new mockup that starts from one version of this one.
+        if (id && path.length === 4 && path[3] === "copy" && request.method === "POST") {
+          const body = await readJson(request).catch(() => ({}));
+          const version = isRecord(body) && typeof body.version === "number" && Number.isSafeInteger(body.version) && body.version > 0 ? body.version : undefined;
+          try { return json(store.copyFoundryArtifact(id, version), 201); }
+          catch (error) { return apiError(error instanceof NotFoundError ? "not_found" : "invalid_request", error instanceof Error ? error.message : String(error), error instanceof NotFoundError ? 404 : 400); }
+        }
         // Pages that remember: what a page saved, one named value at a time,
         // and a question the page asks the chat's model (thinking off, no tools).
         if (id && path.length === 4 && path[3] === "data") {

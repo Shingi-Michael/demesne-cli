@@ -1,7 +1,8 @@
 /** Real Electron check for a Foundry page made of several files (step 6
  * after pass 262 C): its stylesheet, script and data file go in where the
  * page links them, in its frame and in a saved copy, and the code view shows
- * each file under its name. Run after `bun scripts/prepare-desktop.ts`,
+ * each file under its name; and (step 7) a new mockup starts from the
+ * version shown and opens in its place. Run after `bun scripts/prepare-desktop.ts`,
  * under xvfb-run -a. */
 import { _electron as electron, type Frame, type Page } from "playwright";
 import assert from "node:assert/strict";
@@ -60,8 +61,21 @@ try {
   await step(61, async () => existsSync(copy) && readFileSync(copy, "utf8").includes("</html>"));
   const written = readFileSync(copy, "utf8");
   assert.ok(written.includes('data-file="app.js"') && written.includes("Cortado") && !written.includes('src="app.js"'), "the copy carries its files");
-  assert.deepEqual(errors, []);
   console.log("PASS: a saved copy carries its files and stands on its own.");
+
+  // Step 7: a new one from this version opens in its place, with the same page and files; the first stays.
+  await item.getByRole("button", { name: "Start a new one from v1" }).click();
+  await step(68, async () => (await f.client.foundryList()).artifacts.some((one) => one.title === "Orders 2"));
+  const made = (await f.client.foundryList()).artifacts.find((one) => one.title === "Orders 2")!;
+  const opened = page.locator(`#page [data-fd="${made.id}:1"]`);
+  await step(71, async () => /Started “Orders 2” from v1/.test((await opened.locator(".fd-said").textContent().catch(() => "")) ?? ""));
+  const second = () => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${made.id}?v=1`) && found.url().includes("stack=1")) as Frame | undefined;
+  await step(73, async () => !!second() && await second()!.evaluate(() => document.querySelectorAll("#list li").length === 2).catch(() => false));
+  assert.deepEqual((await f.client.foundryGet(made.id)).basedOn, { id, version: 1 });
+  assert.equal((await f.client.foundryGet(id)).version, 1, "the first stays as it was");
+  await opened.screenshot({ path: resolve("test-results/desktop/foundry-branch.png") });
+  assert.deepEqual(errors, []);
+  console.log("PASS: a new mockup starts from the version shown, opens in its place with the same page and files, and the first stays.");
 } finally {
   await desktop?.close().catch(() => {});
   await f.close();

@@ -425,6 +425,25 @@ export class DemesneStore {
     return this.getFoundryArtifact(id)!;
   }
 
+  /// Step 7: a new mockup that starts from one version of another: the same
+  /// kind, page, files, pictures, surface and demo, named "<title> 2" (or the
+  /// next free number), based on that version, in the same project. Its
+  /// history starts here; the one it came from is left as it was.
+  copyFoundryArtifact(id: string, version?: number): FoundryArtifactDetail {
+    const from = this.getFoundryArtifact(id, version);
+    if (!from) throw new NotFoundError("Foundry artifact not found");
+    if (from.built) throw new InvalidStateError("A build's record can't start a new mockup");
+    const stem = from.title.replace(/\s+\d+$/, "").slice(0, 190) || "Mockup";
+    const taken = new Set((this.database.query("SELECT title FROM foundry_artifacts").all() as { title: string }[]).map((row) => row.title));
+    let n = 2;
+    while (taken.has(`${stem} ${n}`) && n < 1000) n++;
+    const stage = this.database.query("SELECT stage FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, from.version) as { stage: string } | null;
+    const made = this.saveFoundryArtifact({ kind: from.kind, title: `${stem} ${n}`, workspace: from.workspace, source: from.source, files: from.files ?? null,
+      note: `Started from ${from.title} v${from.version}`.slice(0, 300), description: from.description, basedOn: { id: from.id, version: from.version }, stage: stageFromText(stage?.stage) });
+    for (const shot of this.listFoundryShots(id)) this.keepFoundryShot(made.id, shot);
+    return this.getFoundryArtifact(made.id)!;
+  }
+
   /// A version's stage with what a save changed: a surface or a demo not given stays as it was.
   private stageWith(id: string, version: number, stage: FoundryStage | null | undefined): string {
     const row = this.database.query("SELECT stage FROM foundry_versions WHERE artifact_id = ? AND version = ?").get(id, version) as { stage: string } | null;

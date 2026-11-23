@@ -7237,7 +7237,7 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
     return true;
   }
   const open = foundryOpen;
-  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit" || action === "foundry-compare";
+  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit" || action === "foundry-compare" || action === "foundry-branch";
   if (action === "foundry-compare") { open.compare = !open.compare; if (open.compare) delete open.code; renderPage(); return true; }
   if (action === "foundry-edit") { await foundryEdit(open); return true; }
   if (action === "foundry-shrink") {
@@ -7269,6 +7269,22 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
     clearTimeout(foundrySaidTimer);
     foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === open) { open.said = ""; open.saved = null; paintFoundrySaid(); } }, 12_000);
     paintFoundrySaid();
+    return true;
+  }
+  // Step 7: a new mockup that starts from the version shown; it opens in place of this one.
+  if (action === "foundry-branch") {
+    const from = open.shown;
+    open.said = "Starting a new one…"; open.saved = null; paintFoundrySaid();
+    try {
+      const made = await api<{ id: string; title: string; version: number }>("foundry-branch", { id: open.id, version: from });
+      if (foundryOpen !== open) return true;
+      const kept: FoundryOpen = { id: made.id, at: made.version, shown: made.version, said: `Started “${made.title}” from v${from}. Pin notes on it or name it in the chat to take it another way; the first stays as it was.` };
+      foundryOpen = kept;
+      foundryFocus = { id: made.id, version: made.version, quiet: true };
+      clearTimeout(foundrySaidTimer);
+      foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === kept) { kept.said = ""; paintFoundrySaid(); } }, 15_000);
+      await loadFoundry();
+    } catch (error) { open.said = `Couldn't start a new one: ${errorWords(error)}`; paintFoundrySaid(); }
     return true;
   }
   if (action === "foundry-copy-show") {

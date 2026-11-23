@@ -16,7 +16,7 @@ import { parseThreadReport } from "../../../packages/protocol/src/thread-report.
 import { browserTarget } from "./browser-row.ts";
 import { browserSteps, downloadWords, findWords, outsideDoing, type OutsideSignin, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
-import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
+import { light as threadLight, threadBriefHTML, threadsNews, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook, type ThreadState } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountMilkyWay, type MilkyWay } from "./milkyway.ts";
@@ -8356,6 +8356,9 @@ let renderedPalette: Snapshot["palette"] | null = null,
 let threadsFolded = true, threadsFoldedFor: string | null = null, threadFileOpen: string | null = null;
 /// The proposed threads this chat's ribbon has already opened itself for.
 const threadsProposedSeen = new Set<string>();
+/// Each thread's last state, so the ribbon laps once when one finishes or asks.
+const threadsStateSeen = new Map<string, ThreadState>();
+let threadsLapTimer: ReturnType<typeof setTimeout> | undefined;
 const threadsProposed = () => state?.threads.list.filter((fix) => fix.status === "starting" && fix.thread?.proposed) ?? [];
 /// Whether this chat holds threads that wait for Start.
 const threadsProposedHere = () => Boolean(state && state.session?.id === state.threads.from && threadsProposed().length);
@@ -8398,7 +8401,7 @@ function renderThreads() {
   const foot = el("threads-foot"), footHTML = mine ? threadsMessageHTML(view) : "";
   if (foot.dataset.html !== footHTML) { foot.innerHTML = footHTML; foot.dataset.html = footHTML; foot.hidden = !footHTML; }
   // Each chat's ribbon starts as its one bar.
-  if (threadsFoldedFor !== view.from) { threadsFoldedFor = view.from; threadsFolded = true; threadFileOpen = null; threadsProposedSeen.clear(); }
+  if (threadsFoldedFor !== view.from) { threadsFoldedFor = view.from; threadsFolded = true; threadFileOpen = null; threadsProposedSeen.clear(); threadsStateSeen.clear(); }
   // It opens on its own only for threads that are proposed and wait for Start.
   if (mine) for (const fix of threadsProposed()) if (!threadsProposedSeen.has(fix.id)) { threadsProposedSeen.add(fix.id); threadsFolded = false; }
   const html = mine ? threadsRibbonHTML(view, { folded: threadsFolded, file: threadFileOpen, armed: threadDeleteArmed, peek: threadsFolded ? null : threadPeek(), asking: state.questions.find((question) => question.thread)?.thread?.id ?? null }) : "";
@@ -8406,6 +8409,11 @@ function renderThreads() {
   if (host.dataset.html !== html) { drawThreadsRibbon(host, html); host.dataset.html = html; }
   host.hidden = !html;
   el("app").classList.toggle("has-threads", Boolean(html));
+  // One lap of silver round the ribbon's edge when a thread finishes or needs you, then still.
+  if (threadsNews(threadsStateSeen, view.list) && html) {
+    host.classList.remove("lap"); void host.offsetWidth; host.classList.add("lap");
+    clearTimeout(threadsLapTimer); threadsLapTimer = setTimeout(() => host.classList.remove("lap"), CARD_LAP_MS);
+  }
 }
 /// Redraws the ribbon in place: the card stays (so it folds and unfolds
 /// smoothly), and only the lines that changed are replaced.

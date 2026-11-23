@@ -96,6 +96,8 @@ export interface FoundryOpen {
   code?: string | null;
   said?: string;
   saved?: { path: string; pdf: boolean; ready: boolean } | null;
+  /// Step 8, share outside Demesne: asking before a first share, then the link.
+  share?: { asking?: boolean; url?: string; version?: number } | null;
   /// Step 3, edit in place: a deck, doc or dashboard's newest version with
   /// its text editable; `source` is the content with your changes so far,
   /// `base` the version they apply to, kept as a new version on Done.
@@ -125,6 +127,7 @@ export const versionsOf = (versions: readonly FoundryShelfVersion[], id: string)
 
 const COMPARE = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 3v18"/><path d="M7 12h2M15 12h2" />';
 const BRANCH = '<circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7.5v9M18 10c0 4.5-6 3.5-11 6.8"/>';
+const SHARE = '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>';
 const PENCIL = '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>';
 
 /// The head line of the opened mockup (pass 262 C): the versions to step
@@ -155,6 +158,8 @@ export function openHead(open: FoundryOpen, all: readonly number[], kind?: Found
     // Step 7: a new mockup that starts from this version, so one good page can branch into a second idea.
     + (editing ? "" : ico("foundry-branch", {}, BRANCH, `Start a new one from v${open.shown}`))
     + ico("foundry-copy", {}, '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', "Save a copy to Downloads")
+    // Step 8: the version shown, on a link others can open.
+    + (editing ? "" : ico("foundry-share", {}, SHARE, `Share v${open.shown} as a link`))
     + ico("foundry-shrink", {}, '<path d="M6 6l12 12M18 6 6 18"/>', "Close (Esc)")
     + "</span>";
 }
@@ -164,6 +169,10 @@ export function openHead(open: FoundryOpen, all: readonly number[], kind?: Found
 /// Painted into the opened mockup's quiet line in place (never a redraw of
 /// the page, which would reload every mockup on it).
 export function savedLine(open: FoundryOpen, kind: FoundryKind) {
+  // Step 8: a first share asks; a shared mockup shows its link, to copy, open or take down.
+  const share = open.share;
+  if (share?.asking) return `${h(`Publish v${open.shown} to a link anyone can open, on your GitHub Pages?`)}<button type="button" class="fd-said-b" data-action="foundry-share" data-args='{"yes":true}'>Publish</button><button type="button" class="fd-said-b" data-action="foundry-share-no">Not now</button>`;
+  if (share?.url) return `${h(open.said || `Shared v${share.version ?? open.shown}`)} <span class="fd-said-link">${h(share.url.replace(/^https:\/\//, ""))}</span><button type="button" class="fd-said-b" data-action="foundry-share-copy">Copy link</button><button type="button" class="fd-said-b" data-action="foundry-share-open">Open</button><button type="button" class="fd-said-b" data-action="foundry-share-stop">Stop sharing</button>`;
   if (!open.said) return "";
   const saved = open.saved;
   const show = saved ? `<button type="button" class="fd-said-b" data-action="foundry-copy-show">Show</button>` : "";

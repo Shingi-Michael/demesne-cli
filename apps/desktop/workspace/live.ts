@@ -7256,7 +7256,7 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
     return true;
   }
   const open = foundryOpen;
-  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit" || action === "foundry-compare" || action === "foundry-branch";
+  if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit" || action === "foundry-compare" || action === "foundry-branch" || action.startsWith("foundry-share");
   if (action === "foundry-compare") { open.compare = !open.compare; if (open.compare) delete open.code; renderPage(); return true; }
   if (action === "foundry-edit") { await foundryEdit(open); return true; }
   if (action === "foundry-shrink") {
@@ -7304,6 +7304,32 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
       foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === kept) { kept.said = ""; paintFoundrySaid(); } }, 15_000);
       await loadFoundry();
     } catch (error) { open.said = `Couldn't start a new one: ${errorWords(error)}`; paintFoundrySaid(); }
+    return true;
+  }
+  // Step 8: share the version shown as a link (a first share asks), copy or open it, or take it down.
+  if (action === "foundry-share") {
+    const version = open.shown;
+    open.saved = null; open.share = null; open.said = "Sharing…";
+    paintFoundrySaid();
+    try {
+      const shared = await api<{ ask?: boolean; url?: string; version?: number; first?: boolean }>("desktop-foundry-share", { id: open.id, version, ...(args.yes ? { yes: true } : {}) });
+      if (foundryOpen !== open) return true;
+      clearTimeout(foundrySaidTimer);
+      if (shared.ask) { open.said = ""; open.share = { asking: true }; }
+      else { open.share = { url: shared.url!, version: shared.version ?? version }; open.said = `Shared v${shared.version ?? version}${shared.first ? " (a new link can take a minute to open)" : ""}:`; }
+    } catch (error) { open.share = null; open.said = `Couldn't share it: ${errorWords(error)}`; }
+    paintFoundrySaid();
+    return true;
+  }
+  if (action === "foundry-share-no") { open.share = null; open.said = ""; paintFoundrySaid(); return true; }
+  if (action === "foundry-share-copy" && open.share?.url) { await api("copy", { text: open.share.url }).catch(() => {}); open.said = "Link copied:"; paintFoundrySaid(); return true; }
+  if (action === "foundry-share-open" && open.share?.url) { await api("open-link", { url: open.share.url }).catch(() => {}); return true; }
+  if (action === "foundry-share-stop") {
+    try {
+      await api("desktop-foundry-unshare", { id: open.id });
+      open.share = null; open.said = "Stopped sharing: the page is taken down (GitHub can take a minute).";
+    } catch (error) { open.said = `Couldn't stop sharing: ${errorWords(error)}`; }
+    paintFoundrySaid();
     return true;
   }
   if (action === "foundry-copy-show") {

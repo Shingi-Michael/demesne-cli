@@ -407,7 +407,7 @@ let driveShown = false,
   ideasShown = false,
   brokeShown = false;
 let driveActionPending = "";
-/// Drive's sheet under its pill on the top bar is open (pass 198 A).
+/// Drive's on-demand sheet is open (or waiting for a new mission to start).
 let driveSheetOpen = false, driveSheetAt = 0;
 /// Each mission chat and the chat it was started from.
 function missionLinks() {
@@ -1940,12 +1940,9 @@ function renderStatus() {
   renderContextCard();
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Ctrl+,")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
-  // The top bar is your tabs and ⋯, which opens the chat's own view
-  // (rename, compact, history). The open tab's dot carries the live state,
-  // and the rim's words are its tooltip.
+  // The open tab's dot carries the live state; the rim's words are its tooltip.
   rimNow = rim;
   renderTabs();
-  el("header").innerHTML = inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : "";
 }
 /// Your plan's limits (pass 112 A): the context word names the fuller
 /// window, and the context card gives each window and its reset.
@@ -2114,17 +2111,15 @@ function renderTabs() {
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
-  const newTab = document.getElementById("workspace-new-tab");
   // Pinned tabs live in their own row before the strip, so they stay put while it scrolls.
   const pins = document.getElementById("workspace-pins");
   const pinnedIds = shown.filter((id) => tabs.isPinned(id));
-  if (pins) updateTabStrip(pins, pinnedIds.map((id) => tab(id, tones[shown.indexOf(id)]!)).join(""), newTab);
-  updateTabStrip(strip, `${shown.filter((id) => !pins || !tabs.isPinned(id)).map((id) => tab(id, tones[shown.indexOf(id)]!)).join("")}${page}`, newTab);
+  if (pins) updateTabStrip(pins, pinnedIds.map((id) => tab(id, tones[shown.indexOf(id)]!)).join(""), editor);
+  updateTabStrip(strip, `${shown.filter((id) => !pins || !tabs.isPinned(id)).map((id) => tab(id, tones[shown.indexOf(id)]!)).join("")}${page}`, editor);
   const selected = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? pins?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? null;
   const panel = document.getElementById("workspace");
   if (selected) panel?.setAttribute("aria-labelledby", selected.id);
   else panel?.removeAttribute("aria-labelledby");
-  if (newTab) newTab.title = `New chat (${shortcut("Ctrl+T")})`;
   const callSlot = document.getElementById("workspace-call");
   if (callSlot) callSlot.innerHTML = callButton;
   updateTabsMore();
@@ -5402,22 +5397,17 @@ function renderBriefing() {
   if (!broke) brokeShown = false;
   const mark = (kind: "spin" | "idea" | "amber" | "ok" | "bad" | "hollow") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
   let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
-  // The pill on the top bar: Drive's mark and two or three words.
-  let pill = "";
-  const pillWord = (word: string, tone = "", about = "") => `<span class="dp-word${tone ? ` ${tone}` : ""}">${h(word)}</span>${about ? `<span class="dp-about">· ${h(about)}</span>` : ""}`;
   // Branches to review are the sidebar's Review line; Drive's place names
   // them only while that line has unfolded them here.
   if (review.length && !broke && reviewShown) {
     const about = away && away.status !== "running" ? "Drive ran them while you were away" : "";
     parts.push(`${mark("ok")}${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review`, {}, "bf-word")}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
-    pill = `${mark("ok")}${pillWord("Drive", "", `${review.length} to review`)}`;
   }
   const label = (drive: NonNullable<Snapshot["drive"]>) => drive.status === "blocked" ? "Drive stopped" : drive.status === "paused" ? "Drive is paused" : "Drive is working";
   if (broke) {
     const first = signals[0]!, ci = /CI failure on (\S+)/.exec(first.title);
     const word = signals.length > 1 ? `${signals.length} things broke` : ci ? `CI failed on ${ci[1]}` : first.source === "checks" ? "A check is failing" : first.title;
     const about = signals.length > 1 ? "" : first.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "");
-    pill = `${mark("bad")}${pillWord(signals.length > 1 ? `${signals.length} things broke` : ci ? "CI failed" : "Something broke", "bad")}`;
     parts.push(`${mark("bad")}${btn("broke-show", word, {}, "bf-word bad")}${about && !brokeShown ? `<span class="bf-about">${h(about)}</span>` : ""}`);
     toggle = { action: "broke-show", open: brokeShown };
     if (brokeShown) {
@@ -5434,11 +5424,6 @@ function renderBriefing() {
     const working = pinned.status === "running" || pinned.status === "waiting", stopped = pinned.status === "blocked";
     const about = [missionTitle(pinned), driveProgress(pinned)].filter(Boolean).join(" · ");
     const word = working ? shine("Drive is working") : label(pinned);
-    const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
-    // The steps as a small meter (the improved top bar), up to eight marks.
-    const marks = Math.min(tasks.length, 8), lit = tasks.length ? Math.round((Math.min(done, tasks.length) / tasks.length) * marks) : 0;
-    const meter = tasks.length > 1 ? `<span class="dp-meter" role="img" aria-label="${Math.min(done, tasks.length)} of ${tasks.length} steps">${Array.from({ length: marks }, (_, i) => `<i${i < lit ? ' class="on"' : ""}></i>`).join("")}</span>` : "";
-    pill = `${driveRing(pinned)}${stopped ? pillWord("Drive stopped", "amber") : `${pillWord(pinned.status === "paused" ? "Drive paused" : "Drive", "", meter ? "" : working ? "working" : "")}${meter}`}`;
     parts.push(`${driveRing(pinned)}<span class="bf-word${stopped ? " amber" : ""}"${stopped ? ` title="${h(stoppedReason(pinned))}"` : ""}>${word}</span><span class="bf-about" title="${h(missionTitle(pinned))}">${h(about)}</span>`);
     const watch = pinned.homeSessionId !== state.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "bf-pill") : "";
     const acts = stopped
@@ -5447,20 +5432,17 @@ function renderBriefing() {
     parts.push(`<span class="bf-acts">${acts.filter(Boolean).join("")}</span>`);
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
-    pill = `${mark("idea")}${pillWord("Drive", "", "working")}`;
     parts.push(`${mark("spin")}${btn("drive-show", run.away?.auto ? "Drive is working on its own" : "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
     if (run.fix) {
       toggle = { action: "drive-show", open: driveShown };
       if (driveShown) fold = `${branchRows([run.fix])}${run.away ? `<p class="bf-foot">${btn("breakage-away-stop", "Stop after this one", {}, "link", Boolean(state.breakage.busy))}</p>` : ""}`;
     }
   } else if (next.error && !next.proposals.length) {
-    pill = `${mark("amber")}${pillWord("Drive")}`;
     parts.push(`${mark("amber")}<span class="bf-word">Drive couldn't look for ideas</span>${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}`);
   } else if (next.proposals.length) {
     const count = next.proposals.length, auto = state.breakage.auto;
     const title = `${count === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][count] ?? count} things`} I could do next`;
     const ideasWord = `${count} idea${count === 1 ? "" : "s"}`;
-    pill = `${mark("idea")}${pillWord("Drive", "", ideasWord)}`;
     parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${ideasWord}`, {}, "bf-word")}`);
     if (auto && !auto.on) {
       // Off until you turn it on: it only runs what you start, so it spends
@@ -5494,17 +5476,11 @@ function renderBriefing() {
   done.hidden = !outcome;
   // A chat with no project has no Drive, and neither has the assistant's.
   node.hidden = !inSession() || !parts.length || isPlain() || inAssistant();
-  const pillNode = el("drive-pill"), sheet = el("drive-sheet");
-  const pillFrom = pillNode.querySelector<HTMLElement>(".bf-ring")?.dataset.fill;
-  pillNode.hidden = node.hidden;
-  pillNode.innerHTML = node.hidden ? "" : pill || `${mark("hollow")}${pillWord("Drive")}`;
-  easeRing(pillNode, pillFrom);
+  const sheet = el("drive-sheet");
   // A sheet just asked for (/drive starting a mission) waits a moment for Drive to have something to say.
   if (node.hidden && Date.now() - driveSheetAt > 15_000) driveSheetOpen = false;
   const sheetOpen = !node.hidden && (driveSheetOpen || Boolean(fold));
   sheet.hidden = !sheetOpen;
-  pillNode.setAttribute("aria-expanded", String(sheetOpen));
-  pillNode.title = node.hidden ? "" : sheetOpen ? "Hide Drive" : `Drive (${/Mac/i.test(navigator.platform) ? "⌥J" : "Alt+J"})`;
   // The folded reply empties too, so no stale control (a Pause after Stop) waits in it.
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").innerHTML = ""; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
@@ -5663,21 +5639,11 @@ function tokensShort(value: number) {
 function placeOverlay() {
   const box = el("overlay"),
     chip = document.getElementById("composer-model"),
-    more = document.querySelector<HTMLElement>(".header-more"),
-    anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null,
-    below = overlay === "session" && more && more.offsetParent ? more.getBoundingClientRect() : null;
+    anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null;
   box.classList.toggle("anchored", !!anchor);
-  box.classList.toggle("dropped", !!below);
-  box.classList.toggle("sheet", !!overlay && !anchor && !below);
+  box.classList.toggle("sheet", !!overlay && !anchor);
   box.style.left = box.style.right = box.style.top = box.style.bottom = box.style.maxHeight = "";
   const main = box.parentElement!.getBoundingClientRect();
-  if (below) {
-    // The ⋯ menu hangs from its button, at the right edge of the conversation.
-    box.style.right = `${Math.max(12, main.right - below.right)}px`;
-    box.style.top = `${below.bottom - main.top + 6}px`;
-    box.style.maxHeight = `${Math.max(160, main.bottom - below.bottom - 24)}px`;
-    return;
-  }
   if (!anchor) return;
   // Its right edge lines up with the chip; "More models" opens to the left.
   box.style.right = `${Math.max(12, main.right - anchor.right)}px`;
@@ -7158,16 +7124,17 @@ async function dispatch(
     }
     return;
   }
-  // /drive and Alt+J open what Drive has (its mission or its ideas) where it
-  // lives: the line at the conversation's end, or under the start composer.
-  if (action === "drive-sheet") {
-    if (driveSheetOpen || el("briefing").classList.contains("open")) closeBriefingCard();
-    else { driveSheetOpen = true; renderBriefing(); }
-    return;
-  }
+  // /drive and Alt+J still reach Drive without a permanent toolbar button.
   if (action === "drive-open") {
     const run = worktreeRun(), busy = Boolean(pinnedMission() || run.fix || run.away);
-    if (inSession()) { driveSheetOpen = args.toggle ? !driveSheetOpen : true; driveSheetAt = Date.now(); }
+    if (inSession()) {
+      if (args.toggle && !el("drive-sheet").hidden) { closeBriefingCard(); return; }
+      driveSheetOpen = true;
+      driveSheetAt = Date.now();
+      // Show an existing briefing (including errors and failed checks) before
+      // asking Drive to look for new ideas. The shortcut opens the summary.
+      if (!el("briefing").hidden && (args.toggle || state?.driveNext.error || state?.breakage.signals.length)) { renderBriefing(); return; }
+    }
     if (busy) driveShown = args.toggle ? !driveShown : true;
     else if (state?.driveNext.proposals.length) ideasShown = args.toggle ? !ideasShown : true;
     else return driveAction("next-refresh");
@@ -7781,10 +7748,10 @@ function renderState(next: Snapshot) {
   }
 }
 new ResizeObserver(() => renderComposer()).observe(editor);
-// A press anywhere but Drive's pill, its sheet or the sidebar's Review line folds Drive's sheet away.
+// A press outside the sheet and the sidebar's Review line folds the sheet away.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Element;
-  if (el("drive-sheet").hidden || target.closest?.('#bar-drive, [data-action="review-open"]')) return;
+  if (el("drive-sheet").hidden || target.closest?.('#drive-sheet, [data-action="review-open"]')) return;
   closeBriefingCard();
 }, true);
 document.addEventListener("click", (event) => {
@@ -8273,7 +8240,7 @@ document.addEventListener("keydown", (event) => {
     run(() => dispatch("follow", {}));
     return;
   }
-  if (event.altKey && key === "j") {
+  if (event.altKey && (key === "j" || event.code === "KeyJ")) {
     run(() => dispatch("drive-open", { toggle: true }));
     return;
   }

@@ -1277,12 +1277,8 @@ try {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "Workspace does not overflow horizontally");
   await capture("03-narrow-review");
   await desktop!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1180, 820));
-  // The top bar's ⋯ is the conversation's menu: rename, compact, archive…
-  await page.locator(".header-more").click();
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).waitFor();
-  await capture("04-menu");
-  await page.keyboard.press("Escape");
-  await page.locator("#overlay").waitFor({ state: "hidden" });
+  const removedHeaderControls = page.locator('#desktop-toolbar :is([data-action="new-session"], #drive-pill, .header-more)');
+  assert.equal(await removedHeaderControls.count(), 0, "no duplicate new-chat, Drive or conversation menu controls");
   for (let i = 0; i < 3; i++) {
     const text = `Compaction fixture ${i}`;
     await type(text);
@@ -1293,8 +1289,7 @@ try {
       throw new Error(`last turn: ${JSON.stringify({ content: turn?.content, status: turn?.status })}`);
     }, "history ready for compaction");
   }
-  await page.locator(".header-more").click();
-  await page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).click();
+  await type("/compact");
   const compacted = await until(async () => (await f.client.getSessionState(sessionId)).checkpoint, "the chat compacts");
   assert(compacted.afterTokens < compacted.beforeTokens);
   const percentage = Math.round(compacted.afterTokens / 262144 * 100);
@@ -1352,10 +1347,6 @@ try {
   await page.getByRole("button", { name: "Collapse older conversation", exact: true }).click();
   assert.equal(await page.locator(`#turn-${firstTurnId}`).count(), 0);
   await capture("04-compacted");
-  await page.locator(".header-more").click();
-  await until(() => page.locator("#overlay .menu-row").filter({ has: page.getByText("Compact", { exact: true }) }).innerText().then(text => text.includes(`${percentage}%`)), "the menu shows the reduced context");
-  await page.keyboard.press("Escape");
-  await page.locator("#overlay").waitFor({ state: "hidden" });
   await close();
   assert.equal((await f.client.health()).model, "desktop-test", "Closing the app leaves the daemon alive");
   // No workspace/session args: private preferences restore the project. This
@@ -1516,9 +1507,9 @@ try {
   await page.waitForTimeout(150);
   const back = await page.evaluate(() => document.getElementById("stage")!.scrollTop);
   assert(Math.abs(back - midway) <= 4, `the chat comes back where you left it: ${back} vs ${midway}`);
-  // Drive has no page: its pill sits on the top bar, and drops a sheet with its line (pass 198 A).
-  const line = page.locator("#briefing"), pill = page.locator("#drive-pill");
-  const openDrive = async () => { if (await page.locator("#drive-sheet").isHidden()) await pill.click(); await page.locator("#drive-sheet").waitFor(); };
+  // Drive remains available on demand, including a briefing that contains only an error.
+  const line = page.locator("#briefing"), driveSheet = page.locator("#drive-sheet");
+  const openDrive = async () => { if (await driveSheet.isHidden()) await page.keyboard.press("Alt+j"); await driveSheet.waitFor(); };
   const pressAction = (action: string) => evaluate(`const b = document.createElement("button"); b.dataset.action = ${JSON.stringify(action)}; document.body.append(b); b.click(); b.remove();`);
   failSuggestions = true;
   await pressAction("next-refresh");
@@ -1526,14 +1517,13 @@ try {
   failSuggestions = false;
   await openDrive();
   await line.getByRole("button", { name: "look again", exact: true }).click();
-  await until(() => pill.isHidden(), "look again recovers, and the line goes quiet with nothing to offer");
+  await until(() => driveSheet.isHidden(), "look again recovers, and the line goes quiet with nothing to offer");
   await page.locator("textarea").fill("/drive --bounded Verify the Drive controls");
   await page.locator("textarea").press("Enter");
   const control = (name: string) => page.locator('[data-action="drive-control"]').filter({ hasText: new RegExp(`^${name}$`, "i") }).first();
   await control("pause").waitFor();
-  assert(await pill.isVisible() && await page.evaluate(() => Boolean(document.querySelector("#desktop-toolbar #bar-drive > #drive-pill"))), "Drive's pill sits on the top bar");
-  assert((await pill.innerText()).includes("Drive"), "the pill names Drive");
-  assert.equal(await page.locator("#drive-pill .bf-ring.work").count(), 1, "the pill carries Drive's ring");
+  assert.equal(await removedHeaderControls.count(), 0, "Drive activity does not reinsert permanent toolbar controls");
+  assert.equal(await line.locator(".bf-ring.work").count(), 1, "the requested briefing shows Drive working");
   assert.deepEqual(await projectOrder(), [secondProject, f.workspace], "Drive worktrees stay within their parent project");
   assert.equal(await page.locator(".sidebar-project.active").getAttribute("data-project"), f.workspace);
   await capture("08-drive-working");
@@ -1552,12 +1542,12 @@ try {
   await page.locator("textarea").press("Enter");
   await until(async () => (await f.client.listSessions()).length > 0 && (await page.locator("textarea").inputValue()) === "", "the note is sent");
   await capture("08-drive-tell");
-  // Drive has no tab of its own on the bar (it is a pill before ⋯).
+  // Drive has no permanent tab of its own.
   assert.equal(await page.locator(".header-drive").count(), 0, "no pinned Drive tab");
-  // A level top bar (pass 199 A): the sidebar button, +, Drive's pill and ⋯ sit on the tab names' line.
+  // The sidebar toggle still lines up with the tab names.
   const levels = await page.evaluate(() => {
     const mid = (selector: string) => { const box = document.querySelector(selector)?.getBoundingClientRect(); return box && box.height ? box.top + box.height / 2 : null; };
-    return { tab: mid("#workspace-tabs .bar-tab.on .bar-tab-name"), toggle: mid("#desktop-toggle-sidebar"), plus: mid("#workspace-new-tab"), drive: mid("#drive-pill"), more: mid("#desktop-toolbar .header-more") };
+    return { tab: mid("#workspace-tabs .bar-tab.on .bar-tab-name"), toggle: mid("#desktop-toggle-sidebar") };
   });
   for (const [name, y] of Object.entries(levels)) if (y !== null && levels.tab !== null) assert(Math.abs(y - levels.tab) <= 1.5, `the top bar is level: ${name} at ${y} vs tab names at ${levels.tab}`);
   // Its own chat opens as a tab; your chat's tab goes back.
@@ -1619,7 +1609,7 @@ try {
   await pressAction("next-refresh");
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("Drive has 3 ideas")), "Drive's chip names its ideas");
   assert(await page.evaluate(() => Boolean(document.querySelector("#desktop-toolbar #drive-sheet > #briefing")) && !document.querySelector("#stage #briefing, #composer-slot #briefing, #desktop-sidebar #briefing")), "Drive's line sits in its sheet on the top bar, not over the composer or in the sidebar");
-  assert((await pill.innerText()).includes("3 ideas"), "the pill counts Drive's ideas");
+  await openDrive();
   // Drive runs nothing on its own until you turn it on here (its own runs
   // spent plans while people were away); Turn off puts it back.
   await until(() => page.locator("#briefing .bf-chip").innerText().then(text => text.includes("runs only what you start")), "Drive runs only what you start until you turn it on");
@@ -1808,7 +1798,7 @@ try {
   await click("permission", { decision: "allow_once" });
   await textIncludes("The check fails now.");
   const broke = page.locator("#briefing .bf-word.bad");
-  await until(() => page.locator("#drive-pill .dp-word.bad").isVisible(), "Drive's pill says the check broke", 30_000);
+  await until(() => broke.count().then(count => count > 0), "the failed check reaches the briefing", 30_000);
   await openDrive();
   await until(() => broke.isVisible(), "Drive's line says the check broke");
   assert.equal(await page.locator("#breakage, .breakage-card").count(), 0, "Drive's branches never float as cards");
@@ -2036,7 +2026,7 @@ try {
   await page.getByRole("textbox", { name: "Filter models" }).fill("desktop-small");
   await page.keyboard.press("Enter");
   await until(() => page.locator("#composer-context").getAttribute("title").then(title => Boolean(title?.includes("of 32.8k"))), "the context follows the model switch");
-  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and the conversation menu", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "one threads ribbon per chat, sorted by what needs you", "a thread's question answered from the chat that started it", "a thread's line opening to its steps, files and diffs", "deleting a thread from its line", "threads proposed first, started one by one", "Try again for a thread that stopped", "a thread's own chat as a normal tab", "right-click a chat or project"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", screenshots: output, checked: ["native Chromium rendering", "streaming thinking wrapping and disclosure", "composer submission", "file and command approvals", "actual edit and successful check", "Markdown/code/math", "inline diff and tabs-only header", "persisted project/session restore", "project grouping and drag ordering", "Drive empty/error states and mission controls", "daemon work survives app closure", "live preview", "agents nearby and the overlap line", "the model's question in the conversation", "breakage on Drive's line", "the context follows a model switch", "a mission linked to its chat, with notes", "Drive never waits on you, and its report", "steering a running turn", "words arrive softly", "ink in Appearance", "glass on Hyprland", "the folded quiet strip", "rest on a chat to see where it stands", "bring it back later", "its pull request on the row", "your plan's limit under the composer", "it learns your yes", "Home's paragraph of what happened, answering an approval from Home", "pointing at the live page", "one threads ribbon per chat, sorted by what needs you", "a thread's question answered from the chat that started it", "a thread's line opening to its steps, files and diffs", "deleting a thread from its line", "threads proposed first, started one by one", "Try again for a thread that stopped", "a thread's own chat as a normal tab", "right-click a chat or project"] }, null, 2));
   writeFileSync(join(output, "result.json"), JSON.stringify({ result: "passed", platform: process.platform, application, sessionId }, null, 2));
 } catch (error) {
   if (desktop) {

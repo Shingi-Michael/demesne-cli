@@ -19,7 +19,7 @@ const WIDTH = 1440, HEIGHT = 900;
 const PIECES: Record<string, string> = {
   sidebar: "#desktop-sidebar", "new chat": ".sidebar-new", search: ".sidebar-search", scheduled: ".sidebar-nav > button:nth-of-type(2)", "projects label": ".sidebar-label",
   project: ".sidebar-project-name", chat: ".sidebar-session", "chat name": ".sidebar-session-name", release: ".sidebar-release", foot: ".sidebar-foot", you: "#sidebar-you",
-  "top bar": "#desktop-toolbar", tab: ".bar-tab.on", "tab name": ".bar-tab.on .bar-tab-name", "new tab": "#workspace-new-tab", more: ".header-more",
+  "top bar": "#desktop-toolbar", tab: ".bar-tab.on", "tab name": ".bar-tab.on .bar-tab-name", "sidebar toggle": "#desktop-toggle-sidebar",
   panel: "#app", ask: ".request .text", "answer text": ".answer .markdown p", "answer list": ".answer .markdown li", code: ".answer .markdown code", mark: ".answer-mark", receipt: ".turn-receipt", copy: ".copy-answer",
   composer: "#composer .composer-box", typing: "#composer textarea", mode: "#composer-mode", model: "#composer-model", context: "#composer-context", cards: "#cards", "where card": "#cards .card.env", "where row": "#cards .env-row",
 };
@@ -81,7 +81,7 @@ try {
   const said = await page.evaluate(() => {
     const text = (selector: string) => document.querySelector(selector)?.textContent?.trim() ?? "";
     return { project: text(".sidebar-project-name > span:last-child"), branch: text(".sidebar-project-branch span"), chat: text(".sidebar-session-name"), tab: text(".bar-tab.on .bar-tab-name"),
-      you: text("#sidebar-you"), plan: text("#sidebar-plan"), drive: document.querySelector<HTMLElement>("#drive-pill")?.offsetParent ? text("#drive-pill .dp-about").replace(/^·\s*/, "") : "none", time: text(".request time"), meta: text(".turn-receipt > span"), model: text("#composer-model"),
+      you: text("#sidebar-you"), plan: text("#sidebar-plan"), time: text(".request time"), meta: text(".turn-receipt > span"), model: text("#composer-model"),
       mode: text("#composer-mode .mode-opt.on"), placeholder: document.querySelector<HTMLTextAreaElement>("#composer textarea")!.placeholder, mac: document.documentElement.classList.contains("mac-chrome"),
       theme: document.documentElement.dataset.appearance ?? "dark", answer: document.querySelector(".answer .markdown")!.innerHTML.replace(/<!--.*?-->/g, "") };
   });
@@ -90,7 +90,7 @@ try {
   const attr = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
   const kit = (name: string) => readFileSync(join(ui, "kit", name), "utf8").replaceAll("foundry://kit/fonts/", `file://${join(ui, "vendor/fonts")}/`);
   const mock = `<!doctype html><html><head><meta charset="utf-8"><style>${kit("base.css")}</style><style data-demesne-app>${kit("app.css")}</style><style>body{margin:0}</style><script>${kit("parts.js").replace(/<\/script/g, "<\\/script")}</script></head><body>
-<d-demesne width="${size[0]}" height="${size[1]}" theme="${said.theme}"${said.mac ? "" : ' os="other"'} project="${attr(said.project)}" branch="${attr(said.branch)}" chats="${attr(said.chat)}" tabs="${attr(said.tab)}" user="${attr(said.you)}" plan="${attr(said.plan)}" drive="${attr(said.drive)}" model="${attr(said.model)}">
+<d-demesne width="${size[0]}" height="${size[1]}" theme="${said.theme}"${said.mac ? "" : ' os="other"'} project="${attr(said.project)}" branch="${attr(said.branch)}" chats="${attr(said.chat)}" tabs="${attr(said.tab)}" user="${attr(said.you)}" plan="${attr(said.plan)}" model="${attr(said.model)}">
 <d-message from="you" time="${attr(said.time)}">${prompt}</d-message><d-message meta="${attr(said.meta)}">${said.answer}</d-message>
 <d-composer placeholder="${attr(said.placeholder)}" mode="${attr(said.mode)}" model="${attr(said.model)}"></d-composer></d-demesne></body></html>`;
   writeFileSync(join(scratch, "mock.html"), mock);

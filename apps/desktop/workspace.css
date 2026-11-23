@@ -212,7 +212,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-rail [data-tip]:hover::after, .sidebar-rail [data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); transition-delay: 250ms; }
 @media (prefers-reduced-motion: reduce) { .sidebar-rail [data-tip]::after { transition: none; } }
 /* The top bar: the sidebar toggle, your tabs, and ⋯. */
-#desktop-toolbar { grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
+#desktop-toolbar { position: relative; grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
 #desktop-toggle-sidebar { color: var(--t3); display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; }
 #desktop-toggle-sidebar:hover { background: var(--surface2); color: var(--t1); }
 #desktop-toolbar header { flex: none; min-width: 0; margin: 0 0 0 auto; gap: 8px; }
@@ -2315,7 +2315,7 @@ svg.th-light.ok { width: 15px; height: 15px; margin: 0; border-radius: 0; backgr
 #drive-pill .dp-about { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t3); }
 #drive-pill .bf-ring { width: 16px; height: 16px; }
 #drive-pill .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin: 0 0 0 4px; }
-#drive-sheet { position: absolute; top: calc(100% + 8px); right: 0; z-index: 95; display: flex; flex-direction: column; gap: 2px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 10px 8px; border-radius: 12px; background: var(--surface2); box-shadow: 0 0 0 1px var(--line2, var(--hair)), 0 18px 40px -12px rgb(0 0 0 / .55); -webkit-app-region: no-drag; }
+#drive-sheet { position: absolute; top: 100%; right: 10px; z-index: 95; display: flex; flex-direction: column; gap: 2px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 10px 8px; border-radius: 12px; background: var(--surface2); box-shadow: 0 0 0 1px var(--line2, var(--hair)), 0 18px 40px -12px rgb(0 0 0 / .55); -webkit-app-region: no-drag; }
 #drive-sheet[hidden] { display: none; }
 html.mac-chrome #desktop-toolbar #drive-sheet * { -webkit-app-region: no-drag; }
 .desktop #drive-sheet #briefing { max-width: none; min-height: 24px; margin: 0; gap: 8px; align-items: flex-start; }

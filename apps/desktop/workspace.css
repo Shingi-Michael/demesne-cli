@@ -2799,7 +2799,8 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
    turn while it runs. It holds the name of the step it is on, which step
    that is, and a fine line under them that fills in green a step at a time.
    A click unfolds a plain list of the steps inside it. A finished turn
-   shrinks it into a small pill. Silver is "now", green is "done". */
+   shrinks it into a small pill. Silver is "now", green is "done". Since
+   pass 270 A it is drawn in the pill's glass (further down). */
 /* Its left edge is the answer's text (past the d. mark), so the ribbon and
    its list line up with the composer box below. */
 .desktop .plan-ribbon { position: sticky; top: 0; z-index: 3; padding: 6px 0 4px; margin-left: 32px; }
@@ -2811,18 +2812,14 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop .pr-cur { grid-column: 2; position: relative; min-width: 0; height: 20px; overflow: hidden; }
 .desktop .pr-name, .desktop .pr-was { display: block; font-size: 13px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--t1); }
 .desktop .pr-was { position: absolute; inset: 0; color: var(--t2); opacity: 0; pointer-events: none; }
-.desktop .plan-ribbon:not(.ended) .pr-name { --pr-dim: color-mix(in srgb, var(--t1) 70%, transparent); background: linear-gradient(100deg, var(--pr-dim) 0%, var(--pr-dim) 42%, var(--t1) 50%, var(--pr-dim) 58%, var(--pr-dim) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 .desktop .pr-ct { grid-column: 3; margin-left: 11px; font-size: 12px; color: var(--t3); white-space: nowrap; font-variant-numeric: tabular-nums; transition: color 160ms var(--ease); }
 .desktop .pr-card:hover .pr-ct { color: var(--t2); }
-/* The fine line: one part per step, green where done, a light on the one it
-   is on. A part fills from its left when its step is done. */
+/* The fine line: one part per step, green where done, a shade lighter on the
+   one it is on. A part fills from its left when its step is done. */
 .desktop .pr-segs { grid-column: 1 / -1; display: flex; gap: 4px; margin-top: 6px; }
 .desktop .pr-segs i { position: relative; flex: 1; height: 3px; border-radius: 2px; overflow: hidden; --pr-rest: var(--tone2); background: linear-gradient(var(--ok), var(--ok)) left / 0% 100% no-repeat, var(--pr-rest); transition: background-size 620ms var(--ease); }
 .desktop .pr-segs i.d { background-size: 100% 100%, auto; }
 .desktop .pr-segs i.n { --pr-rest: var(--hair2); }
-.desktop .pr-segs b { display: none; }
-.desktop .pr-segs i.n b { display: block; position: absolute; inset: 0 auto 0 0; width: 45%; background: linear-gradient(90deg, transparent, var(--t1), transparent); }
-@keyframes pr-slide { from { transform: translateX(-110%); } to { transform: translateX(330%); } }
 /* The list folds open inside the ribbon. Its space is on the rows, never on
    the list, so a shut list has no height at all. */
 .desktop .pr-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 340ms var(--ease); }
@@ -2851,11 +2848,33 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop .plan-ribbon.ended:not(.open) .pr-fold { width: 0; min-width: 100%; }
 .desktop .plan-ribbon.ended .pr-list { box-shadow: inset 0 1px 0 var(--hair); }
 .desktop .plan-ribbon.ended .pr-row:first-child { margin-top: 6px; }
-@media (prefers-reduced-motion: no-preference) {
-  .desktop .plan-ribbon:not(.ended) .pr-name { animation: shine 3s ease-in-out infinite alternate; }
-  .desktop .pr-segs i.n b { animation: pr-slide 1.9s ease-in-out infinite; }
-}
 @media (prefers-reduced-motion: reduce) { .desktop :is(.pr-card, .pr-fold, .pr-lab, .pr-bx, .pr-segs i) { transition: none; } }
+/* The checklist in the pill's glass (pass 270 A). The same ribbon in the
+   same place; the silver light going round its edge is the one thing that
+   moves while it runs (the shimmer on the name and the light sliding along
+   the line are gone). The step's number sits in the pill's round mark, and
+   turns into a green tick when the turn ends and the light has made its
+   last lap. Threads' ribbon (.tr) keeps its own look. */
+@property --plan-a { syntax: "<angle>"; inherits: false; initial-value: -90deg; }
+@keyframes plan-light { from { --plan-a: -90deg; } to { --plan-a: 270deg; } }
+.desktop .plan-ribbon:not(.tr) .pr-card { position: relative; border-radius: 18px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / 0.85); }
+.desktop .plan-ribbon:not(.tr) .pr-card::before { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--plan-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 60%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 34%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.desktop .plan-ribbon:not(.tr) .pr-bar { column-gap: 10px; padding: 6px 14px 10px 7px; }
+.desktop .plan-ribbon:not(.tr) .pr-bar:focus-visible { border-radius: 18px; }
+.desktop .plan-ribbon:not(.tr) .pr-ct { margin-left: 1px; }
+.desktop .plan-ribbon:not(.tr) .pr-segs { margin-top: 5px; padding-left: 34px; }
+.desktop .plan-ribbon:not(.tr) .pr-ok { display: grid; width: 24px; height: 24px; margin: 0; background: color-mix(in srgb, var(--t1) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t1) 10%, transparent); color: var(--t1); font-size: 11px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.desktop .plan-ribbon:not(.tr) .pr-ok::after { display: none; width: 13px; height: 13px; background: var(--ok); }
+.desktop .plan-ribbon:not(.tr).ended .pr-card { border-radius: 99px; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent); }
+.desktop .plan-ribbon:not(.tr).ended.open .pr-card { border-radius: 18px; }
+.desktop .plan-ribbon:not(.tr).ended .pr-bar { padding: 6px 14px; }
+.desktop .plan-ribbon:not(.tr).ended.all .pr-bar { padding-left: 6px; }
+.desktop .plan-ribbon:not(.tr).ended:not(.all) .pr-ok { display: none; }
+.desktop .plan-ribbon:not(.tr).ended.all .pr-ok::after { display: block; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop .plan-ribbon:not(.tr):not(.ended) .pr-card::before { animation: plan-light 6s linear infinite; }
+  .desktop .plan-ribbon:not(.tr).ended.lap .pr-card::before { animation: plan-light 6s linear 1 both; }
+}
 /* Wait and watch (pass 174): a wait_for step shimmers while it waits, with a
    thin line running under it; a wait that ended badly shows its last lines. */
 .desktop .tool-row.wait-row.running { position: relative; overflow: hidden; }

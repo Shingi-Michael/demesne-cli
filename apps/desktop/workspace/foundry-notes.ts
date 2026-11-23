@@ -202,11 +202,13 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
   const stagesOf = (section: HTMLElement) => [...section.querySelectorAll<HTMLElement>(".fd-stage")];
   const frameOf = (stage: HTMLElement) => stage.querySelector<HTMLIFrameElement>("iframe.fd-frame");
   const sectionOf = (stage: HTMLElement) => { const section = stage.closest<HTMLElement>(".fd-item"); return section?.querySelector(":scope > .fd-notes") ? section : null; };
-  /// A mockup with options has a stage per option, each named on the line above it.
+  /// A mockup with options shows the one its tab names (pass 263 A); a style has a stage of its own, named on the line above it.
   const optionOf = (stage: HTMLElement) => {
     if (stage.dataset.split === undefined) return undefined;
-    const head = stage.previousElementSibling;
-    return { index: Number(stage.dataset.split) || 0, name: cut(head?.classList.contains("fd-opt") ? head.querySelector("b")?.textContent ?? "" : "", 60) || `option ${(Number(stage.dataset.split) || 0) + 1}` };
+    const head = stage.previousElementSibling, index = Number(stage.dataset.split) || 0;
+    const named = head?.classList.contains("fd-tabs") ? head.querySelector(`[data-variant="${index}"]`)?.firstChild?.textContent ?? ""
+      : head?.classList.contains("fd-opt") ? head.querySelector("b")?.textContent ?? "" : "";
+    return { index, name: cut(named, 60) || `option ${index + 1}` };
   };
   const onStage = (stage: HTMLElement, option: { index: number } | undefined) => (option?.index ?? -1) === (stage.dataset.split === undefined ? -1 : Number(stage.dataset.split) || 0);
   const layerOf = (section: HTMLElement) => {

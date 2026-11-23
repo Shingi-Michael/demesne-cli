@@ -130,6 +130,20 @@ The runtime is `apps/desktop/foundry-kit/remember.js` (with save, load, ask and 
 
 Read more: [Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) (MDN), [CSV](https://en.wikipedia.org/wiki/Comma-separated_values), [Same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy) (why a walled-off page asks Demesne instead of the web directly), [Server-side request forgery](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) (why local and private addresses are refused).
 
+## Variants as tabs, every one explained
+
+A mockup can hold two to five variants of the same thing (`<d-compare>` with a `data-option` each; it used to be three). On Foundry they are tabs over one stage, the model's pick first with a small dot. A tab shows that variant in the stage and its walkthrough under it. The tabs only change what you look at; you still answer in the chat. A page of styles keeps its own row and stages.
+
+Every html mockup comes with a walkthrough, one per variant (`why.walkthrough` on `foundry_save`): what it is and who it is for, its parts by number, why it is shaped so, how it differs from the other variants, and what the model would do next. Each part can name the piece of the page it is about (`at`, a CSS selector), and Foundry draws its number there (`foundry-kit/marks.js`); resting on a line rings that piece, and resting on the piece lights its line. A save without a walkthrough, or with a variant left out, is refused and told what is missing. A later fix that sends none keeps the one before while it still covers the variants, and `foundry_read` hands it back. When there is a walkthrough, the quiet why lines above the mockup keep only what was dropped and your taste.
+
+When it is done, the model writes a full answer in the chat, the way a designer hands work over: what it made and for whom, each variant in a line, its pick and why, and what to decide next. It no longer ends with two or three sentences.
+
+The opened mockup runs edge to edge across Foundry, with no box around it; its name, words and walkthrough keep a margin.
+
+`packages/protocol/src/foundry-walk.ts` holds the walkthrough's shape and its checks; `walkHTML` in `workspace/foundry-page.ts` draws it, `variantTabs` and `tabbed` in `workspace/foundry-stage.ts` make the tabs. `xvfb-run -a bun scripts/check-foundry-walk.ts` checks it in the real app.
+
+Read more: [Parallel and iterative design](https://www.nngroup.com/articles/parallel-and-iterative-design/) (why several different takes beat polishing one), [Tabs, used right](https://www.nngroup.com/articles/tabs-used-right/) (tabs for things that are alike), [Design rationale](https://en.wikipedia.org/wiki/Design_rationale) (writing down why, next to the design), [Artifacts in Claude Code](https://code.claude.com/docs/en/artifacts) (what this borrows).
+
 ## Pictures in a mockup
 
 A mockup can show your real logo, photo or product shot instead of a drawn stand-in. Two ways in:

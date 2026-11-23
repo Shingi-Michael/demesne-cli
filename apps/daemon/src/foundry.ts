@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, FOUNDRY_FILE_NAME, FOUNDRY_MAX_FILES, withFoundryFiles, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, FOUNDRY_FILE_NAME, FOUNDRY_MAX_FILES, withFoundryFiles, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, cleanWalk, walkProblem, optionNames, FOUNDRY_MAX_VARIANTS, FOUNDRY_MAX_WALK_PARTS, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
@@ -47,7 +47,7 @@ Anywhere:
 - <d-avatar name="Amara Okafor" size="28"> initials on a steady colour. demesne.sample.people(n) gives 12 names; demesne.sample.series(n, start, drift, seed) a believable number series.
 - <d-chart type="line|area|bar|donut" values="4,6,5,8" labels="Mon,Tue,Wed,Thu" height="200"> in --accent.
 - <d-stat label="This week" value="32.4 km" delta="+12%">.
-- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> options to choose between: on the Foundry page each option gets its own stage, named on the line above it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
+- <d-compare recommended="A"><section data-option="A · Pills" note="calm">…</section>…</d-compare> two to five variants to choose between, each a different shape: on the Foundry page they are tabs over one stage, each with its walkthrough (why.walkthrough) under it, so nothing is drawn inside the options; the person answers in the chat. layout="side" puts small options (a button, a card) side by side instead.
 - <d-styles recommended="Clean counter"><d-style name="Clean counter" made="Inter throughout · 8px corners · hairlines" vars="${STYLE_NEEDS.map((name) => `${name}:…`).join("; ")}"></d-style>…</d-styles> a range of styles, for when they ask for styles or looks: write the page ONCE on those variables (the kit already is: --paper background, --ink text, --accent the one thing to press, --font body type, --radius corners; --head is the heading type), then two or three styles, each a name, one plain line on what it is made of, and its values (add your own variables, the same set in every style). Foundry draws the page in each: a row of small ones, then each at full size under its name, colours and that line. The styles must be told apart at a glance: different paper, type and corners, not one look three times. No <d-compare> on such a page. Typefaces a machine has: Inter and JetBrains Mono (the kit's), Georgia, Times New Roman, Helvetica, Arial, Courier New, system-ui, ui-serif, ui-rounded. When the project has a look already (its Style in the design guide, or the real thing you looked at), that look is one of the styles, named for what it is. What they taught you about words and order holds in every style; what they taught you about colour and type holds only in the style that is theirs today. When they choose one, keep it: remember {design: true, style_of: "<this mockup's id>", rule: "<style name>"}.
 - <d-mark>1</d-mark> a pink numbered call-out dot.
 A review of something that exists ("look at this and show me what needs work"), one page:
@@ -223,8 +223,8 @@ export async function lookShots(store: DemesneStore, id: string): Promise<Record
   return Object.keys(shots).length ? shots : undefined;
 }
 
-/// At most three options in a page (pass 197 A): best of three, not eight.
-export const MAX_OPTIONS = 3;
+/// At most five variants in a page (pass 197 A had three; pass 263 A shows them as tabs).
+export const MAX_OPTIONS = FOUNDRY_MAX_VARIANTS;
 function checkOptions(kind: string | undefined, source: string) {
   if (kind !== undefined && kind !== "html") return;
   // A review (pass 223 A) holds up to three parts, each with its own Today, options and pick.
@@ -415,20 +415,56 @@ const WHY_SCHEMA = {
     dropped: { type: "string", maxLength: 300, description: "What you left out, and why." },
     starts_from: { type: "string", maxLength: 300, description: "New mockups: the real thing you looked at (window, files), or \"new\"." },
     followed: { type: "string", maxLength: 300, description: "Which of their learned likes (design guide) this follows, a few words each; \"none\" when none apply." },
+    walkthrough: {
+      type: "array", maxItems: FOUNDRY_MAX_VARIANTS,
+      description: "Required on html mockups: one entry per variant (per data-option; one entry when there is a single page), shown under it on Foundry. Omit on a fix to keep the one before.",
+      items: {
+        type: "object",
+        properties: {
+          option: { type: "string", description: "The variant's name (its data-option)." },
+          what: { type: "string", maxLength: 500, description: "What it is and who it is for, a sentence or two." },
+          parts: { type: "array", minItems: 2, maxItems: FOUNDRY_MAX_WALK_PARTS, items: { type: "object", properties: {
+            name: { type: "string", maxLength: 80 }, says: { type: "string", maxLength: 300, description: "What it does and why it is there." },
+            at: { type: "string", maxLength: 200, description: "CSS selector of that piece, inside the variant; Foundry numbers it on the page." } }, required: ["name", "says"], additionalProperties: false } },
+          why: { type: "string", maxLength: 500, description: "Why it is shaped this way." },
+          differs: { type: "string", maxLength: 400, description: "How it differs from the other variants (several variants)." },
+          next: { type: "string", maxLength: 400, description: "What you would do next with it." },
+        },
+        required: ["what", "parts", "why"],
+        additionalProperties: false,
+      },
+    },
   },
   required: ["direction", "look_at"],
   additionalProperties: false,
 } as const;
 
-const WHY_ANSWER = "In your answer, say the same why in plain words: the direction, what to look at first, and what you dropped.";
+const WHY_ANSWER = "Foundry shows the walkthrough under each variant. In your answer, hand the work over in full: what you made and who it is for, each variant in a line with how it differs, your pick and why, what you dropped, and what they should decide next.";
 
 function whyOf(value: unknown): FoundryWhy | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new Error("[invalid_input] why is an object: {direction, look_at, dropped}");
   const text = (key: string) => typeof value[key] === "string" ? (value[key] as string).trim().slice(0, 300) : "";
   const from = text("starts_from"), followed = text("followed");
-  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped"), ...(from ? { from } : {}), ...(followed ? { followed } : {}) };
-  return why.direction || why.look || why.dropped ? why : undefined;
+  const walk = cleanWalk(value.walkthrough);
+  const why = { direction: text("direction"), look: text("look_at"), dropped: text("dropped"), ...(from ? { from } : {}), ...(followed ? { followed } : {}), ...(walk ? { walk } : {}) };
+  return why.direction || why.look || why.dropped || walk ? why : undefined;
+}
+
+/// Pass 263 A: an html mockup comes with a walkthrough of each variant. A
+/// save or edit that gives none keeps the one the version before had, as
+/// long as it still covers the variants; otherwise it is refused, with what
+/// is missing. A review (pass 223 A) explains itself part by part instead.
+function withWalk(store: DemesneStore, kind: FoundryKind | undefined, id: string | undefined, why: FoundryWhy | undefined, source: string): FoundryWhy | undefined {
+  if (kind !== "html" || REVIEW_PAGE.test(source)) return why;
+  const before = id ? store.getFoundryArtifact(id) : null;
+  const kept = before?.versions.find((item) => item.version === before.version)?.why?.walk;
+  // A page of styles is one page in two or three looks: one walkthrough explains it.
+  const variants = STYLES_PAGE.test(source) ? [] : optionNames(source);
+  if (!why?.walk && kept && !walkProblem(kept, variants)) return why ? { ...why, walk: kept } : why;
+  const problem = walkProblem(why?.walk ?? kept, variants);
+  if (problem) throw new Error(problem);
+  return why;
 }
 
 /// A review says why part by part, on the sheet: of the save's own why only
@@ -587,10 +623,11 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const basedOn = id ? null : read && store.getFoundryArtifact(read.id) ? read : basedOnOf(store, input.based_on);
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       if (!id) checkPick(store, context.turnId, recommended);
-      const why = whyFor(input.why, input.source);
-      if (!(why && REVIEW_PAGE.test(input.source))) checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, why);
-      if (!id) checkStart(store, kind, input.source, why, !!basedOn, context);
-      if (!REVIEW_PAGE.test(input.source)) checkTaste(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, why, context);
+      const said = whyFor(input.why, input.source);
+      if (!(said && REVIEW_PAGE.test(input.source))) checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, said);
+      if (!id) checkStart(store, kind, input.source, said, !!basedOn, context);
+      if (!REVIEW_PAGE.test(input.source)) checkTaste(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, said, context);
+      const why = withWalk(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, said, input.source);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
       const { stage: given, dropped } = stageWithPage(input);
       const stage = reviewStage(given, input.source);
@@ -677,7 +714,8 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const recommended = typeof input.recommended === "boolean" ? input.recommended : undefined;
       // Names and words only: no new version, no look.
       if (input.edits === undefined || (Array.isArray(input.edits) && input.edits.length === 0)) {
-        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended, why: whyOf(input.why), stage: stageOf(input) };
+        const newWhy = whyOf(input.why), kept = newWhy && !newWhy.walk ? store.getFoundryArtifact(input.id)?.versions[0]?.why?.walk : undefined;
+        const words = { title: clean(input.title, 200), description: clean(input.description, 600), note: clean(input.note, 300), recommended, why: kept ? { ...newWhy!, walk: kept } : newWhy, stage: stageOf(input) };
         if (!words.title?.trim() && !words.description?.trim() && !words.note?.trim() && recommended === undefined && !words.why && !words.stage) throw new Error("[invalid_input] foundry_edit needs edits, or a title, note, description, recommended, why, surface or demo to change. Hint: pass edits to change the page");
         if (!store.getFoundryArtifact(input.id)) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
         const saved = store.describeFoundryArtifact(input.id, words);
@@ -703,9 +741,10 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       checkNotBuilt(store, undefined, source);
       if (bytesOf(source, files ?? current.files) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
       checkOptions(current.kind, source);
-      const why = whyFor(input.why, source);
-      if (!(why && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, why);
-      if (!REVIEW_PAGE.test(source)) checkTaste(store, current.kind, input.id, why, context);
+      const said = whyFor(input.why, source);
+      if (!(said && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, said);
+      if (!REVIEW_PAGE.test(source)) checkTaste(store, current.kind, input.id, said, context);
+      const why = withWalk(store, current.kind, input.id, said, source);
       checkCritique(input.id, context.turnId, input.critique);
       const { stage: given, dropped } = stageWithPage(input);
       const stage = given?.surface ? reviewStage(given, source) : given;
@@ -747,6 +786,12 @@ export function briefOf(found: FoundryArtifactDetail): { brief?: Record<string, 
   return { brief: kept.map(({ version, ask, why }) => ({ version, ...(ask ? { asked: ask.slice(0, 300) } : {}),
     ...(why?.direction ? { direction: why.direction } : {}), ...(why?.look ? { look_at: why.look } : {}),
     ...(why?.dropped ? { dropped: why.dropped } : {}), ...(why?.from ? { starts_from: why.from } : {}), ...(why?.followed && !NO_TASTE.test(why.followed) ? { followed: why.followed } : {}) })), keep: BRIEF_KEEP };
+}
+
+/// Pass 263 A: the shown version's walkthrough, as the model gave it, so a change keeps it true (or sends a new one).
+function walkRead(found: FoundryArtifactDetail) {
+  const walk = found.versions.find((item) => item.version === found.version)?.why?.walk;
+  return walk ? { walkthrough: walk, walkthrough_rule: "Kept with the next version while it still holds; when the change makes it wrong, send why.walkthrough again." } : {};
 }
 
 /// Pass 242 A: what the person pinned as liked on this mockup, kept across
@@ -817,7 +862,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
-        ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), source: found.source, ...(found.files ? { files: found.files } : {}),
+        ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), ...walkRead(found), source: found.source, ...(found.files ? { files: found.files } : {}),
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };

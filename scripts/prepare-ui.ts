@@ -32,6 +32,7 @@ export async function prepareUi(out: string) {
   cpSync(join(desktop, "foundry-kit/remember.js"), join(out, "kit/remember.js"));
   cpSync(join(desktop, "foundry-kit/demo.js"), join(out, "kit/demo.js"));
   cpSync(join(desktop, "foundry-kit/note.js"), join(out, "kit/note.js"));
+  cpSync(join(desktop, "foundry-kit/marks.js"), join(out, "kit/marks.js"));
   cpSync(join(desktop, "foundry-kit/errors.js"), join(out, "kit/errors.js"));
   cpSync(join(desktop, "foundry-kit/edit.js"), join(out, "kit/edit.js"));
   // More kinds (electron/foundry-more-kinds.ts): React, its icons and charts, Tailwind and Mermaid, from the app so they work offline.

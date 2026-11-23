@@ -10,6 +10,7 @@ import {
   type FoundryWhy,
   type FoundryStage,
   stageText,
+  cleanWalk,
   stageFromText,
   type FoundryKind,
   FOUNDRY_KINDS,
@@ -202,13 +203,15 @@ interface FoundryRow { id: string; title: string; kind: FoundryKind; workspace: 
 const whyText = (why: FoundryWhy | null | undefined) => {
   const direction = why?.direction?.trim().slice(0, 300) ?? "", look = why?.look?.trim().slice(0, 300) ?? "", dropped = why?.dropped?.trim().slice(0, 300) ?? "";
   const from = why?.from?.trim().slice(0, 300) ?? "", followed = why?.followed?.trim().slice(0, 300) ?? "";
-  return direction || look || dropped || from ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}), ...(followed ? { followed } : {}) }) : "";
+  const walk = cleanWalk(why?.walk);
+  return direction || look || dropped || from || walk ? JSON.stringify({ direction, look, dropped, ...(from ? { from } : {}), ...(followed ? { followed } : {}), ...(walk ? { walk } : {}) }) : "";
 };
+const walkOf = (value: unknown) => { const walk = cleanWalk(value); return walk ? { walk } : {}; };
 const parseWhy = (text: string | null | undefined): FoundryWhy | null => {
   if (!text) return null;
   try {
     const value = JSON.parse(text) as Partial<FoundryWhy>;
-    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? ""), ...(value.from ? { from: String(value.from) } : {}), ...(value.followed ? { followed: String(value.followed) } : {}) };
+    return { direction: String(value.direction ?? ""), look: String(value.look ?? ""), dropped: String(value.dropped ?? ""), ...(value.from ? { from: String(value.from) } : {}), ...(value.followed ? { followed: String(value.followed) } : {}), ...walkOf(value.walk) };
   } catch { return null; }
 };
 

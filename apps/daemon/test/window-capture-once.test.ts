@@ -67,7 +67,7 @@ test("a capture kept with the chat counts as looking first, even after a restart
     const later = turn("now mock a calmer one");
     // A fresh session id was never seen by this daemon's memory: only the kept capture says it was looked at.
     await foundrySaveTool(store).execute({ title: "Calmer plans", kind: "html", description: "The plans page, calmer.", source: "<!doctype html><title>x</title><main>Plans</main>",
-      why: { direction: "Calm.", look_at: "The cards.", starts_from: "a capture of the plans page" } }, { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: later.id });
+      why: { direction: "Calm.", look_at: "The cards.", starts_from: "a capture of the plans page", walkthrough: [{ what: "Plans.", parts: [{ name: "Cards", says: "The plans." }, { name: "Button", says: "Picks one." }], why: "Calm." }] } }, { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: later.id });
     expect(store.listFoundryArtifacts().length).toBe(1);
   } finally { store.close(); }
 });
@@ -80,7 +80,7 @@ test("a look at the person's running app, kept with the chat, counts as looking 
     expect(store.lookedAtPage(session.id)).toBe(true);
     const later = turn("now mock a calmer one");
     await foundrySaveTool(store).execute({ title: "Calmer plans", kind: "html", description: "The plans page, calmer.", source: "<!doctype html><title>x</title><main>Plans</main>",
-      why: { direction: "Calm.", look_at: "The cards.", starts_from: "the plans page on localhost" } }, { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: later.id });
+      why: { direction: "Calm.", look_at: "The cards.", starts_from: "the plans page on localhost", walkthrough: [{ what: "Plans.", parts: [{ name: "Cards", says: "The plans." }, { name: "Button", says: "Picks one." }], why: "Calm." }] } }, { workspaceRoot: "/tmp", signal: new AbortController().signal, sessionId: session.id, turnId: later.id });
     expect(store.listFoundryArtifacts().length).toBe(1);
   } finally { store.close(); }
 });

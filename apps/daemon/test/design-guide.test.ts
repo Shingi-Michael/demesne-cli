@@ -25,7 +25,7 @@ test("Demesne's rules are numbered, and say what the old paragraph said", () => 
   expect(block).toContain("15. Every state it can be in is designed");
   expect(block).toContain(`${DESIGN_RULES.length}. Words are part of the design`);
   expect(block).toContain("\"Delete 3 files?\", never \"Are you sure?\"");
-  for (const words of ["the kit is the floor", "var(--text-xs|sm|md|lg|xl|display)", "var(--space-1…8)", "cards side by side the same height", "write no phone layout unless the ask is a phone screen", "never more than three", "prefers-reduced-motion: reduce", "never lorem ipsum"])
+  for (const words of ["the kit is the floor", "var(--text-xs|sm|md|lg|xl|display)", "var(--space-1…8)", "cards side by side the same height", "write no phone layout unless the ask is a phone screen", "never more than five", "prefers-reduced-motion: reduce", "never lorem ipsum"])
     expect(block).toContain(words);
   // Demesne's own look, for a mockup of Demesne.
   expect(block).toContain("no side panels and no menus");

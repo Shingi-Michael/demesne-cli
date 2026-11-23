@@ -4,7 +4,8 @@ import { withFoundryFiles } from "@demesne/protocol";
 import { DemesneStore } from "@demesne/storage";
 import { foundryEditTool, foundryReadTool, foundrySaveTool } from "../src/foundry.ts";
 
-const W = { direction: "Plain, for a test.", look_at: "The list.", starts_from: "new" };
+const WALK = [{ what: "A page for a test.", parts: [{ name: "Heading", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the test." }];
+const W = { direction: "Plain, for a test.", look_at: "The list.", starts_from: "new", walkthrough: WALK };
 const PAGE = '<!doctype html><link rel="stylesheet" href="foundry://kit/base.css"><link rel="stylesheet" href="styles.css"><h1>Orders</h1><ul id="list"></ul><script type="application/json" id="data" src="data.json"></script><script src="./app.js"></script>';
 const FILES = { "styles.css": "h1{color:#336}", "data.json": '[{"name":"Flat white"}]', "app.js": "for (const o of JSON.parse(data.textContent)) list.append(Object.assign(document.createElement('li'), { textContent: o.name }));" };
 

@@ -31,7 +31,7 @@ const f = await fixture({
     if (/hit this error while I was using it/.test(request)) { heardError = request; yield { type: "text_delta", delta: "Fixing it." }; yield { type: "finish", reason: "stop" }; return; }
     if (/broken/i.test(request)) {
       yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
-        title: "Tip jar", kind: "html", description: "A tip button.", note: "First take", why: { direction: "Small.", look_at: "The button.", starts_from: "new" },
+        title: "Tip jar", kind: "html", description: "A tip button.", note: "First take", why: { direction: "Small.", look_at: "The button.", starts_from: "new", walkthrough: [{ what: "A page for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check." }] },
         source: `<!doctype html><html><head><meta charset="utf-8"></head><body><button id="tip">Add a tip</button><script>document.getElementById("tip").onclick=()=>{const order=null;order.total+=1;};</script></body></html>`, surface: { frame: "part", width: 300 } }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
@@ -41,7 +41,7 @@ const f = await fixture({
     const id = list.find((item) => item.title === "Orders board")?.id;
     yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
       ...(id ? { id } : {}), title: "Orders board", kind: "html", description: "The counter's orders, in three columns.", note: blue ? "Blue" : "First take",
-      why: { direction: "Calm, for the counter.", look_at: "The columns.", starts_from: "new" }, source: board(blue), surface: { frame: "browser", width: 900, height: 420, title: "cafe.example/orders" } }) };
+      why: { direction: "Calm, for the counter.", look_at: "The columns.", starts_from: "new", walkthrough: [{ what: "A page for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check." }] }, source: board(blue), surface: { frame: "browser", width: 900, height: 420, title: "cafe.example/orders" } }) };
     yield { type: "finish", reason: "tool_calls" };
   },
 });
@@ -81,8 +81,8 @@ try {
   assert.equal(await page.locator("#page .fd-open").count(), 1, "only one grows");
   assert.equal(await page.locator("#page .fd-hd").count(), 1, "one head line, on it");
   assert.equal(await open.locator(".fd-hd-v").textContent(), "v2");
-  // It takes the whole width the page has (wider than the column on a wide window), centred on it.
-  const width = await open.evaluate((item) => { const host = document.getElementById("stage")!, css = getComputedStyle(host), room = host.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight), box = item.getBoundingClientRect(), stage = document.getElementById("stage")!.getBoundingClientRect(); return { item: box.width, want: Math.min(room - 56, 1720), left: box.left - stage.left, right: stage.right - box.right }; });
+  // It takes the whole width the page has, edge to edge (pass 263 A), centred on it.
+  const width = await open.evaluate((item) => { const host = document.getElementById("stage")!, css = getComputedStyle(host), room = host.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight), box = item.getBoundingClientRect(), stage = document.getElementById("stage")!.getBoundingClientRect(); return { item: box.width, want: room, left: box.left - stage.left, right: stage.right - box.right }; });
   assert.ok(Math.abs(width.item - width.want) <= 1, `the whole width there is (${width.item} vs ${width.want})`);
   assert.ok(Math.abs(width.left - width.right) <= 16, `centred (${width.left} / ${width.right})`);
   // The other version stays look-only: its name opens it, nothing else to press.

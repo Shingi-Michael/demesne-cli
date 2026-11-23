@@ -192,7 +192,7 @@ test("the swap script first ends anything still running from the old app, like t
 });
 
 test("the release line shows the name, the download, then Restart", () => {
-  expect(releaseLine(null).html).toBe("Demesne · Cherry Blossom");
+  expect(releaseLine(null).html).toBe("Demesne · Milky Way");
   expect(releaseLine({ state: "downloading", version: "0.4.51", to: "0.4.52", progress: 0.45 }).html).toContain('width:45%');
   expect(releaseLine({ state: "ready", version: "0.4.51", to: "0.4.52" }).html).toContain("data-update-restart");
   expect(releaseLine({ state: "ready", version: "0.4.51", to: "0.4.52", waiting: true }).html).toContain("restarts when this finishes");

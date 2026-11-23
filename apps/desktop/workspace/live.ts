@@ -19,7 +19,7 @@ import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
-import { mountSakura, type Sakura } from "./sakura.ts";
+import { mountMilkyWay, type MilkyWay } from "./milkyway.ts";
 import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
@@ -4095,9 +4095,9 @@ window.addEventListener("pagehide", () => seenStore.write(seen));
 const reviewJobs = () =>
   state ? [state.breakage.fix, ...state.breakage.inbox].filter((job): job is NonNullable<typeof job> => Boolean(job) && (job!.status === "ready" || job!.status === "failed")) : [];
 let reviewShown = false;
-/// Home's cherry blossom lives behind the start screen only, and sleeps while
-/// a chat or a page is showing.
-let sakura: Sakura | null = null, sakuraTried = false, sakuraDark: boolean | null = null;
+/// Home's sky (the galaxy and the flagship) lives behind the start screen
+/// only, and is left alone while a chat or a page is showing.
+let homeSky: MilkyWay | null = null, homeSkyTried = false, homeSkyDark: boolean | null = null;
 const colorProbe = document.createElement("canvas").getContext("2d");
 function inkIsDark() {
   if (!colorProbe) return true;
@@ -4106,23 +4106,22 @@ function inkIsDark() {
   const hex = String(colorProbe.fillStyle), [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0);
   return .2126 * r! + .7152 * g! + .0722 * b! < 128;
 }
-function renderSakura(show: boolean) {
-  const host = document.getElementById("sakura");
+function renderHomeSky(show: boolean) {
+  const host = document.getElementById("home-sky");
   if (!host) return;
-  if (show && !sakuraTried) {
-    sakuraTried = true;
+  if (show && !homeSkyTried) {
+    homeSkyTried = true;
     // the picture ends just above the greeting
     const floor = () => { const eyebrow = el("hero").querySelector(".hero-eyebrow, h1"); return eyebrow ? eyebrow.getBoundingClientRect().top - host.getBoundingClientRect().top : host.clientHeight * .47; };
-    try { sakura = mountSakura(host, inkIsDark(), floor); } catch { sakura = null; }
+    try { homeSkyDark = inkIsDark(); homeSky = mountMilkyWay(host, homeSkyDark, floor); } catch { homeSky = null; }
   }
-  host.hidden = !show || !sakura;
-  if (!sakura) return;
+  host.hidden = !show || !homeSky;
   // Hidden, it only rests: reading the ink's colour asks the browser for
   // styles, which in a chat cost more than anything else on each update.
-  if (!show) { sakura.pause(); return; }
+  if (!homeSky || !show) return;
   const dark = inkIsDark();
-  if (dark !== sakuraDark) { sakuraDark = dark; sakura.setDark(dark); }
-  sakura.resume(); sakura.refit();
+  if (dark !== homeSkyDark) { homeSkyDark = dark; homeSky.setDark(dark); }
+  homeSky.refit();
 }
 /// When the window was last in front of you, kept on this computer: Home
 /// says what happened since.
@@ -4218,9 +4217,9 @@ function renderHero() {
     ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
     : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${fold}${pick}</div><div id="hero-composer"></div>`;
   el("hero-composer").append(composer);
-  // Home grew or lost lines (ideas unfolded, a branch to review): the
-  // blossom ends above the greeting again, so no text sits on the boughs.
-  if (sakura && !document.getElementById("sakura")?.hidden) sakura.refit();
+  // Home grew or lost lines (ideas unfolded, a branch to review): the sky
+  // ends above the greeting again, so no text sits on it.
+  if (homeSky && !document.getElementById("home-sky")?.hidden) homeSky.refit();
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
 /// (Active or Archived), Scheduled, Customize or Settings. "" when closed.
@@ -8581,7 +8580,7 @@ function renderState(next: Snapshot) {
   renderLastChat();
   if (start) renderHero();
   else if (wasStart || el("composer-slot").parentElement !== el("input-area")) el("input-area").append(el("composer-slot"));
-  renderSakura(start);
+  renderHomeSky(start);
   renderStatus();
   renderConversation();
   renderThreads();

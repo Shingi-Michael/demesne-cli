@@ -323,7 +323,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     const root = inApp!.window.contentView;
     if (!cover) {
       cover = new View();
-      cover.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#161617" : "#ececec");
+      cover.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#08090d" : "#eff0f7");
       cover.setBounds({ x: 0, y: 0, width: 1, height: 1 });
     }
     // Added again, it goes on top of the pages put away under it.

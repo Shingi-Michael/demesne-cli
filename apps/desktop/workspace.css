@@ -1219,10 +1219,11 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .rewind-line .rw-mark .ico { width: 13px; height: 13px; }
 .desktop .rewind-line .rw-redo { color: var(--acc); font-size: 12.5px; }
 @media (prefers-reduced-motion: no-preference) { .desktop .step-rewind { transition: opacity 140ms var(--ease); } }
-/* Home's cherry blossom: a still drawing behind the start screen's top half,
-   its sky fading into the page (sakura.ts). */
-#sakura { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-#sakura canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+/* Home's sky (Milky Way): a galaxy on black with the flagship leaving it, ending above the greeting. */
+#home-sky { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.mw-hero { position: absolute; inset: 0 0 auto 0; overflow: hidden; -webkit-mask-image: linear-gradient(#000 76%, transparent); mask-image: linear-gradient(#000 76%, transparent); }
+.mw-sky { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mw-ship { position: absolute; right: 1%; top: 3%; width: auto; height: auto; max-width: 69%; max-height: 92%; }
 .live-app.start #stage { position: relative; z-index: 1; }
 .live-app.start .intro h1, .live-app.start .hero-eyebrow { text-shadow: 0 1px 16px var(--ink), 0 0 3px var(--ink); }
 .live-app.start #composer { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }
@@ -1525,9 +1526,9 @@ html[data-appearance="light"] body.desktop {
 html[data-theme="demesne"] body.desktop {
   /* The ink in three channels: the text, the shell and the panel. Settings ›
      Appearance › Ink swaps them; Glass sets how much of the blur shows. */
-  --ink-fg: 235 235 235; --ink-base: 22 22 23; --ink-deep: 17 17 18;
+  --ink-fg: 232 235 244; --ink-base: 8 9 13; --ink-deep: 3 4 7;
 }
-html[data-theme="demesne-light"] body.desktop { --ink-fg: 46 46 46; --ink-base: 242 242 242; --ink-deep: 255 255 255; }
+html[data-theme="demesne-light"] body.desktop { --ink-fg: 36 40 58; --ink-base: 239 240 247; --ink-deep: 253 253 255; }
 html[data-theme="demesne"] body.desktop, html[data-theme="demesne-light"] body.desktop {
   --shell: rgb(var(--ink-base)); --shell-glass: rgb(var(--ink-base) / var(--shell-a, 0.325)); --panel: rgb(var(--ink-deep)); --panel-glass: rgb(var(--ink-deep) / var(--panel-a, 0.5)); --panel-edge: rgb(var(--ink-fg) / 0.045);
   --panel-inset: inset 0 2px 12px rgb(0 0 0 / 0.12);
@@ -2033,7 +2034,7 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .repo-flow .rf-replay:focus-visible, .repo-flow summary:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .repo-flow .rf-replay:disabled { opacity: .45; cursor: default; }
 
-/* Cherry Blossom (pass 108 C): where you are is pink, what you press stays blue. */
+/* Where you are takes the theme's mark (--blossom: starlight in Milky Way, pink elsewhere); what you press stays blue (pass 108 C). */
 body.desktop textarea, body.desktop input { caret-color: var(--blossom); }
 body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, transparent); }
 .sidebar-session.selected .sidebar-session-mark:not(.warn, .acc, .working, .bad) { visibility: visible; width: 6px; height: 6px; margin: 0 5px; background: var(--blossom); }
@@ -3475,3 +3476,16 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-walk-parts li:hover, .fd-walk-parts li.lit { background: color-mix(in srgb, var(--t1) 6%, transparent); }
 .fd-walk-parts b { color: var(--t1); font-weight: 500; }
 .fd-num { flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--t1) 14%, transparent); color: var(--t1); font-size: 10.5px; font-weight: 600; }
+
+/* Milky Way, away from Home: a faint edge of stars along the top of each page
+   (a pale wash at dawn), and Cassiopeia in the sidebar's spare room. */
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > :is(.live-app, #desktop-home) { isolation: isolate; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > :is(.live-app, #desktop-home)::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 180px; z-index: -1; pointer-events: none; border-radius: inherit; opacity: .5; background: url("assets/milky-way-edge.png") top center / 1545px 180px no-repeat; }
+html[data-theme="demesne-light"] #desktop-shell > :is(.live-app, #desktop-home)::before { background: linear-gradient(180deg, rgba(150, 164, 222, .22), rgba(246, 223, 217, .10) 60%, transparent); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > .live-app.start::before { display: none; }
+.sidebar-stars { display: none; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #sidebar-projects { display: flex; flex-direction: column; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #sidebar-projects > * { flex: none; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-stars { display: block; margin-top: auto; padding: 36px 0 26px 18px; color: var(--t1); opacity: .2; pointer-events: none; }
+.sidebar-stars svg { display: block; width: 190px; height: 70px; }
+#desktop-shell.sidebar-collapsed .sidebar-stars { display: none; }

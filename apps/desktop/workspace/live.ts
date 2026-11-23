@@ -14,7 +14,7 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
-import { browserSteps, downloadWords, findWords, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
+import { browserSteps, downloadWords, findWords, outsideDoing, type OutsideSignin, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
@@ -1614,6 +1614,8 @@ const split = {
   ringAt: 0,
   /// Find on the page (⌘F): the bar under the toolbar, what you typed, and where it is in the matches.
   find: { open: false, text: "", found: null as null | { matches: number; at: number } },
+  /// A Google sign-in sent to your own browser, as the daemon last said.
+  outside: null as null | OutsideSignin,
   pumping: false, width: (() => { try { return Number(localStorage.getItem("demesne-browser-split")) || 0; } catch { return 0; } })(),
 };
 const BROWSER_SPLIT_LABEL = "The chat’s browser";
@@ -1640,7 +1642,7 @@ function renderBrowserSplit() {
   const s = state;
   if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; placeSplitView(); return; }
   if (split.session !== s.session.id) {
-    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0, find: { open: false, text: "", found: null } });
+    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0, find: { open: false, text: "", found: null }, outside: null });
     // Another chat's page does not stay up while this one's first picture comes.
     splitDrawn = splitWanted = ""; const old = aside.querySelector<HTMLCanvasElement>(".bs-page"); if (old) old.hidden = true;
   }
@@ -1659,7 +1661,7 @@ function renderBrowserSplit() {
   const working = run && last && last.state === "running" && !ask ? `${verb(last as unknown as ToolEntry)} ${stepTarget(last as unknown as ToolEntry)}`.trim() : null;
   // A page you hand back stops being a new tab: the model carries on where it was.
   if (split.home && !split.held) split.home = false;
-  const doing = splitDoing(ask, took ? null : working, took);
+  const doing = outsideDoing(split.outside) ?? splitDoing(ask, took ? null : working, took);
   const yours = splitYours();
   aside.classList.toggle("yours", yours && !split.home);
   aside.classList.toggle("done", !run);
@@ -2042,7 +2044,7 @@ async function pumpBrowserFrames() {
     while (split.open && state?.session?.id === split.session && !pageOpen) {
       if (document.visibilityState !== "visible") { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
       const session = split.session;
-      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number } };
+      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number }; outside?: OutsideSignin };
       let got: Got | null = null;
       // The view's shape, so the page is drawn as tall as the split shows it.
       const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
@@ -2055,6 +2057,8 @@ async function pumpBrowserFrames() {
       const held = got.held ?? null;
       // An answer asked for before you took or handed back the page is out of date about who holds it.
       if (held !== split.held && askedAt > split.heldAt) { split.held = held; redraw = true; }
+      const outside = got.outside ?? null;
+      if (JSON.stringify(outside) !== JSON.stringify(split.outside)) { split.outside = outside; redraw = true; }
       if ((got.src || got.live) && Number(got.seq) > split.seq) {
         (window as unknown as { __at?: number }).__at = Number((got as { at?: number }).at) || 0;
         split.seq = Number(got.seq);

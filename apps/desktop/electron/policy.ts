@@ -129,6 +129,12 @@ export interface ShotPlace { url: string; width: number; height: number; scale: 
 export function withShots(html: string, shots: Record<string, ShotPlace>) {
   return Object.keys(shots).length ? withRemember(html, `window.__demesneShots=${JSON.stringify(shots).replace(/</g, "\\u003c")};`) : html;
 }
+/** Step 6: picture:IMAGE_ID, a picture from the chat in any kind, becomes
+ * where Demesne serves it (or its data, for the look and a saved copy).
+ * Only pictures the mockup keeps; any other stays as written. */
+export function withPictures(page: string, places: Record<string, string>) {
+  return Object.keys(places).length ? page.replace(/\bpicture:([A-Za-z0-9_-]{1,200})/g, (whole, id: string) => Object.hasOwn(places, id) ? places[id]! : whole) : page;
+}
 /** A page uses the remember runtime when it calls one of its four functions. */
 export const usesRemember = (html: string) => /\bdemesne\s*\.\s*(?:save|load|ask|pick|read|list|fetch)\s*\(/.test(html);
 /** A page that uses it gets the runtime first, before its own scripts run. With

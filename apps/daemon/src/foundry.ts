@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
@@ -92,6 +92,9 @@ export const REMEMBER_RULES = "Pages can remember and ask, with no script tag: a
   + "await demesne.fetch(httpsUrl) live public data ({ok, status, type, text, json()}; the person allows each site once, so fetch on load is fine and a refusal comes back as an error). "
   + "Use them when the person asks for their real numbers or files; show a quiet loading state, and on an error say what was missing in the page (your own look sees the error, not the data).";
 
+/// Step 6: pictures from the chat in any mockup (picture:IMAGE_ID).
+export const PICTURE_RULES = "Pictures the person attached or dropped on a mockup go in any kind as picture:IMAGE_ID where an address goes (<img src>, CSS url(), a Markdown image ![Logo](picture:IMAGE_ID)), with the id the message gave; use them instead of a drawn stand-in.";
+
 /// Pass 221 A: Foundry draws the surface and plays the demo, so the page
 /// holds only the thing being made.
 export const STAGE_RULES = "The page holds only the thing, with only the controls the real thing has. "
@@ -99,7 +102,7 @@ export const STAGE_RULES = "The page holds only the thing, with only the control
   + "demo says how it moves: foundry_try steps, each with a short say; Foundry plays them with a pointer, the words under the page. A page with something to press always gets one, of its main path. "
   + "So never put Replay, Play demo, Next step, an option switcher or a state switcher (Empty · Loading · Error, Show error, Simulate) in the page.";
 
-const GUIDE = READY_KINDS_RULES + " " + MORE_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + DESIGN_POINTER;
+const GUIDE = READY_KINDS_RULES + " " + MORE_KINDS_RULES + " " + FILE_RULES + " " + STAGE_RULES + " " + REMEMBER_RULES + " " + PICTURE_RULES + " " + DESIGN_POINTER;
 
 /// What stands in for a page's source once its turn is old.
 export const FORGOTTEN_SOURCE = "[source omitted from history; foundry_read the artifact for it]";
@@ -182,10 +185,16 @@ export function chatPictures(store: DemesneStore, sessionId: string | undefined)
 }
 
 export function checkShots(store: DemesneStore, id: string | undefined, source: string, sessionId: string | undefined): ImageArtifact[] {
-  const uses = shotsOf(source);
-  if (!uses.length) return [];
+  const uses = shotsOf(source), named = picturesOf(source);
+  if (!uses.length && !named.length) return [];
   const found = new Map<string, ImageArtifact>();
   const pictures = () => chatPictures(store, sessionId);
+  // Step 6: picture:IMAGE_ID, a picture from this chat anywhere in any mockup.
+  for (const src of named) {
+    const image = (sessionId ? store.getImageArtifact(sessionId, src) : null) ?? (id ? store.getFoundryShot(id, src) : null);
+    if (!image) throw new Error(`[picture] "picture:${src}" is not a picture this chat has. Hint: picture:IMAGE_ID takes the image artifact id an attached or dropped picture gave${pictures()}`);
+    found.set(src, image);
+  }
   for (const use of uses) {
     const image = found.get(use.src) ?? (use.src && sessionId ? store.getImageArtifact(sessionId, use.src) : null) ?? (use.src && id ? store.getFoundryShot(id, use.src) : null);
     if (!image) throw new Error(`[review_shot] ${use.src ? `"${use.src}" is not a picture this chat has.` : "A <d-shot> names no picture."} Hint: src is the image artifact id a capture or an attached picture gave${pictures()}`);

@@ -2,7 +2,7 @@
 /// screenshot is redrawn at most `side` pixels on its long side (and under
 /// the daemon's 40 megapixel decode limit), so any size can be attached or
 /// shared. Small enough pictures pass through untouched.
-export interface FitOptions { side: number; bytes: number; type?: "image/webp" | "image/jpeg" }
+export interface FitOptions { side: number; bytes: number; type?: "image/webp" | "image/jpeg" | "image/png" }
 
 /// The size to draw at: the long side at most `side`, and no more than
 /// 40 million pixels.

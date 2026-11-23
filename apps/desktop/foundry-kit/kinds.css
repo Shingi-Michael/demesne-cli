@@ -74,6 +74,9 @@ html[data-kind=deck] body{background:color-mix(in srgb,var(--ink) 9%,var(--paper
 .s-in .k-stat{padding:1.6em 1.8em;gap:.3em;border-radius:1.2cqw;background:color-mix(in srgb,var(--ink) 6%,transparent)}
 .s-in .k-stat-l{font-size:.8em}.s-in .k-stat-v{font-size:2.2em}.s-in .k-stat-f{font-size:.7em}
 .s-in .k-figure{margin:0}
+/* Step 6: a picture from the chat (picture:IMAGE_ID) fits its slide or card. */
+.s-in img{display:block;min-height:0;max-height:100%;max-width:100%;object-fit:contain;border-radius:1cqw}
+.s-in p:has(>img:only-child){flex:1 1 auto;min-height:0;display:flex}
 .s-in .k-ctitle{font-size:.8em;margin-bottom:.6em;color:var(--secondary);font-weight:500}
 .s-in .k-legend{font-size:.65em}
 .s-in .k-callout{font-size:.9em}

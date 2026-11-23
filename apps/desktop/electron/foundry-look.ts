@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DESIGN_MEASURE, LOOK_MEASURE, type DesignMeasure, type LookMeasure } from "./foundry-look-measure.ts";
-import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember, withRemember, withShots } from "./policy.ts";
+import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember, withPictures, withRemember, withShots } from "./policy.ts";
 import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryPlan, type TryResult, type TryStep, type TryStepResult } from "./foundry-try.ts";
 
 /// try: run these steps on the page instead of looking at it (foundry-try.ts).
@@ -65,6 +65,7 @@ export function runFoundryLook(path: string) {
       let page = foundryDocument(job.kind, job.source, job.title);
       if ((job.kind === "html" || job.kind === "react") && usesRemember(job.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"));
       // Its pictures ride in the job, so they go in as data.
+      if (job.shots) page = withPictures(page, Object.fromEntries(Object.entries(job.shots).map(([id, shot]) => [id, `data:${shot.mimeType};base64,${shot.data}`])));
       if (job.kind === "html" && job.shots) page = withShots(page, Object.fromEntries(Object.entries(job.shots).map(([id, shot]) => [id, { url: `data:${shot.mimeType};base64,${shot.data}`, width: shot.width, height: shot.height, scale: shot.scale }])));
       return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": FOUNDRY_CSP } });
     });

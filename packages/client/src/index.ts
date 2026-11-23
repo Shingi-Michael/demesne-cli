@@ -257,6 +257,10 @@ export class DemesneClient {
   async foundrySave(body: { id?: string; title?: string; kind?: string; workspace?: string | null; note?: string; description?: string; source: string; baseVersion?: number }): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request("/v1/foundry", { method: "POST", body: JSON.stringify(body) });
   }
+  /// Step 7: a new mockup that starts from one version of this one.
+  async foundryCopy(id: string, version?: number): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
+    return this.request(`/v1/foundry/${encodeURIComponent(id)}/copy`, { method: "POST", body: JSON.stringify(version ? { version } : {}) });
+  }
   async foundryRename(id: string, title: string): Promise<import("@demesne/protocol").FoundryArtifact> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
   }

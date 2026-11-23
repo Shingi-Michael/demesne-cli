@@ -124,6 +124,7 @@ export const versionsOf = (versions: readonly FoundryShelfVersion[], id: string)
   versions.filter((item) => item.artifactId === id).map((item) => item.version).sort((a, b) => a - b);
 
 const COMPARE = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 3v18"/><path d="M7 12h2M15 12h2" />';
+const BRANCH = '<circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7.5v9M18 10c0 4.5-6 3.5-11 6.8"/>';
 const PENCIL = '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>';
 
 /// The head line of the opened mockup (pass 262 C): the versions to step
@@ -151,6 +152,8 @@ export function openHead(open: FoundryOpen, all: readonly number[], kind?: Found
         : ico("foundry-edit", {}, editing ? '<path d="m5 12.5 4.5 4.5L19 7.5"/>' : PENCIL, editing ? "Done editing" : "Edit the text", ` aria-pressed="${editing}"`)
       : "")
     + (editing ? "" : ico("foundry-code", {}, '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', code ? "Show the page" : "Show the code", ` aria-pressed="${code}"`))
+    // Step 7: a new mockup that starts from this version, so one good page can branch into a second idea.
+    + (editing ? "" : ico("foundry-branch", {}, BRANCH, `Start a new one from v${open.shown}`))
     + ico("foundry-copy", {}, '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', "Save a copy to Downloads")
     + ico("foundry-shrink", {}, '<path d="M6 6l12 12M18 6 6 18"/>', "Close (Esc)")
     + "</span>";

@@ -17,7 +17,7 @@ import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
@@ -296,6 +296,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
       if ((found.kind === "html" || found.kind === "react") && usesRemember(found.source)) page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
+      if (found.shots?.length) page = withPictures(page, Object.fromEntries(found.shots.map((one) => [one.id, `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`])));
       if (found.kind === "html" && found.shots?.length) page = withShots(page, Object.fromEntries(found.shots.map((one) => [one.id, { url: `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`, width: one.width, height: one.height, scale: one.scale }])));
       // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
       // note.js (pass 233 A) tells the Foundry page which part is under the pointer, for notes pinned to a part.
@@ -524,7 +525,7 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (method === "desktop-foundry-copy") {
       const { id, version, other } = args as Record<string, unknown>;
       if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id)) throw new Error("No such mockup");
-      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string; version: number };
+      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[] };
       const ready = isReadyKind(found.kind);
       // More kinds: a React page or a diagram as a page that runs on its own, or (other) its source.
       const drawn = found.kind === "react" || found.kind === "mermaid", source = drawn && other === true;
@@ -537,7 +538,17 @@ if (!lookJob) void app.whenReady().then(async () => {
       else {
         const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
         const libs = drawn && !source ? Object.fromEntries(["react.js", "react-dom.js", "prop-types.js", "lucide.js", "recharts.js", "tailwind.js", "mermaid.js"].map((name) => [name, kitFile(name).toString("utf8")])) : {};
-        await writeFile(path, found.kind === "html" ? exportedSource(found.source, kit) : ready || (drawn && !source) ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit, libs) : found.source, "utf8");
+        // Step 6: the pictures it shows go inside the file, so it stands on its own.
+        const pictures: Record<string, string> = {}, places: Record<string, ShotPlace> = {};
+        if (found.kind !== "code" && found.kind !== "markdown" && !source) for (const one of found.shots ?? []) {
+          try {
+            const shot = await backend!.request("foundry-shot", { id, shot: one.id }) as { mimeType: string; data: string };
+            pictures[one.id] = `data:${shot.mimeType};base64,${shot.data}`;
+            places[one.id] = { url: pictures[one.id]!, width: one.width, height: one.height, scale: one.scale };
+          } catch {}
+        }
+        const page = found.kind === "html" ? exportedSource(withShots(found.source, places), kit) : ready || (drawn && !source) ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit, libs) : found.source;
+        await writeFile(path, withPictures(page, pictures), "utf8");
       }
       savedCopies.add(path);
       // ready: there is another format to offer (a deck's page, a doc's PDF, a component's source).

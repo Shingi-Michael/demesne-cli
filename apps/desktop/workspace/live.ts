@@ -39,7 +39,7 @@ import { foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVe
 import { placeEdit } from "./foundry-edit.ts";
 import { watchFoundrySites } from "./foundry-sites.ts";
 import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
-import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
+import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, notePictureFile, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
 import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
@@ -51,7 +51,7 @@ import { researchRowHTML } from "./research-row.ts";
 import { crewRowHTML } from "./crew-row.ts";
 import { catchUp, seenStore } from "./catch-up.ts";
 import { foldsUp, partsLabel, pasteLabel, splitPastes, withPastes, type Paste } from "./pastes.ts";
-import { fitImage } from "./fit-image.ts";
+import { fitImage, type FitOptions } from "./fit-image.ts";
 import { chatPile, pileHTML, showPile, stepPicture, stepShotHTML, type PileShot } from "./shot-pile.ts";
 import { chatRoutines, routinesCardHTML, routineTarget, ROUTINE_TOOL, ROUTINE_VERBS, ROUTINES_CARD } from "./routine-card.ts";
 import { chatShown, latestShown, shownCardHTML, SHOWN_CARD, type Shown } from "./shown-card.ts";
@@ -4511,8 +4511,9 @@ async function carryFoundryNotes(keys: string[]): Promise<string> {
     const pictured: number[] = [];
     for (const [index, note] of notes.entries()) {
       if (!note.picture || state.attachments.length >= 10) continue;
-      const sent = await api<{ id: string } | undefined>("attach", { name: `note-${index + 1}.png`, mimeType: "image/png", data: note.picture }).catch(() => undefined);
-      if (sent?.id) { pictured.push(index); attachmentPreviews.set(sent.id, `data:image/png;base64,${note.picture}`); }
+      const file = notePictureFile(note, index);
+      const sent = await api<{ id: string } | undefined>("attach", { ...file, data: note.picture }).catch(() => undefined);
+      if (sent?.id) { pictured.push(index); attachmentPreviews.set(sent.id, `data:${file.mimeType};base64,${note.picture}`); }
     }
     parts.push(foundryNotesMessage({ id, title: mockup.title, version }, notes, pictured));
     foundryNotes.waiting.delete(key);
@@ -4890,8 +4891,9 @@ async function sendFoundryNotes(key: string) {
     const pictured: number[] = [], had = state.attachments.length;
     for (const [index, note] of notes.entries()) {
       if (!note.picture || had + pictured.length >= 10) continue;
-      const sent = await api<{ id: string } | undefined>("attach", { name: `note-${index + 1}.png`, mimeType: "image/png", data: note.picture }).catch(() => undefined);
-      if (sent?.id) { pictured.push(index); pictures.push(sent.id); attachmentPreviews.set(sent.id, `data:image/png;base64,${note.picture}`); }
+      const file = notePictureFile(note, index);
+      const sent = await api<{ id: string } | undefined>("attach", { ...file, data: note.picture }).catch(() => undefined);
+      if (sent?.id) { pictured.push(index); pictures.push(sent.id); attachmentPreviews.set(sent.id, `data:${file.mimeType};base64,${note.picture}`); }
     }
     // Queued behind a turn that is still running, never steered into it; the line under the mockup says where they went.
     const session = state.session;
@@ -5136,7 +5138,7 @@ function renderPage() {
   root.dataset.html = html;
   if (pageOpen === "foundry") paintFoundrySaid();
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); foundrySitesWatch = watchFoundrySites(root, (id, host) => api("desktop-foundry-site", { id, host })); }
+  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow, fitDropped); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); foundrySitesWatch = watchFoundrySites(root, (id, host) => api("desktop-foundry-site", { id, host })); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider], [data-anthropic-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.anthropicProvider ?? googleSlot.dataset.googleProvider!;
@@ -5326,12 +5328,24 @@ async function answerQuestion(value: string | null, source: "typed" | "suggestio
 const attachmentPreviews = new Map<string, string>();
 /// A picture fitted for sending (fit-image.ts). An iPhone photo (HEIC) the
 /// window can't draw is turned into a JPEG by the Mac first.
-async function readPicture(file: File, options: { side: number; bytes: number }): Promise<{ url: string; type: string }> {
+async function readPicture(file: File, options: FitOptions): Promise<{ url: string; type: string }> {
   if (!/^image\/hei[cf]$/.test(file.type) && !/\.hei[cf]$/i.test(file.name)) return fitImage(file, options);
   if (file.size > 24 * 1024 * 1024) throw new Error("too big");
   const raw = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
   const jpeg = await api<string>("image-convert", { data: raw });
   return fitImage(await (await fetch(jpeg)).blob(), options);
+}
+/// Step 6: a picture dropped on a mockup, made one the chat can take (as attaching does): its base64 and type.
+async function fitDropped(url: string): Promise<{ data: string; type: string } | null> {
+  try {
+    // Read here, not fetched: the window's own rules keep data: addresses from fetch.
+    const comma = url.indexOf(","), type = /^data:([\w/.+-]+);base64$/.exec(url.slice(0, comma))?.[1] ?? "";
+    const blob = new Blob([Uint8Array.from(atob(url.slice(comma + 1)), (char) => char.charCodeAt(0))], { type });
+    // A GIF or an SVG is drawn again as a PNG: the chat takes PNG, JPEG and WebP.
+    const plain = /^image\/(png|jpeg|webp)$/.test(blob.type);
+    const fitted = await readPicture(new File([blob], "dropped", { type: blob.type }), plain ? { side: 4096, bytes: 15 * 1024 * 1024 } : { side: 4096, bytes: 0, type: "image/png" });
+    return /^data:image\/(png|jpeg|webp);base64,/.test(fitted.url) ? { data: fitted.url.slice(fitted.url.indexOf(",") + 1), type: fitted.type } : null;
+  } catch { return null; }
 }
 /// Files the daemon couldn't read: their chips say why, and they aren't sent.
 let refusedFiles: { id: string; filename: string; why: string }[] = [];
@@ -8854,7 +8868,8 @@ document.addEventListener("dragenter", (event) => {
   if (!carriesSource(event) || !state?.session) return;
   dragDepth++;
   dragging(true);
-  if (carriesFiles(event)) el("drop-zone").hidden = false;
+  // On Foundry (step 6) a picture goes on a mockup, as a note that carries it.
+  if (carriesFiles(event)) { const zone = el("drop-zone"); zone.textContent = pageOpen === "foundry" ? "Drop a picture on a mockup to use it there" : "Drop files to attach"; zone.hidden = false; }
 });
 document.addEventListener("dragleave", (event) => {
   if (!carriesSource(event)) return;

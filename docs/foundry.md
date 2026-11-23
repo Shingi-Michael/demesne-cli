@@ -130,6 +130,19 @@ The runtime is `apps/desktop/foundry-kit/remember.js` (with save, load, ask and 
 
 Read more: [Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) (MDN), [CSV](https://en.wikipedia.org/wiki/Comma-separated_values), [Same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy) (why a walled-off page asks Demesne instead of the web directly), [Server-side request forgery](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) (why local and private addresses are refused).
 
+## Pictures in a mockup
+
+A mockup can show your real logo, photo or product shot instead of a drawn stand-in. Two ways in:
+
+- **Attach a picture to the chat** and ask for a mockup with it. The model puts it in any kind as `picture:IMAGE_ID` where an address goes: `<img src="picture:…">` or CSS `url(picture:…)` in a page, a Markdown image `![Logo](picture:…)` in a deck, doc or dashboard, a `src` prop in a React component.
+- **Drop a picture on a mockup** on the Foundry page. It becomes a note pinned exactly where you dropped it, saying "Use this picture here" and naming the file. Type more if you like, then send it with the other notes: the picture goes to the chat under its own name, with the words to put it in at that pin. Anything that isn't a picture is refused on the notes line. A GIF or SVG is drawn again as a PNG, and a big photo is fitted, the same as attaching.
+
+Foundry checks that every picture a mockup names is one its chat has, and keeps it with the mockup, so an edit from another chat still shows it. Demesne serves it to the page from `foundry://shot/<id>/<picture>` (the same store as a review's real screen), the model's own look gets it as data, and Save a copy puts it inside the file so the copy stands on its own.
+
+`picturesOf` (`packages/protocol/src/foundry-stage.ts`) finds them, `checkShots` (`apps/daemon/src/foundry.ts`) checks and keeps them, `withPictures` (`apps/desktop/electron/policy.ts`) puts their addresses in; the drop is `apps/desktop/foundry-kit/note.js` and `watchFoundryNotes` in `apps/desktop/workspace/foundry-notes.ts`. `xvfb-run -a bun scripts/check-foundry-pictures.ts` checks it in the real app.
+
+Read more: [HTML Drag and Drop API](https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API) (MDN), [Data URLs](https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/data) (how a saved copy carries its pictures), [Images in Markdown](https://spec.commonmark.org/0.31.2/#images) (CommonMark).
+
 ## Compare two versions
 
 The opened mockup's head line has a compare icon (the split square). Press it and the version before the one shown lies over it, cut by a line down the middle: the earlier one on the left, the shown one on the right, each named at the top. Drag the line (or focus it and use the arrow keys, Shift for bigger steps, Home and End) to sweep across and see exactly what changed where. ‹ › still step through versions, each compared with the one before it. Nothing plays while you compare, and notes wait. A first version has nothing to compare with, so the icon rests.

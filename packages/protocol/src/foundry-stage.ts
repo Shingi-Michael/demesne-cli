@@ -221,6 +221,14 @@ export function shotsOf(source: string): ShotUse[] {
   return [...body.matchAll(TAG("d-shot"))].map((match) => ({ src: attribute(match[0], "src") ?? "", box: attribute(match[0], "box"),
     marks: (attribute(match[0], "marks") ?? "").split("|").map((item) => item.trim()).filter(Boolean) }));
 }
+/// Step 6: a picture from the chat in any mockup, as picture:IMAGE_ID where
+/// an address goes (<img src>, CSS url(), a Markdown image, a React prop).
+/// Foundry keeps the picture with the mockup and serves it there.
+export const PICTURE_REF = /\bpicture:([A-Za-z0-9_-]{1,200})/g;
+/// The pictures a source names that way, once each, in order.
+export function picturesOf(source: string): string[] {
+  return [...new Set([...source.matchAll(PICTURE_REF)].map((match) => match[1]!))];
+}
 /// A box written x,y,w,h (commas or spaces), or null.
 export function shotBox(text: string): { x: number; y: number; width: number; height: number } | null {
   const n = text.trim().split(/[\s,]+/).map(Number);

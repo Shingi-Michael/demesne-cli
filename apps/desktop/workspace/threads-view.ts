@@ -120,6 +120,21 @@ export function liveThreads(list: DriveFix[]): DriveFix[] {
     .sort((a, b) => RANK[threadState(a.fix)] - RANK[threadState(b.fix)] || a.at - b.at).map(({ fix }) => fix);
 }
 
+/// Whether the threads ribbon should make its one lap of light: a thread it
+/// already knew has just finished, asked you, or stopped. `seen` holds each
+/// thread's last state and is updated in place; a thread seen for the first
+/// time never laps (opening a chat is not news).
+const NEWS: ThreadState[] = ["ready", "you", "failed"];
+export function threadsNews(seen: Map<string, ThreadState>, list: DriveFix[]): boolean {
+  let news = false;
+  for (const fix of list) {
+    const now = threadState(fix), before = seen.get(fix.id);
+    if (before !== undefined && before !== now && NEWS.includes(now)) news = true;
+    seen.set(fix.id, now);
+  }
+  return news;
+}
+
 const NUMBER = ["No", "One", "Two", "Three", "Four", "Five", "Six"];
 const threads = (count: number) => `${NUMBER[count] ?? count} thread${count === 1 ? "" : "s"}`;
 

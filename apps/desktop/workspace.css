@@ -3513,3 +3513,21 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-stars { d
 @media (prefers-reduced-motion: no-preference) {
   .desktop #cards .card:has(> button.card-head).lap::before { animation: card-light 6s linear 1 both; animation-delay: var(--lap-at, 0ms); }
 }
+
+/* Five more places in the pill's glass (pass 272 A): the small menus over the
+   composer (#overlay.popover, the slash menu among them), the context pop-up,
+   the glance when you rest on a chat, the threads ribbon and the summary that
+   stands in for older turns. The same sheen, edge and lift as the pill. The
+   pop-ups stay solid behind their words, so nothing in the chat shows through.
+   Nothing moves at rest; the threads ribbon makes one lap of light when a
+   thread finishes or needs you. Read more:
+   https://developer.mozilla.org/en-US/docs/Web/CSS/mask-composite */
+@property --threads-a { syntax: "<angle>"; inherits: false; initial-value: -90deg; }
+@keyframes threads-light { from { --threads-a: -90deg; } to { --threads-a: 270deg; } }
+.desktop :is(#overlay.popover, #context-card, #sidebar-glance) { border: 0; border-radius: 16px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 70%, var(--surface)); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85), 0 24px 60px -20px rgb(0 0 0 / .7); }
+.desktop :is(#threads-ribbon .plan-ribbon.tr .pr-card, .compaction-card) { position: relative; border: 0; border-radius: 18px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85); }
+.desktop .compaction-card { border-radius: 16px; }
+.desktop :is(#overlay.popover, #context-card, #sidebar-glance, .compaction-card)::after, .desktop #threads-ribbon .plan-ribbon.tr .pr-card::after { content: ""; position: absolute; inset: 0; z-index: 3; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--threads-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 60%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 34%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #threads-ribbon.lap .plan-ribbon.tr .pr-card::after { animation: threads-light 6s linear 1 both; }
+}

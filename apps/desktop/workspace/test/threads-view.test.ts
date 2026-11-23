@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { DriveFix } from "@demesne/protocol";
-import { light, liveThreads, threadBriefHTML, threadDoing, threadLine, threadReportHTML, threadsBar, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, threadState, type ThreadsLook, type ThreadsView } from "../threads-view.ts";
+import { light, liveThreads, threadBriefHTML, threadDoing, threadLine, threadReportHTML, threadsBar, threadsBegunHTML, threadsMessageHTML, threadsNews, threadsRibbonHTML, threadState, type ThreadState, type ThreadsLook, type ThreadsView } from "../threads-view.ts";
 
 const fix = (id: string, more: Partial<DriveFix> = {}): DriveFix => ({ id, workspace: "/p", title: `Thread ${id}`, signals: [], branch: `thread/${id}`, path: `/w/${id}`, base: "abc",
   sessionId: `s-${id}`, turnId: `t-${id}`, status: "running", startedAt: new Date().toISOString(), finishedAt: null, from: "orch", thread: { brief: "Do it.", files: [`${id}.ts`] }, ...more });
@@ -232,4 +232,18 @@ test("a thread reporting back carries its light: green when it finished, red whe
   const report = { fix: "a", chat: "s-a", title: "Add CSV export", branch: "thread/a", working: 0, status: "ready" as const, summary: "Did it.", diff: { files: 2, additions: 4, deletions: 1, paths: ["a.ts", "a.test.ts"] } };
   expect(threadReportHTML(report, "09:58")).toContain('<i class="th-light ready" aria-hidden="true"></i><b>Add CSV export</b><span class="tr-what">finished · 2 files</span>');
   expect(threadReportHTML({ ...report, status: "failed" as const }, "09:58")).toContain('<i class="th-light failed" aria-hidden="true"></i><b>Add CSV export</b><span class="tr-what">stopped</span>');
+});
+
+test("pass 272 A: the ribbon laps once when a known thread finishes, asks or stops", () => {
+  const seen = new Map<string, ThreadState>();
+  // Opening a chat whose threads are already ready is not news.
+  expect(threadsNews(seen, [fix("a", { status: "ready" }), fix("b")])).toBe(false);
+  expect(threadsNews(seen, [fix("a", { status: "ready" }), fix("b")])).toBe(false);
+  expect(threadsNews(seen, [fix("a", { status: "ready" }), fix("b", { status: "ready" })])).toBe(true);
+  expect(threadsNews(seen, [fix("a", { status: "ready" }), fix("b", { status: "ready" })])).toBe(false);
+  expect(threadsNews(seen, [fix("c")])).toBe(false);
+  expect(threadsNews(seen, [fix("c", { waiting: true } as Partial<DriveFix>)])).toBe(true);
+  expect(threadsNews(seen, [fix("c", { status: "failed" })])).toBe(true);
+  // Merged leaves quietly.
+  expect(threadsNews(seen, [fix("a", { status: "applied" })])).toBe(false);
 });

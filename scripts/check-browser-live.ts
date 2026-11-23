@@ -24,7 +24,7 @@ const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
   if (url.pathname === "/admin") return page("Sign in", `<h1 style="font:600 30px system-ui">Sign in to Slow Pour admin</h1><p><input id="email" placeholder="Email" style="font:20px system-ui;padding:12px;width:300px;border:1px solid #ccc;border-radius:8px"></p><button id="go" style="font:600 18px system-ui;padding:12px 40px;border:0;border-radius:10px;background:#111417;color:#fff">Sign in</button><p id="said"></p><div style="height:3000px"></div>
     <script>let n = 0; go.onclick = () => { n++; said.textContent = "Signed in as " + email.value + " (" + n + ")"; document.title = "Orders"; document.querySelector("h1").textContent = "Orders"; };</script>`);
   if (url.pathname === "/report.csv") return new Response("order,total\n1042,96\n", { headers: { "Content-Type": "text/csv", "Content-Disposition": 'attachment; filename="report.csv"' } });
-  if (url.pathname === "/cart") return page("Cart", `<h1 style="font:600 30px system-ui">Cart</h1><p>One yearly plan, £96.</p>`);
+  if (url.pathname === "/cart") return page("Cart", `<h1 style="font:600 30px system-ui">Cart</h1><p>One yearly plan, £96.</p><p><a id="google" href="https://accounts.google.com/o/oauth2/v2/auth?client_id=check" style="display:inline-block;padding:10px 0">Sign in with Google</a></p>`);
   return new Response("not here", { status: 404 });
 } });
 const base = `http://localhost:${site.port}`;
@@ -272,6 +272,18 @@ try {
   assert(existsSync(join(f.workspace, ".demesne", "downloads", "report.csv")), "the file is in the project's downloads folder");
   await win.screenshot({ path: join(output, "download.png"), clip: { x: 760, y: 40, width: 480, height: 60 } });
   console.log("PASS: a file the page downloads lands in the project and shows in the bar.");
+
+  // Google refuses sign-in inside an app's browser: its sign-in opens in your own browser instead, and the page stays where it was.
+  await app.evaluate(({ shell }) => { const opened: string[] = []; (globalThis as { opened?: string[] }).opened = opened; shell.openExternal = async (url: string) => { opened.push(url); }; });
+  const link = await app.evaluate(async ({ BrowserWindow, webContents }) => { const window = BrowserWindow.getAllWindows()[0]!; const contents = webContents.getAllWebContents().find((one) => one !== window.webContents && one.getURL().includes("/cart"))!; return await contents.executeJavaScript("(() => { const r = document.getElementById('google').getBoundingClientRect(); return [r.left + 20, r.top + r.height / 2]; })()") as number[]; });
+  await act("/cart", click(link[0]!, link[1]!));
+  const opened = await until("Google's sign-in opened in your own browser", () => app.evaluate(() => (globalThis as { opened?: string[] }).opened ?? []), (list) => list.length === 1);
+  assert.match(opened[0]!, /^https:\/\/accounts\.google\.com\/o\/oauth2/);
+  await win.waitForTimeout(500);
+  assert.equal((await real("/cart"))?.title, "Cart", "the page did not go to Google's sign-in");
+  await win.locator("#conversation").click({ position: { x: 20, y: 20 } });
+  await win.waitForTimeout(800);
+  console.log("PASS: Google's sign-in opens in your own browser instead of being refused in Demesne's.");
 
   // Settings over the chat, and ×: the real page is put away, and still there for the model.
   await split.locator(".bs-close").click();

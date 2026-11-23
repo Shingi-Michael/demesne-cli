@@ -240,6 +240,11 @@ export const ZOOM_VERSION = 2;
 export function nextZoom(current: number, step: number) {
   return step === 0 ? 1 : step > 0 ? ZOOM_LEVELS.find(level => level > current + 1e-9) ?? current : [...ZOOM_LEVELS].reverse().find(level => level < current - 1e-9) ?? current;
 }
+/// Google's own sign-in pages, which refuse a browser inside an app ("This browser or app may not be secure").
+/// They open in the person's own browser instead, and the site comes back signed in (browser-signins.ts).
+export function outsideSignin(url: string): boolean {
+  try { const parsed = new URL(url); return parsed.protocol === "https:" && parsed.hostname === "accounts.google.com" && !/^\/(?:Logout|ServiceLogout|o\/oauth2\/revoke)/i.test(parsed.pathname); } catch { return false; }
+}
 /// A find or zoom key pressed on the page (⌘ on a Mac, Ctrl elsewhere).
 export function browserKey(input: { type: string; key: string; meta: boolean; control: boolean; alt: boolean; shift: boolean }, mac = process.platform === "darwin"): string {
   if (input.type !== "keyDown" || input.alt || !(mac ? input.meta : input.control)) return "";

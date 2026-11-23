@@ -23,7 +23,7 @@
 /// For the model's own work on this computer's pages it can read what the
 /// server answered and how a control is styled, upload a project file and
 /// download into the project.
-import { app, BrowserWindow, nativeTheme, session as sessions, View, WebContentsView, type Cookie, type Session, type WebContents } from "electron";
+import { app, BrowserWindow, nativeTheme, session as sessions, shell, View, WebContentsView, type Cookie, type Session, type WebContents } from "electron";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -32,7 +32,7 @@ import { BROWSER_RUNTIME, OUTLINE_MAX_LINES, PAGE_TEXT_CHARS } from "./browser-r
 import { wentTo } from "./foundry-look.ts";
 import { changed, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
-import { nextZoom, browserKey } from "./policy.ts";
+import { nextZoom, browserKey, outsideSignin } from "./policy.ts";
 
 export const BROWSER_HOST_FLAG = "--browser-host";
 /// `--browser-profile=<folder>`: where projects' sign-ins are kept between runs.
@@ -90,7 +90,9 @@ interface Tab { win: Pane; chat: Chat; n: number; width: "desktop" | "phone"; si
   /// The page is streaming its pictures (CDP screencast), and the newest one, to send again with news.
   casting?: boolean; last?: { jpeg: string; ratio: number };
   /// You are pointing at something on it: your clicks pick, they don't take the page.
-  pointing?: boolean }
+  pointing?: boolean;
+  /// Sends a Google sign-in to the person's own browser (see addTab).
+  outside?: (url: string) => void }
 /// A chat's browser: its tabs, which one is active, and whether the person has it.
 interface Chat { /** How sharp its tabs draw: device pixels per page pixel (2 on a Retina screen). Fixed when a tab is made. */ sharp: number; id: string; tabs: Map<number, Tab>; active: number; next: number; held: boolean; queue: Promise<unknown>; used: number; profile: unknown; downloads: string | null }
 /// A request this computer's page made, for the model to read the answer of.
@@ -567,7 +569,19 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       return [...tab.sites].some((approved) => site === approved || site.endsWith(`.${approved}`));
     };
     const blocked = (url: string) => { if (tab.blocked.length < 4) tab.blocked.push(localAddress(url) ? `${url.slice(0, 200)} was not opened: a public page can't send you into this computer` : `${url.slice(0, 200)} was not opened: it is another site, so open it yourself to go there`); };
-    const refuse = (event: { preventDefault(): void }, url: string) => { if (!allowed(url)) { event.preventDefault(); blocked(url); } };
+    // Google refuses to sign anyone in inside an app's browser. The page you were on opens in your own browser instead (where its
+    // "Sign in with Google" works, and its own sign-in steps stay together), and the daemon brings that site's sign-in back here.
+    const outside = (url: string) => {
+      const from = contents.getURL(), site = siteOf(from), there = site && site !== "accounts.google.com" ? from : url;
+      write({ event: "outside", chat: chat.id, url: there, ...(site && site !== "accounts.google.com" ? { site } : {}) });
+      if (inApp) void shell.openExternal(there).catch(() => {});
+      if (tab.blocked.length < 4) tab.blocked.push(`Google doesn't allow signing in inside this browser, so ${site && site !== "accounts.google.com" ? `${site} opened in the person's own browser to sign in there; it comes back signed in here once they do` : "its sign-in opened in the person's own browser"}. Wait for the person, then read the page again.`);
+    };
+    tab.outside = outside;
+    const refuse = (event: { preventDefault(): void }, url: string) => {
+      if (outsideSignin(url)) { event.preventDefault(); outside(url); return; }
+      if (!allowed(url)) { event.preventDefault(); blocked(url); }
+    };
     contents.on("did-navigate", (_event, url) => {
       tab.local = localAddress(url);
       watchNetwork(tab);
@@ -582,6 +596,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
     contents.on("will-redirect", (event, url) => refuse(event, url));
     // A page's new window (target=_blank, a sign-in popup) opens as another tab of this chat, still linked to its opener.
     contents.setWindowOpenHandler(({ url }) => {
+      if (outsideSignin(url)) { outside(url); return { action: "deny" }; }
       if (url && url !== "about:blank" && !allowed(url)) { blocked(url); return { action: "deny" }; }
       if (chat.tabs.size >= MAX_TABS) { if (tab.blocked.length < 4) tab.blocked.push(`${url.slice(0, 200)} was not opened: this chat already has ${MAX_TABS} tabs; close one`); return { action: "deny" }; }
       // In the app the new window is another real view, made here.
@@ -661,6 +676,7 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       // The daemon names a site only after the person approved it, or the person typed it.
       const site = siteOf(url);
       if (site !== null && command.site !== site) return { error: "That site was not approved for the browser." };
+      if (outsideSignin(url)) { tab.outside?.(url); tab.blocked.length = 0; return { error: "Google doesn't allow signing in inside this browser, so its sign-in opened in the person's own browser instead." }; }
       if (site !== null) tab.sites.add(site);
       tab.local = site === null;
       watchNetwork(tab);

@@ -1400,7 +1400,13 @@ export interface FoundryArtifactDetail extends FoundryArtifact {
   versions: FoundryVersion[];
   /// Pass 240 A: the real pictures this mockup shows (<d-shot src>), kept with it.
   shots?: FoundryShot[];
+  /// Step 6: a page's other files (styles.css, app.js, data.json…), by name, with this version.
+  files?: Record<string, string>;
 }
+
+/// Step 6: the files a page (kind html) may keep beside it, named as the page links them.
+export const FOUNDRY_FILE_NAME = /^[A-Za-z0-9][\w.-]{0,79}\.(css|js|mjs|json|svg|csv|txt|md)$/;
+export const FOUNDRY_MAX_FILES = 20;
 
 /// A picture a mockup shows, at its own pixels; scale is pixels per point (2 on a Retina capture).
 export interface FoundryShot { id: string; width: number; height: number; scale: number; mimeType: string }

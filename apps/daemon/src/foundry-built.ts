@@ -13,7 +13,7 @@
 /// look's rings stay beside the fixed result. The record is a page Demesne
 /// writes (protocol foundry-built.ts) and nobody edits.
 import type { DemesneStore } from "@demesne/storage";
-import { BUILT_LOOKS, builtMatches, builtOf, builtPage, builtVerdict, isRecord, isToday, MAX_BUILT_DIFFERENCES, optionNames, pickOption, shotBox, STYLES_PAGE,
+import { BUILT_LOOKS, builtMatches, builtOf, builtPage, builtVerdict, isRecord, isToday, MAX_BUILT_DIFFERENCES, optionNames, pickOption, shotBox, STYLES_PAGE, withFoundryFiles,
   type BuiltDifference, type BuiltRecord, type FoundryStage, type ImageArtifact } from "@demesne/protocol";
 import { ingestImage, readArtifact, type ImageOutput, type StructuredToolResult } from "./artifacts.ts";
 import { FOUNDRY_LOOK_PREFIX, type FoundryLook } from "./foundry-look.ts";
@@ -78,7 +78,7 @@ async function drawPick(store: DemesneStore, look: FoundryLook | undefined, mock
   if (!look || !DRAWN.has(mockup.kind)) return null;
   const phone = mockup.versions.find((item) => item.version === mockup.version)?.stage?.surface?.frame === "phone";
   const shots = await lookShots(store, mockup.id);
-  const result = await look({ kind: mockup.kind, source: mockup.source, title: mockup.title, ...(phone ? { phone } : {}), ...(index !== undefined ? { option: index } : {}), ...(shots ? { shots } : {}) }, context.signal).catch(() => null);
+  const result = await look({ kind: mockup.kind, source: withFoundryFiles(mockup.source, mockup.files), title: mockup.title, ...(phone ? { phone } : {}), ...(index !== undefined ? { option: index } : {}), ...(shots ? { shots } : {}) }, context.signal).catch(() => null);
   const page = result?.pages[0];
   if (!page) return null;
   const data = Buffer.from(page.png, "base64"), size = pngSize(data);

@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, FOUNDRY_FILE_NAME, FOUNDRY_MAX_FILES, withFoundryFiles, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
@@ -61,7 +61,8 @@ const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet"
   + `.pill(.accent/.ok/.warn/.bad) .tabs .list .eyebrow .muted .secondary .sp; buttons .primary .quiet .danger .small) and, when it moves, <script src="${FOUNDRY_KIT_SCRIPT}"></script> (anime.js 4 as window.anime). `
   + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
   + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>, <d-review> for a review of what exists); foundry_read id "kit:parts" lists them. `
-  + "SVG is one <svg> with a viewBox. Under 512 KB.";
+  + "A bigger page may split into files: pass files {\"styles.css\": …, \"app.js\": …, \"data.json\": …} and link them by name (<link rel=\"stylesheet\" href=\"styles.css\">, <script src=\"app.js\">, <script type=\"application/json\" id=\"data\" src=\"data.json\">). "
+  + "SVG is one <svg> with a viewBox. Under 512 KB in all.";
 
 /// How a page should look is not here: the design guide (design-guide.ts)
 /// rides in the system prompt with the person's own rules, and this
@@ -524,6 +525,22 @@ function conflict(error: unknown): never {
   throw error;
 }
 
+/// Step 6: the files a page keeps beside it, as given to a save: undefined when
+/// not given (a new version keeps the ones before), {} to drop them.
+export function filesOf(value: unknown, kind: string | undefined): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('[invalid_input] files is an object of file name to text. Hint: {"styles.css": "…", "app.js": "…"}');
+  const entries = Object.entries(value);
+  if (entries.length && kind !== "html") throw new Error("[invalid_input] Only an html page keeps other files. Hint: put everything in the source");
+  if (entries.length > FOUNDRY_MAX_FILES) throw new Error(`[invalid_input] A page keeps up to ${FOUNDRY_MAX_FILES} files. Hint: join the small ones`);
+  for (const [name, text] of entries) {
+    if (!FOUNDRY_FILE_NAME.test(name)) throw new Error(`[invalid_input] "${name}" can't be a file of a page. Hint: a plain name with .css, .js, .mjs, .json, .svg, .csv, .txt or .md, no folders`);
+    if (typeof text !== "string") throw new Error(`[invalid_input] The file "${name}" needs its text`);
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+const bytesOf = (source: string, files: Record<string, string> | undefined) => Buffer.byteLength(source) + Object.entries(files ?? {}).reduce((sum, [name, text]) => sum + Buffer.byteLength(name) + Buffer.byteLength(text), 0);
+
 export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks = new Map<string, number>()): AgentTool {
   const tool: AgentTool = {
     definition: {
@@ -546,6 +563,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
           why: WHY_SCHEMA,
           surface: SURFACE_SCHEMA,
           demo: DEMO_SCHEMA,
+          files: { type: "object", additionalProperties: { type: "string" }, description: "An html page's other files by name (styles.css, app.js, data.json), linked from the page. Omit to keep the ones before." },
         },
         required: ["source"],
         additionalProperties: false,
@@ -554,9 +572,10 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
     permission: () => null,
     async execute(input, context) {
       if (!isRecord(input) || typeof input.source !== "string" || !input.source.trim()) throw new Error("[invalid_input] foundry_save needs the complete source. Hint: send the whole file as source");
-      if (Buffer.byteLength(input.source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] Source is over 512 KB. Hint: simplify or split it");
       const id = typeof input.id === "string" && input.id ? input.id : undefined;
       const kind = typeof input.kind === "string" ? input.kind as FoundryKind : undefined;
+      const files = filesOf(input.files, id ? store.getFoundryArtifact(id)?.kind : kind);
+      if (bytesOf(input.source, files) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] Source is over 512 KB. Hint: simplify or split it");
       if (!id && (!kind || !FOUNDRY_KINDS.includes(kind))) throw new Error(`[invalid_input] kind must be one of ${FOUNDRY_KINDS.join(", ")} when creating. Hint: deck, doc or dashboard for slides, a report or numbers; html for anything else`);
       if (!id && (typeof input.title !== "string" || !input.title.trim())) throw new Error("[invalid_input] A new artifact needs a title. Hint: name it in a few words");
       if (!id && (typeof input.description !== "string" || !input.description.trim())) throw new Error("[invalid_input] A new artifact needs a description. Hint: one or two sentences on what it is and what to look at");
@@ -583,7 +602,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       context.signal.throwIfAborted();
       let saved;
       try {
-        saved = store.saveFoundryArtifact({ id, kind, title: clean(input.title, 200), source: input.source, note: clean(input.note, 300) ?? "", baseVersion,
+        saved = store.saveFoundryArtifact({ id, kind, title: clean(input.title, 200), source: input.source, note: clean(input.note, 300) ?? "", baseVersion, ...(files !== undefined ? { files } : {}),
           description: clean(input.description, 600), basedOn, ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
@@ -629,6 +648,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
               type: "object",
               properties: {
                 find: { type: "string", minLength: 1, description: "Exact text from the current source." },
+                file: { type: "string", description: "One of the page's files to edit instead of the page (styles.css)." },
                 replace: { type: "string" },
                 all: { type: "boolean", description: "Replace every occurrence." },
               },
@@ -666,16 +686,22 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const baseVersion = baseVersionOf(input);
       if (baseVersion === undefined) throw new Error("[invalid_input] foundry_edit needs base_version. Hint: pass the version you read");
       if (!Array.isArray(input.edits) || input.edits.length > 50) throw new Error("[invalid_input] edits must be 1 to 50 {find, replace} items");
-      const edits: FoundryEdit[] = input.edits.map((edit, index) => {
+      const edits: (FoundryEdit & { file?: string })[] = input.edits.map((edit, index) => {
         if (!isRecord(edit) || typeof edit.find !== "string" || !edit.find || typeof edit.replace !== "string") throw new Error(`[invalid_input] Edit ${index + 1} needs find (non-empty) and replace strings`);
-        return { find: edit.find, replace: edit.replace, all: edit.all === true };
+        return { find: edit.find, replace: edit.replace, all: edit.all === true, ...(typeof edit.file === "string" && edit.file ? { file: edit.file } : {}) };
       });
       const current = store.getFoundryArtifact(input.id);
       if (!current) throw new Error("[not_found] No such Foundry artifact. Hint: call foundry_read without id to list them");
       if (current.version !== baseVersion) conflict(new Error(`Foundry artifact is at version ${current.version}, not ${baseVersion}`));
-      const source = applyFoundryEdits(current.source, edits);
+      // Step 6: an edit may name one of the page's files; the rest change the page.
+      const source = applyFoundryEdits(current.source, edits.filter((edit) => !edit.file));
+      let files: Record<string, string> | undefined;
+      for (const name of new Set(edits.flatMap((edit) => edit.file ? [edit.file] : []))) {
+        if (!current.files || !Object.hasOwn(current.files, name)) throw new Error(`[no_match] "${name}" is not one of this page's files. Hint: ${current.files ? `its files are ${Object.keys(current.files).join(", ")}` : "it has none; edit the page"}`);
+        files = { ...(files ?? current.files), [name]: applyFoundryEdits(current.files[name]!, edits.filter((edit) => edit.file === name)) };
+      }
       checkNotBuilt(store, undefined, source);
-      if (Buffer.byteLength(source) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
+      if (bytesOf(source, files ?? current.files) > FOUNDRY_MAX_SOURCE_BYTES) throw new Error("[too_large] The edited source is over 512 KB. Hint: simplify it");
       checkOptions(current.kind, source);
       const why = whyFor(input.why, source);
       if (!(why && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, why);
@@ -690,7 +716,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       context.signal.throwIfAborted();
       let saved;
       try {
-        saved = store.saveFoundryArtifact({ id: input.id, title: clean(input.title, 200), source, note: clean(input.note, 300) ?? "", baseVersion,
+        saved = store.saveFoundryArtifact({ id: input.id, title: clean(input.title, 200), source, note: clean(input.note, 300) ?? "", baseVersion, ...(files ? { files } : {}),
           description: clean(input.description, 600), ...(recommended !== undefined ? { recommended } : {}), why, stage,
           sessionId: context.sessionId ?? null, turnId: context.turnId ?? null, workspace: session?.workspace?.root ?? null });
       } catch (error) { conflict(error); }
@@ -791,7 +817,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       remember(context.turnId, found.id, found.version);
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
-        ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), source: found.source,
+        ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), source: found.source, ...(found.files ? { files: found.files } : {}),
         versions: found.versions.map(({ version, note, createdAt, recommended }) => ({ version, note, createdAt, ...(recommended ? { recommended } : {}) })) });
     },
   };
@@ -828,7 +854,7 @@ async function lookAfter(store: DemesneStore, look: FoundryLook, looks: Map<stri
   if (!artifact) return text;
   const phone = (saved.surface as { frame?: unknown } | undefined)?.frame === "phone";
   const shots = await lookShots(store, artifact.id);
-  const result = await look({ kind: artifact.kind, source: artifact.source, title: artifact.title, ...(phone ? { phone } : {}), ...(shots ? { shots } : {}) }, context.signal).catch(() => null);
+  const result = await look({ kind: artifact.kind, source: withFoundryFiles(artifact.source, artifact.files), title: artifact.title, ...(phone ? { phone } : {}), ...(shots ? { shots } : {}) }, context.signal).catch(() => null);
   if (!result) return text;
   looks.set(key, seen + 1);
   if (looks.size > 200) looks.delete(looks.keys().next().value!);
@@ -893,7 +919,7 @@ export function foundryTryTool(store: DemesneStore, tryer: FoundryTry, tries = n
       // Tried at the size it is drawn for: a phone screen at a phone's width, everything else at the desktop's.
       const phone = found.versions.find((item) => item.version === found.version)?.stage?.surface?.frame === "phone";
       const shots = await lookShots(store, found.id);
-      const result = await tryer({ kind: found.kind, source: found.source, title: found.title, ...(shots ? { shots } : {}) }, { width: phone ? 390 : 1280, steps }, context.signal);
+      const result = await tryer({ kind: found.kind, source: withFoundryFiles(found.source, found.files), title: found.title, ...(shots ? { shots } : {}) }, { width: phone ? 390 : 1280, steps }, context.signal);
       if (!result) throw new Error("[unavailable] The page could not be tried just now");
       if (!result.steps.length && result.errors.length) throw new Error(`[unavailable] ${result.errors.join("; ")}`);
       const report = tryReport(result);

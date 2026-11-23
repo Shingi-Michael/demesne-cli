@@ -18,7 +18,7 @@ import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
-
+import { withFoundryFiles } from "../../../packages/protocol/src/foundry-stage.ts";
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
@@ -286,12 +286,14 @@ if (!lookJob) void app.whenReady().then(async () => {
     try {
       const url = new URL(request.url), version = Number(url.searchParams.get("v")), id = decodeURIComponent(url.pathname.slice(1));
       const at = Number.isSafeInteger(version) && version > 0 ? version : undefined;
-      const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[] };
+      const found = await backend!.request("foundry-get", { id, ...(at ? { version: at } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[]; files?: Record<string, string> };
+      // Step 6: a page made of several files has them put in where it links them.
+      if (found.files) found.source = withFoundryFiles(found.source, found.files);
       // A new version's first show: the previous version rides along, for outlining what changed.
       const first = url.searchParams.get("first") === "1", drawn = found.kind !== "svg" && found.kind !== "markdown";
       let before: { kind: string; source: string; title: string } | null = null;
       if (first && drawn && found.version > 1) {
-        try { before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string; title: string }; } catch {}
+        try { before = await backend!.request("foundry-get", { id, version: found.version - 1 }) as { kind: string; source: string; title: string; files?: Record<string, string> }; before = { ...before, source: withFoundryFiles(before.source, (before as { files?: Record<string, string> }).files) }; } catch {}
       }
       let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
@@ -525,7 +527,8 @@ if (!lookJob) void app.whenReady().then(async () => {
     if (method === "desktop-foundry-copy") {
       const { id, version, other } = args as Record<string, unknown>;
       if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id)) throw new Error("No such mockup");
-      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[] };
+      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[]; files?: Record<string, string> };
+      if (found.files) found.source = withFoundryFiles(found.source, found.files);
       const ready = isReadyKind(found.kind);
       // More kinds: a React page or a diagram as a page that runs on its own, or (other) its source.
       const drawn = found.kind === "react" || found.kind === "mermaid", source = drawn && other === true;

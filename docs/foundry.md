@@ -143,6 +143,14 @@ Foundry checks that every picture a mockup names is one its chat has, and keeps 
 
 Read more: [HTML Drag and Drop API](https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API) (MDN), [Data URLs](https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/data) (how a saved copy carries its pictures), [Images in Markdown](https://spec.commonmark.org/0.31.2/#images) (CommonMark).
 
+## A page made of several files
+
+A bigger prototype (kind html) can be more than one file, the way a small site is: `foundry_save` takes `files`, by name (`styles.css`, `app.js`, `data.json`; also `.mjs`, `.svg`, `.csv`, `.txt`, `.md`, up to 20, no folders, 512 KB with the page), and the page links them as it would on the web: `<link rel="stylesheet" href="styles.css">`, `<script src="app.js">`, data in `<script type="application/json" id="data" src="data.json">`, a drawing in `<img src="logo.svg">` or `url(logo.svg)`. A save without `files` keeps the ones before, and `foundry_edit` changes one with `file` on an edit, so a small change to the styles doesn't resend the page. `foundry_read` hands them back with the source.
+
+Foundry puts each file in where it is linked (`withFoundryFiles`, `packages/protocol/src/foundry-stage.ts`), so the page runs the same in its frame, in the model's own look and try, and as a saved copy, which stands on its own. The code view on the Foundry page shows the page, then each file under its name. A link to a name the page doesn't keep stays as written. `xvfb-run -a bun scripts/check-foundry-files.ts` checks it in the real app.
+
+Read more: [The script element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script) (including data blocks), [The link element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/link) (MDN).
+
 ## Compare two versions
 
 The opened mockup's head line has a compare icon (the split square). Press it and the version before the one shown lies over it, cut by a line down the middle: the earlier one on the left, the shown one on the right, each named at the top. Drag the line (or focus it and use the arrow keys, Shift for bigger steps, Home and End) to sweep across and see exactly what changed where. ‹ › still step through versions, each compared with the one before it. Nothing plays while you compare, and notes wait. A first version has nothing to compare with, so the icon rests.

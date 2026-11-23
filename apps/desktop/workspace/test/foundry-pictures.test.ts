@@ -30,3 +30,12 @@ test("a dropped picture's name and type come back from the daemon checked", () =
   expect(readGiven({ name: "x.svg", type: "image/svg+xml" })).toBeNull();
   expect(readGiven({ name: "", type: "image/png" })).toBeNull();
 });
+
+test("the code view of a page made of several files shows each under its name", async () => {
+  const { codeWithFiles } = await import("../foundry-page.ts");
+  const text = codeWithFiles("<h1>Hi</h1>", { "styles.css": "h1{}", "app.js": "go()" });
+  expect(text.startsWith("<h1>Hi</h1>\n")).toBe(true);
+  expect(text).toContain("── styles.css ─");
+  expect(text.indexOf("h1{}")).toBeLessThan(text.indexOf("── app.js"));
+  expect(codeWithFiles("<p>a</p>", undefined)).toBe("<p>a</p>");
+});

@@ -8,7 +8,8 @@ import { foundryEditTool, foundrySaveTool } from "../src/foundry.ts";
 import { designReport, LOOKS_PER_TURN, lookCommand, lookReport, type FoundryLook, type LookResult } from "../src/foundry-look.ts";
 
 /// Why a test page looks the way it does (pass 218 A).
-const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new" };
+const WALK = [{ what: "A page for a test.", parts: [{ name: "Heading", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the test." }];
+const W = { direction: "Plain, for a test.", look_at: "The heading.", starts_from: "new", walkthrough: WALK };
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64").toString("base64");
 /// One look, at the desktop's width: a mockup is not looked at at phone width any more.

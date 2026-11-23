@@ -64,7 +64,7 @@ const f = await fixture({
     const picture = () => /Image artifact ([\w-]+): page-look-1\.png/.exec(String(tools.at(-1)?.content))?.[1] ?? "none";
     if (!/build/i.test(ask)) {
       yield* tools.length ? said("Two ways to open the plans page; I'd open on Yearly.") : call("foundry_save", { title: "Plans page", kind: "html", description: "Two ways the plans page could open.", note: "Two openings",
-        why: { direction: "Open on the saving.", look_at: "The switch.", starts_from: "new" }, source: mockup, recommended: true });
+        why: { direction: "Open on the saving.", look_at: "The switch.", starts_from: "new", walkthrough: [{ option: "Yearly first", what: "Yearly first, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }, { option: "Monthly first", what: "Monthly first, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }] }, source: mockup, recommended: true });
       return;
     }
     const made = (await f.client.foundryList()).artifacts.find((item) => item.title === "Plans page")!;

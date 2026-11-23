@@ -1229,6 +1229,7 @@ export * from "./foundry-try.ts";
 export * from "./foundry-stage.ts";
 export * from "./foundry-built.ts";
 export * from "./foundry-styles.ts";
+export * from "./foundry-walk.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 
@@ -1355,6 +1356,8 @@ export interface FoundryWhy {
   from?: string;
   /// Which of the person's learned likes this version follows (pass 245 A), in a few words each.
   followed?: string;
+  /// Pass 263 A: the walkthrough of each variant, shown under the mockup.
+  walk?: import("./foundry-walk.ts").FoundryWalk[];
 }
 
 export interface FoundryVersion {

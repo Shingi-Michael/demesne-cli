@@ -3399,8 +3399,11 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
    as tall as the window; a quiet head line on its name line steps through its
    versions, shows its code, saves a copy and closes it. Greys only. The rest
    of the page stays look-only. */
-#stage:has(> #page[data-kind="foundry"]:not([hidden])) { container-type: inline-size; }
-.fd-item.fd-open { --fd-w: min(calc(100cqw - 56px), 1720px); width: var(--fd-w); margin-left: calc((100% - var(--fd-w)) / 2); }
+#stage:has(> #page[data-kind="foundry"]:not([hidden])) { container-type: inline-size; padding-left: 0; padding-right: 0; }
+/* Pass 263 A: Foundry is a page of its own, so the opened mockup runs edge to edge across it, with no box; its words keep a margin. */
+.fd-item.fd-open { --fd-w: 100cqw; --fd-pad: 28px; box-sizing: border-box; width: var(--fd-w); margin-left: calc((100% - var(--fd-w)) / 2); padding-inline: var(--fd-pad); }
+.fd-open > .fd-stage, .fd-open > .fd-wipe, .fd-open > .fd-code, .fd-open > .fd-doc { margin-inline: calc(var(--fd-pad) * -1); border-radius: 0; box-shadow: none; }
+.fd-open > .fd-tabs + .fd-stage { box-shadow: 0 -1px 0 var(--hair); }
 .fd-open .fd-stage:not(.fd-s), .fd-open .fd-stage.graphic { height: max(520px, calc(100vh - 170px)); }
 .fd-open .fd-doc { max-width: none; }
 .fd-ln .fd-link { color: inherit; box-shadow: none; }
@@ -3449,3 +3452,26 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-err .fd-quiet { color: var(--t3); }
 .fd-err-send { all: unset; padding: 0 7px; margin: 0 -3px; border-radius: 6px; color: var(--t2); cursor: pointer; }
 .fd-err-send:hover, .fd-err-send:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }
+
+/* Pass 263 A, variants as tabs and every one explained: the names over the
+   one stage (the pick with a small dot), and under it the shown variant's
+   walkthrough, its parts numbered as on the page. Greys only; the tabs only
+   change what you look at. */
+.fd-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 10px 0 0; }
+.fd-tab { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px 8px; border-radius: 9px 9px 0 0; color: var(--t3); font-size: 12.5px; cursor: pointer; transition: color 140ms var(--ease), background 140ms var(--ease); }
+.fd-tab:hover { color: var(--t1); }
+.fd-tab.on { color: var(--t1); background: color-mix(in srgb, var(--t1) 7%, transparent); }
+.fd-tab:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: -2px; }
+.fd-tab-pick { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .55; }
+.fd-tabs + .fd-stage { border-top-left-radius: 0; }
+.fd-walk { max-width: 72ch; margin: 18px 0 0; color: var(--t2); font-size: 13px; line-height: 20px; }
+.fd-walk-v { display: flex; flex-direction: column; gap: 4px; }
+.fd-walk-v[hidden] { display: none; }
+.fd-walk h4 { margin: 12px 0 2px; color: var(--t1); font-size: 12.5px; font-weight: 600; }
+.fd-walk p { margin: 0; }
+.fd-walk-what { color: var(--t1); }
+.fd-walk-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.fd-walk-parts li { display: flex; gap: 10px; padding: 4px 6px; margin: 0 -6px; border-radius: 7px; transition: background 140ms var(--ease); }
+.fd-walk-parts li:hover, .fd-walk-parts li.lit { background: color-mix(in srgb, var(--t1) 6%, transparent); }
+.fd-walk-parts b { color: var(--t1); font-weight: 500; }
+.fd-num { flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--t1) 14%, transparent); color: var(--t1); font-size: 10.5px; font-weight: 600; }

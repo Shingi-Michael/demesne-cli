@@ -26,7 +26,7 @@ const f = await fixture({
   async *stream(messages) {
     const at = messages.findLastIndex((message) => message.role === "user");
     if (messages.slice(at + 1).some((message) => message.role === "tool")) { yield { type: "text_delta", delta: "Here it is." }; yield { type: "finish", reason: "stop" }; return; }
-    yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Sales", kind: "html", description: "This week's sales, from the project's CSV.", note: "First take", why: { direction: "Plain.", look_at: "The rows.", starts_from: "new" }, source: PAGE }) };
+    yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Sales", kind: "html", description: "This week's sales, from the project's CSV.", note: "First take", why: { direction: "Plain.", look_at: "The rows.", starts_from: "new", walkthrough: [{ what: "A page for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check." }] }, source: PAGE }) };
     yield { type: "finish", reason: "tool_calls" };
   },
 });

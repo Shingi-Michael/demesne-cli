@@ -4,7 +4,7 @@
 /// goes to the chat. HTML and SVG
 /// render in a foundry:// frame that has no network, no app access and no
 /// shared origin; Markdown renders through the app's sanitizer.
-import { drawnSurface, type FoundryArtifact, type FoundryKind, type FoundryShelfVersion } from "@demesne/protocol";
+import { drawnSurface, type FoundryArtifact, type FoundryKind, type FoundryShelfVersion, type FoundryWalk } from "@demesne/protocol";
 import { dayWord } from "./chats-page.ts";
 
 const h = (value: unknown) =>
@@ -180,6 +180,24 @@ export function savedLine(open: FoundryOpen, kind: FoundryKind) {
   return `${h(open.said)}${show}${other}`;
 }
 
+/// Pass 263 A, every variant explained: the walkthrough under a mockup, one
+/// section per variant (tab), the first shown until the page says which
+/// variant it shows (foundry-stage.ts switches them with the tabs). Each
+/// part is numbered; its number is drawn on the page where `at` points
+/// (foundry-kit/marks.js), and resting on either lights the other.
+export function walkHTML(walk: readonly FoundryWalk[] | undefined, title: string) {
+  if (!walk?.length) return "";
+  const others = walk.length - 1;
+  const one = (item: FoundryWalk, index: number) => `<section class="fd-walk-v"${item.option ? ` data-option="${h(item.option)}"` : ""}${index ? " hidden" : ""}>`
+    + `<p class="fd-walk-what">${h(item.what)}</p>`
+    + (item.parts.length ? `<h4>The parts</h4><ol class="fd-walk-parts">${item.parts.map((part, at) => `<li data-n="${at + 1}"${part.at ? ` data-at="${h(part.at)}"` : ""}><span class="fd-num" aria-hidden="true">${at + 1}</span><span><b>${h(part.name)}</b> ${h(part.says)}</span></li>`).join("")}</ol>` : "")
+    + (item.why ? `<h4>Why it’s shaped this way</h4><p>${h(item.why)}</p>` : "")
+    + (item.differs ? `<h4>How it differs from the other${others === 1 ? "" : others ? ` ${others}` : "s"}</h4><p>${h(item.differs)}</p>` : "")
+    + (item.next ? `<h4>What I’d do next</h4><p>${h(item.next)}</p>` : "")
+    + "</section>";
+  return `<div class="fd-walk" aria-label="${h(`${title}, explained`)}">${walk.map(one).join("")}</div>`;
+}
+
 /// The kinds a note can be pinned to (pass 233 A): the ones drawn in a frame that says what is under the pointer.
 export const NOTE_KINDS = new Set<FoundryKind>(["html", "deck", "doc", "dashboard", "react", "mermaid"]);
 
@@ -248,7 +266,9 @@ export function foundryPage(view: FoundryView) {
     const why = version.why;
     // Pass 245 A: a fourth line when the version follows what the person liked on earlier mockups here.
     const taste = why?.followed && !/^none\b/i.test(why.followed) ? why.followed : "";
-    const reasons = why ? ([["Direction", why.direction], ["Look at", why.look], ["Dropped", why.dropped], ["Your taste", taste]] as const).filter(([, text]) => text) : [];
+    // Pass 263 A: with a walkthrough under the mockup, only what it dropped and your taste stay up here.
+    const walked = !!why?.walk?.length;
+    const reasons = why ? ([["Direction", walked ? "" : why.direction], ["Look at", walked ? "" : why.look], ["Dropped", why.dropped], ["Your taste", taste]] as const).filter(([, text]) => text) : [];
     const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
     const before = open?.compare && open.code === undefined && !open.editing ? earlierOf(versionsOf(shown, artifact.id), open.shown) : undefined;
     const beforeSlot = before === undefined ? undefined : shown.find((item) => item.artifactId === artifact.id && item.version === before);
@@ -263,7 +283,7 @@ export function foundryPage(view: FoundryView) {
     // A build's record takes none: what to change goes to the code or the mockup.
     const notes = artifact.version === version.version && NOTE_KINDS.has(artifact.kind) && !artifact.built ? '<p class="fd-notes" aria-live="polite" hidden></p>' : "";
     const notesHere = open && (open.code !== undefined || !!open.editing || !!beforeSlot || version !== slot) ? "" : notes;
-    return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}</section>`;
+    return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}${open && open.code !== undefined ? "" : walkHTML(why?.walk, artifact.title)}</section>`;
   };
   return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
 }

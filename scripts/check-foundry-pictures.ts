@@ -25,7 +25,7 @@ const f = await fixture({
     if (messages.slice(at + 1).some((message) => message.role === "tool") || /Notes pinned/.test(said)) { if (/Notes pinned/.test(said)) asked.push(said); yield { type: "text_delta", delta: "Here it is." }; yield { type: "finish", reason: "stop" }; return; }
     const image = /image artifact ([\w-]+)\]/.exec(said)?.[1] ?? "none";
     const source = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="foundry://kit/base.css"></head><body><header style="padding:24px"><img id="logo" alt="Logo" src="picture:${image}"></header><h1 id="name" style="padding:24px">Café Rosa</h1></body></html>`;
-    yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Café page", kind: "html", description: "The café's page with its logo.", note: "First take", why: { direction: "Plain.", look_at: "The logo.", starts_from: "new" }, source }) };
+    yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Café page", kind: "html", description: "The café's page with its logo.", note: "First take", why: { direction: "Plain.", look_at: "The logo.", starts_from: "new", walkthrough: [{ what: "A page for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check." }] }, source }) };
     yield { type: "finish", reason: "tool_calls" };
   },
 });

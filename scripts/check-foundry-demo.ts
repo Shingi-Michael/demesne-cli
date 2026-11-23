@@ -43,14 +43,14 @@ const f = await fixture({
     if (/styles/i.test(request)) {
       yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
         title: "Checkout page, three styles", kind: "html", description: "One checkout in three styles.",
-        why: { direction: "One checkout in three styles. Only the style changes.", look_at: "The price and the Pay button in each.", starts_from: "new" },
+        why: { direction: "One checkout in three styles. Only the style changes.", look_at: "The price and the Pay button in each.", starts_from: "new", walkthrough: [{ option: "A · Pin on hover", what: "A · Pin on hover, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }, { option: "B · Pin always showing", what: "B · Pin always showing, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }] },
         source: stylesPage, surface: { frame: "browser", width: 760, height: 380, title: "slowpour.example/checkout" } }) };
       yield { type: "finish", reason: "tool_calls" };
       return;
     }
     yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({
       title: options ? "Pin a chat, two ways" : "Pin a chat", kind: "html", description: "Pinning a chat from the sidebar.", note: "First take",
-      why: { direction: "Quiet.", look_at: "The pin.", starts_from: "new" },
+      why: { direction: "Quiet.", look_at: "The pin.", starts_from: "new", walkthrough: [{ option: "A · Pin on hover", what: "A · Pin on hover, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }, { option: "B · Pin always showing", what: "B · Pin always showing, for a check.", parts: [{ name: "Top", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the check.", differs: "Its own way." }] },
       source: options ? optionsPage : pinPage, surface: options ? { frame: "window", width: 520, height: 320, title: "Demesne" } : { frame: "part", width: 360 }, demo }) };
     yield { type: "finish", reason: "tool_calls" };
   },
@@ -80,6 +80,8 @@ try {
   assert.deepEqual(stored?.surface, { frame: "part", width: 360 }, "the surface is kept with the version");
   assert.equal(stored?.demo?.length, 3, "the demo is kept with the version");
   await chips.first().click();
+  // Opened, it runs edge to edge (pass 263 A): the pointer left on the chip would be resting on it, which hands the page over.
+  await page.mouse.move(5, 5);
   const item = page.locator(`#page [data-fd="${pin.id}:1"]`), stage = item.locator(".fd-stage");
   await stage.waitFor();
   assert.match((await stage.getAttribute("class"))!, /fd-s s-part b-paper/, "the stage is the part on paper");
@@ -109,7 +111,7 @@ try {
   console.log("PASS: a mockup sits on its surface and plays its demo under it; moving in stops it.");
   await page.mouse.move(5, 5);
 
-  // Options: a stage each, named on the line above it, nothing drawn inside.
+  // Options (pass 263 A): tabs over one stage, the pick first with a dot, nothing drawn inside.
   await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
   await idle(); await page.waitForTimeout(300);
   await editor.fill("/foundry pin a chat, with options"); await editor.press("Enter");
@@ -117,23 +119,24 @@ try {
   const two = (await f.client.foundryList()).artifacts.find((found) => found.title === "Pin a chat, two ways")!;
   await chips.filter({ hasText: "Pin a chat, two ways" }).click();
   const both = page.locator(`#page [data-fd="${two.id}:1"]`);
-  await step(95, async () => await both.locator(".fd-opt").count() === 2);
-  assert.deepEqual(await both.locator(".fd-opt b").allTextContents(), ["A · Pin on hover", "B · Pin always showing"]);
-  assert.equal(await both.locator(".fd-opt").first().locator(".fd-rec-pill").count(), 1, "the recommended one says so");
-  assert.equal(await both.locator(".fd-stage").count(), 2, "a stage per option");
+  await step(95, async () => await both.locator(".fd-tabs [role=tab]").count() === 2);
+  assert.deepEqual(await both.locator(".fd-tabs [role=tab]").allTextContents(), ["A · Pin on hover", "B · Pin always showing"]);
+  assert.equal(await both.locator(".fd-tabs [role=tab]").first().locator(".fd-tab-pick").count(), 1, "the recommended one says so");
+  assert.equal(await both.locator(".fd-stage").count(), 1, "one stage, the variants as tabs over it");
   assert.match((await both.locator(".fd-stage").first().getAttribute("class"))!, /s-window b-desk/);
   assert.equal(await both.locator(".fd-chrome span").first().textContent(), "Demesne", "the window's title on Foundry's frame");
-  assert.match((await both.locator("iframe.fd-frame").nth(1).getAttribute("src"))!, /&option=1$/);
-  const optionFrame = (n: number) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${two.id}?v=1`) && (n ? found.url().endsWith("&option=1") : !found.url().includes("option=")))!;
-  await step(103, async () => !!optionFrame(0) && !!optionFrame(1));
-  await step(104, async () => optionFrame(0).evaluate(() => [...document.querySelectorAll("d-compare > section")].map((el) => (el as HTMLElement).hidden).join()) .then((value) => value === "false,true"));
-  await step(105, async () => optionFrame(1).evaluate(() => [...document.querySelectorAll("d-compare > section")].map((el) => (el as HTMLElement).hidden).join()).then((value) => value === "true,false"));
-  assert.equal(await optionFrame(0).evaluate(() => document.querySelectorAll(".dp-strip, .dp-opt").length), 0, "no strip or label inside the page");
+  const optionFrame = (n: number) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${two.id}?v=1`) && (n ? found.url().endsWith("&option=1") : !found.url().includes("option=")));
+  await step(103, async () => !!optionFrame(0));
+  await step(104, async () => optionFrame(0)!.evaluate(() => [...document.querySelectorAll("d-compare > section")].map((el) => (el as HTMLElement).hidden).join()) .then((value) => value === "false,true"));
+  assert.equal(await optionFrame(0)!.evaluate(() => document.querySelectorAll(".dp-strip, .dp-opt").length), 0, "no strip or label inside the page");
+  await both.locator(".fd-tabs [role=tab]").nth(1).click();
+  await step(108, async () => !!optionFrame(1) && await optionFrame(1)!.evaluate(() => [...document.querySelectorAll("d-compare > section")].map((el) => (el as HTMLElement).hidden).join()).then((value) => value === "true,false").catch(() => false));
+  assert.equal(await both.locator(".fd-walk-v:not([hidden])").getAttribute("data-option"), "B · Pin always showing", "its walkthrough under it");
   await both.scrollIntoViewIfNeeded();
   await page.waitForTimeout(2500);
   await both.screenshot({ path: join(output, "foundry-options.png") });
   assert.deepEqual(errors, []);
-  console.log("PASS: options get a stage each, named above it, with nothing drawn inside.");
+  console.log("PASS: options are tabs over one stage, each with its walkthrough, nothing drawn inside.");
 
   // Pass 246 A: a page of styles is drawn once per style. A row of small ones to compare, then each at full size under its name, its colours and what it is made of.
   await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();

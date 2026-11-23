@@ -9,7 +9,8 @@ function picture(store: DemesneStore, sessionId: string, turnId: string, id: str
     width: 400, height: 200, byteLength: 1, sha256: "0".repeat(64), source: { kind: "attachment" }, revisionOf: null } as never, `key-${id}`);
   return id;
 }
-const W = { direction: "Plain, for a test.", look_at: "The logo.", starts_from: "new" };
+const WALK = [{ what: "A page for a test.", parts: [{ name: "Heading", says: "Says what it is." }, { name: "Body", says: "Holds the rest." }], why: "Kept plain for the test." }];
+const W = { direction: "Plain, for a test.", look_at: "The logo.", starts_from: "new", walkthrough: WALK };
 
 test("the pictures a source names, once each, wherever an address goes", () => {
   expect(picturesOf('<img src="picture:logo-1"><div style="background:url(picture:photo_2)"></div><img src="picture:logo-1">')).toEqual(["logo-1", "photo_2"]);

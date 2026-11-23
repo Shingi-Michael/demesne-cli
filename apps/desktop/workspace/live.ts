@@ -89,6 +89,7 @@ import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-
 import { MemoryPill } from "./memory-pill.ts";
 import { pills, type PillSpec } from "./pill.ts";
 import { lightRows } from "./row-light.ts";
+import { CARD_LAP_MS, cardNews, cardWords } from "./card-light.ts";
 import { brokeNews, brokeSeen, type BrokeSeen } from "./broke-news.ts";
 import type {
   ToolEntry,
@@ -1554,6 +1555,8 @@ const CARD_ICON = {
 } as const;
 const cardsOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-open") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
+/// Cards making their one lap of light (pass 271 A), and when each began.
+const cardLaps = new Map<string, number>();
 /// Screenshots from the capture keys (window-shots.ts), each its own card
 /// after the last card; the ones still to land, with where their window was.
 const windowShots: WindowShot[] = [];
@@ -2197,6 +2200,15 @@ function renderCards() {
       const pages = node?.querySelector("[data-pdf]"), into = replacement.querySelector("[data-pdf]");
       if (pages && into) into.replaceChildren(...pages.childNodes);
       if (!node && key === PREVIEW_CARD && filePreview?.landing) arrivingPreview = replacement;
+      // A card that says something new makes one lap of light (pass 271 A).
+      const head = ":scope > button.card-head";
+      if (node && replacement.querySelector(head) && cardNews(key, cardWords(node.querySelector(head)), cardWords(replacement.querySelector(head)))) {
+        cardLaps.set(key, Date.now());
+        setTimeout(() => { if (Date.now() - (cardLaps.get(key) ?? 0) >= CARD_LAP_MS - 50) { cardLaps.delete(key); aside.querySelector(`:scope > [data-card="${key}"]`)?.classList.remove("lap"); } }, CARD_LAP_MS);
+      }
+      // A lap that is still going carries on where it was on the redrawn card.
+      const lapAt = cardLaps.get(key);
+      if (lapAt !== undefined) { replacement.classList.add("lap"); replacement.style.setProperty("--lap-at", `${-(Date.now() - lapAt)}ms`); }
       if (node) node.replaceWith(replacement);
       node = replacement;
     }

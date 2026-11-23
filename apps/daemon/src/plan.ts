@@ -2,9 +2,11 @@ import { isRecord } from "@demesne/protocol";
 import { toolError, type AgentTool } from "./tools.ts";
 
 /// The plan checklist (pass 172): on a task of several steps the model lists
-/// them once, then marks each one as it goes. The chat draws the latest list
-/// as a ribbon at the top of the turn, so the person sees the checklist run.
-/// It changes nothing and asks nothing.
+/// them once, then marks each one as it goes. How many steps is the model's
+/// call, sized to the work; nothing here or in the prompt names a count, since
+/// a threshold like "3 or more steps" made nearly every plan exactly three.
+/// The chat draws the latest list as a ribbon at the top of the turn, so the
+/// person sees the checklist run. It changes nothing and asks nothing.
 
 export const UPDATE_PLAN = "update_plan";
 export type PlanStatus = "pending" | "in_progress" | "completed";
@@ -37,7 +39,7 @@ export function updatePlanTool(): AgentTool {
   return {
     definition: {
       name: UPDATE_PLAN,
-      description: "Show the person a checklist of your plan for a task with 3 or more distinct steps. Call it once before starting, with every step (a few words each) and the first one in_progress; call it again with the whole list each time a step completes or the plan changes. Keep one step in_progress, mark finished ones completed. Skip it for quick or one-step asks.",
+      description: "Show the person a checklist of your plan. Use as many steps as the work truly has, a few words each; there is no target count. Call it before starting with the first step in_progress, and again with the whole list as each step completes or the plan changes. Skip it for quick or one-step asks.",
       inputSchema: {
         type: "object",
         properties: {

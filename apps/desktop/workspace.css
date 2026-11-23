@@ -365,10 +365,10 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* One visual language across setup, choosers, approvals, and work panels. */
 .desktop-home-content, .desktop-error-content { width: 660px; }
 .desktop-home-wordmark { display: flex; align-items: center; gap: 10px; font-size: 17px; color: var(--strong); margin-bottom: 54px; }
-/* The mark draws its d in the text colour; the blossom keeps its own pink. */
+/* The mark draws its d in the text colour; its full stop takes --mark-stop, this version's sign. */
 .brand-symbol { display: block; flex: none; width: 24px; height: 24px; color: var(--t1); }
 .brand-symbol svg { display: block; width: 100%; height: 100%; }
-.brand-version { align-self: flex-end; margin-left: 2px; padding-bottom: 2px; font-size: 11.5px; font-weight: 500; color: #e0457a; }
+.brand-version { align-self: flex-end; margin-left: 2px; padding-bottom: 2px; font-size: 11.5px; font-weight: 500; color: var(--blossom); }
 .desktop-primary { padding: 13px 18px; border-radius: 8px; font-size: 14px; gap: 50px; color: var(--strong); background: var(--accentSurface); }
 .desktop-error-content h1 { font-size: 30px; line-height: 1.3; letter-spacing: -.8px; }
 #desktop-error-message { background: var(--surface); padding: 18px; border: 1px solid var(--rule); border-radius: 8px; font-size: 14px; }
@@ -1519,6 +1519,7 @@ body.desktop {
   --panel-edge: color-mix(in srgb, var(--strong) 4.5%, transparent);
 }
 html[data-appearance="light"] body.desktop {
+  --mark-stop: #4f6fe0;
   --hair: rgba(0, 0, 0, 0.08); --hair2: rgba(0, 0, 0, 0.14);
   --tone: rgba(0, 0, 0, 0.04); --tone2: rgba(0, 0, 0, 0.07);
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08); --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.1); --shadow-3: 0 24px 70px rgba(0, 0, 0, 0.18);

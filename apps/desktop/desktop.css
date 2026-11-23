@@ -89,6 +89,8 @@ body.desktop {
   --ok: var(--citron);
   --bad: var(--signal);
   --warn: var(--thinking);
+  /* The full stop of the d. mark, this version's sign (Milky Way: a ringed planet in starlight blue). */
+  --mark-stop: #a9c4ff;
   /* The mark beside the blue: blue stays on what you press; this one marks where you are. Pink in
      most themes; Demesne's own themes (Milky Way) make it starlight below. */
   --blossom: #f2b6c8; --dusk: linear-gradient(135deg, var(--acc), var(--blossom)); --on-dusk: #14151a;

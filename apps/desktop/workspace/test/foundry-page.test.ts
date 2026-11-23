@@ -234,3 +234,16 @@ test("step 7: a new mockup can start from the version shown, but not while you e
   expect(openHead(open, [1, 2, 3], "html")).toContain('aria-label="Start a new one from v2"');
   expect(openHead({ ...open, shown: 3, editing: { source: "# Hi", base: 3, changes: 0 } }, [1, 2, 3], "doc")).not.toContain("foundry-branch");
 });
+
+test("step 8: share asks first, then shows the link to copy, open or take down", () => {
+  const open = { id: "d", at: 3, shown: 3 };
+  expect(openHead(open, [1, 2, 3], "html")).toContain('aria-label="Share v3 as a link"');
+  const asking = savedLine({ ...open, share: { asking: true } }, "html");
+  expect(asking).toContain("Publish v3 to a link anyone can open, on your GitHub Pages?");
+  expect(asking).toContain(">Publish</button>");
+  expect(asking).toContain(">Not now</button>");
+  const shared = savedLine({ ...open, said: "Shared v3:", share: { url: "https://me.github.io/demesne-shares/abc/", version: 3 } }, "html");
+  expect(shared).toContain("me.github.io/demesne-shares/abc/");
+  expect(shared).toContain(">Copy link</button>");
+  expect(shared).toContain(">Stop sharing</button>");
+});

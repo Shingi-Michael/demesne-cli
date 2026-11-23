@@ -3425,6 +3425,7 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-said { display: flex; align-items: center; gap: 10px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-said-b { all: unset; padding: 0 7px; margin: 0 -3px; border-radius: 6px; color: var(--t2); cursor: pointer; }
 .fd-said-b:hover, .fd-said-b:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }
+.fd-said-link { color: var(--t1); font-feature-settings: "calt" 0; user-select: text; margin-right: 4px; }
 /* Errors come back: a mockup that throws while you use it says so on one quiet
    line under it, with Send to the chat. A small amber dot is the only colour. */
 /* Real data (Foundry step 5): the quiet line that asks before a mockup reads a site. */

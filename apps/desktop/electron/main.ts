@@ -19,6 +19,7 @@ import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 import { withFoundryFiles } from "../../../packages/protocol/src/foundry-stage.ts";
+import { readShares, sharePage, unsharePage, type GitHubCall, type Shared, type Shares } from "./foundry-share.ts";
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
@@ -44,6 +45,27 @@ let inAppBrowser: ReturnType<typeof serveBrowser> | undefined;
 let awakeBlocker: number | null = null;
 /// Real data (Foundry step 5): set where the frames are served, called when you allow a site on the Foundry page.
 let allowFoundrySite: (id: string, host: string) => void = () => { throw new Error("Foundry isn't ready"); };
+/// Share outside Demesne (step 8): what each mockup shares, kept in the app's settings folder.
+const sharesFile = () => join(app.getPath("userData"), "foundry-shares.json");
+const foundryShares = (): Shares => readShares(existsSync(sharesFile()) ? readFileSync(sharesFile(), "utf8") : null);
+const keepFoundryShare = (id: string, one: Shared | null) => {
+  const all = foundryShares();
+  if (one) all[id] = one; else delete all[id];
+  writeFileSync(sharesFile(), JSON.stringify(all, null, 2));
+};
+/// GitHub's REST API with the computer's own GitHub login, through Electron's network.
+async function gitHubCall(): Promise<GitHubCall> {
+  const token = await githubToken();
+  if (!token) throw new Error("Sign in to GitHub on this computer first (gh auth login), then share again");
+  return async (method, path, body) => {
+    // DEMESNE_GITHUB_API: a stand-in GitHub for the real-app check (scripts/check-foundry-share.ts).
+    const answer = await net.fetch(`${process.env.DEMESNE_GITHUB_API || "https://api.github.com"}${path}`, { method, headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Demesne", ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const text = await answer.text();
+    let json: unknown = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    return { status: answer.status, json };
+  };
+}
 // Keep native notifications alive until the OS closes them or they are clicked.
 const notifications = new Set<Notification>();
 // Where the Mac window's own red, yellow and green buttons sit.
@@ -524,11 +546,36 @@ if (!lookJob) void app.whenReady().then(async () => {
     // as SVG, a document as Markdown; a deck as a PDF, a doc or a dashboard as
     // the drawn page. "pdf" asks for the PDF of a doc or dashboard instead
     // (or the drawn page of a deck).
-    if (method === "desktop-foundry-copy") {
-      const { id, version, other } = args as Record<string, unknown>;
+    // A mockup's version as a page that stands on its own (Save a copy, Share):
+    // the kit, its libraries, its files and its pictures inside it. `page`
+    // makes every kind a page (a graphic, notes or code drawn as Foundry draws them).
+    type Found = { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[]; files?: Record<string, string> };
+    const foundryFound = async (id: unknown, version: unknown) => {
       if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id)) throw new Error("No such mockup");
-      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as { kind: string; source: string; title: string; version: number; shots?: { id: string; width: number; height: number; scale: number }[]; files?: Record<string, string> };
+      const found = await backend!.request("foundry-get", { id, ...(typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { version } : {}) }) as Found;
       if (found.files) found.source = withFoundryFiles(found.source, found.files);
+      return { id, found };
+    };
+    const standalone = async (id: string, found: Found, page: boolean) => {
+      const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
+      const drawn = found.kind === "react" || found.kind === "mermaid";
+      const libs = drawn ? Object.fromEntries(["react.js", "react-dom.js", "prop-types.js", "lucide.js", "recharts.js", "tailwind.js", "mermaid.js"].map((name) => [name, kitFile(name).toString("utf8")])) : {};
+      // Step 6: the pictures it shows go inside the file.
+      const pictures: Record<string, string> = {}, places: Record<string, ShotPlace> = {};
+      if (page || (found.kind !== "code" && found.kind !== "markdown")) for (const one of found.shots ?? []) {
+        try {
+          const shot = await backend!.request("foundry-shot", { id, shot: one.id }) as { mimeType: string; data: string };
+          pictures[one.id] = `data:${shot.mimeType};base64,${shot.data}`;
+          places[one.id] = { url: pictures[one.id]!, width: one.width, height: one.height, scale: one.scale };
+        } catch {}
+      }
+      const html = found.kind === "html" ? exportedSource(withShots(found.source, places), kit)
+        : page || isReadyKind(found.kind) || drawn ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit, libs) : found.source;
+      return withPictures(html, pictures);
+    };
+    if (method === "desktop-foundry-copy") {
+      const { version, other } = args as Record<string, unknown>;
+      const { id, found } = await foundryFound((args as Record<string, unknown>).id, version);
       const ready = isReadyKind(found.kind);
       // More kinds: a React page or a diagram as a page that runs on its own, or (other) its source.
       const drawn = found.kind === "react" || found.kind === "mermaid", source = drawn && other === true;
@@ -538,24 +585,36 @@ if (!lookJob) void app.whenReady().then(async () => {
       const folder = app.getPath("downloads");
       const path = join(folder, copyName(found.title, found.version, extension, (name) => existsSync(join(folder, name))));
       if (pdf) await writeFile(path, await foundryPDF(session, id, found.version, found.kind));
-      else {
-        const kit = { style: kitFile("base.css").toString("utf8"), script: kitFile("anime.js").toString("utf8"), parts: kitFile("parts.js").toString("utf8"), kinds: { style: kitFile("kinds.css").toString("utf8"), script: kitFile("kinds.js").toString("utf8") }, remember: kitFile("remember.js").toString("utf8") };
-        const libs = drawn && !source ? Object.fromEntries(["react.js", "react-dom.js", "prop-types.js", "lucide.js", "recharts.js", "tailwind.js", "mermaid.js"].map((name) => [name, kitFile(name).toString("utf8")])) : {};
-        // Step 6: the pictures it shows go inside the file, so it stands on its own.
-        const pictures: Record<string, string> = {}, places: Record<string, ShotPlace> = {};
-        if (found.kind !== "code" && found.kind !== "markdown" && !source) for (const one of found.shots ?? []) {
-          try {
-            const shot = await backend!.request("foundry-shot", { id, shot: one.id }) as { mimeType: string; data: string };
-            pictures[one.id] = `data:${shot.mimeType};base64,${shot.data}`;
-            places[one.id] = { url: pictures[one.id]!, width: one.width, height: one.height, scale: one.scale };
-          } catch {}
-        }
-        const page = found.kind === "html" ? exportedSource(withShots(found.source, places), kit) : ready || (drawn && !source) ? exportedSource(foundryDocument(found.kind, found.source, found.title), kit, libs) : found.source;
-        await writeFile(path, withPictures(page, pictures), "utf8");
-      }
+      else await writeFile(path, source ? found.source : await standalone(id, found, false), "utf8");
       savedCopies.add(path);
       // ready: there is another format to offer (a deck's page, a doc's PDF, a component's source).
       return { path, name: path.slice(folder.length + 1), pdf, ready: ready || drawn };
+    }
+    // Share outside Demesne (step 8): the version as a page on your GitHub
+    // Pages, at a link nobody can guess. A mockup not shared before asks
+    // first (`yes` is the answer); shared again, its new version goes to the same link.
+    if (method === "desktop-foundry-share") {
+      const { version, yes } = args as Record<string, unknown>;
+      const { id, found } = await foundryFound((args as Record<string, unknown>).id, version);
+      const before = foundryShares()[id];
+      if (!before && yes !== true) return { ask: true };
+      const call = await gitHubCall();
+      const shared = await sharePage(call, { html: await standalone(id, found, true), title: found.title, version: found.version, ...(before ? { slug: before.slug } : {}) });
+      keepFoundryShare(id, { ...shared, version: found.version });
+      return { url: shared.url, version: found.version, first: !before };
+    }
+    if (method === "desktop-foundry-unshare") {
+      const id = String((args as Record<string, unknown>).id ?? "");
+      const before = foundryShares()[id];
+      if (!before) return { gone: true };
+      await unsharePage(await gitHubCall(), before.slug);
+      keepFoundryShare(id, null);
+      return { gone: true };
+    }
+    if (method === "desktop-foundry-shared") {
+      const id = String((args as Record<string, unknown>).id ?? "");
+      const one = foundryShares()[id];
+      return one ? { url: one.url, version: one.version } : null;
     }
     // Real data (Foundry step 5): you allowed a mockup to read a site, on the Foundry page.
     if (method === "desktop-foundry-site") {

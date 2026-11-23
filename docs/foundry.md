@@ -159,6 +159,16 @@ The opened mockup's head line has a branch icon, "Start a new one from vN". Pres
 
 Read more: [Fork (software development)](https://en.wikipedia.org/wiki/Fork_(software_development)) (the idea it borrows), [What are artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (remixing an artifact).
 
+## Share outside Demesne
+
+The opened mockup's head line has a link icon, "Share vN as a link". The first time you press it on a mockup, the quiet line under it asks: "Publish vN to a link anyone can open, on your GitHub Pages?" with **Publish** and **Not now**. Nothing leaves the computer until you say Publish. Then Demesne puts the page, standing on its own the way Save a copy makes it (kit, libraries, files and pictures inside), in a repository named `demesne-shares` in your own GitHub account, which it makes the first time (public, with GitHub Pages on), at a folder named by 20 random letters and digits. The line shows the link with **Copy link**, **Open** and **Stop sharing**. A new site can take a minute to appear.
+
+Pressing share again on the same mockup puts the version shown at the same link, without asking. **Stop sharing** takes the page down. Shared pages tell search engines to stay away (`noindex`), but anyone who has the link can open it, so share only what you would send. Every kind can be shared: a deck, doc or dashboard as its drawn page, a graphic, notes or code as Foundry draws them. A page that remembers keeps its saves in the visitor's browser; reading project files and asking the chat only work inside Demesne.
+
+It uses the computer's own GitHub login (`gh auth login`, or `GH_TOKEN`), the same one updates use, and GitHub's REST API through Electron's network. What each mockup shares is kept in the app's settings folder (`foundry-shares.json`). `apps/desktop/electron/foundry-share.ts` publishes and takes down; `desktop-foundry-share` in `electron/main.ts` builds the page. `xvfb-run -a bun scripts/check-foundry-share.ts` checks it in the real app against a stand-in GitHub.
+
+Read more: [What is GitHub Pages?](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages), [REST API endpoints for repository contents](https://docs.github.com/en/rest/repos/contents), [Robots meta tag](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta/name#robots) (why shared pages stay out of search), [Publishing artifacts](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them) (what this borrows).
+
 ## Compare two versions
 
 The opened mockup's head line has a compare icon (the split square). Press it and the version before the one shown lies over it, cut by a line down the middle: the earlier one on the left, the shown one on the right, each named at the top. Drag the line (or focus it and use the arrow keys, Shift for bigger steps, Home and End) to sweep across and see exactly what changed where. ‹ › still step through versions, each compared with the one before it. Nothing plays while you compare, and notes wait. A first version has nothing to compare with, so the icon rests.

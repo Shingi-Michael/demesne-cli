@@ -8,7 +8,7 @@
  * Run bun scripts/prepare-desktop.ts first (Linux: xvfb-run -a). */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { electronBrowser } from "../apps/daemon/src/browser.ts";
@@ -23,6 +23,7 @@ const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
   const url = new URL(request.url);
   if (url.pathname === "/admin") return page("Sign in", `<h1 style="font:600 30px system-ui">Sign in to Slow Pour admin</h1><p><input id="email" placeholder="Email" style="font:20px system-ui;padding:12px;width:300px;border:1px solid #ccc;border-radius:8px"></p><button id="go" style="font:600 18px system-ui;padding:12px 40px;border:0;border-radius:10px;background:#111417;color:#fff">Sign in</button><p id="said"></p><div style="height:3000px"></div>
     <script>let n = 0; go.onclick = () => { n++; said.textContent = "Signed in as " + email.value + " (" + n + ")"; document.title = "Orders"; document.querySelector("h1").textContent = "Orders"; };</script>`);
+  if (url.pathname === "/report.csv") return new Response("order,total\n1042,96\n", { headers: { "Content-Type": "text/csv", "Content-Disposition": 'attachment; filename="report.csv"' } });
   if (url.pathname === "/cart") return page("Cart", `<h1 style="font:600 30px system-ui">Cart</h1><p>One yearly plan, £96.</p>`);
   return new Response("not here", { status: 404 });
 } });
@@ -261,6 +262,16 @@ try {
   await chip.click();
   await chip.waitFor({ state: "detached" });
   console.log("PASS: Point picks what you click on the page into the next message as a chip, without taking the page; Esc stops it.");
+
+  // A file the page downloads lands in the project's downloads folder, and the bar shows it.
+  await app.evaluate(({ BrowserWindow, webContents }, address) => { const window = BrowserWindow.getAllWindows()[0]!; webContents.getAllWebContents().find((one) => one !== window.webContents && one.getURL().includes("/cart"))!.downloadURL(address); }, `${base}/report.csv`);
+  const saved = split.locator(".bs-down");
+  await saved.waitFor();
+  assert.equal(await saved.innerText(), "report.csv");
+  assert.match((await saved.getAttribute("title")) ?? "", /report\.csv · 1 KB[\s\S]*\.demesne\/downloads/);
+  assert(existsSync(join(f.workspace, ".demesne", "downloads", "report.csv")), "the file is in the project's downloads folder");
+  await win.screenshot({ path: join(output, "download.png"), clip: { x: 760, y: 40, width: 480, height: 60 } });
+  console.log("PASS: a file the page downloads lands in the project and shows in the bar.");
 
   // Settings over the chat, and ×: the real page is put away, and still there for the model.
   await split.locator(".bs-close").click();

@@ -15,8 +15,9 @@ import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 
 export type SigninSourceId = "chrome" | "arc" | "brave" | "edge" | "safari" | "firefox";
-/// A browser on this computer: whether its sign-ins can be read, and if not, why.
-export interface SigninSource { id: SigninSourceId; label: string; state: "ready" | "missing" | "disk" | "locked" }
+/// A browser profile on this computer: whether its sign-ins can be read, and if not, why.
+/// `id` is the browser ("chrome") for its first profile, and the browser and profile folder ("chrome:Profile 1") for the others.
+export interface SigninSource { id: string; browser: SigninSourceId; label: string; state: "ready" | "missing" | "disk" | "locked" }
 export interface SigninSite { site: string; lastUsed: number; cookies: number; never?: true }
 /// One cookie, ready for Electron's `session.cookies.set`.
 export interface SigninCookie { url: string; name: string; value: string; domain?: string; path: string; secure: boolean; httpOnly: boolean; expirationDate?: number; sameSite?: "no_restriction" | "lax" | "strict" }
@@ -49,41 +50,83 @@ interface RawCookie { host: string; name: string; value: string; encrypted?: Uin
 export interface SigninWhere { home: string; os: NodeJS.Platform; env: NodeJS.ProcessEnv }
 const here = (): SigninWhere => ({ home: homedir(), os: platform(), env: process.env });
 
-/// Where each browser keeps its cookies on this computer (the default profile).
-export function cookieFile(id: SigninSourceId, where: SigninWhere = here()): string | null {
-  const { home, os, env } = where;
-  const first = (...paths: string[]) => paths.find((path) => existsSync(path)) ?? null;
-  const chromium = (base: string) => first(join(base, "Default", "Network", "Cookies"), join(base, "Default", "Cookies"));
-  if (id === "firefox") {
-    const roots = os === "darwin" ? [join(home, "Library", "Application Support", "Firefox", "Profiles")] : os === "win32" ? [join(env.APPDATA ?? join(home, "AppData", "Roaming"), "Mozilla", "Firefox", "Profiles")] : [join(home, ".mozilla", "firefox"), join(home, "snap", "firefox", "common", ".mozilla", "firefox")];
-    // The profile used last.
-    const found = roots.filter(existsSync).flatMap((root) => readdirSync(root).map((name) => join(root, name, "cookies.sqlite"))).filter(existsSync);
-    return found.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null;
-  }
-  if (id === "safari") return os === "darwin" ? first(join(home, "Library", "Containers", "com.apple.Safari", "Data", "Library", "Cookies", "Cookies.binarycookies"), join(home, "Library", "Cookies", "Cookies.binarycookies")) ?? join(home, "Library", "Containers", "com.apple.Safari", "Data", "Library", "Cookies", "Cookies.binarycookies") : null;
-  const bases: Record<Exclude<SigninSourceId, "firefox" | "safari">, Partial<Record<NodeJS.Platform, string>>> = {
+/// A source as its browser and profile folder ("" for the browser's first profile).
+export function signinFrom(from: string): { browser: SigninSourceId; profile: string } | null {
+  const at = from.indexOf(":"), browser = (at < 0 ? from : from.slice(0, at)) as SigninSourceId, profile = at < 0 ? "" : from.slice(at + 1);
+  if (!(browser in LABELS)) return null;
+  // A profile is a folder name inside the browser's own folder, nothing more.
+  if (profile && (browser === "safari" || !/^[\w .()@+-]{1,80}$/.test(profile) || profile.includes("..") || profile.startsWith("."))) return null;
+  return { browser, profile };
+}
+const CHROMIUM_COOKIES = (dir: string) => [join(dir, "Network", "Cookies"), join(dir, "Cookies")].find((path) => existsSync(path)) ?? null;
+/// Where a Chromium browser keeps its profiles on this computer.
+function chromiumBase(id: SigninSourceId, { home, os, env }: SigninWhere): string | null {
+  const bases: Partial<Record<SigninSourceId, Partial<Record<NodeJS.Platform, string>>>> = {
     chrome: { darwin: join(home, "Library", "Application Support", "Google", "Chrome"), linux: join(home, ".config", "google-chrome"), win32: join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Google", "Chrome", "User Data") },
     arc: { darwin: join(home, "Library", "Application Support", "Arc", "User Data") },
     brave: { darwin: join(home, "Library", "Application Support", "BraveSoftware", "Brave-Browser"), linux: join(home, ".config", "BraveSoftware", "Brave-Browser"), win32: join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "BraveSoftware", "Brave-Browser", "User Data") },
     edge: { darwin: join(home, "Library", "Application Support", "Microsoft Edge"), linux: join(home, ".config", "microsoft-edge"), win32: join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Microsoft", "Edge", "User Data") },
   };
-  const base = bases[id][os];
-  return base ? chromium(base) : null;
+  return bases[id]?.[os] ?? null;
+}
+/// A Chromium browser's profiles that have sign-ins, Default first, each with the name you gave it in the browser.
+function chromiumProfiles(base: string): { dir: string; name: string }[] {
+  let names: Record<string, { name?: string }> = {};
+  try { names = (JSON.parse(readFileSync(join(base, "Local State"), "utf8")) as { profile?: { info_cache?: Record<string, { name?: string }> } }).profile?.info_cache ?? {}; } catch { /* no names: folder names */ }
+  let dirs: string[] = [];
+  try { dirs = readdirSync(base).filter((dir) => dir === "Default" || /^Profile \d+$/.test(dir) || dir in names); } catch { return []; }
+  return dirs.filter((dir) => CHROMIUM_COOKIES(join(base, dir)))
+    .sort((a, b) => a === "Default" ? -1 : b === "Default" ? 1 : a.localeCompare(b, undefined, { numeric: true }))
+    .map((dir) => ({ dir, name: names[dir]?.name?.trim() || dir }));
+}
+/// Firefox's profiles that have sign-ins, the one used last first, named as in its profiles.ini.
+function firefoxProfiles({ home, os, env }: SigninWhere): { dir: string; path: string; name: string }[] {
+  const roots = os === "darwin" ? [join(home, "Library", "Application Support", "Firefox", "Profiles")] : os === "win32" ? [join(env.APPDATA ?? join(home, "AppData", "Roaming"), "Mozilla", "Firefox", "Profiles")] : [join(home, ".mozilla", "firefox"), join(home, "snap", "firefox", "common", ".mozilla", "firefox")];
+  const named = new Map<string, string>();
+  for (const root of roots) {
+    let ini = "";
+    for (const at of [join(root, "profiles.ini"), join(root, "..", "profiles.ini")]) { try { ini = readFileSync(at, "utf8"); break; } catch { /* not here */ } }
+    for (const block of ini.split(/^\[/m)) { const name = /^Name=(.+)$/m.exec(block)?.[1]?.trim(), path = /^Path=(.+)$/m.exec(block)?.[1]?.trim(); if (name && path) named.set(path.split(/[\\/]/).pop()!, name); }
+  }
+  return roots.filter(existsSync).flatMap((root) => readdirSync(root).map((dir) => ({ dir, path: join(root, dir, "cookies.sqlite") })))
+    .filter((one) => existsSync(one.path))
+    .sort((a, b) => statSync(b.path).mtimeMs - statSync(a.path).mtimeMs)
+    .map((one) => ({ ...one, name: named.get(one.dir) ?? one.dir.replace(/^[^.]*\./, "") }));
 }
 
-/// The browsers on this computer, in a fixed order; Safari shows even when Demesne can't read it yet.
+/// Where a browser profile keeps its cookies on this computer (the first profile when none is named).
+export function cookieFile(from: string, where: SigninWhere = here()): string | null {
+  const source = signinFrom(from);
+  if (!source) return null;
+  const { browser: id, profile } = source, { home, os } = where;
+  const first = (...paths: string[]) => paths.find((path) => existsSync(path)) ?? null;
+  if (id === "firefox") {
+    const found = firefoxProfiles(where);
+    return (profile ? found.find((one) => one.dir === profile) : found[0])?.path ?? null;
+  }
+  if (id === "safari") return os === "darwin" ? first(join(home, "Library", "Containers", "com.apple.Safari", "Data", "Library", "Cookies", "Cookies.binarycookies"), join(home, "Library", "Cookies", "Cookies.binarycookies")) ?? join(home, "Library", "Containers", "com.apple.Safari", "Data", "Library", "Cookies", "Cookies.binarycookies") : null;
+  const base = chromiumBase(id, where);
+  if (!base) return null;
+  if (profile) return CHROMIUM_COOKIES(join(base, profile));
+  return CHROMIUM_COOKIES(join(base, "Default")) ?? (chromiumProfiles(base)[0] ? CHROMIUM_COOKIES(join(base, chromiumProfiles(base)[0]!.dir)) : null);
+}
+
+/// The browsers on this computer, one row per profile with sign-ins, in a fixed order; Safari shows even when Demesne can't read it yet.
+/// A browser with several profiles names each ("Chrome · Work"); its first keeps the browser's own id.
 export function signinSources(where: SigninWhere = here()): SigninSource[] {
   return (Object.keys(LABELS) as SigninSourceId[]).flatMap((id): SigninSource[] => {
-    const file = cookieFile(id, where);
+    const label = LABELS[id];
     if (id === "safari") {
+      const file = cookieFile(id, where);
       if (where.os !== "darwin" || !file) return [];
-      try { readFileSync(file).subarray(0, 4); return [{ id, label: LABELS[id], state: "ready" }]; }
-      catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : [{ id, label: LABELS[id], state: "disk" }]; }
+      try { readFileSync(file).subarray(0, 4); return [{ id, browser: id, label, state: "ready" }]; }
+      catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : [{ id, browser: id, label, state: "disk" }]; }
     }
-    if (!file) return [];
+    const profiles = id === "firefox" ? firefoxProfiles(where) : (() => { const base = chromiumBase(id, where); return base ? chromiumProfiles(base) : []; })();
+    if (!profiles.length) return [];
     // Chromium browsers on Windows lock cookies to the browser itself since 2024 (app-bound encryption).
-    if (where.os === "win32" && id !== "firefox") return [{ id, label: LABELS[id], state: "locked" }];
-    return [{ id, label: LABELS[id], state: "ready" }];
+    if (where.os === "win32" && id !== "firefox") return [{ id, browser: id, label, state: "locked" }];
+    return profiles.map((profile, at) => ({ id: at === 0 ? id : `${id}:${profile.dir}`, browser: id, label: profiles.length > 1 ? `${label} · ${profile.name}` : label, state: "ready" as const }));
   });
 }
 
@@ -148,8 +191,10 @@ export function safariCookies(data: Uint8Array, sites?: string[]): RawCookie[] {
   return out;
 }
 
-function rawCookies(id: SigninSourceId, sites?: string[], where: SigninWhere = here()): { cookies: RawCookie[]; version: number } {
-  const file = cookieFile(id, where);
+function rawCookies(from: string, sites?: string[], where: SigninWhere = here()): { cookies: RawCookie[]; version: number } {
+  const id = signinFrom(from)?.browser;
+  if (!id) throw new Error("That browser isn't one Demesne reads");
+  const file = cookieFile(from, where);
   if (!file) throw new Error(`${LABELS[id]} isn't on this computer`);
   if (id === "firefox") return { cookies: firefoxCookies(file, sites), version: 0 };
   if (id === "safari") {
@@ -160,7 +205,7 @@ function rawCookies(id: SigninSourceId, sites?: string[], where: SigninWhere = h
 }
 
 /// The sites you're signed in to in one browser, used last first. Nothing secret is read.
-export function signinSites(id: SigninSourceId, where: SigninWhere = here(), now = Date.now() / 1000): SigninSite[] {
+export function signinSites(id: string, where: SigninWhere = here(), now = Date.now() / 1000): SigninSite[] {
   const { cookies } = rawCookies(id, undefined, where);
   const sites = new Map<string, SigninSite>();
   for (const cookie of cookies) {
@@ -211,13 +256,15 @@ export function chromiumValue(encrypted: Uint8Array, key: { v10: Buffer; v11?: B
 }
 
 /// The cookies of the sites you picked, ready for the project's browser. Email and money sites are left out whatever is asked.
-export async function signinCookies(id: SigninSourceId, sites: string[], options: { where?: SigninWhere; key?: KeyReader; now?: number } = {}): Promise<SigninCookie[]> {
+export async function signinCookies(id: string, sites: string[], options: { where?: SigninWhere; key?: KeyReader; now?: number } = {}): Promise<SigninCookie[]> {
   const picked = [...new Set(sites.map((site) => site.toLowerCase().trim()))].filter((site) => site && !neverBrought(site));
   if (!picked.length) return [];
   const where = options.where ?? here(), now = options.now ?? Date.now() / 1000;
   const { cookies, version } = rawCookies(id, picked, where);
-  const chromium = Boolean(KEYCHAIN[id]);
-  const key = chromium && cookies.some((cookie) => !cookie.value && cookie.encrypted?.length) ? await (options.key ?? readChromiumKey)(id) : null;
+  // Every profile of a browser shares its one key.
+  const browser = signinFrom(id)?.browser;
+  const chromium = Boolean(browser && KEYCHAIN[browser]);
+  const key = chromium && cookies.some((cookie) => !cookie.value && cookie.encrypted?.length) ? await (options.key ?? readChromiumKey)(browser!) : null;
   return cookies.flatMap((cookie): SigninCookie[] => {
     if (cookie.expires && cookie.expires < now) return [];
     const value = cookie.value || (key && cookie.encrypted?.length ? chromiumValue(cookie.encrypted, key, version) : "") || "";
@@ -227,16 +274,16 @@ export async function signinCookies(id: SigninSourceId, sites: string[], options
   });
 }
 
-export const isSigninSource = (value: unknown): value is SigninSourceId => typeof value === "string" && value in LABELS;
-export const signinLabel = (id: SigninSourceId) => LABELS[id];
+export const isSigninSource = (value: unknown): value is string => typeof value === "string" && signinFrom(value) !== null;
+export const signinLabel = (from: string) => { const source = signinFrom(from); return source ? LABELS[source.browser] : from; };
 
 /// What each project has brought in, so Settings can list it and take it out again.
-export interface KeptSignin { site: string; from: SigninSourceId; at: number }
+export interface KeptSignin { site: string; from: string; at: number }
 export class SigninRecord {
   constructor(private readonly file: string) {}
   private read(): Record<string, KeptSignin[]> { try { return JSON.parse(readFileSync(this.file, "utf8")) as Record<string, KeptSignin[]>; } catch { return {}; } }
   list(profile: string): KeptSignin[] { return (this.read()[profile] ?? []).sort((a, b) => a.site.localeCompare(b.site)); }
-  add(profile: string, from: SigninSourceId, sites: string[], at = Date.now()) {
+  add(profile: string, from: string, sites: string[], at = Date.now()) {
     const all = this.read(), kept = (all[profile] ?? []).filter((one) => !sites.includes(one.site));
     all[profile] = [...kept, ...sites.map((site) => ({ site, from, at }))];
     writeFileSync(this.file, JSON.stringify(all, null, 2));

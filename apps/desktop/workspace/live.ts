@@ -14,7 +14,7 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
-import { browserSteps, findWords, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitTab } from "./browser-split.ts";
+import { browserSteps, downloadWords, findWords, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
@@ -1627,7 +1627,10 @@ const BS_ICONS = {
   point: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75v2.5M8 11.75v2.5M1.75 8h2.5M11.75 8h2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   up: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   down: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  saved: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M4.75 7 8 10.25 11.25 7M3 13h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
+/// What each chat's browser downloaded while the app was open: the bar shows the newest, and shows it in its folder on a click.
+const splitDownloads = new Map<string, SplitDownload[]>();
 const splitButton = (go: string, label: string, icon: keyof typeof BS_ICONS = go as keyof typeof BS_ICONS) => `<button type="button" class="bs-icon" data-go="${go}" aria-label="${label}" title="${label}">${BS_ICONS[icon]}</button>`;
 /// The page reaches your mouse and keys only while you hold it.
 const splitYours = () => Boolean(split.held && split.frame && !split.home);
@@ -1718,6 +1721,12 @@ function renderSplitHead(aside: HTMLElement, doing: { tone: string; words: strin
   aim.classList.toggle("on", aiming);
   aim.setAttribute("aria-pressed", String(aiming));
   aim.title = aiming ? "Pointing: click something on the page, Esc to stop" : "Point at something on the page; it goes in your next message";
+  const saved = aside.querySelector<HTMLButtonElement>(".bs-down")!, got = downloadWords(splitDownloads.get(split.session) ?? []);
+  const savedHtml = got ? `${BS_ICONS.saved}<span>${h(got.text)}</span>${got.more ? `<b>+${got.more}</b>` : ""}` : "";
+  if (saved.dataset.html !== savedHtml) { saved.innerHTML = savedHtml; saved.dataset.html = savedHtml; }
+  saved.hidden = !got || split.home;
+  saved.title = got?.title ?? "";
+  saved.setAttribute("aria-label", got ? `Downloaded ${got.text}${got.more ? ` and ${got.more} more` : ""}: show it in its folder` : "");
   const zoom = aside.querySelector<HTMLButtonElement>(".bs-zoom")!, zoomed = split.home ? "" : zoomWords(split.frame?.zoom);
   if (zoom.textContent !== zoomed) zoom.textContent = zoomed;
   zoom.hidden = !zoomed;
@@ -1796,6 +1805,15 @@ function stopPointing() {
   if (pointing === "browser") void api("desktop-browser-point", { chat: pointingPage, cancel: true }).catch(() => {});
   else if (pointing) void api("desktop-point", { cancel: true }).catch(() => {});
 }
+// A file the page downloaded (into the project's .demesne/downloads) shows in the bar.
+document.addEventListener("demesne:browser-download", (event) => {
+  const { chat, name, path, bytes } = (event as CustomEvent<{ chat?: string; name?: string; path?: string; bytes?: number }>).detail ?? {};
+  if (!chat || !name || !path) return;
+  const list = splitDownloads.get(chat) ?? [];
+  list.push({ name, path, bytes: Number(bytes) || 0 });
+  splitDownloads.set(chat, list.slice(-8));
+  if (chat === split.session) renderBrowserSplit();
+});
 // Find and zoom keys pressed on the page itself come from the window.
 document.addEventListener("demesne:browser-key", (event) => {
   const { chat, key } = (event as CustomEvent<{ chat?: string; key?: string }>).detail ?? {};
@@ -1874,7 +1892,7 @@ function buildBrowserSplit(aside: HTMLElement) {
   aside.innerHTML = `<div class="bs-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize"></div>`
     + `<div class="bs-head"><span class="bs-nav">${splitButton("back", "Back")}${splitButton("forward", "Forward")}${splitButton("reload", "Reload")}</span>`
     + `<label class="bs-addr"><input class="bs-url" readonly spellcheck="false" autocomplete="off" aria-label="Address"><span class="bs-doing" hidden></span></label>`
-    + `<button type="button" class="bs-zoom" data-go="zoom-reset" title="Back to 100%" hidden></button>${splitButton("point", "Point at something on the page", "point")}${splitButton("new", "New tab", "plus")}${splitButton("outside", "Open in your browser", "out")}<button type="button" class="bs-icon bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close the browser">${BS_ICONS.close}</button><i class="bs-load" hidden></i></div>`
+    + `<button type="button" class="bs-down" data-go="downloads" hidden></button><button type="button" class="bs-zoom" data-go="zoom-reset" title="Back to 100%" hidden></button>${splitButton("point", "Point at something on the page", "point")}${splitButton("new", "New tab", "plus")}${splitButton("outside", "Open in your browser", "out")}<button type="button" class="bs-icon bs-close" data-action="browser-split-close" aria-label="Close the browser" title="Close the browser">${BS_ICONS.close}</button><i class="bs-load" hidden></i></div>`
     + `<div class="bs-tabs" hidden></div>`
     + `<div class="bs-find" role="search" hidden><input class="bs-find-text" spellcheck="false" autocomplete="off" placeholder="Find on page" aria-label="Find on page"><span class="bs-find-count" aria-live="polite"></span>`
     + `<button type="button" class="bs-icon" data-find="back" aria-label="Previous match" title="Previous match">${BS_ICONS.up}</button><button type="button" class="bs-icon" data-find="next" aria-label="Next match" title="Next match">${BS_ICONS.down}</button><button type="button" class="bs-icon" data-find="close" aria-label="Close find" title="Close (Esc)">${BS_ICONS.close}</button></div>`
@@ -1939,6 +1957,7 @@ function buildBrowserSplit(aside: HTMLElement) {
     // Pointing and zoom are looking at the page, not using it: the model keeps it.
     if (what === "point") { void pointAtPage(); return; }
     if (what === "zoom-reset") { void zoomPage("reset"); return; }
+    if (what === "downloads") { const last = splitDownloads.get(split.session)?.at(-1); if (last) void api("desktop-show-download", { path: last.path }).catch((error) => fail(error)); return; }
     if (what === "outside") { const address = split.frame?.url; if (openableOutside(address)) void api("open-link", { url: address }).catch(() => {}); return; }
     if (!await own()) return;
     if (what === "new") { home(true); url.focus(); return; }

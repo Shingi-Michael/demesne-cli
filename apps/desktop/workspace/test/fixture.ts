@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DemesneClient } from "@demesne/client";
 import { createDaemonApp } from "../../../daemon/src/app.ts";
+import { collectDriveSignals } from "../../../daemon/src/drive-signals.ts";
 import { serveDaemon } from "../../../daemon/src/http-server.ts";
 import type { TurnProcessor } from "../../../daemon/src/processor.ts";
 import { loadCliSettings } from "@demesne/setup/cli-config.ts";
@@ -50,6 +51,10 @@ export async function fixture(
       databasePath: join(root, "data/state.sqlite"),
       authToken: token,
       providerVision: options.vision,
+      // Drive's signals never call the machine's own `gh` here. That command
+      // can take seconds (it looks for a sign-in, then the network), longer
+      // than a test's five, and what it answers depends on the machine.
+      driveSignals: (database, root, signalOptions) => collectDriveSignals(database, root, { ...signalOptions, gh: false }),
       // Heartbeat stays off unless a test brings its own stand-in daemon.
       heartbeat: options.heartbeatSocket ? { socket: options.heartbeatSocket } : { enabled: false },
       ...(options.agentCli ? { agentCli: options.agentCli } : { agentCli: { which: () => null } }),

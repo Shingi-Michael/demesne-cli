@@ -127,9 +127,9 @@ if (!readme) {
   await shot("02-turn");
   await page.locator("#sidebar-sessions .sidebar-item").first().hover(); await page.waitForTimeout(300);
   await shot("02-sidebar-delete");
-  // Drive's pill on the top bar and its sheet, each part opened; then the
-  // sidebar folded to its rail, and the project switcher.
-  if (await page.locator("#drive-pill").isVisible()) { await page.locator("#drive-pill").click(); await page.waitForTimeout(400); await shot("02-drive"); }
+  // Open the Drive sheet without a permanent header control.
+  await page.keyboard.press("Alt+j");
+  if (await page.locator("#drive-sheet").isVisible()) await shot("02-drive");
   await toggle('#briefing [data-action="review-open"]:visible', "02-review-open");
   await toggle('#briefing [data-action="ideas-show"]:visible', "02-ideas");
   await toggle('.turn-receipt button[data-action="toggle-steps"]', "02-steps");
@@ -144,8 +144,7 @@ if (!readme) {
   await shot("02-slash");
   await page.fill("textarea", ""); await page.keyboard.press("Escape"); await page.waitForTimeout(300);
 }
-// The turn's steps open and the edit's row unfolds its diff in place; the
-// top bar's ⋯ is the conversation's menu.
+// The turn's steps open and the edit's row unfolds its diff in place.
 await page.locator('.turn-receipt button[data-action="toggle-steps"]').first().click(); await page.waitForTimeout(500);
 await page.locator('.steps button[data-action="step"]').first().click(); await page.waitForTimeout(800);
 await shot(named("03-inline-diff", "ask"));
@@ -154,11 +153,6 @@ if (readme) {
   await page.locator(".sidebar-settings").first().click(); await page.waitForTimeout(900);
   await shot("demesne-settings");
   await page.locator(".st-back").first().click(); await page.waitForTimeout(600);
-}
-if (!readme) {
-  await page.locator(".header-more").click(); await page.waitForTimeout(600);
-  await shot("03-menu");
-  await page.keyboard.press("Escape"); await page.waitForTimeout(300);
 }
 if (!readme) {
   // A workflow running as a Drive mission: the conversation's newest turn.

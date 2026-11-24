@@ -112,3 +112,14 @@ export function downloadWords(list: readonly SplitDownload[]): { text: string; m
   const name = last.name.length > 22 ? `${last.name.slice(0, 21).trimEnd()}…` : last.name;
   return { text: name, more: list.length - 1, title: `${list.map((one) => `${one.name} · ${sizeWords(one.bytes)}`).reverse().join("\n")}\nIn the project’s .demesne/downloads. Click to show it.` };
 }
+
+/// A Google sign-in that went to your own browser, and the site coming back signed in.
+export interface OutsideSignin { site: string; state: "waiting" | "done" | "failed" | "never"; from?: string; said?: string }
+/// What the bar says about it: amber while it waits on you, a plain line once the site is back signed in.
+export function outsideDoing(outside: OutsideSignin | null | undefined): { tone: "ask" | "mine" | "now"; words: string } | null {
+  if (!outside) return null;
+  if (outside.state === "waiting") return { tone: "ask", words: `Google signs in only in your own browser: sign in to ${outside.site} there, and it comes back here` };
+  if (outside.state === "done") return { tone: "now", words: `Signed in to ${outside.site}${outside.from ? ` from ${outside.from}` : ""}` };
+  if (outside.state === "never") return { tone: "ask", words: `${outside.site} opened in your own browser; email and money sites stay out of Demesne` };
+  return { tone: "ask", words: outside.said ? `${outside.site}: ${outside.said}` : `Couldn’t bring ${outside.site} in` };
+}

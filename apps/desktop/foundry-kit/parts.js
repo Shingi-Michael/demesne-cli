@@ -711,9 +711,14 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     var user = el.getAttribute("user") || "Mike";
     $("#sidebar-you").textContent = user; $("#sidebar-avatar").textContent = user.charAt(0).toUpperCase();
     $("#sidebar-plan").textContent = el.getAttribute("plan") || "";
-    // Drive's pill, as it sits with nothing running; drive="3 ideas" says more, drive="none" is a project without it.
-    if (el.getAttribute("drive") === "none") $("#drive-pill").hidden = true;
-    else $(".dp-about").textContent = el.getAttribute("drive") ? "· " + el.getAttribute("drive") : "";
+    // Keep historical comparisons that explicitly request the old toolbar;
+    // new mockups start from the current tabs-only shell.
+    if (el.hasAttribute("drive") || el.closest('[data-option="Today"]')) {
+      if (el.getAttribute("drive") === "none") $("#drive-pill").hidden = true;
+      else $(".dp-about").textContent = el.getAttribute("drive") ? "· " + el.getAttribute("drive") : "";
+    } else {
+      $("#workspace-new-tab").remove(); $("#bar-drive").remove(); $("#desktop-toolbar header").remove();
+    }
     // What the author wrote: cards go to the right column, the rest is the
     // chat (or the page, when page="…" names one).
     var main = doc.createElement("div"); main.className = "dm-main";

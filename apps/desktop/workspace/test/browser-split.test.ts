@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { downloadWords, findWords, handOverAsk, keyInputs, localPage, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName, zoomWords } from "../browser-split.ts";
+import { downloadWords, findWords, outsideDoing, handOverAsk, keyInputs, localPage, pagePoint, openableOutside, ringSpot, splitDoing, splitOpen, splitWidth, tabName, zoomWords } from "../browser-split.ts";
 
 // Pass 248 D: the chat's browser beside the chat. When it opens, where a click
 // lands on the page, and which keys reach a page that is yours.
@@ -111,4 +111,12 @@ test("the bar's download chip shows the newest file, how many more, and each in 
   expect(two.text).toBe("a-very-long-invoice-n…");
   expect(two.more).toBe(1);
   expect(two.title.split("\n").slice(0, 2)).toEqual(["a-very-long-invoice-name-2026.pdf · 3.0 MB", "report.csv · 2 KB"]);
+});
+
+test("a Google sign-in sent to your own browser says so in the bar, amber while it waits on you", () => {
+  expect(outsideDoing(null)).toBeNull();
+  expect(outsideDoing({ site: "figma.com", state: "waiting" })).toEqual({ tone: "ask", words: "Google signs in only in your own browser: sign in to figma.com there, and it comes back here" });
+  expect(outsideDoing({ site: "figma.com", state: "done", from: "Chrome" })).toEqual({ tone: "now", words: "Signed in to figma.com from Chrome" });
+  expect(outsideDoing({ site: "figma.com", state: "failed", said: "No sign-in for figma.com in Chrome yet" })!.words).toBe("figma.com: No sign-in for figma.com in Chrome yet");
+  expect(outsideDoing({ site: "youtube.com", state: "never" })!.tone).toBe("ask");
 });

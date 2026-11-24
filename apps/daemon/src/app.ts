@@ -21,6 +21,7 @@ import { foundryBuiltTool } from "./foundry-built.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
 import { browserAddress, BrowserHandovers, browserProfile, browserTool, electronBrowser, type BrowserDriver, type WatchableBrowser } from "./browser.ts";
+import { OutsideSignins } from "./outside-signin.ts";
 import { isSigninSource, signinCookies, signinLabel, SigninRecord, signinSites, signinSources, type KeyReader, type SigninWhere } from "./browser-signins.ts";
 import { openTool, showTool } from "./open-show.ts";
 import { AskLimits, askOnce } from "./foundry-ask.ts";
@@ -427,6 +428,21 @@ export function createDaemonApp(options: {
   if (browser) tools.register(browserTool(browser, undefined, undefined, handovers));
   // You scrolled, clicked or typed on the chat's page: it is yours, and the model's next browser step waits for you.
   if (browser && browser.frame) browser.onTaken = (chat) => { handovers.take(chat); };
+  // Google's sign-in opened in your own browser: the site comes back signed in once you finish there.
+  const outsideSignins = browser ? new OutsideSignins({
+    sources: () => signinSources(options.signinWhere),
+    sites: (from) => signinSites(from, options.signinWhere),
+    bring: async (from, site, profile) => {
+      const cookies = await signinCookies(from, [site], { ...(options.signinWhere ? { where: options.signinWhere } : {}), ...(options.signinKey ? { key: options.signinKey } : {}) });
+      if (!cookies.length) return 0;
+      const reply = await browser("signins", { action: "cookies_set", profile, cookies }, AbortSignal.timeout(20_000));
+      if (!reply || typeof reply.error === "string") throw new Error(String(reply?.error ?? "The browser did not answer"));
+      signinRecord.add(profile, from, [site]);
+      return Number(reply.set) || cookies.length;
+    },
+    reload: async (chat) => { await browser(chat, { action: "reload" }, AbortSignal.timeout(20_000)); },
+  }) : null;
+  if (browser && browser.frame && outsideSignins) browser.onOutside = (chat, site) => outsideSignins.start(chat, site, browserProfile(store.getSession(chat)?.workspace?.root));
   // Open it behind Demesne, and show it on the right (pass 210 A).
   if (options.openShow !== false) { tools.register(openTool()); tools.register(showTool(pageLook)); }
   // The assistant's shared folders: a tool to read them, and a search index
@@ -1768,7 +1784,8 @@ export function createDaemonApp(options: {
           const frame = browser?.frame ? await browser.frame(chat, after, request.signal, Number.isFinite(aspect) && aspect > 0.2 && aspect < 4 ? aspect : undefined, url.searchParams.has("dark") ? url.searchParams.get("dark") === "1" : undefined,
             Number(url.searchParams.get("w")) > 100 ? { width: Math.min(4000, Number(url.searchParams.get("w"))), dpr: Math.max(1, Math.min(3, Number(url.searchParams.get("dpr")) || 1)) } : undefined) : null;
           const held = handovers.held(chat);
-          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}) };
+          const outside = outsideSignins?.get(chat);
+          const extra = { ...(held?.by === "model" ? { asked: held.reason } : {}), ...(held ? { held: held.by } : {}), ...(outside ? { outside: { site: outside.site, state: outside.state, ...(outside.from ? { from: outside.from } : {}), ...(outside.said ? { said: outside.said } : {}) } } : {}) };
           return json(frame ? { ...frame, ...extra } : { seq: 0, ...extra });
         }
         // You take the page without being asked: the model's browser steps wait until you give it back.
@@ -2496,6 +2513,7 @@ export function createDaemonApp(options: {
   async function closeApplication(): Promise<void> {
       closing = true;
       ownBrowser?.close();
+      outsideSignins?.close();
       for (const timer of awayTimers.values()) clearTimeout(timer);
       driveLifecycle.abort(new DOMException("Daemon shutting down", "AbortError"));
       clearInterval(driveAutoTimer);

@@ -219,7 +219,7 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 .sidebar-rail [data-tip]:hover::after, .sidebar-rail [data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); transition-delay: 250ms; }
 @media (prefers-reduced-motion: reduce) { .sidebar-rail [data-tip]::after { transition: none; } }
 /* The top bar: the sidebar toggle, your tabs, and ⋯. */
-#desktop-toolbar { grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
+#desktop-toolbar { position: relative; grid-column: 2; grid-row: 1; min-width: 0; height: 48px; padding: 0 16px; gap: 10px; border: 0; background: var(--ink); z-index: 80; }
 #desktop-toggle-sidebar { color: var(--t3); display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; }
 #desktop-toggle-sidebar:hover { background: var(--surface2); color: var(--t1); }
 #desktop-toolbar header { flex: none; min-width: 0; margin: 0 0 0 auto; gap: 8px; }
@@ -237,8 +237,8 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
    message box, so the box keeps its size when you send. */
 .desktop .hero { width: 748px; max-width: 100%; gap: 18px; }
 .desktop .live-app.start .intro { gap: 6px; }
-.hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--t2); font-size: 12.5px; line-height: 18px; }
-.hero-eyebrow .ico { color: var(--t3); }
+.hero-eyebrow { color: var(--t2); font-size: 12px; line-height: 16px; }
+#hero [hidden] { display: none; }
 .desktop .live-app.start .intro h1 { font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--t1); }
 .desktop .live-app.start .intro p { font-size: 13.5px; line-height: 1.6; color: var(--t3); }
 .desktop .intro strong { color: var(--t2); font-weight: 500; }
@@ -2110,17 +2110,6 @@ body.desktop ::selection { background: color-mix(in srgb, var(--blossom) 30%, tr
 .desktop :is(#context-card, #cards .ctx-card) .context-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 11px; padding-top: 9px; box-shadow: 0 -1px 0 var(--hair); font-size: 12px; color: var(--t3); }
 .desktop :is(#context-card, #cards .ctx-card) .context-foot .context-compact { margin: 0; }
 /* Compaction from notes (pass 114): the Keep list and the turns strip, pink for notes, blue for whole turns. */
-/* Changed, not running yet (pass 115): under the last turn that changed Demesne's own source. */
-.desktop .live-build { display: flex; align-items: center; gap: 8px; margin: 10px 0 0 34px; padding: 6px 8px 6px 10px; border-radius: 9px; background: var(--tone, rgba(255,255,255,.035)); box-shadow: inset 0 0 0 1px var(--hair, rgba(255,255,255,.07)); font-size: 12.5px; color: var(--t3); }
-.desktop .live-build > i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
-.desktop .live-build.on > i { background: var(--ok, #5fcf8e); }
-.desktop .live-build .w { color: var(--t2); }
-.desktop .live-build .sp { flex: 1; }
-.desktop .live-build .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.desktop .live-build .lb-go { padding: 3px 10px; border: 0; border-radius: 7px; background: var(--tone2); box-shadow: inset 0 0 0 1px var(--hair2); color: var(--t1); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.desktop .live-build .lb-go:hover { background: var(--hair2); }
-.desktop .live-build .spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--hair2, rgba(255,255,255,.2)); border-top-color: var(--acc); animation: lb-spin .8s linear infinite; flex: none; }
-@keyframes lb-spin { to { transform: rotate(360deg); } }
 /* Since you looked (pass 115): before the first turn you didn't see. */
 .desktop .catch-up { display: flex; align-items: baseline; gap: 9px; margin: 6px 0 14px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--blossom, #f2b6c8) 7%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blossom, #f2b6c8) 20%, transparent); font-size: 12.5px; color: var(--t2); }
 .desktop .catch-up > i { width: 6px; height: 6px; border-radius: 50%; background: var(--blossom, #f2b6c8); flex: none; transform: translateY(-1px); }
@@ -2329,7 +2318,7 @@ svg.th-light.ok { width: 15px; height: 15px; margin: 0; border-radius: 0; backgr
 #drive-pill .dp-about { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--t3); }
 #drive-pill .bf-ring { width: 16px; height: 16px; }
 #drive-pill .bf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin: 0 0 0 4px; }
-#drive-sheet { position: absolute; top: calc(100% + 8px); right: 0; z-index: 95; display: flex; flex-direction: column; gap: 2px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 10px 8px; border-radius: 12px; background: var(--surface2); box-shadow: 0 0 0 1px var(--line2, var(--hair)), 0 18px 40px -12px rgb(0 0 0 / .55); -webkit-app-region: no-drag; }
+#drive-sheet { position: absolute; top: 100%; right: 10px; z-index: 95; display: flex; flex-direction: column; gap: 2px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 10px 8px; border-radius: 12px; background: var(--surface2); box-shadow: 0 0 0 1px var(--line2, var(--hair)), 0 18px 40px -12px rgb(0 0 0 / .55); -webkit-app-region: no-drag; }
 #drive-sheet[hidden] { display: none; }
 html.mac-chrome #desktop-toolbar #drive-sheet * { -webkit-app-region: no-drag; }
 .desktop #drive-sheet #briefing { max-width: none; min-height: 24px; margin: 0; gap: 8px; align-items: flex-start; }
@@ -2800,7 +2789,8 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
    turn while it runs. It holds the name of the step it is on, which step
    that is, and a fine line under them that fills in green a step at a time.
    A click unfolds a plain list of the steps inside it. A finished turn
-   shrinks it into a small pill. Silver is "now", green is "done". */
+   shrinks it into a small pill. Silver is "now", green is "done". Since
+   pass 270 A it is drawn in the pill's glass (further down). */
 /* Its left edge is the answer's text (past the d. mark), so the ribbon and
    its list line up with the composer box below. */
 .desktop .plan-ribbon { position: sticky; top: 0; z-index: 3; padding: 6px 0 4px; margin-left: 32px; }
@@ -2812,18 +2802,14 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop .pr-cur { grid-column: 2; position: relative; min-width: 0; height: 20px; overflow: hidden; }
 .desktop .pr-name, .desktop .pr-was { display: block; font-size: 13px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--t1); }
 .desktop .pr-was { position: absolute; inset: 0; color: var(--t2); opacity: 0; pointer-events: none; }
-.desktop .plan-ribbon:not(.ended) .pr-name { --pr-dim: color-mix(in srgb, var(--t1) 70%, transparent); background: linear-gradient(100deg, var(--pr-dim) 0%, var(--pr-dim) 42%, var(--t1) 50%, var(--pr-dim) 58%, var(--pr-dim) 100%) 50% 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 .desktop .pr-ct { grid-column: 3; margin-left: 11px; font-size: 12px; color: var(--t3); white-space: nowrap; font-variant-numeric: tabular-nums; transition: color 160ms var(--ease); }
 .desktop .pr-card:hover .pr-ct { color: var(--t2); }
-/* The fine line: one part per step, green where done, a light on the one it
-   is on. A part fills from its left when its step is done. */
+/* The fine line: one part per step, green where done, a shade lighter on the
+   one it is on. A part fills from its left when its step is done. */
 .desktop .pr-segs { grid-column: 1 / -1; display: flex; gap: 4px; margin-top: 6px; }
 .desktop .pr-segs i { position: relative; flex: 1; height: 3px; border-radius: 2px; overflow: hidden; --pr-rest: var(--tone2); background: linear-gradient(var(--ok), var(--ok)) left / 0% 100% no-repeat, var(--pr-rest); transition: background-size 620ms var(--ease); }
 .desktop .pr-segs i.d { background-size: 100% 100%, auto; }
 .desktop .pr-segs i.n { --pr-rest: var(--hair2); }
-.desktop .pr-segs b { display: none; }
-.desktop .pr-segs i.n b { display: block; position: absolute; inset: 0 auto 0 0; width: 45%; background: linear-gradient(90deg, transparent, var(--t1), transparent); }
-@keyframes pr-slide { from { transform: translateX(-110%); } to { transform: translateX(330%); } }
 /* The list folds open inside the ribbon. Its space is on the rows, never on
    the list, so a shut list has no height at all. */
 .desktop .pr-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 340ms var(--ease); }
@@ -2852,11 +2838,33 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop .plan-ribbon.ended:not(.open) .pr-fold { width: 0; min-width: 100%; }
 .desktop .plan-ribbon.ended .pr-list { box-shadow: inset 0 1px 0 var(--hair); }
 .desktop .plan-ribbon.ended .pr-row:first-child { margin-top: 6px; }
-@media (prefers-reduced-motion: no-preference) {
-  .desktop .plan-ribbon:not(.ended) .pr-name { animation: shine 3s ease-in-out infinite alternate; }
-  .desktop .pr-segs i.n b { animation: pr-slide 1.9s ease-in-out infinite; }
-}
 @media (prefers-reduced-motion: reduce) { .desktop :is(.pr-card, .pr-fold, .pr-lab, .pr-bx, .pr-segs i) { transition: none; } }
+/* The checklist in the pill's glass (pass 270 A). The same ribbon in the
+   same place; the silver light going round its edge is the one thing that
+   moves while it runs (the shimmer on the name and the light sliding along
+   the line are gone). The step's number sits in the pill's round mark, and
+   turns into a green tick when the turn ends and the light has made its
+   last lap. Threads' ribbon (.tr) keeps its own look. */
+@property --plan-a { syntax: "<angle>"; inherits: false; initial-value: -90deg; }
+@keyframes plan-light { from { --plan-a: -90deg; } to { --plan-a: 270deg; } }
+.desktop .plan-ribbon:not(.tr) .pr-card { position: relative; border-radius: 18px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / 0.85); }
+.desktop .plan-ribbon:not(.tr) .pr-card::before { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--plan-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 60%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 34%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.desktop .plan-ribbon:not(.tr) .pr-bar { column-gap: 10px; padding: 6px 14px 10px 7px; }
+.desktop .plan-ribbon:not(.tr) .pr-bar:focus-visible { border-radius: 18px; }
+.desktop .plan-ribbon:not(.tr) .pr-ct { margin-left: 1px; }
+.desktop .plan-ribbon:not(.tr) .pr-segs { margin-top: 5px; padding-left: 34px; }
+.desktop .plan-ribbon:not(.tr) .pr-ok { display: grid; width: 24px; height: 24px; margin: 0; background: color-mix(in srgb, var(--t1) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t1) 10%, transparent); color: var(--t1); font-size: 11px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.desktop .plan-ribbon:not(.tr) .pr-ok::after { display: none; width: 13px; height: 13px; background: var(--ok); }
+.desktop .plan-ribbon:not(.tr).ended .pr-card { border-radius: 99px; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent); }
+.desktop .plan-ribbon:not(.tr).ended.open .pr-card { border-radius: 18px; }
+.desktop .plan-ribbon:not(.tr).ended .pr-bar { padding: 6px 14px; }
+.desktop .plan-ribbon:not(.tr).ended.all .pr-bar { padding-left: 6px; }
+.desktop .plan-ribbon:not(.tr).ended:not(.all) .pr-ok { display: none; }
+.desktop .plan-ribbon:not(.tr).ended.all .pr-ok::after { display: block; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop .plan-ribbon:not(.tr):not(.ended) .pr-card::before { animation: plan-light 6s linear infinite; }
+  .desktop .plan-ribbon:not(.tr).ended.lap .pr-card::before { animation: plan-light 6s linear 1 both; }
+}
 /* Wait and watch (pass 174): a wait_for step shimmers while it waits, with a
    thin line running under it; a wait that ended badly shows its last lines. */
 .desktop .tool-row.wait-row.running { position: relative; overflow: hidden; }
@@ -3490,3 +3498,38 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) #sidebar-projects 
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-stars { display: block; margin-top: auto; padding: 36px 0 26px 18px; color: var(--t1); opacity: .2; pointer-events: none; }
 .sidebar-stars svg { display: block; width: 190px; height: 70px; }
 #desktop-shell.sidebar-collapsed .sidebar-stars { display: none; }
+
+/* The cards in the pill's glass (pass 271 A). At rest each card is still one
+   quiet line. The card you open (rest on it, click it, tab into it) lifts
+   into the pill's silver glass with a still edge. A card that says something
+   new takes the glass for one lap of silver light, then settles back. Greys
+   from the theme. Read more:
+   https://www.nngroup.com/articles/progressive-disclosure/ */
+@property --card-a { syntax: "<angle>"; inherits: false; initial-value: -90deg; }
+@keyframes card-light { from { --card-a: -90deg; } to { --card-a: 270deg; } }
+.desktop #cards .card:has(> button.card-head):is(:hover, :focus-within, .open, .lap) { border-radius: 18px; color: var(--t2); background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 8%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / 0.85); }
+.desktop #cards .card:has(> button.card-head):is(:hover, :focus-within, .open, .lap)::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: linear-gradient(180deg, color-mix(in srgb, var(--t1) 16%, transparent), color-mix(in srgb, var(--t1) 5%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.desktop #cards .card:has(> button.card-head):is(:hover, :focus-within, .open, .lap) .card-head { border-radius: 18px; }
+.desktop #cards .card:has(> button.card-head).lap::before { background: conic-gradient(from var(--card-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 58%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 32%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #cards .card:has(> button.card-head).lap::before { animation: card-light 6s linear 1 both; animation-delay: var(--lap-at, 0ms); }
+}
+
+/* Five more places in the pill's glass (pass 272 A): the small menus over the
+   composer (#completion is the slash command menu; #overlay.popover the model
+   and ⋯ menus), the context pop-up,
+   the glance when you rest on a chat, the threads ribbon and the summary that
+   stands in for older turns. The same sheen, edge and lift as the pill. The
+   pop-ups stay solid behind their words, so nothing in the chat shows through.
+   Nothing moves at rest; the threads ribbon makes one lap of light when a
+   thread finishes or needs you. Read more:
+   https://developer.mozilla.org/en-US/docs/Web/CSS/mask-composite */
+@property --threads-a { syntax: "<angle>"; inherits: false; initial-value: -90deg; }
+@keyframes threads-light { from { --threads-a: -90deg; } to { --threads-a: 270deg; } }
+.desktop :is(#completion, #overlay.popover, #context-card, #sidebar-glance) { border: 0; border-radius: 16px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 70%, var(--surface)); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85), 0 24px 60px -20px rgb(0 0 0 / .7); }
+.desktop :is(#threads-ribbon .plan-ribbon.tr .pr-card, .compaction-card) { position: relative; border: 0; border-radius: 18px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85); }
+.desktop .compaction-card { border-radius: 16px; }
+.desktop :is(#completion, #overlay.popover, #context-card, #sidebar-glance, .compaction-card)::after, .desktop #threads-ribbon .plan-ribbon.tr .pr-card::after { content: ""; position: absolute; inset: 0; z-index: 3; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--threads-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 60%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 34%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop #threads-ribbon.lap .plan-ribbon.tr .pr-card::after { animation: threads-light 6s linear 1 both; }
+}

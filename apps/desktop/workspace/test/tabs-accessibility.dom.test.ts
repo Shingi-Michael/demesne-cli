@@ -17,13 +17,13 @@ ${section("const h = (value:", "const shortcut =")}
 ${section("const btn = (", "const num =")}
 const editor = document.querySelector('textarea'), el = id => document.getElementById(id);
 const sessions = ['a', 'b', 'c'].map(id => ({id, title:'Chat '+id, updatedAt:'2026-01-01', workspace:'/project'}));
-let state = { sessions, session:sessions[0], workspace:'/project', breakage:{inbox:[]}, approvals:[] };
+let state = { sessions, session:sessions[0], workspace:'/project', breakage:{inbox:[]}, threads:{list:[]}, approvals:[] };
 let pageOpen = '', foundryOpen = null, pointing = null, contextCardOpen = false, overlay = null;
 let sessionVisible = true, revision = 0;
 const deletedSessions = new Set(), pendingDeletes = new Map(), calls = [];
 const inSession = () => sessionVisible, inAssistant = () => false;
 const chatTone = item => item.waiting ? 'wait' : 'ready';
-const STATE_WORDS = {ready:'', wait:'Needs you'}, fullTime = x => x, shortcut = x => x;
+const STATE_WORDS = {ready:'', wait:'Needs you'}, STATE_SAYS = STATE_WORDS, fullTime = x => x, shortcut = x => x;
 const act = fn => fn(), pendingQuestion = () => null;
 const openPage = value => { pageOpen = value; renderTabs(); };
 const dispatch = (action, args) => {
@@ -62,7 +62,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("tab strip accessibility 
     page = await browser.newPage();
     errors = [];
     page.on("pageerror", error => errors.push(error.message));
-    await page.setContent(`<!doctype html><button id="before">Before</button><div id="workspace-tabs" role="tablist" aria-label="Open chats"></div><button id="workspace-new-tab" data-action="new-session">New chat</button><div id="workspace-call"></div><div id="completion" hidden></div><div id="workspace" role="tabpanel"><textarea aria-label="Message"></textarea></div>`);
+    await page.setContent(`<!doctype html><button id="before">Before</button><div id="workspace-tabs" role="tablist" aria-label="Open chats"></div><div id="workspace-call"></div><div id="completion" hidden></div><div id="workspace" role="tabpanel"><textarea id="message" aria-label="Message"></textarea></div>`);
     await page.addScriptTag({ content: script });
   });
   afterEach(async () => { await page?.close(); expect(errors).toEqual([]); });
@@ -94,7 +94,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("tab strip accessibility 
     await page.keyboard.press("Space");
     expect((await snapshot()).current).toBe("c");
     await page.keyboard.press("Tab");
-    expect(await focused()).toBe("workspace-new-tab");
+    expect(await focused()).toBe("message");
     await page.keyboard.press("Shift+Tab");
     expect(await focused()).toBe("workspace-tab-c");
   });
@@ -137,7 +137,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("tab strip accessibility 
     expect((await snapshot()).current).toBe("a");
   });
 
-  test("closing a focused tab chooses its neighbor, the last close chooses New chat, and reopen works", async () => {
+  test("closing a focused tab chooses its neighbor, the last close focuses the composer, and reopen works", async () => {
     await page.locator('[data-tab="b"] .bar-tab-close').focus();
     await page.keyboard.press("Enter");
     expect((await snapshot()).ids).toEqual(["a", "c"]);
@@ -146,7 +146,7 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("tab strip accessibility 
     await page.keyboard.press("Enter");
     expect(await focused()).toBe("workspace-tab-a");
     await page.keyboard.press("Control+w");
-    expect(await focused()).toBe("workspace-new-tab");
+    expect(await focused()).toBe("message");
     expect((await snapshot()).ids).toEqual([]);
     await page.keyboard.press("Control+Shift+t");
     expect((await snapshot()).current).toBe("a");

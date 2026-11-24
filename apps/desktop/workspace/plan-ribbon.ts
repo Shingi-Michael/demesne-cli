@@ -1,9 +1,17 @@
-/// The plan checklist (pass 226 A): the model's update_plan steps drawn as a
-/// soft glass ribbon at the top of the turn. It holds the name of the step it
-/// is on, which step that is ("2 of 5"), and a fine line under them that
-/// fills in green one step at a time. Clicking the ribbon unfolds a plain list
+/// The plan checklist (pass 226 A, in the pill's glass since pass 270 A): the
+/// model's update_plan steps drawn as a silver glass ribbon at the top of the
+/// turn. It holds the number of the step it is on in the pill's round mark,
+/// that step's name, which step that is ("2 of 5"), and a fine line under
+/// them that fills in green one step at a time. A silver light going round
+/// its edge is the one thing that moves while it runs. Clicking the ribbon unfolds a plain list
 /// of the steps inside it. When the turn ends the same ribbon shrinks into a
-/// small pill ("5 steps") that opens the same list.
+/// small pill ("5 steps") that opens the same list; the light makes one last
+/// lap and stops.
+///
+/// Read more: https://www.nngroup.com/articles/progress-indicators/ (a long
+/// job should show how far along it is) and
+/// https://lawsofux.com/law-of-similarity/ (things drawn alike read as one
+/// family: the ribbon and the pills).
 
 export type PlanStatus = "pending" | "in_progress" | "completed";
 export interface PlanStep { step: string; status: PlanStatus }
@@ -45,8 +53,7 @@ export function planRibbonHTML(plan: readonly PlanStep[], options: { runId: stri
     : current < 0 && all ? "All steps done" : plan[at]!.step;
   // The step before it, for the roll when the name changes.
   const was = options.live && current > 0 ? plan[current - 1]!.step : "";
-  // Each part of the line holds its light as an element of its own.
-  const segs = plan.map((step, i) => `<i class="${step.status === "completed" ? "d" : i === current ? "n" : ""}"><b></b></i>`).join("");
+  const segs = plan.map((step, i) => `<i class="${step.status === "completed" ? "d" : i === current ? "n" : ""}"></i>`).join("");
   const rows = plan.map((step, i) => {
     const kind = step.status === "completed" ? "d" : i === current ? "n" : "";
     return `<div class="pr-row ${kind}" role="listitem"><span class="pr-bx" aria-hidden="true"></span><span class="pr-lab">${h(step.step)}</span></div>`;
@@ -54,7 +61,7 @@ export function planRibbonHTML(plan: readonly PlanStep[], options: { runId: stri
   const state = `${options.live ? "" : " ended"}${all ? " all" : ""}${options.open ? " open" : ""}`;
   return `<div class="plan-ribbon${state}"><div class="pr-card">`
     + `<button type="button" class="pr-bar" data-action="toggle-plan" data-args="${h(JSON.stringify({ id: options.runId }))}" aria-expanded="${options.open}" title="${h(`${done} of ${total} steps done`)}">`
-    + `<span class="pr-ok" aria-hidden="true"></span>`
+    + `<span class="pr-ok" aria-hidden="true">${options.live ? at + 1 : ""}</span>`
     + `<span class="pr-cur"><span class="pr-was" aria-hidden="true">${h(was)}</span><span class="pr-name">${h(name)}</span></span>`
     + `<span class="pr-ct">${options.live ? `${at + 1} of ${total}` : ""}</span>`
     + `<span class="pr-segs" aria-hidden="true">${segs}</span>`
@@ -71,6 +78,8 @@ export function planLook(ribbon: Element): PlanLook {
 }
 
 const EASE = "cubic-bezier(0.2, 0.7, 0.2, 1)";
+/// One lap of the light round the edge.
+export const LAP_MS = 6000;
 
 /// After a redraw brought the same ribbon to its new look: the step's name
 /// rolls up once when the step changed, and the ribbon changes size smoothly
@@ -90,7 +99,12 @@ export function planMoved(ribbon: Element, before: PlanLook, still = matchMedia(
   // Opening the pill's list moves its height by itself; only the width jumps.
   const from: Keyframe = { width: `${before.width}px` }, to: Keyframe = { width: `${now.width}px` };
   if (turned) { from.height = `${before.height}px`; to.height = `${now.height}px`; }
-  // The tick pops in once, as the ribbon becomes the pill (never on old turns).
-  if (turned && ended) ribbon.querySelector(".pr-ok")?.animate([{ transform: "scale(0.4)", opacity: 0 }, { transform: "scale(1)", opacity: 1 }], { duration: 420, easing: EASE });
+  // The tick draws itself once, as the ribbon becomes the pill (never on old turns).
+  if (turned && ended) {
+    ribbon.querySelector(".pr-ok")?.animate([{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0 0 0)" }], { duration: 480, delay: 160, fill: "backwards", easing: EASE, pseudoElement: "::after" });
+    // The light makes one last lap as the ribbon becomes the pill, then it is still.
+    ribbon.classList.add("lap");
+    setTimeout(() => ribbon.classList.remove("lap"), LAP_MS);
+  }
   if (Math.abs(now.width - before.width) > 1 || (turned && Math.abs(now.height - before.height) > 1)) card.animate([from, to], { duration: 520, easing: EASE });
 }

@@ -449,7 +449,7 @@ export class DemesneClient {
   }
   /// The chat's browser, beside it (pass 248 D): the newest picture after `after` (waits up to 1.5 s for one).
   async browserFrame(sessionId: string, after: number, aspect?: number, dark?: boolean, box?: { width: number; dpr: number }): Promise<{ seq: number; jpeg?: string; width?: number; height?: number; url?: string; title?: string; handover?: boolean; asked?: string; held?: "model" | "person";
-    tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; live?: boolean }> {
+    tabs?: { n: number; url: string; title: string; active?: boolean }[]; pointer?: { x: number; y: number; ago: number }; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; live?: boolean; outside?: { site: string; state: "waiting" | "done" | "failed" | "never"; from?: string; said?: string } }> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/browser/frame?after=${Math.max(0, Math.floor(after))}${aspect ? `&aspect=${aspect.toFixed(3)}` : ""}${dark === undefined ? "" : `&dark=${dark ? 1 : 0}`}${box ? `&w=${Math.round(box.width)}&dpr=${box.dpr}` : ""}`);
   }
   /// Your clicks and keys on a page the model handed you.

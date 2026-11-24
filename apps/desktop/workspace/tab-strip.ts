@@ -48,7 +48,7 @@ export function updateTabStrip(strip: HTMLElement, html: string, fallback: HTMLE
   }
   for (const node of [...strip.children]) if (!retained.has(node)) node.remove();
   // Removal chooses the next tab at the same position, then the previous one;
-  // the last tab hands keyboard focus to New chat, never to document.body.
+  // the last tab hands keyboard focus to the composer, never to document.body.
   const tabs = tabElements(strip);
   const focus = active ? active.isConnected ? active : tabs[Math.min(Math.max(oldIndex, 0), tabs.length - 1)] ?? fallback : null;
   tabStop(strip, focus ?? undefined);

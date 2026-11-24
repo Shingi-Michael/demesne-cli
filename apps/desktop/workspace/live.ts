@@ -14,9 +14,9 @@ import { parseMailTurn } from "../../../packages/protocol/src/heartbeat-mail.ts"
 import { parseDriveReport } from "../../../packages/protocol/src/drive-report.ts";
 import { parseThreadReport } from "../../../packages/protocol/src/thread-report.ts";
 import { browserTarget } from "./browser-row.ts";
-import { browserSteps, downloadWords, findWords, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
+import { browserSteps, downloadWords, findWords, outsideDoing, type OutsideSignin, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
-import { light as threadLight, threadBriefHTML, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook } from "./threads-view.ts";
+import { light as threadLight, threadBriefHTML, threadsNews, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook, type ThreadState } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { mountMilkyWay, type MilkyWay } from "./milkyway.ts";
@@ -89,6 +89,7 @@ import { chatIcon, DEMESNE_FACE, foldMark, SHAPES, type ChatIcon } from "./chat-
 import { MemoryPill } from "./memory-pill.ts";
 import { pills, type PillSpec } from "./pill.ts";
 import { lightRows } from "./row-light.ts";
+import { CARD_LAP_MS, cardNews, cardWords } from "./card-light.ts";
 import { brokeNews, brokeSeen, type BrokeSeen } from "./broke-news.ts";
 import type {
   ToolEntry,
@@ -414,7 +415,7 @@ let driveShown = false,
   ideasShown = false,
   brokeShown = false;
 let driveActionPending = "";
-/// Drive's sheet under its pill on the top bar is open (pass 198 A).
+/// Drive's on-demand sheet is open (or waiting for a new mission to start).
 let driveSheetOpen = false, driveSheetAt = 0;
 /// Each mission chat and the chat it was started from.
 function missionLinks() {
@@ -1554,6 +1555,8 @@ const CARD_ICON = {
 } as const;
 const cardsOpen = new Set<string>((() => { try { return JSON.parse(localStorage.getItem("demesne-cards-open") ?? "[]") as string[]; } catch { return []; } })());
 let cardsSignature = "";
+/// Cards making their one lap of light (pass 271 A), and when each began.
+const cardLaps = new Map<string, number>();
 /// Screenshots from the capture keys (window-shots.ts), each its own card
 /// after the last card; the ones still to land, with where their window was.
 const windowShots: WindowShot[] = [];
@@ -1614,6 +1617,8 @@ const split = {
   ringAt: 0,
   /// Find on the page (⌘F): the bar under the toolbar, what you typed, and where it is in the matches.
   find: { open: false, text: "", found: null as null | { matches: number; at: number } },
+  /// A Google sign-in sent to your own browser, as the daemon last said.
+  outside: null as null | OutsideSignin,
   pumping: false, width: (() => { try { return Number(localStorage.getItem("demesne-browser-split")) || 0; } catch { return 0; } })(),
 };
 const BROWSER_SPLIT_LABEL = "The chat’s browser";
@@ -1640,7 +1645,7 @@ function renderBrowserSplit() {
   const s = state;
   if (!s?.session || !inSession() || pageOpen) { app.classList.remove("browser-split-on"); aside.hidden = true; placeSplitView(); return; }
   if (split.session !== s.session.id) {
-    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0, find: { open: false, text: "", found: null } });
+    Object.assign(split, { session: s.session.id, open: false, openedTurn: null, closedTurn: null, closedAsk: null, seq: 0, frame: null, held: null, tabs: [], home: false, ringAt: 0, find: { open: false, text: "", found: null }, outside: null });
     // Another chat's page does not stay up while this one's first picture comes.
     splitDrawn = splitWanted = ""; const old = aside.querySelector<HTMLCanvasElement>(".bs-page"); if (old) old.hidden = true;
   }
@@ -1659,7 +1664,7 @@ function renderBrowserSplit() {
   const working = run && last && last.state === "running" && !ask ? `${verb(last as unknown as ToolEntry)} ${stepTarget(last as unknown as ToolEntry)}`.trim() : null;
   // A page you hand back stops being a new tab: the model carries on where it was.
   if (split.home && !split.held) split.home = false;
-  const doing = splitDoing(ask, took ? null : working, took);
+  const doing = outsideDoing(split.outside) ?? splitDoing(ask, took ? null : working, took);
   const yours = splitYours();
   aside.classList.toggle("yours", yours && !split.home);
   aside.classList.toggle("done", !run);
@@ -2042,7 +2047,7 @@ async function pumpBrowserFrames() {
     while (split.open && state?.session?.id === split.session && !pageOpen) {
       if (document.visibilityState !== "visible") { await new Promise((resolve) => setTimeout(resolve, 500)); continue; }
       const session = split.session;
-      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number } };
+      type Got = { seq?: number; src?: string; live?: boolean; width?: number; height?: number; url?: string; title?: string; back?: boolean; forward?: boolean; loading?: boolean; zoom?: number; held?: "model" | "person"; tabs?: SplitTab[]; pointer?: { x: number; y: number; ago: number }; outside?: OutsideSignin };
       let got: Got | null = null;
       // The view's shape, so the page is drawn as tall as the split shows it.
       const view = el("browser-split").querySelector<HTMLElement>(".bs-view");
@@ -2055,6 +2060,8 @@ async function pumpBrowserFrames() {
       const held = got.held ?? null;
       // An answer asked for before you took or handed back the page is out of date about who holds it.
       if (held !== split.held && askedAt > split.heldAt) { split.held = held; redraw = true; }
+      const outside = got.outside ?? null;
+      if (JSON.stringify(outside) !== JSON.stringify(split.outside)) { split.outside = outside; redraw = true; }
       if ((got.src || got.live) && Number(got.seq) > split.seq) {
         (window as unknown as { __at?: number }).__at = Number((got as { at?: number }).at) || 0;
         split.seq = Number(got.seq);
@@ -2193,6 +2200,15 @@ function renderCards() {
       const pages = node?.querySelector("[data-pdf]"), into = replacement.querySelector("[data-pdf]");
       if (pages && into) into.replaceChildren(...pages.childNodes);
       if (!node && key === PREVIEW_CARD && filePreview?.landing) arrivingPreview = replacement;
+      // A card that says something new makes one lap of light (pass 271 A).
+      const head = ":scope > button.card-head";
+      if (node && replacement.querySelector(head) && cardNews(key, cardWords(node.querySelector(head)), cardWords(replacement.querySelector(head)))) {
+        cardLaps.set(key, Date.now());
+        setTimeout(() => { if (Date.now() - (cardLaps.get(key) ?? 0) >= CARD_LAP_MS - 50) { cardLaps.delete(key); aside.querySelector(`:scope > [data-card="${key}"]`)?.classList.remove("lap"); } }, CARD_LAP_MS);
+      }
+      // A lap that is still going carries on where it was on the redrawn card.
+      const lapAt = cardLaps.get(key);
+      if (lapAt !== undefined) { replacement.classList.add("lap"); replacement.style.setProperty("--lap-at", `${-(Date.now() - lapAt)}ms`); }
       if (node) node.replaceWith(replacement);
       node = replacement;
     }
@@ -2445,12 +2461,9 @@ function renderStatus() {
   renderContextCard();
   el("status").innerHTML =
     `${working ? `<span class="state">${spinner()}</span>` : phase === "ready" ? "" : `<span class="state ${phase === "failed" ? "danger" : phase === "approval" || phase === "waiting" ? "amber" : ""}"><img src="assets/${phase === "approval" || phase === "waiting" ? "activity-dot" : "ready-dot"}.svg" width="8" height="8" alt="">${h(phase)}</span>`}<span>${h((state.model.displayName ?? state.model.id) || "Connecting…")}${state.reasoning ? `<span class="muted"> · ${h(state.reasoning)}</span>` : ""}</span><div class="spacer"></div><div class="context">${c.percentage == null ? "<span>ctx —</span>" : `<div class="meter"><i style="--usage:${Math.min(100, c.percentage)}%"></i></div><span>${num(c.used)} · ${c.percentage}%</span>`}</div>${inSession() ? "" : btn("page-open", `${k("Ctrl+,")} settings`, { page: "settings" }, "key-action") + btn("insert-command", `${k("Ctrl+K")} commands`, {}, "key-action")}`;
-  // The top bar is your tabs and ⋯, which opens the chat's own view
-  // (rename, compact, history). The open tab's dot carries the live state,
-  // and the rim's words are its tooltip.
+  // The open tab's dot carries the live state; the rim's words are its tooltip.
   rimNow = rim;
   renderTabs();
-  el("header").innerHTML = inSession() && !pageOpen ? btn("overlay", "⋯", { name: "session" }, `header-more${overlay === "session" ? " active" : ""}`).replace("<button ", '<button title="This conversation" aria-label="This conversation" ') : "";
 }
 /// Your plan's limits (pass 112 A): the context word names the fuller
 /// window, and the context card gives each window and its reset.
@@ -2619,17 +2632,15 @@ function renderTabs() {
   };
   const page = here ? `<div class="bar-tab on here" data-tab-key="page"><span class="bar-tab-label" role="tab" id="workspace-tab-page" aria-controls="workspace" tabindex="0" aria-selected="true"><span class="bar-tab-name" id="workspace-title">${h(here)}</span></span>${shown.length && tabOn && byId.has(tabOn) ? btn("tab-close", "×", { id: "" }, "bar-tab-close").replace("<button ", `<button title="Back to ${h(byId.get(tabOn)!.title)}" aria-label="Close ${h(here)}" tabindex="-1" `) : ""}</div>` : "";
   const callButton = call ? (() => { const [action, args] = chatTarget(call.id); return `<button type="button" class="bar-call" data-action="${action}" data-args="${h(JSON.stringify(args))}" title="Go there (${h(shortcut("Ctrl+Shift+A"))})" aria-keyshortcuts="Control+Shift+A Meta+Shift+A"><i aria-hidden="true"></i><span>${h(call.title || "A chat")} needs you</span></button>`; })() : "";
-  const newTab = document.getElementById("workspace-new-tab");
   // Pinned tabs live in their own row before the strip, so they stay put while it scrolls.
   const pins = document.getElementById("workspace-pins");
   const pinnedIds = shown.filter((id) => tabs.isPinned(id));
-  if (pins) updateTabStrip(pins, pinnedIds.map((id) => tab(id, tones[shown.indexOf(id)]!)).join(""), newTab);
-  updateTabStrip(strip, `${shown.filter((id) => !pins || !tabs.isPinned(id)).map((id) => tab(id, tones[shown.indexOf(id)]!)).join("")}${page}`, newTab);
+  if (pins) updateTabStrip(pins, pinnedIds.map((id) => tab(id, tones[shown.indexOf(id)]!)).join(""), editor);
+  updateTabStrip(strip, `${shown.filter((id) => !pins || !tabs.isPinned(id)).map((id) => tab(id, tones[shown.indexOf(id)]!)).join("")}${page}`, editor);
   const selected = strip.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? pins?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? null;
   const panel = document.getElementById("workspace");
   if (selected) panel?.setAttribute("aria-labelledby", selected.id);
   else panel?.removeAttribute("aria-labelledby");
-  if (newTab) newTab.title = `New chat (${shortcut("Ctrl+T")})`;
   const callSlot = document.getElementById("workspace-call");
   if (callSlot) callSlot.innerHTML = callButton;
   updateTabsMore();
@@ -3308,32 +3319,6 @@ function handoffCard(card: NonNullable<ToolEntry["handoff"]>) {
   </div>`;
 }
 
-/// Under the last turn that changed Demesne's own source: whether the app
-/// you're in runs it yet (its build is newer than the turn), and on a Mac,
-/// Rebuild and open. The open waits until nothing is working.
-let rebuildAsked = false;
-function liveLine(run: WorkspaceRun) {
-  const self = state!.selfBuild;
-  if (!self.source || run.status !== "completed" || !run.completedAt) return "";
-  const last = state!.runs.findLast((item) => item.status === "completed" && tools(item).some((tool) => tool.phase === "change" && tool.state === "done"));
-  if (last?.id !== run.id) return "";
-  if (self.builtAt && self.builtAt > Date.parse(run.completedAt)) return `<div class="live-build on"><i></i><span class="w">Running now</span></div>`;
-  const busy = self.state === "ready" && rebuildAsked && working();
-  const after = self.behind ? `<span class="sub">this folder is behind the app you're running</span>`
-    : !self.can ? ""
-    : self.state === "building" ? `<span class="spin"></span><span class="sub">Rebuilding · Demesne reopens when it's done</span>`
-    : busy ? `<span class="sub">Built · opens once nothing is working</span>`
-    : self.state === "failed" ? `<span class="sub danger" title="${h(self.error ?? "")}">The build failed</span>${btn("rebuild-app", "Try again", {}, "lb-go")}`
-    : btn("rebuild-app", "Rebuild and open", {}, "lb-go");
-  return `<div class="live-build"><i></i><span class="w">Changed, not running yet</span><span class="sp"></span>${after}</div>`;
-}
-const working = () => Boolean(state?.activeTurnId || state?.busy || state?.sessions.some((item) => item.status === "running" || item.status === "queued"));
-/// Once the build is ready and nothing works, swap it in and quit; it reopens.
-function rebuildWhenIdle() {
-  if (!rebuildAsked || state?.selfBuild.state !== "ready" || working()) return;
-  rebuildAsked = false;
-  void api("rebuild-open", {}).then(() => api("desktop-quit", {})).catch((error) => fail(error));
-}
 /// A sent message, its big pastes shown folded as they were in the composer.
 function requestText(content: string) {
   const { text, refs } = splitMockupRefs(content);
@@ -3497,7 +3482,6 @@ function runHTML(run: WorkspaceRun, index: number) {
     // A turn that only answered needs no receipt: its time is on the ask.
     const bare = run.status === "completed" && !files && !checks.length && !steps && !thought && !(receipt?.mode === "Plan" || run.planOnly) && !model && !mailReply(run) && !versionArrows(run);
     footer = bare ? "" : `<div class="turn-receipt">${parts.map((part) => `<span>${part}</span>`).join("")}${actions ? `<span class="receipt-actions">${actions}</span>` : ""}</div>`;
-    if (files) footer += liveLine(run);
   }
   const trail = "";
   const answered = run.entries.some((e) => e.type === "assistant");
@@ -4158,14 +4142,12 @@ function awayApproval(sessionId: string, ask: Extract<AwayAsk, { kind: "permissi
     + `</div>`;
 }
 function renderHero() {
-  if (!state) return;
-  const review = reviewJobs(),
-    next = state.driveNext,
-    user = document.body.dataset.user ?? "",
-    branch = state.session?.workspace?.gitBranch ?? "",
-    hour = new Date().getHours(),
-    running = worktreeRun().fix,
-    plain = isPlain();
+  if (!state || inSession() || pageOpen) return;
+  const now = new Date(), hour = now.getHours(), plain = isPlain();
+  const when = `${now.toLocaleDateString(undefined, { weekday: "long" })} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`;
+  const user = document.body.dataset.user ?? "";
+  const slot = el("composer-slot"), home = el("hero-composer");
+  if (slot.parentElement !== home) home.append(slot);
   const here = plain ? [] : state.sessions.filter((session) => session.workspace === state!.workspace && session.id !== state!.session?.id);
   if (!plain) loadHomeRoutines();
   const waiting = here.filter((session) => session.waiting);
@@ -4175,7 +4157,10 @@ function renderHero() {
     .flatMap((routine) => routine.runs.filter((run) => leftAt != null && Date.parse(run.at) > leftAt!).map((run) => ({ title: state!.sessions.find((session) => session.id === run.sessionId)?.title || routine.text, at: run.at, sessionId: run.sessionId })))
     .filter((run) => !waiting.some((session) => session.id === run.sessionId))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-  const sentences = plain ? [] : awaySentences({
+  const busy = here.filter((session) => !session.waiting && (session.status === "running" || session.status === "queued") && !ran.some((run) => run.sessionId === session.id));
+  // An idle Home needs no status paragraph. Decisions come before typing;
+  // actual background news and the way back to a chat come after it.
+  const sentences = waiting.length || busy.length || ran.length ? awaySentences({
     now: Date.now(),
     leftAt,
     // Drive isn't on Home: its state and ideas live at the sidebar's foot,
@@ -4183,42 +4168,32 @@ function renderHero() {
     branches: [],
     running: null,
     waiting: waiting.map((session) => ({ sessionId: session.id, title: chatTitle(session.id), ask: session.ask })),
-    busy: here.filter((session) => !session.waiting && (session.status === "running" || session.status === "queued") && !ran.some((run) => run.sessionId === session.id)).map((session) => ({ sessionId: session.id, title: chatTitle(session.id) })),
+    busy: busy.map((session) => ({ sessionId: session.id, title: chatTitle(session.id) })),
     routines: ran,
     ideas: 0,
     asks: state.asks,
-    shown: { branches: reviewShown, drive: driveShown, ideas: ideasShown, ask: awayAskShown },
-  });
+    shown: { branches: false, drive: false, ideas: false, ask: awayAskShown },
+  }) : [];
   // Back to the chat you were last in, with the last thing you asked there.
   const last = [...here].filter((session) => session.turns > 0).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
   const asked = waiting.find((session) => session.id === awayAskShown)?.ask;
-  const signature = JSON.stringify([plain, state.workspace, sentences, review.map((job) => [job.id, job.status, job.diff, job.summary, job.checks]), running && [running.id, running.activity], state.breakage.busy, state.breakage.message, [...detailsOpen].filter((key) => key.startsWith("branch:")), next.proposals, next.loading, ideasShown && next.generatedAt && age(next.generatedAt), user, branch, hour, asked, last && [last.id, last.title, last.lastAsk, age(last.updatedAt)]]);
+  const pickTitle = last && chatTitle(last.id);
+  const signature = JSON.stringify([when, user, sentences, asked, last && [last.id, pickTitle, last.lastAsk, age(last.updatedAt)]]);
   if (signature === heroSignature) return;
   heroSignature = signature;
-  const composer = el("composer-slot");
-  composer.remove();
-  const name = state.workspace.replace(/[\\/]$/, "").split(/[\\/]/).at(-1) || state.workspace;
-  const day = new Date().toLocaleDateString(undefined, { weekday: "long" }),
-    when = `${day} ${hour < 5 ? "night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}`,
-    where = branch ? `${h(name)} on ${h(branch)}` : h(name);
-  // One paragraph: what happened while you were away, what needs you first.
-  // Each underlined phrase unfolds that thing right under it.
-  const paragraph = sentences.length ? `<p class="away">${sentences.map((sentence) => sentence.map(awayPart).join("")).join(" ")}</p>` : "";
-  const folds = [
-    asked?.kind === "permission" ? awayApproval(awayAskShown!, asked) : "",
-  ].filter(Boolean);
-  const fold = (folds.length ? `<div class="away-fold">${folds.join("")}</div>` : "") + branchNote();
+  el("home-when").textContent = when;
+  el("home-greeting").textContent = `What are we building${user ? `, ${user}` : ""}?`;
+  const paragraph = (lines: AwayPart[][]) => lines.length ? `<p class="away">${lines.map(sentence => sentence.map(awayPart).join("")).join(" ")}</p>` : "";
+  const fold = asked?.kind === "permission" ? `<div class="away-fold">${awayApproval(awayAskShown!, asked)}</div>` : "";
   const pick = last
-    ? btn("select-session", `<span class="pick-word">Pick up</span><b>${h(chatTitle(last.id))}</b>${last.lastAsk ? `<q>${h(last.lastAsk)}</q>` : ""}<span class="pick-age">${h(age(last.updatedAt))}</span><span class="pick-go" aria-hidden="true">›</span>`, { id: last.id }, "hero-pick")
+    ? btn("select-session", `<span class="pick-word">Pick up</span><b>${h(pickTitle!)}</b>${last.lastAsk ? `<q>${h(last.lastAsk)}</q>` : ""}<span class="pick-age">${h(age(last.updatedAt))}</span><span class="pick-go" aria-hidden="true">›</span>`, { id: last.id }, "hero-pick")
     : "";
-  // Just a chat: the time of day and the greeting; the project's news comes
-  // back once a project is picked.
-  el("hero").innerHTML = plain
-    ? `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1></div><div id="hero-composer"></div>`
-    : `<div class="intro"><span class="hero-eyebrow">${ICON_SPARK}${h(when)} · ${where}</span><h1>What are we building${user ? `, ${h(user)}` : ""}?</h1>${paragraph}${fold}${pick}</div><div id="hero-composer"></div>`;
-  el("hero-composer").append(composer);
-  // Home grew or lost lines (ideas unfolded, a branch to review): the sky
-  // ends above the greeting again, so no text sits on it.
+  const attention = el("home-attention"), after = el("home-after");
+  attention.innerHTML = waiting.length ? paragraph(sentences.slice(0, 1)) + fold : "";
+  attention.hidden = !attention.childElementCount;
+  after.innerHTML = paragraph(sentences.slice(waiting.length ? 1 : 0)) + pick;
+  after.hidden = !after.childElementCount;
+  // Keep the sky above the greeting when Home gains or loses lines.
   if (homeSky && !document.getElementById("home-sky")?.hidden) homeSky.refit();
 }
 /// A page in place of the conversation, opened from the sidebar: All chats
@@ -5593,7 +5568,7 @@ function composerFrame(width: number) {
       ? "Steer it while it works…"
       : threadsProposedHere() ? "Change the split in your own words…"
       : suggestion ? `${suggestion}   Tab` : inAssistant() ? "Ask your assistant…" : "Continue the conversation…"
-    : isPlain() ? "Ask anything…" : "Describe a change, paste an error, or drop a file…");
+    : isPlain() ? "Ask anything…" : "Ask about this project…");
   editor.disabled =
     state.connection !== "online" ||
     state.busy ||
@@ -5985,22 +5960,17 @@ function renderBriefing() {
   if (!broke) brokeShown = false;
   const mark = (kind: "spin" | "idea" | "amber" | "ok" | "bad" | "hollow") => kind === "spin" ? spinner() : `<span class="bf-dot ${kind}" aria-hidden="true"></span>`;
   let fold = "", toggle: { action: string; open: boolean } | null = null, progress: number | null = null;
-  // The pill on the top bar: Drive's mark and two or three words.
-  let pill = "";
-  const pillWord = (word: string, tone = "", about = "") => `<span class="dp-word${tone ? ` ${tone}` : ""}">${h(word)}</span>${about ? `<span class="dp-about">· ${h(about)}</span>` : ""}`;
   // Branches to review are the sidebar's Review line; Drive's place names
   // them only while that line has unfolded them here.
   if (review.length && !broke && reviewShown) {
     const about = away && away.status !== "running" ? "Drive ran them while you were away" : "";
     parts.push(`${mark("ok")}${btn("review-open", `${review.length} ${review.length === 1 ? "branch" : "branches"} to review`, {}, "bf-word")}${about ? `<span class="bf-about">${h(about)}</span>` : ""}`);
-    pill = `${mark("ok")}${pillWord("Drive", "", `${review.length} to review`)}`;
   }
   const label = (drive: NonNullable<Snapshot["drive"]>) => drive.status === "blocked" ? "Drive stopped" : drive.status === "paused" ? "Drive is paused" : "Drive is working";
   if (broke) {
     const first = signals[0]!, ci = /CI failure on (\S+)/.exec(first.title);
     const word = signals.length > 1 ? `${signals.length} things broke` : ci ? `CI failed on ${ci[1]}` : first.source === "checks" ? "A check is failing" : first.title;
     const about = signals.length > 1 ? "" : first.detail.replace(/^Latest run exit (\S+) at \S+\.\s*/, "");
-    pill = `${mark("bad")}${pillWord(signals.length > 1 ? `${signals.length} things broke` : ci ? "CI failed" : "Something broke", "bad")}`;
     parts.push(`${mark("bad")}${btn("broke-show", word, {}, "bf-word bad")}${about && !brokeShown ? `<span class="bf-about">${h(about)}</span>` : ""}`);
     toggle = { action: "broke-show", open: brokeShown };
     if (brokeShown) {
@@ -6017,11 +5987,6 @@ function renderBriefing() {
     const working = pinned.status === "running" || pinned.status === "waiting", stopped = pinned.status === "blocked";
     const about = [missionTitle(pinned), driveProgress(pinned)].filter(Boolean).join(" · ");
     const word = working ? shine("Drive is working") : label(pinned);
-    const tasks = driveTaskList(pinned), done = tasks.filter((task) => task.mark === "✓").length;
-    // The steps as a small meter (the improved top bar), up to eight marks.
-    const marks = Math.min(tasks.length, 8), lit = tasks.length ? Math.round((Math.min(done, tasks.length) / tasks.length) * marks) : 0;
-    const meter = tasks.length > 1 ? `<span class="dp-meter" role="img" aria-label="${Math.min(done, tasks.length)} of ${tasks.length} steps">${Array.from({ length: marks }, (_, i) => `<i${i < lit ? ' class="on"' : ""}></i>`).join("")}</span>` : "";
-    pill = `${driveRing(pinned)}${stopped ? pillWord("Drive stopped", "amber") : `${pillWord(pinned.status === "paused" ? "Drive paused" : "Drive", "", meter ? "" : working ? "working" : "")}${meter}`}`;
     parts.push(`${driveRing(pinned)}<span class="bf-word${stopped ? " amber" : ""}"${stopped ? ` title="${h(stoppedReason(pinned))}"` : ""}>${word}</span><span class="bf-about" title="${h(missionTitle(pinned))}">${h(about)}</span>`);
     const watch = pinned.homeSessionId !== state.session?.id ? btn("select-session", "Watch", { id: pinned.homeSessionId }, "bf-pill") : "";
     const acts = stopped
@@ -6030,20 +5995,17 @@ function renderBriefing() {
     parts.push(`<span class="bf-acts">${acts.filter(Boolean).join("")}</span>`);
   } else if (run.fix || run.away) {
     const about = run.fix ? run.fix.title : `Drive's list · ${run.away!.items.filter((item) => !["queued", "running"].includes(item.state)).length} of ${run.away!.items.length} done`;
-    pill = `${mark("idea")}${pillWord("Drive", "", "working")}`;
     parts.push(`${mark("spin")}${btn("drive-show", run.away?.auto ? "Drive is working on its own" : "Drive is working", {}, "bf-word")}<span class="bf-about">${h(about)}</span>`);
     if (run.fix) {
       toggle = { action: "drive-show", open: driveShown };
       if (driveShown) fold = `${branchRows([run.fix])}${run.away ? `<p class="bf-foot">${btn("breakage-away-stop", "Stop after this one", {}, "link", Boolean(state.breakage.busy))}</p>` : ""}`;
     }
   } else if (next.error && !next.proposals.length) {
-    pill = `${mark("amber")}${pillWord("Drive")}`;
     parts.push(`${mark("amber")}<span class="bf-word">Drive couldn't look for ideas</span>${btn("next-refresh", next.loading ? "looking…" : "look again", {}, "link", next.loading)}`);
   } else if (next.proposals.length) {
     const count = next.proposals.length, auto = state.breakage.auto;
     const title = `${count === 1 ? "One thing" : `${["", "", "Two", "Three", "Four", "Five"][count] ?? count} things`} I could do next`;
     const ideasWord = `${count} idea${count === 1 ? "" : "s"}`;
-    pill = `${mark("idea")}${pillWord("Drive", "", ideasWord)}`;
     parts.push(`${mark("idea")}${btn("ideas-show", ideasShown ? title : `Drive has ${ideasWord}`, {}, "bf-word")}`);
     if (auto && !auto.on) {
       // Off until you turn it on: it only runs what you start, so it spends
@@ -6077,17 +6039,11 @@ function renderBriefing() {
   done.hidden = !outcome;
   // A chat with no project has no Drive, and neither has the assistant's.
   node.hidden = !inSession() || !parts.length || isPlain() || inAssistant();
-  const pillNode = el("drive-pill"), sheet = el("drive-sheet");
-  const pillFrom = pillNode.querySelector<HTMLElement>(".bf-ring")?.dataset.fill;
-  pillNode.hidden = node.hidden;
-  pillNode.innerHTML = node.hidden ? "" : pill || `${mark("hollow")}${pillWord("Drive")}`;
-  easeRing(pillNode, pillFrom);
+  const sheet = el("drive-sheet");
   // A sheet just asked for (/drive starting a mission) waits a moment for Drive to have something to say.
   if (node.hidden && Date.now() - driveSheetAt > 15_000) driveSheetOpen = false;
   const sheetOpen = !node.hidden && (driveSheetOpen || Boolean(fold));
   sheet.hidden = !sheetOpen;
-  pillNode.setAttribute("aria-expanded", String(sheetOpen));
-  pillNode.title = node.hidden ? "" : sheetOpen ? "Hide Drive" : `Drive (${/Mac/i.test(navigator.platform) ? "⌥J" : "Alt+J"})`;
   // The folded reply empties too, so no stale control (a Pause after Stop) waits in it.
   if (node.hidden) { node.innerHTML = ""; el("drive-reply").hidden = true; el("drive-reply").innerHTML = ""; el("drive-reply").classList.remove("open"); return; }
   const chevron = toggle ? btn(toggle.action, CHEVRON, {}, "bf-chev").replace("<button ", `<button aria-label="${toggle.open ? "Hide" : "Show"}" aria-expanded="${toggle.open}" `) : "";
@@ -6246,21 +6202,11 @@ function tokensShort(value: number) {
 function placeOverlay() {
   const box = el("overlay"),
     chip = document.getElementById("composer-model"),
-    more = document.querySelector<HTMLElement>(".header-more"),
-    anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null,
-    below = overlay === "session" && more && more.offsetParent ? more.getBoundingClientRect() : null;
+    anchor = overlay === "models" && chip && chip.offsetParent ? chip.getBoundingClientRect() : null;
   box.classList.toggle("anchored", !!anchor);
-  box.classList.toggle("dropped", !!below);
-  box.classList.toggle("sheet", !!overlay && !anchor && !below);
+  box.classList.toggle("sheet", !!overlay && !anchor);
   box.style.left = box.style.right = box.style.top = box.style.bottom = box.style.maxHeight = "";
   const main = box.parentElement!.getBoundingClientRect();
-  if (below) {
-    // The ⋯ menu hangs from its button, at the right edge of the conversation.
-    box.style.right = `${Math.max(12, main.right - below.right)}px`;
-    box.style.top = `${below.bottom - main.top + 6}px`;
-    box.style.maxHeight = `${Math.max(160, main.bottom - below.bottom - 24)}px`;
-    return;
-  }
   if (!anchor) return;
   // Its right edge lines up with the chip; "More models" opens to the left.
   box.style.right = `${Math.max(12, main.right - anchor.right)}px`;
@@ -7817,7 +7763,6 @@ async function dispatch(
     compactionCard?.querySelector<HTMLButtonElement>(".compaction-toggle")?.focus({ preventScroll: true });
     return;
   }
-  if (action === "rebuild-app") { rebuildAsked = true; return api("rebuild-app", {}); }
   if (action === "question-control") return questionAction(args.action, questionById(args.id) ?? pendingQuestion());
   if (action === "question-pick") {
     snap(target, { scale: [0.96, 1], duration: 280 });
@@ -7974,16 +7919,17 @@ async function dispatch(
     }
     return;
   }
-  // /drive and Alt+J open what Drive has (its mission or its ideas) where it
-  // lives: the line at the conversation's end, or under the start composer.
-  if (action === "drive-sheet") {
-    if (driveSheetOpen || el("briefing").classList.contains("open")) closeBriefingCard();
-    else { driveSheetOpen = true; renderBriefing(); }
-    return;
-  }
+  // /drive and Alt+J still reach Drive without a permanent toolbar button.
   if (action === "drive-open") {
     const run = worktreeRun(), busy = Boolean(pinnedMission() || run.fix || run.away);
-    if (inSession()) { driveSheetOpen = args.toggle ? !driveSheetOpen : true; driveSheetAt = Date.now(); }
+    if (inSession()) {
+      if (args.toggle && !el("drive-sheet").hidden) { closeBriefingCard(); return; }
+      driveSheetOpen = true;
+      driveSheetAt = Date.now();
+      // Show an existing briefing (including errors and failed checks) before
+      // asking Drive to look for new ideas. The shortcut opens the summary.
+      if (!el("briefing").hidden && (args.toggle || state?.driveNext.error || state?.breakage.signals.length)) { renderBriefing(); return; }
+    }
     if (busy) driveShown = args.toggle ? !driveShown : true;
     else if (state?.driveNext.proposals.length) ideasShown = args.toggle ? !ideasShown : true;
     else return driveAction("next-refresh");
@@ -8410,6 +8356,9 @@ let renderedPalette: Snapshot["palette"] | null = null,
 let threadsFolded = true, threadsFoldedFor: string | null = null, threadFileOpen: string | null = null;
 /// The proposed threads this chat's ribbon has already opened itself for.
 const threadsProposedSeen = new Set<string>();
+/// Each thread's last state, so the ribbon laps once when one finishes or asks.
+const threadsStateSeen = new Map<string, ThreadState>();
+let threadsLapTimer: ReturnType<typeof setTimeout> | undefined;
 const threadsProposed = () => state?.threads.list.filter((fix) => fix.status === "starting" && fix.thread?.proposed) ?? [];
 /// Whether this chat holds threads that wait for Start.
 const threadsProposedHere = () => Boolean(state && state.session?.id === state.threads.from && threadsProposed().length);
@@ -8452,7 +8401,7 @@ function renderThreads() {
   const foot = el("threads-foot"), footHTML = mine ? threadsMessageHTML(view) : "";
   if (foot.dataset.html !== footHTML) { foot.innerHTML = footHTML; foot.dataset.html = footHTML; foot.hidden = !footHTML; }
   // Each chat's ribbon starts as its one bar.
-  if (threadsFoldedFor !== view.from) { threadsFoldedFor = view.from; threadsFolded = true; threadFileOpen = null; threadsProposedSeen.clear(); }
+  if (threadsFoldedFor !== view.from) { threadsFoldedFor = view.from; threadsFolded = true; threadFileOpen = null; threadsProposedSeen.clear(); threadsStateSeen.clear(); }
   // It opens on its own only for threads that are proposed and wait for Start.
   if (mine) for (const fix of threadsProposed()) if (!threadsProposedSeen.has(fix.id)) { threadsProposedSeen.add(fix.id); threadsFolded = false; }
   const html = mine ? threadsRibbonHTML(view, { folded: threadsFolded, file: threadFileOpen, armed: threadDeleteArmed, peek: threadsFolded ? null : threadPeek(), asking: state.questions.find((question) => question.thread)?.thread?.id ?? null }) : "";
@@ -8460,6 +8409,11 @@ function renderThreads() {
   if (host.dataset.html !== html) { drawThreadsRibbon(host, html); host.dataset.html = html; }
   host.hidden = !html;
   el("app").classList.toggle("has-threads", Boolean(html));
+  // One lap of silver round the ribbon's edge when a thread finishes or needs you, then still.
+  if (threadsNews(threadsStateSeen, view.list) && html) {
+    host.classList.remove("lap"); void host.offsetWidth; host.classList.add("lap");
+    clearTimeout(threadsLapTimer); threadsLapTimer = setTimeout(() => host.classList.remove("lap"), CARD_LAP_MS);
+  }
 }
 /// Redraws the ribbon in place: the card stays (so it folds and unfolds
 /// smoothly), and only the lines that changed are replaced.
@@ -8596,7 +8550,6 @@ function renderState(next: Snapshot) {
   renderCompletion();
   renderSetup();
   renderNotifications();
-  rebuildWhenIdle();
   if (
     !editor.disabled &&
     !overlay &&
@@ -8622,10 +8575,10 @@ function renderState(next: Snapshot) {
   }
 }
 new ResizeObserver(() => renderComposer()).observe(editor);
-// A press anywhere but Drive's pill, its sheet or the sidebar's Review line folds Drive's sheet away.
+// A press outside the sheet and the sidebar's Review line folds the sheet away.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Element;
-  if (el("drive-sheet").hidden || target.closest?.('#bar-drive, [data-action="review-open"]')) return;
+  if (el("drive-sheet").hidden || target.closest?.('#drive-sheet, [data-action="review-open"]')) return;
   closeBriefingCard();
 }, true);
 document.addEventListener("click", (event) => {
@@ -9121,7 +9074,7 @@ document.addEventListener("keydown", (event) => {
     run(() => dispatch("follow", {}));
     return;
   }
-  if (event.altKey && key === "j") {
+  if (event.altKey && (key === "j" || event.code === "KeyJ")) {
     run(() => dispatch("drive-open", { toggle: true }));
     return;
   }

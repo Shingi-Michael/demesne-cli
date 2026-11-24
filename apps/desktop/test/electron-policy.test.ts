@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, browserKey, openTarget, placeRect, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, browserKey, outsideSignin, openTarget, placeRect, validateRequest } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -47,6 +47,10 @@ test("find and zoom keys pressed on the chat's page go to its bar", () => {
   expect(browserKey(key("c"), true)).toBe("");
   expect(browserKey(key("f", { alt: true }), true)).toBe("");
   expect(browserKey(key("f", { type: "keyUp" }), true)).toBe("");
+});
+test("Google's sign-in pages go to your own browser; its sign-out does not", () => {
+  for (const url of ["https://accounts.google.com/v3/signin/identifier?continue=x", "https://accounts.google.com/o/oauth2/v2/auth?client_id=1", "https://accounts.google.com/ServiceLogin"]) expect(outsideSignin(url)).toBe(true);
+  for (const url of ["https://accounts.google.com/Logout", "https://google.com/", "http://accounts.google.com/x", "https://accounts.google.com.evil.test/", "nonsense"]) expect(outsideSignin(url)).toBe(false);
 });
 test("zoom preserves the desktop's fixed levels", () => {
   expect(nextZoom(1, 1)).toBe(1.1);

@@ -97,3 +97,16 @@ test("step 3 of pass 273 A: a sheet is drawn as a table that sorts, edits, adds 
   expect(page).toContain(`"base":"${sheetBase(csv)}"`);
   expect(sheetBase(csv)).not.toBe(sheetBase(csv + "C3,6,1\n"));
 });
+
+test("step 4 of pass 273 A: a whiteboard is drawn from its JSON, moves and connects, and keeps what you change", async () => {
+  const { boardPage, sheetBase } = await import("../electron/foundry-more-kinds.ts");
+  const json = '{"notes":[{"id":"a","text":"<Ask>","x":40,"y":40,"tone":"sky"},{"id":"b","text":"Book"}],"arrows":[{"from":"a","to":"b","label":"then"}]}';
+  const page = foundryDocument("board", json, "Visit <flow>");
+  expect(page).toBe(boardPage(json, "Visit <flow>"));
+  expect(page).toContain("<title>Visit &lt;flow&gt;</title>");
+  expect(page).toContain('"text":"\\u003cAsk>"');
+  expect(page).not.toContain("<Ask>");
+  expect(page).toContain('"tone":"sky"');
+  expect(page).toContain('demesne.save("board"');
+  expect(page).toContain(`"base":"${sheetBase(json)}"`);
+});

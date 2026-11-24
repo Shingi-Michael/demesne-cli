@@ -10,7 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
-import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, FOUNDRY_FILE_NAME, FOUNDRY_MAX_FILES, withFoundryFiles, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, cleanWalk, walkProblem, optionNames, sheetProblem, FOUNDRY_MAX_VARIANTS, FOUNDRY_MAX_WALK_PARTS, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
+import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, FOUNDRY_FILE_NAME, FOUNDRY_MAX_FILES, withFoundryFiles, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, cleanWalk, walkProblem, optionNames, sheetProblem, boardProblem, boardWords, FOUNDRY_MAX_VARIANTS, FOUNDRY_MAX_WALK_PARTS, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
@@ -81,9 +81,9 @@ export const READY_KINDS_RULES = "Ready kinds: slides are kind deck, a report, b
 /// More kinds (apps/desktop/electron/foundry-more-kinds.ts): what the model
 /// would write anyway, drawn by Demesne with libraries from the app.
 export const MORE_KINDS_RULES = "More kinds: an interactive app, tool or game in React is kind react: one component in JSX or TSX with export default, styled with Tailwind classes, importing only "
-  + FOUNDRY_REACT_IMPORTS.filter((name) => name !== "react-dom/client").join(", ") + " (icons, charts). A diagram (flow, sequence, states, entities, timeline, gantt, mind map) is kind mermaid: Mermaid source only. "
+  + FOUNDRY_REACT_IMPORTS.filter((name) => name !== "react-dom/client").join(", ") + " (icons, charts). A diagram (flow, sequence, states, gantt, mind map…) is kind mermaid: Mermaid source only. "
   + "Code to read is kind code: the code only, its file name in the title (orders.ts). "
-  + "A table to sort, fill in and add up is kind sheet: CSV, first row the column names. Anything else interactive is html.";
+  + "A table to sort, fill in and add up is kind sheet: CSV, first row the column names. A whiteboard is kind board: JSON notes, arrows, groups. Anything else interactive is html.";
 
 /// Pages that remember (apps/desktop/foundry-kit/remember.js): Demesne puts
 /// the runtime in front of any page that calls it, so the page needs no tag.
@@ -292,7 +292,7 @@ function remember(turnId: string | undefined, id: string, version: number) {
 
 /// The words a page shows: its markup without scripts, styles or tags (pass 273 A).
 export function pageWords(kind: string, source: string): string {
-  const text = kind === "markdown" || kind === "mermaid" || kind === "code" || kind === "sheet" ? source
+  const text = kind === "board" ? boardWords(source) : kind === "markdown" || kind === "mermaid" || kind === "code" || kind === "sheet" ? source
     : source.replace(/<(script|style|svg)\b[\s\S]*?<\/\1>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"');
   return text.replace(/\s+/g, " ").trim().slice(0, 20_000);
@@ -374,7 +374,7 @@ const reviewSaid = (source: string, first: boolean) => `${first && reviewOf(sour
 /// A page that draws a button only a demo needs (Replay, Play demo, Next
 /// step) is sent back once per ask: the demo belongs to Foundry. A second
 /// save goes through, for the page whose real design has one.
-/// A react, mermaid, code or sheet artifact that won't draw says why at save, so
+/// A react, mermaid, code, sheet or board artifact that won't draw says why at save, so
 /// the model fixes it before the person sees a broken page.
 const tsx = new Bun.Transpiler({ loader: "tsx" });
 export function checkKindSource(kind: FoundryKind | undefined, source: string) {
@@ -386,6 +386,10 @@ export function checkKindSource(kind: FoundryKind | undefined, source: string) {
     const other = scanned.imports.find((one) => !(FOUNDRY_REACT_IMPORTS as readonly string[]).includes(one.path));
     if (other) throw new Error(`[invalid_input] "${other.path}" can't be imported in a react artifact. Hint: only ${FOUNDRY_REACT_IMPORTS.filter((name) => name !== "react-dom/client").join(", ")}; write anything else in the file`);
     if (!scanned.exports.includes("default")) throw new Error("[invalid_input] The component needs an export default. Hint: export default function App() { … }");
+  }
+  if (kind === "board") {
+    const problem = boardProblem(source);
+    if (problem) throw new Error(`[invalid_input] ${problem}`);
   }
   if (kind === "sheet") {
     const problem = sheetProblem(source);

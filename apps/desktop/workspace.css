@@ -1680,28 +1680,6 @@ html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notc
 #timeline .tl-label span { color: var(--t4); }
 @media (prefers-reduced-motion: reduce) { #timeline, #timeline .tl-m { transition: none; } }
 
-/* Snap to past mockups (pass 209 A): Foundry's edge has a tick per mockup,
-   the one on screen pink. Pointing there (or typing a name) opens the ticks
-   into names grouped by day; a click snaps the page to that mockup. */
-#foundry-rail { position: absolute; right: 0; z-index: 7; display: flex; flex-direction: column; justify-content: center; pointer-events: none; }
-#foundry-rail .fr-in { pointer-events: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; max-height: 100%; overflow-y: auto; scrollbar-width: none; padding: 8px 12px 8px 8px; border-radius: 12px 0 0 12px; transition: background-color 160ms var(--ease, ease), box-shadow 160ms var(--ease, ease); }
-#foundry-rail .fr-tk { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: 10px; white-space: nowrap; }
-#foundry-rail .fr-tk i { flex: none; width: 14px; height: 2px; border-radius: 2px; background: var(--t4, var(--t3)); transition: width 160ms var(--ease, ease), background-color 160ms var(--ease, ease); }
-#foundry-rail .fr-tk.on i { width: 22px; background: var(--blossom, #f2b6c8); }
-#foundry-rail .fr-tk:focus-visible { outline: 2px solid var(--electric, #4c8dff); outline-offset: 2px; border-radius: 4px; }
-#foundry-rail .fr-name, #foundry-rail .fr-day, #foundry-rail .fr-find { display: none; }
-#foundry-rail .fr-day { height: 6px; }
-#foundry-rail.open .fr-in { gap: 2px; padding: 12px 12px 12px 18px; background: color-mix(in srgb, var(--panel, var(--ink)) 96%, transparent); box-shadow: -1px 0 0 var(--hair), -18px 0 40px -18px rgba(0, 0, 0, .55); backdrop-filter: blur(16px); }
-#foundry-rail.open .fr-tk { height: 24px; }
-#foundry-rail.open .fr-name { display: inline; max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: var(--t2); font-size: 12.5px; }
-#foundry-rail.open .fr-name small { margin-left: 7px; color: var(--t3); font-size: 11.5px; }
-#foundry-rail.open .fr-tk:hover .fr-name, #foundry-rail.open .fr-tk.on .fr-name { color: var(--t1); }
-#foundry-rail.open .fr-day { display: flex; align-self: stretch; height: 22px; align-items: flex-end; padding-bottom: 2px; color: var(--t3); font-size: 11.5px; }
-#foundry-rail.open .fr-day:first-child { height: 16px; }
-#foundry-rail.open .fr-find { display: flex; flex-direction: column; align-self: stretch; gap: 1px; padding: 0 0 8px; margin-bottom: 4px; box-shadow: inset 0 -1px 0 var(--hair); }
-#foundry-rail .fr-find span { color: var(--t1); font-size: 13px; }
-#foundry-rail .fr-find small { color: var(--t3); font-size: 11.5px; }
-@media (prefers-reduced-motion: reduce) { #foundry-rail .fr-in, #foundry-rail .fr-tk i { transition: none; } }
 
 /* The rim says the state (pass 74 B): the panel's edge carries the chat's
    state. Work: a blue light runs along it. Wait: a still amber arc on top.
@@ -1962,6 +1940,44 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 @media (prefers-reduced-motion: reduce) { .fn-plus { animation: none; } .fd-notes-work { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .fd-stage { transition: none; } }
 .fd-h { margin-bottom: 18px; }
+/* Pass 273 A: Foundry's front page, a card with a picture of everything made, pinned first. */
+.fg-top { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.fg-top .fd-h { margin: 0; flex: 1; }
+.fg-search { display: flex; align-items: center; gap: 8px; width: min(300px, 46%); height: 32px; padding: 0 10px; border-radius: var(--r); background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; color: var(--t3); }
+.fg-search:focus-within { box-shadow: 0 0 0 1px var(--hair2) inset; }
+.fg-search .ico { width: 15px; height: 15px; flex: none; }
+.fg-search input { all: unset; flex: 1; min-width: 0; color: var(--t1); font-size: 13px; }
+.fg-search input::placeholder { color: var(--t4); }
+.fg-search input::-webkit-search-cancel-button { filter: grayscale(1); opacity: .5; }
+.fg-chips { display: flex; gap: 4px; margin-bottom: 8px; }
+.fg-chip { all: unset; cursor: pointer; padding: 4px 11px; border-radius: 99px; color: var(--t3); font-size: 13px; }
+.fg-chip:hover { color: var(--t1); }
+.fg-chip.on { background: var(--tone2); color: var(--t1); }
+.fg-chip:focus-visible, .fg-back:focus-visible, .fg-go:focus-visible, .fg-pin:focus-visible { outline: 2px solid var(--focus, var(--hair2)); outline-offset: 2px; }
+.fg-group { margin: 18px 0 10px; color: var(--t3); font-size: 12.5px; font-weight: 500; }
+.fg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 22px 16px; }
+.fg-card { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fg-th { position: relative; aspect-ratio: 16 / 10; margin-bottom: 6px; border-radius: var(--r); overflow: hidden; background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; }
+.fg-card:hover .fg-th { box-shadow: 0 0 0 1px var(--hair2) inset; }
+/* Drawn at four times the card's size, then scaled down: a page sees a desktop-width window. */
+.fg-frame { position: absolute; left: 0; top: 0; width: 400%; height: 400%; border: 0; transform: scale(.25); transform-origin: 0 0; pointer-events: none; background: #fff; }
+.fg-doc.fd-doc { position: absolute; inset: 0; max-width: none; width: 250%; height: 250%; padding: 36px 44px; box-sizing: border-box; box-shadow: none; border-radius: 0; transform: scale(.4); transform-origin: 0 0; overflow: hidden; pointer-events: none; }
+.fg-name { color: var(--t1); font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fg-meta { color: var(--t3); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fg-go { all: unset; position: absolute; inset: 0; cursor: pointer; border-radius: var(--r); }
+.fg-pin { all: unset; cursor: pointer; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 99px; color: var(--t2); }
+.fg-card .fg-pin { position: absolute; right: 8px; top: 8px; background: rgb(0 0 0 / .55); color: rgb(255 255 255 / .9); opacity: 0; transition: opacity .15s var(--ease); }
+.fg-card:hover .fg-pin, .fg-card .fg-pin:focus-visible, .fg-card .fg-pin.on { opacity: 1; }
+.fg-pin .ico { width: 14px; height: 14px; }
+.fg-pin.on .ico { fill: currentColor; }
+.fg-pin:hover { color: var(--t1); }
+.fg-none { margin: 28px 0; color: var(--t3); font-size: 13px; }
+.fg-back { all: unset; cursor: pointer; color: var(--t3); font-size: 13px; }
+.fg-back:hover { color: var(--t1); }
+.fg-one { display: flex; align-items: center; gap: 12px; margin: 8px 0 18px; }
+.fg-one .fd-h { margin: 0; }
+.fg-one .fg-meta { flex: 1; }
+@media (prefers-reduced-motion: reduce) { .fg-card .fg-pin { transition: none; } }
 .fd-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 20px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair) inset; color: var(--t3); font-size: 13px; text-align: center; }
 .fd-empty .ico { width: 28px; height: 28px; margin-bottom: 4px; stroke-width: 1.3; }
 .fd-empty b { color: var(--t1); font-weight: 500; }

@@ -97,6 +97,20 @@ Foundry used to keep a small hand-made copy of the app for mockups of Demesne, a
 
 The window is glass over your desktop; in a mockup a still grey backdrop stands in for what is behind it.
 
+## A front page for everything made
+
+Foundry opens on a front page, the way Claude's own artifacts page does (pass 273 A). Before it, Foundry was one long page of versions you mostly reached from the chat that made them: there was no search, nothing to pin, and no quick way to see what you had made across projects.
+
+- **A card for each mockup**, from every project, newest first, with a picture of its newest version. The picture is the page itself, drawn small: it loads only near the screen, takes no input and plays no demo. A Markdown document shows its first lines. Under it are its name, its kind, its project, and when it last changed.
+- **Search** at the top ("Search everything made"), or just start typing anywhere on the page. It reads names, descriptions, kinds, projects and chats as you type, and a moment later the words on each page too (the daemon's `searchFoundry`, which also reads the asks and whys).
+- **All, This project, Pinned, Shared.** "This project" is the project this window is in. "Shared" lists the mockups shared to a link on your GitHub Pages (see Share outside Demesne below).
+- **Pin.** Rest on a card and press its pin, or use the pin beside the name on its own page. Pinned mockups sit at the top, in the order you pinned them. Pins are kept in the app's settings folder (`foundry-pins.json`).
+- **A card opens that mockup's own long page**: its versions by day, newest first, with everything below (open it full width, notes, compare, share). "← Foundry" goes back to the front page. A mockup's link in the chat opens its own page the same way.
+
+The rail of ticks on the long page's edge (pass 209 A) is gone: the front page and its search are how you find a past mockup now.
+
+Read about it: [Recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/) (Nielsen Norman Group: why a picture of each thing beats remembering which chat made it), and [Cards](https://m3.material.io/components/cards/overview) (Material Design: when a grid of cards is the right way to show a collection).
+
 ## A mockup you can hold
 
 Foundry's long page is for looking. The one mockup you open is for using, the way a Claude artifact is (pass 262 C). A mockup's link in the chat, or its name on the long page, opens it where it sits: it grows to the full width the page has, as tall as the window, and gets one quiet line of grey icons on its name line.

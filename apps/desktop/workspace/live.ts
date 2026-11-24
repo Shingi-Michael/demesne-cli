@@ -35,12 +35,12 @@ import { agentMood, forYou, moodTitle, newSince, storiesOf, storyAgents, todayPa
 import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
-import { codeWithFiles, foundryOrder, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
+import { codeWithFiles, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
+import { galleryGrid, galleryPage, oneHead, type FoundryGallery, type GalleryView } from "./foundry-gallery.ts";
 import { placeEdit } from "./foundry-edit.ts";
 import { watchFoundrySites } from "./foundry-sites.ts";
 import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
 import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, notePictureFile, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
-import { railHTML, railMarks, railMatches, railStep, type RailMark } from "./foundry-rail.ts";
 import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planLook, planMoved, planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
@@ -4438,6 +4438,12 @@ function ensureMockupNames() {
 let foundryFocus: { id: string; version?: number; quiet?: boolean } | null = null;
 /// Pass 262 C: the one mockup grown to full width on the long page, if any.
 let foundryOpen: FoundryOpen | null = null;
+/// Pass 273 A: the front page's search and filter, and the one mockup whose
+/// long page is open instead; what you pinned, and what is shared to a link.
+const foundryGallery: FoundryGallery = { query: "", filter: "all", one: null };
+let foundryPins: string[] = [], foundryShared = new Set<string>();
+/// The mockups the daemon found by the words on their pages, for the search typed now.
+let foundryFound: { query: string; ids: Set<string> } | null = null, foundrySearchTimer = 0;
 /// Documents on the long page, rendered once they scroll near ("id:version").
 const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
 const foundryUi = { error: "" };
@@ -4753,8 +4759,6 @@ function openPage(kind: "" | PageKind) {
   pageOpen = kind;
   if (kind === "foundry") foundryLooked();
   sidebarSignature = heroSignature = "";
-  // The rail on the edge is Foundry's alone.
-  if (kind !== "foundry") { railQuery = ""; paintRail(); }
   if (kind === "active" || kind === "archived") void loadArchived();
   if (kind === "scheduled") { if (was !== "scheduled") routineUi.error = ""; void loadRoutines(); }
   if (kind === "customize") { if (was !== "customize") Object.assign(customizeUi, { editing: null, error: "" }); void loadCustomize(); }
@@ -4763,8 +4767,8 @@ function openPage(kind: "" | PageKind) {
       foundryUi.error = "";
       // What changed was shown the last time the page was open.
       foundryChanged.clear();
-      // Back to the mockup you were on, unless a link asked for another.
-      if (!foundryFocus && foundryPlace) foundryFocus = { id: foundryPlace, quiet: true };
+      // Pass 273 A: the front page, unless a link asked for a mockup.
+      if (!foundryFocus) { foundryGallery.one = null; foundryOpen = null; }
     }
     foundrySaves = foundrySaveCount(); void loadFoundry();
   }
@@ -4791,7 +4795,8 @@ function foundrySaveCount() {
 }
 async function loadFoundry() {
   try {
-    const shelf = await api<FoundryListResponse>("foundry-shelf");
+    const [shelf, marks] = await Promise.all([api<FoundryListResponse>("foundry-shelf"), api<{ pins: string[]; shared: string[] }>("desktop-foundry-gallery").catch(() => null)]);
+    if (marks) { foundryPins = marks.pins; foundryShared = new Set(marks.shared); }
     foundryList = shelf.artifacts;
     foundryVersions = shelf.versions ?? shelf.artifacts.map((item) => ({ artifactId: item.id, version: item.version, createdAt: item.updatedAt, sessionId: item.sessionId, note: "" }));
     foundryNames = shelf.artifacts.map(({ id, title, version, description, kind }) => ({ id, title, version, description: description ?? "", kind }));
@@ -4950,87 +4955,16 @@ function showFoundryFocus() {
   if (!target) return;
   foundryFocus = null;
   target.scrollIntoView({ block: "start" });
-  paintRail();
   if (focus.quiet) return;
   target.classList.add("fd-here");
   setTimeout(() => target.classList.remove("fd-here"), 1600);
 }
-/// Snap to past mockups (pass 209 A): the rail on Foundry's edge, a tick per
-/// mockup, the one on screen lit. It opens into names while pointed at or
-/// while you type a name; a click, ↑ ↓ or Enter snaps the page to one.
-/// Leaving Foundry and coming back returns to the mockup you were on.
-let rail: RailMark[] = [], railHere: string | null = null, railQuery = "", railHTMLNow = "", railFrame = 0;
-/// The mockup you were on when you left Foundry.
-let foundryPlace: string | null = null;
-function railCurrent(): string | null {
-  const stage = el("stage"), top = stage.getBoundingClientRect().top + 120;
-  let here: string | null = null;
-  for (const item of document.querySelectorAll<HTMLElement>("#page .fd-item")) {
-    if (item.getBoundingClientRect().top > top) break;
-    here = item.dataset.fd!.slice(0, item.dataset.fd!.lastIndexOf(":"));
-  }
-  return here ?? rail[0]?.id ?? null;
-}
-function paintRail() {
-  railFrame = 0;
-  const node = el("foundry-rail"), stage = el("stage");
-  const on = pageOpen === "foundry" && rail.length > 1;
-  if (node.hidden === on) node.hidden = !on;
-  if (!on) return;
-  node.style.top = `${stage.offsetTop + 14}px`;
-  node.style.height = `${Math.max(0, stage.clientHeight - 28)}px`;
-  railHere = railCurrent();
-  if (railHere) foundryPlace = railHere;
-  node.classList.toggle("open", Boolean(railQuery) || node.matches(":hover"));
-  const html = railHTML(rail, railHere, railQuery);
-  if (html !== railHTMLNow) { node.querySelector(".fr-in")!.innerHTML = railHTMLNow = html; }
-}
-const repaintRail = () => { if (!railFrame) railFrame = requestAnimationFrame(paintRail); };
-function setRail() {
-  rail = railMarks(foundryOrder(foundryList, foundryVersions));
-  repaintRail();
-}
-/// The page snaps to the mockup (its newest version), with no flash: the
-/// lit tick already says where you are.
-function railGo(id: string) {
-  railQuery = "";
-  foundryFocus = { id, quiet: true };
-  showFoundryFocus();
-}
-el("foundry-rail").addEventListener("pointerenter", () => { el("foundry-rail").classList.add("open"); });
-el("foundry-rail").addEventListener("pointerleave", () => { if (!railQuery) el("foundry-rail").classList.remove("open"); });
-el("foundry-rail").addEventListener("click", (event) => {
-  const tick = (event.target as HTMLElement).closest<HTMLElement>("[data-rail]");
-  if (tick) railGo(tick.dataset.rail!);
-});
-el("stage").addEventListener("scroll", () => { if (pageOpen === "foundry") repaintRail(); }, { passive: true });
-new ResizeObserver(() => { if (pageOpen === "foundry") repaintRail(); }).observe(el("stage"));
-/// On Foundry, ↑ and ↓ step between mockups, and typing a name finds one.
+/// Pass 273 A: on the front page, typing anywhere starts a search.
 document.addEventListener("keydown", (event) => {
-  if (pageOpen !== "foundry" || rail.length < 2 || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || overlay) return;
+  if (pageOpen !== "foundry" || foundryGallery.one || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || overlay || event.key.length !== 1 || !/\S/.test(event.key)) return;
   const target = event.target as HTMLElement | null;
   if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']")) return;
-  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-    const next = railStep(railQuery ? railMatches(rail, railQuery) : rail, railCurrent(), event.key === "ArrowDown" ? 1 : -1);
-    if (!next) return;
-    event.preventDefault();
-    if (railQuery) { railQuery = ""; }
-    railGo(next.id);
-    return;
-  }
-  if (event.key === "Escape" && railQuery) { event.preventDefault(); railQuery = ""; paintRail(); return; }
-  if (event.key === "Enter" && railQuery) {
-    event.preventDefault();
-    const first = railMatches(rail, railQuery)[0];
-    if (first) railGo(first.id); else { railQuery = ""; paintRail(); }
-    return;
-  }
-  if (event.key === "Backspace" && railQuery) { event.preventDefault(); railQuery = railQuery.slice(0, -1); paintRail(); return; }
-  if (event.key.length === 1 && (railQuery || /\S/.test(event.key))) {
-    event.preventDefault();
-    railQuery = (railQuery + event.key).slice(0, 60);
-    paintRail();
-  }
+  document.querySelector<HTMLInputElement>("#page #fg-q")?.focus({ preventScroll: true });
 });
 /// Surfaces, options and demos on the long page (pass 221 A).
 let foundryStagesStop: (() => void) | null = null;
@@ -5100,8 +5034,13 @@ function renderPage() {
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
     foundryNotesTick();
-    html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, open: foundryOpen, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
-      builtIn: (id) => { const pr = pullRequests.get(id); return pr?.state === "merged" ? { number: pr.number, createdAt: pr.createdAt } : null; } });
+    // Pass 273 A: a link to a mockup opens its own long page; otherwise the front page.
+    if (foundryFocus?.id) foundryGallery.one = foundryFocus.id;
+    const one = foundryGallery.one ? foundryList?.find((item) => item.id === foundryGallery.one) : null;
+    if (foundryList && foundryVersions && !one) { foundryGallery.one = null; html = galleryPage(galleryView(here), foundryUi.error); }
+    else html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, open: foundryOpen, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
+      builtIn: (id) => { const pr = pullRequests.get(id); return pr?.state === "merged" ? { number: pr.number, createdAt: pr.createdAt } : null; },
+      ...(one ? { only: one.id, head: oneHead(one, foundryPins.includes(one.id), foundryShared.has(one.id)) } : {}) });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
@@ -5131,7 +5070,7 @@ function renderPage() {
   root.dataset.html = html;
   if (pageOpen === "foundry") paintFoundrySaid();
   if (pageOpen === "today") mountReel(root);
-  if (pageOpen === "foundry") { watchFoundryDocs(root); setRail(); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow, fitDropped); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); foundrySitesWatch = watchFoundrySites(root, (id, host) => api("desktop-foundry-site", { id, host })); }
+  if (pageOpen === "foundry") { watchFoundryDocs(root); foundryStagesStop = watchFoundryStages(root); foundryNotesWatch = watchFoundryNotes(root, foundryNotes, (key) => void sendFoundryNotes(key), cropWindow, fitDropped); foundryErrorsWatch = watchFoundryErrors(root, foundryErrors, (key) => void sendFoundryError(key)); foundrySitesWatch = watchFoundrySites(root, (id, host) => api("desktop-foundry-site", { id, host })); }
   const googleSlot = root.querySelector<HTMLElement>("[data-google-provider], [data-anthropic-provider]");
   if (googleSlot) {
     const key = googleSlot.dataset.anthropicProvider ?? googleSlot.dataset.googleProvider!;
@@ -7370,7 +7309,58 @@ document.addEventListener("keydown", (event) => {
   void foundryOpenAction("foundry-shrink", {});
 });
 /// Foundry's long page: links from the chat, and the day strip. You only look here.
+/// Pass 273 A: what the front page draws from.
+function galleryView(here: string | null | undefined): GalleryView {
+  return { list: foundryList ?? [], versions: foundryVersions ?? [], gallery: foundryGallery, here: here ?? null, pins: foundryPins, shared: foundryShared,
+    found: foundryFound && foundryFound.query === foundryGallery.query.trim() ? foundryFound.ids : null, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null };
+}
+const foundryHere = () => document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace || null;
+/// Typing in the front page's search: the cards follow each key, and the
+/// daemon's search of the words on the pages joins in a moment later.
+function foundrySearchTyped(value: string) {
+  foundryGallery.query = value;
+  paintGalleryCards();
+  clearTimeout(foundrySearchTimer);
+  const query = value.trim();
+  if (!query) { foundryFound = null; return; }
+  foundrySearchTimer = window.setTimeout(() => {
+    void api<string[]>("foundry-search", { query }).then((ids) => {
+      foundryFound = { query, ids: new Set(ids) };
+      if (foundryGallery.query.trim() === query) paintGalleryCards();
+    }).catch(() => {});
+  }, 180);
+}
+function paintGalleryCards() {
+  const cards = document.querySelector<HTMLElement>("#page #fg-cards");
+  if (!cards || pageOpen !== "foundry") return;
+  cards.innerHTML = galleryGrid(galleryView(foundryHere()));
+  const root = document.getElementById("page");
+  if (root) watchFoundryDocs(root);
+}
 async function foundryAction(action: string, args: Record<string, any>) {
+  // Pass 273 A: the front page.
+  if (action === "foundry-one") {
+    foundryGallery.one = String(args.id); foundryOpen = null;
+    renderPage(); el("stage").scrollTop = 0;
+    return;
+  }
+  if (action === "foundry-home") {
+    foundryGallery.one = null; foundryOpen = null; foundryFocus = null;
+    renderPage(); el("stage").scrollTop = 0;
+    return;
+  }
+  if (action === "foundry-filter") {
+    foundryGallery.filter = (["all", "here", "pinned", "shared"] as const).find((key) => key === args.filter) ?? "all";
+    return renderPage();
+  }
+  if (action === "foundry-pin") {
+    const id = String(args.id), pinned = args.pinned === true;
+    foundryPins = pinned ? [id, ...foundryPins.filter((one) => one !== id)] : foundryPins.filter((one) => one !== id);
+    renderPage();
+    try { foundryPins = (await api<{ pins: string[] }>("desktop-foundry-pin", { id, pinned })).pins; }
+    catch (error) { foundryUi.error = errorWords(error); }
+    return renderPage();
+  }
   if (await foundryOpenAction(action, args)) return;
   if (action === "foundry-open") return openFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
   if (action === "foundry-open-step") {

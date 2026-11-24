@@ -14,6 +14,13 @@ export type GitHubCall = (method: string, path: string, body?: unknown) => Promi
 /// What is shared, as kept on disk: { [artifact id]: { slug, url, version } }.
 export interface Shared { slug: string; url: string; version: number }
 export type Shares = Record<string, Shared>;
+/// Pass 273 A: the pinned mockups' ids, as kept; anything else in the file is dropped.
+export function readPins(text: string | null): string[] {
+  try {
+    const parsed = JSON.parse(text ?? "[]") as unknown;
+    return Array.isArray(parsed) ? [...new Set(parsed.filter((one): one is string => typeof one === "string" && /^[\w-]{1,200}$/.test(one)))].slice(0, 200) : [];
+  } catch { return []; }
+}
 export function readShares(text: string | null): Shares {
   try {
     const parsed = JSON.parse(text ?? "{}") as Record<string, unknown>;

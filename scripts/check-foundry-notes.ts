@@ -95,7 +95,7 @@ try {
   // At rest the page shows nothing new, and the mockup has no pink edge.
   await page.mouse.move(5, 5);
   await page.waitForTimeout(400);
-  assert.equal(await page.locator("#page").locator("button:not(.fd-link):not(.fd-hd-b):visible, form:visible, input:visible").count(), 0, "nothing to press on Foundry at rest");
+  assert.equal(await page.locator("#page").locator("button:not(.fd-link):not(.fd-hd-b):not(.fg-back):not(.fg-pin):visible, form:visible, input:visible").count(), 0, "nothing to press on Foundry at rest");
   assert.equal(await line.isHidden(), true, "no notes line at rest");
   assert.equal(await page.locator("#page .fn-layer").count(), 0, "nothing is added to the page at rest");
   assert.doesNotMatch(await stage.evaluate((el) => getComputedStyle(el).boxShadow), /242, 182, 200|228, 138, 166/, "no pink frame around the mockup");

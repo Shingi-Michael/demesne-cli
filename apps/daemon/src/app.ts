@@ -16,7 +16,7 @@ import { routineTool } from "./routine-tool.ts";
 import { runTestsTool } from "./test-run.ts";
 import { updatePlanTool } from "./plan.ts";
 import { githubTools } from "./github.ts";
-import { foundryEditTool, foundryReadTool, foundrySaveTool, foundryTryTool } from "./foundry.ts";
+import { foundryEditTool, foundryReadTool, searchFoundry, foundrySaveTool, foundryTryTool } from "./foundry.ts";
 import { foundryBuiltTool } from "./foundry-built.ts";
 import { electronLook, electronTry, lookCommand, type FoundryLook, type FoundryTry } from "./foundry-look.ts";
 import { electronPageLook, lookAtPageTool, type PageLook } from "./page-look.ts";
@@ -1906,6 +1906,11 @@ export function createDaemonApp(options: {
 
       // Notes pinned on Foundry and not sent yet, for every mockup.
       if (path[0] === "v1" && path[1] === "foundry-notes" && path.length === 2 && request.method === "GET") return json({ waiting: store.waitingFoundryNotes() });
+      // Pass 273 A: Foundry's front page searches names, descriptions, asks and the words on each page.
+      if (path[0] === "v1" && path[1] === "foundry-search" && path.length === 2 && request.method === "GET") {
+        const query = (url.searchParams.get("q") ?? "").slice(0, 200).trim();
+        return json({ ids: query ? searchFoundry(store, query).map((item) => item.id) : [] });
+      }
       // Foundry: artifacts the agent made, with every version kept.
       if (path[0] === "v1" && path[1] === "foundry") {
         if (request.method === "GET" && path.length === 2) return json({ artifacts: store.listFoundryArtifacts(), versions: store.listFoundryVersions() });

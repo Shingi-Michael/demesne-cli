@@ -81,6 +81,10 @@ export interface FoundryView {
   changed?: ReadonlySet<string>;
   /// Pass 262 C: the one mockup you opened, grown to full width where it sits.
   open?: FoundryOpen | null;
+  /// Pass 273 A: the long page for this one mockup, opened from its card,
+  /// under `head` (the line back to the front page) in place of the title.
+  only?: string | null;
+  head?: string;
 }
 
 /// Pass 262 C, a mockup you can hold: the one you open grows on the long
@@ -226,14 +230,13 @@ const dayKey = (date: string) => { const at = new Date(date); return `${at.getFu
 const clock = (date: string) => new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /// The long page: every version, newest first, under the day it was made.
-/// The day stays at the top as you scroll; the rail on the edge (pass 209 A)
-/// snaps to any mockup.
+/// The day stays at the top as you scroll.
 export function foundryPage(view: FoundryView) {
   const { list, versions } = view;
-  const title = `<h1 class="cp-title fd-h">Foundry</h1>` + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "");
+  const title = (view.head ?? `<h1 class="cp-title fd-h">Foundry</h1>`) + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "");
   if (list === null || versions === null) return title + '<p class="cp-empty">Reading Foundry…</p>';
   const byId = new Map(list.map((item) => [item.id, item]));
-  const shown = versions.filter((item) => byId.has(item.artifactId));
+  const shown = versions.filter((item) => byId.has(item.artifactId) && (!view.only || item.artifactId === view.only));
   if (!shown.length) return title + `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
   const days = shelfDays(shown);
   const built = builtVersions(shown, view.builtIn);
@@ -297,15 +300,6 @@ function shelfDays(shown: readonly FoundryShelfVersion[]) {
     day.items.push(item);
   }
   return days;
-}
-
-/// Every version in the order the long page draws it, with its day: what
-/// the rail on the page's edge is made from (pass 209 A).
-export function foundryOrder(list: readonly FoundryArtifact[] | null, versions: readonly FoundryShelfVersion[] | null) {
-  if (!list || !versions) return [];
-  const byId = new Map(list.map((item) => [item.id, item]));
-  return shelfDays(versions.filter((item) => byId.has(item.artifactId))).flatMap((day) =>
-    pickFirst(day.items).map(({ version }) => ({ id: version.artifactId, version: version.version, title: byId.get(version.artifactId)!.title, day: day.word })));
 }
 
 const link = (action: string, args: Record<string, unknown>, html: string, tip: string) =>

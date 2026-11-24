@@ -19,7 +19,7 @@ import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 import { withFoundryFiles } from "../../../packages/protocol/src/foundry-stage.ts";
-import { readShares, sharePage, unsharePage, type GitHubCall, type Shared, type Shares } from "./foundry-share.ts";
+import { readPins, readShares, sharePage, unsharePage, type GitHubCall, type Shared, type Shares } from "./foundry-share.ts";
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
 app.setName("Demesne");
 /// `--foundry-look=<job>`: render one Foundry page off screen for the daemon and quit (foundry-look.ts).
@@ -55,6 +55,9 @@ const keepFoundryShare = (id: string, one: Shared | null) => {
   if (one) all[id] = one; else delete all[id];
   writeFileSync(sharesFile(), JSON.stringify(all, null, 2));
 };
+/// Pass 273 A: the mockups pinned to the top of Foundry's front page, newest pin first.
+const pinsFile = () => join(app.getPath("userData"), "foundry-pins.json");
+const foundryPins = (): string[] => readPins(existsSync(pinsFile()) ? readFileSync(pinsFile(), "utf8") : null);
 /// GitHub's REST API with the computer's own GitHub login, through Electron's network.
 async function gitHubCall(): Promise<GitHubCall> {
   const token = await githubToken();
@@ -613,6 +616,16 @@ if (!lookJob) void app.whenReady().then(async () => {
       await unsharePage(await gitHubCall(), before.slug);
       keepFoundryShare(id, null);
       return { gone: true };
+    }
+    // Pass 273 A: what Foundry's front page marks: the mockups you pinned and the ones shared to a link.
+    if (method === "desktop-foundry-gallery") return { pins: foundryPins(), shared: Object.keys(foundryShares()) };
+    if (method === "desktop-foundry-pin") {
+      const { id, pinned } = args as Record<string, unknown>;
+      if (typeof id !== "string" || !/^[\w-]{1,200}$/.test(id)) throw new Error("No such mockup");
+      const pins = foundryPins().filter((one) => one !== id);
+      if (pinned === true) pins.unshift(id);
+      writeFileSync(pinsFile(), JSON.stringify(pins.slice(0, 200)));
+      return { pins: pins.slice(0, 200) };
     }
     if (method === "desktop-foundry-shared") {
       const id = String((args as Record<string, unknown>).id ?? "");

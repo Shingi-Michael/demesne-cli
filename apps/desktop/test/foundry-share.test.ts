@@ -55,3 +55,11 @@ test("what is shared comes back from disk checked; slugs are long and random; th
   expect(newSlug(() => new Uint8Array(20))).toBe("a".repeat(20));
   expect(sharedPage("<!doctype html><p>hi</p>")).toBe('<!doctype html><meta name="robots" content="noindex, nofollow"><p>hi</p>');
 });
+
+test("pass 273 A: pins are kept as ids, once each, and anything else is dropped", async () => {
+  const { readPins } = await import("../electron/foundry-share.ts");
+  expect(readPins(JSON.stringify(["a", "b", "a", 3, "../x", null]))).toEqual(["a", "b"]);
+  expect(readPins("{}")).toEqual([]);
+  expect(readPins("not json")).toEqual([]);
+  expect(readPins(null)).toEqual([]);
+});

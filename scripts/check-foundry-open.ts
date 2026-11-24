@@ -155,7 +155,7 @@ try {
   await page.mouse.click(720, 60);
   await page.keyboard.press("Escape");
   await step(117, async () => await page!.locator("#page .fd-open").count() === 0);
-  assert.equal(await page.locator("#page").locator("button:not(.fd-link):not(.fn-plus):visible, form:visible, input:visible").count(), 0, "look-only again");
+  assert.equal(await page.locator("#page").locator("button:not(.fd-link):not(.fn-plus):not(.fg-back):not(.fg-pin):visible, form:visible, input:visible").count(), 0, "look-only again");
   // The name opens it again, here.
   await old.locator(".fd-ln b .fd-link").click();
   await step(121, async () => (await old.getAttribute("class"))!.includes("fd-open"));

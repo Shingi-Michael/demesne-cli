@@ -289,8 +289,16 @@ function remember(turnId: string | undefined, id: string, version: number) {
   if (readInTurn.size > 200) readInTurn.delete(readInTurn.keys().next().value!);
 }
 
+/// The words a page shows: its markup without scripts, styles or tags (pass 273 A).
+export function pageWords(kind: string, source: string): string {
+  const text = kind === "markdown" || kind === "mermaid" || kind === "code" ? source
+    : source.replace(/<(script|style|svg)\b[\s\S]*?<\/\1>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"');
+  return text.replace(/\s+/g, " ").trim().slice(0, 20_000);
+}
+
 /// Every word of the query, in a mockup's name, description, version names,
-/// whys or the asks that made it.
+/// whys, the asks that made it, or (pass 273 A) the words on its newest page.
 export function searchFoundry(store: DemesneStore, query: string) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const text = new Map<string, string[]>();
@@ -299,6 +307,7 @@ export function searchFoundry(store: DemesneStore, query: string) {
     parts.push(version.note, version.ask ?? "", version.why ? `${version.why.direction} ${version.why.look} ${version.why.dropped}` : "");
     text.set(version.artifactId, parts);
   }
+  for (const page of store.foundryNewestSources()) (text.get(page.id) ?? (text.set(page.id, []), text.get(page.id)!)).push(pageWords(page.kind, page.source));
   return store.listFoundryArtifacts().filter((item) => {
     const haystack = [item.title, item.description, ...(text.get(item.id) ?? [])].join(" ").toLowerCase();
     return words.every((word) => haystack.includes(word));

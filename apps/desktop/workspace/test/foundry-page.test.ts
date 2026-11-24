@@ -20,7 +20,7 @@ test("Foundry is one long page: every version, newest first, under its day, at r
     error: "",
     chatTitle: (id) => id === "s1" ? "Pricing page" : null,
   });
-  // Two days, the newest first; the rail on the edge replaces the day strip.
+  // Two days, the newest first.
   expect(html.match(/class="fd-day"/g)?.length).toBe(2);
   expect(html.indexOf(">Today<")).toBeLessThan(html.indexOf(">Yesterday<"));
   expect(html).not.toContain("fd-days");

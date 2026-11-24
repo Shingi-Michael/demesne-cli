@@ -529,6 +529,12 @@ export class DemesneStore {
     return rows.map(foundryArtifact);
   }
 
+  /// Pass 273 A: each mockup's newest source, for searching the words on the page.
+  foundryNewestSources(): { id: string; kind: string; source: string }[] {
+    return this.database.query("SELECT a.id AS id, a.kind AS kind, v.source AS source FROM foundry_artifacts a JOIN foundry_versions v ON v.artifact_id = a.id AND v.version = a.version ORDER BY a.updated_at DESC LIMIT 500")
+      .all() as { id: string; kind: string; source: string }[];
+  }
+
   /// Every version of every artifact, newest first, for Foundry's long page.
   listFoundryVersions(limit = 400): FoundryShelfVersion[] {
     const rows = this.database.query("SELECT artifact_id, version, created_at, session_id, turn_id, note, recommended, why, ask, stage FROM foundry_versions ORDER BY created_at DESC, version DESC LIMIT ?")

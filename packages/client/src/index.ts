@@ -251,6 +251,10 @@ export class DemesneClient {
   async foundryList(): Promise<import("@demesne/protocol").FoundryListResponse> {
     return this.request("/v1/foundry");
   }
+  /// Pass 273 A: the mockups whose name, description, asks or page words hold every word of the query.
+  async foundrySearch(query: string): Promise<{ ids: string[] }> {
+    return this.request(`/v1/foundry-search?q=${encodeURIComponent(query)}`);
+  }
   async foundryGet(id: string, version?: number): Promise<import("@demesne/protocol").FoundryArtifactDetail> {
     return this.request(`/v1/foundry/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}`);
   }

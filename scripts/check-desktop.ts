@@ -1032,7 +1032,7 @@ try {
   await page.locator(".sidebar-settings").click();
   await page.locator("#settings-nav .st-nav").filter({ hasText: "Appearance" }).click();
   await page.locator(`#page .ap-card[data-args*='"demesne"']`).click();
-  await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#0B1218");
+  await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--ink").toUpperCase() === "#08090D");
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--ink").trim()), "rgb(22 22 23)", "The desktop wears its own dark palette");
   const accent = () => page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--acc").trim());
   const neutralAccent = await accent();

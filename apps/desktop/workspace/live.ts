@@ -9646,7 +9646,7 @@ function renderSetup() {
     left = button("q", `${k("q")} close`);
     right = button("return", `Open project ${k("Enter")}`);
   }
-  setupRoot.innerHTML = `<header><span><b>demesne</b> <span class="muted">setup</span></span><div class="setup-steps">${["Provider", "Model", "Review"].map((label, index) => `<span class="${index < stepIndex ? "success" : index === stepIndex ? "electric" : "muted"}">${index < stepIndex ? "✓" : index + 1} ${label}</span>`).join('<span class="muted">──</span>')}</div></header><div class="setup-body"><div class="setup-column">${body}${setup.error ? `<p class="danger">× ${h(setup.error)}</p>` : ""}</div></div><footer><div>${left}</div><span class="right">${right}</span></footer>`;
+  setupRoot.innerHTML = `<header><span class="setup-mark"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#demesne-mark"/></svg></span><b>Demesne</b> <span class="muted">setup</span></span><div class="setup-steps">${["Provider", "Model", "Review"].map((label, index) => `<span class="${index < stepIndex ? "success" : index === stepIndex ? "electric" : "muted"}">${index < stepIndex ? "✓" : index + 1} ${label}</span>`).join('<span class="muted">──</span>')}</div></header><div class="setup-body"><div class="setup-column">${body}${setup.error ? `<p class="danger">× ${h(setup.error)}</p>` : ""}</div></div><footer><div>${left}</div><span class="right">${right}</span></footer>`;
   const input = setupRoot.querySelector<HTMLInputElement>("input");
   if (input && (field === input.name || !field)) {
     input.focus({ preventScroll: true });

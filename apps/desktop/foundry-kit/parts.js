@@ -18,7 +18,7 @@
 d-icon{display:inline-flex;width:var(--size,16px);height:var(--size,16px);flex:none;vertical-align:-.15em}
 d-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
 d-avatar{display:inline-grid;place-items:center;flex:none;width:var(--size,28px);height:var(--size,28px);border-radius:50%;font-size:calc(var(--size,28px)*.4);font-weight:600;color:#fff;letter-spacing:0}
-d-mark{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#f2b6c8;color:#141416;font-size:12px;font-weight:600;flex:none}
+d-mark{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#a9c4ff;color:#0b1020;font-size:12px;font-weight:600;flex:none}
 .dp-frame{display:flex;flex-direction:column;border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.12),0 24px 60px -24px rgba(0,0,0,.45);background:var(--paper);min-width:0}
 .dp-bar{display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;flex:none;background:var(--tone-2);border-bottom:1px solid var(--hair);font-size:12px;color:var(--muted)}
 .dp-lights{display:flex;gap:7px;flex:none}.dp-lights i{width:12px;height:12px;border-radius:50%;background:#ff5f57}.dp-lights i+i{background:#febc2e}.dp-lights i+i+i{background:#28c840}
@@ -69,7 +69,7 @@ d-demesne[theme=light]{--dm-side:linear-gradient(180deg,#e9e9eb,#dfdfe2);--dm-sh
 @media (prefers-reduced-motion:reduce){.dm-main>[data-view],d-message{animation:none}}
 d-message{display:flex;gap:12px;max-width:100%}
 d-message[from=you]{align-self:flex-end;max-width:78%;padding:8px 12px;border-radius:12px;background:var(--dm-bubble,var(--tone-2))}
-.dm-d{flex:none;width:20px;font-weight:700;font-size:14px;line-height:20px;color:var(--dm-t1,var(--ink))}.dm-d i{font-style:normal;color:var(--dm-pink,#f2b6c8)}
+.dm-d{flex:none;width:20px;font-weight:700;font-size:14px;line-height:20px;color:var(--dm-t1,var(--ink))}.dm-d i{font-style:normal;color:var(--dm-pink,#a9c4ff)}
 .dm-said{min-width:0;display:flex;flex-direction:column;gap:8px;color:var(--dm-t1,var(--ink))}
 .dm-said>button{align-self:flex-start}
 .dm-meta{font-size:12px;color:var(--dm-t3,var(--muted))}
@@ -113,7 +113,7 @@ d-review d-compare>*>.dr-tile{flex:1;padding:var(--space-4) var(--space-3)}
 d-review d-compare>.dp-rec>.dr-tile{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--secondary,#666) 45%,transparent)}
 d-review .dp-opt{flex-wrap:wrap;font-size:var(--text-xs);font-weight:500;color:var(--secondary)}
 d-review .dr-now>.dp-opt{color:var(--muted);font-weight:400}
-d-review .dp-opt em{padding:0 7px;border-radius:6px;background:color-mix(in srgb,#f2b6c8 24%,transparent);color:color-mix(in srgb,#d9648c 72%,var(--ink));font-size:11.5px;line-height:18px}
+d-review .dp-opt em{padding:0 7px;border-radius:6px;background:color-mix(in srgb,#a9c4ff 24%,transparent);color:color-mix(in srgb,#4f6fe0 72%,var(--ink));font-size:11.5px;line-height:18px}
 .dr-ring{position:absolute;border-radius:8px;box-shadow:0 0 0 2px #e8799b;pointer-events:none;z-index:5}
 .dr-ring>d-mark{position:absolute;top:-10px;right:-10px}
 d-crop{display:block;position:relative;overflow:hidden;max-width:100%;border-radius:10px}
@@ -378,7 +378,7 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
   /// is, and the pieces the marks name (or that carry data-mark="1") are
   /// outlined and numbered; each <section data-part="Name" why="…"> is one
   /// part that needs work, at its own size: "Today" first, then the pick
-  /// (edged in pink), then the other options. The names, the numbers and
+  /// (edged in starlight blue), then the other options. The names, the numbers and
   /// the outlines are drawn here, never by the page.
   var afterLayout = function (watched, job) {
     job();

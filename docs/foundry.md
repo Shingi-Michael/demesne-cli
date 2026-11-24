@@ -105,12 +105,25 @@ Foundry opens on a front page, the way Claude's own artifacts page does (pass 27
 - **Search** at the top ("Search everything made"), or just start typing anywhere on the page. It reads names, descriptions, kinds, projects and chats as you type, and a moment later the words on each page too (the daemon's `searchFoundry`, which also reads the asks and whys).
 - **All, This project, Pinned, Shared.** "This project" is the project this window is in. "Shared" lists the mockups shared to a link on your GitHub Pages (see Share outside Demesne below).
 - **Pin.** Rest on a card and press its pin, or use the pin beside the name on its own page. Pinned mockups sit at the top, in the order you pinned them. Pins are kept in the app's settings folder (`foundry-pins.json`).
-- **Make something new.** A row of kinds under the title: Page, Deck, Doc, Dashboard and Diagram. A press opens a new chat in the project this window is in, with its first words ready ("/foundry Make a deck about "), and the cursor after them. You finish the sentence and send it; nothing runs until you do.
+- **Make something new.** A row of kinds under the title: Page, Deck, Doc, Sheet, Dashboard and Diagram. A press opens a new chat in the project this window is in, with its first words ready ("/foundry Make a deck about "), and the cursor after them. You finish the sentence and send it; nothing runs until you do.
 - **A card opens that mockup's own long page**: its versions by day, newest first, with everything below (open it full width, notes, compare, share). "← Foundry" goes back to the front page. A mockup's link in the chat opens its own page the same way.
 
 The rail of ticks on the long page's edge (pass 209 A) is gone: the front page and its search are how you find a past mockup now.
 
 Read about it: [Recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/) (Nielsen Norman Group: why a picture of each thing beats remembering which chat made it), and [Cards](https://m3.material.io/components/cards/overview) (Material Design: when a grid of cards is the right way to show a collection).
+
+## Sheets
+
+A table people sort, type into and add up (samples, a budget, a list of records) is kind `sheet` (step 3 of pass 273 A). The model writes CSV, with the first row naming the columns and one row per record, and Demesne draws it ([foundry-more-kinds.ts](../apps/desktop/electron/foundry-more-kinds.ts), `sheetPage`):
+
+- **Sort**: press a column's name to sort by it. Press again for the other way, and a third time to go back. Numbers sort as numbers, words as words.
+- **Type**: every cell takes typing. Enter moves down a row. **Add a row** adds one at the end.
+- **Add up**: a column whose filled cells are all numbers ($18, 1,200, 12%, (40) all count) is right-aligned, and its total sits at the foot. The total follows what you type.
+- **Kept**: what you type is saved with the mockup (`demesne.save`), and is still there after Foundry draws the sheet again. When the model makes a new version, its rows win.
+
+A sheet that can't be drawn is sent back at save with what to fix: a column with no name, a row wider than the head (a comma not in quotes), or more than 40 columns or 2,000 rows. **Save a copy** gives the CSV. The front page offers **Sheet** under Make something new.
+
+Read about it: [RFC 4180](https://www.rfc-editor.org/rfc/rfc4180) (the CSV format the model writes), and [Data tables](https://www.nngroup.com/articles/data-tables/) (Nielsen Norman Group: sorting, aligning numbers and keeping tables easy to scan).
 
 ## A mockup you can hold
 

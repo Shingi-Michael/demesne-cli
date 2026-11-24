@@ -125,7 +125,7 @@ try {
   // Step 2: a kind starts a new chat in this project with its words ready, and nothing runs until you send.
   await app.locator("#page .fg-back").click();
   await app.locator("#page .fg-mk").first().waitFor();
-  assert.deepEqual(await app.locator("#page .fg-mk").allTextContents(), ["Page", "Deck", "Doc", "Dashboard", "Diagram"]);
+  assert.deepEqual(await app.locator("#page .fg-mk").allTextContents(), ["Page", "Deck", "Doc", "Sheet", "Dashboard", "Diagram"]);
   assert.equal(await app.locator("#page .fg-make-t").textContent(), "Make something new in workspace");
   await app.screenshot({ path: "output/foundry-gallery-make.png" });
   const before = (await f.client.listSessions()).length;

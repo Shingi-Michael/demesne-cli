@@ -11,7 +11,7 @@ const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const icon = (paths: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${paths}</svg>`;
 
-export const KIND_WORD: Record<FoundryKind, string> = { html: "Prototype", svg: "Graphic", markdown: "Document", deck: "Deck", doc: "Doc", dashboard: "Dashboard", react: "App", mermaid: "Diagram", code: "Code" };
+export const KIND_WORD: Record<FoundryKind, string> = { html: "Prototype", svg: "Graphic", markdown: "Document", deck: "Deck", doc: "Doc", dashboard: "Dashboard", react: "App", mermaid: "Diagram", code: "Code", sheet: "Sheet" };
 export const KIND_ICON: Record<FoundryKind, string> = {
   html: icon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/>'),
   svg: icon('<circle cx="8" cy="9" r="3"/><path d="m4 19 5-5 3 3 3-4 5 6z"/>'),
@@ -22,6 +22,7 @@ export const KIND_ICON: Record<FoundryKind, string> = {
   react: icon('<circle cx="12" cy="12" r="1.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)"/>'),
   mermaid: icon('<rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><path d="M10 5.5h4M17.5 8v8"/>'),
   code: icon('<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>'),
+  sheet: icon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M9 4v16"/>'),
 };
 /// Pass 241 A: a build's record, the pick beside what was built.
 export const BUILT_ICON = icon('<rect x="2.5" y="5" width="8" height="12" rx="1.5"/><rect x="13.5" y="5" width="8" height="12" rx="1.5"/><path d="m15.5 11 1.5 1.5 3-3"/><path d="M6.5 20h11"/>');
@@ -29,7 +30,7 @@ export const BUILT_ICON = icon('<rect x="2.5" y="5" width="8" height="12" rx="1.
 export function codeWithFiles(source: string, files: Record<string, string> | undefined): string {
   return [source, ...Object.entries(files ?? {}).map(([name, text]) => `\n── ${name} ${"─".repeat(Math.max(4, 56 - name.length))}\n\n${text}`)].join("\n");
 }
-export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", svg: "svg", markdown: "md", deck: "html", doc: "html", dashboard: "html", react: "jsx", mermaid: "mmd", code: "txt" };
+export const FOUNDRY_EXTENSION: Record<FoundryKind, string> = { html: "html", svg: "svg", markdown: "md", deck: "html", doc: "html", dashboard: "html", react: "jsx", mermaid: "mmd", code: "txt", sheet: "csv" };
 /// The kinds Demesne draws from content (a deck, a doc, a dashboard).
 export const READY_KIND = new Set<FoundryKind>(["deck", "doc", "dashboard"]);
 export const frameURL = (id: string, version: number) => `foundry://artifact/${encodeURIComponent(id)}?v=${version}`;

@@ -9,9 +9,10 @@
 ///     gantt, journey, pie, mindmap, timeline…), drawn by Mermaid in the page.
 ///   - code: a file of code, shown highlighted; the title's extension
 ///     ("orders.ts") picks the language, else it is guessed.
+///   - sheet: CSV, drawn as a table you sort, type into and add up (sheetPage).
 /// Each page is plain HTML with foundry://kit/ scripts, so Save a copy
 /// inlines them (exportedSource) and the file stands on its own.
-import { FOUNDRY_REACT_IMPORTS } from "@demesne/protocol";
+import { FOUNDRY_REACT_IMPORTS, numberColumns, parseSheet } from "@demesne/protocol";
 import { transform } from "sucrase";
 import hljs from "highlight.js/lib/common";
 import lightTheme from "highlight.js/styles/github.min.css" with { type: "text" };
@@ -114,4 +115,122 @@ html,body{margin:0}body{font:13px/1.6 ui-monospace,"JetBrains Mono",SFMono-Regul
 pre.hljs{margin:0;padding:20px 24px 28px 0;min-height:100vh;box-sizing:border-box;counter-reset:line;overflow:auto}
 .ln{display:block;padding-left:4.2em;position:relative;white-space:pre}
 .ln::before{counter-increment:line;content:counter(line);position:absolute;left:0;width:3em;text-align:right;opacity:.38;user-select:none}</style></head><body><pre class="hljs"><code>${lines.map((one) => `<span class="ln">${one || " "}</span>`).join("")}</code></pre></body></html>`;
+}
+
+/// Step 3 of pass 273 A, a sheet: the CSV drawn as a table you sort (press a
+/// column's name), type into (any cell), add rows to, and add up (a number
+/// column's total sits at its foot). What you type is kept with the mockup
+/// through demesne.save, until the model makes a new version: then its rows win.
+export function sheetPage(source: string, title: string) {
+  const sheet = parseSheet(source), numbers = numberColumns(sheet);
+  const data = JSON.stringify({ head: sheet.head, rows: sheet.rows, numbers, base: sheetBase(source) }).replace(/</g, "\\u003c");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1f2125;--muted:#6b6f76;--line:#e6e7ea;--head:#f6f7f8;--hover:#f1f2f4;--focus:#3a6df0}
+@media (prefers-color-scheme:dark){:root{--bg:#141518;--fg:#e8e9ec;--muted:#9a9ea6;--line:#2a2c31;--head:#1b1c20;--hover:#202227;--focus:#7aa7ff}}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{padding:16px 20px 24px;overflow:auto}
+table{border-collapse:separate;border-spacing:0;min-width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:7px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;max-width:360px;overflow:hidden;text-overflow:ellipsis}
+th{position:sticky;top:0;background:var(--head);font-weight:600;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
+th:hover{color:var(--fg)}
+th .arrow{margin-left:6px;font-size:10px;opacity:.8}
+th.n,td.n{text-align:right}
+td[contenteditable]:hover{background:var(--hover)}
+td[contenteditable]:focus{outline:2px solid var(--focus);outline-offset:-2px;background:var(--bg);white-space:normal}
+tfoot td{font-weight:600;border-bottom:0;border-top:1px solid var(--line);color:var(--fg)}
+tfoot td.lbl{color:var(--muted);font-weight:500}
+.foot{display:flex;align-items:center;gap:14px;margin-top:10px;color:var(--muted);font-size:12.5px}
+button{all:unset;cursor:pointer;color:var(--fg);padding:4px 10px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--line)}
+button:hover{background:var(--hover)}
+button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+</style></head><body><div class="wrap"><table><thead></thead><tbody></tbody><tfoot></tfoot></table><div class="foot"><button type="button" id="add">Add a row</button><span id="said" aria-live="polite"></span></div></div><script>
+(function () {
+  var S = ${data};
+  var rows = S.rows.map(function (row) { return row.slice(); }), sort = null;
+  var head = document.querySelector("thead"), body = document.querySelector("tbody"), foot = document.querySelector("tfoot"), said = document.getElementById("said");
+  function num(text) {
+    var clean = String(text).trim(), sign = 1;
+    if (/^\\(.*\\)$/.test(clean)) { sign = -1; clean = clean.slice(1, -1).trim(); }
+    clean = clean.replace(/^([-+]?)[$€£¥]/, "$1").replace(/%$/, "").replace(/,(?=\\d{3}(?:\\D|$))/g, "");
+    if (!/^[-+]?(\\d+\\.?\\d*|\\.\\d+)(e[-+]?\\d+)?$/i.test(clean)) return null;
+    var value = Number(clean) * sign; return isFinite(value) ? value : null;
+  }
+  function places(column) { var most = 0; rows.forEach(function (row) { var m = /\\.(\\d+)/.exec(String(row[column] || "").replace(/[^\\d.]/g, "")); if (m) most = Math.max(most, m[1].length); }); return Math.min(most, 4); }
+  function money(column) { return rows.some(function (row) { return /^[-+(]?[$€£¥]/.test(String(row[column] || "").trim()); }); }
+  function total(column) {
+    var sum = 0, any = false;
+    rows.forEach(function (row) { var value = num(row[column] || ""); if (value !== null) { sum += value; any = true; } });
+    if (!any) return "";
+    var mark = money(column) ? (String(rows.find(function (row) { return /[$€£¥]/.test(row[column] || ""); })[column]).match(/[$€£¥]/) || [""])[0] : "";
+    return mark + sum.toLocaleString(undefined, { minimumFractionDigits: places(column), maximumFractionDigits: places(column) });
+  }
+  function order() {
+    var list = rows.map(function (row, at) { return at; });
+    if (!sort) return list;
+    var column = sort.column, dir = sort.dir;
+    return list.sort(function (a, b) {
+      var x = rows[a][column] || "", y = rows[b][column] || "", nx = num(x), ny = num(y);
+      var by = nx !== null && ny !== null ? nx - ny : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+      return by * dir || a - b;
+    });
+  }
+  function draw() {
+    head.innerHTML = "<tr>" + S.head.map(function (name, at) {
+      var arrow = sort && sort.column === at ? '<span class="arrow" aria-hidden="true">' + (sort.dir > 0 ? "▲" : "▼") + "</span>" : "";
+      return '<th scope="col" data-c="' + at + '" class="' + (S.numbers[at] ? "n" : "") + '" aria-sort="' + (sort && sort.column === at ? (sort.dir > 0 ? "ascending" : "descending") : "none") + '" tabindex="0">' + esc(name) + arrow + "</th>";
+    }).join("") + "</tr>";
+    body.innerHTML = order().map(function (at) {
+      return '<tr data-r="' + at + '">' + S.head.map(function (_, column) { return '<td contenteditable="plaintext-only" spellcheck="false" data-c="' + column + '" class="' + (S.numbers[column] ? "n" : "") + '">' + esc(rows[at][column] || "") + "</td>"; }).join("") + "</tr>";
+    }).join("");
+    drawFoot();
+  }
+  function drawFoot() {
+    if (!S.numbers.some(Boolean)) { foot.innerHTML = ""; return; }
+    foot.innerHTML = "<tr>" + S.head.map(function (_, column) { return S.numbers[column] ? '<td class="n">' + esc(total(column)) + "</td>" : column === 0 ? '<td class="lbl">Total</td>' : "<td></td>"; }).join("") + "</tr>";
+  }
+  function esc(text) { return String(text).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  var timer = 0;
+  function keep() {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (!window.demesne || !window.demesne.save) return;
+      window.demesne.save("sheet", { base: S.base, rows: rows }).then(function () { said.textContent = "Saved"; setTimeout(function () { said.textContent = ""; }, 1200); }, function (error) { said.textContent = "Couldn't save: " + ((error && error.message) || error); });
+    }, 400);
+  }
+  head.addEventListener("click", function (event) {
+    var th = event.target.closest("th"); if (!th) return;
+    var column = Number(th.dataset.c);
+    sort = sort && sort.column === column ? (sort.dir > 0 ? { column: column, dir: -1 } : null) : { column: column, dir: 1 };
+    draw();
+  });
+  head.addEventListener("keydown", function (event) { if ((event.key === "Enter" || event.key === " ") && event.target.closest("th")) { event.preventDefault(); event.target.click(); } });
+  body.addEventListener("input", function (event) {
+    var td = event.target.closest("td"); if (!td) return;
+    rows[Number(td.parentNode.dataset.r)][Number(td.dataset.c)] = td.textContent;
+    drawFoot(); keep();
+  });
+  body.addEventListener("keydown", function (event) {
+    var td = event.target.closest("td"); if (!td || event.key !== "Enter") return;
+    event.preventDefault();
+    var below = td.parentNode.nextElementSibling;
+    if (below) below.children[Number(td.dataset.c)].focus(); else td.blur();
+  });
+  document.getElementById("add").addEventListener("click", function () {
+    rows.push(S.head.map(function () { return ""; }));
+    sort = null; draw(); keep();
+    var last = body.lastElementChild; if (last) last.firstElementChild.focus();
+  });
+  draw();
+  if (window.demesne && window.demesne.load) window.demesne.load("sheet", null).then(function (kept) {
+    if (kept && kept.base === S.base && Array.isArray(kept.rows)) { rows = kept.rows.map(function (row) { return S.head.map(function (_, at) { return String((row || [])[at] == null ? "" : row[at]); }); }); draw(); }
+  }, function () {});
+})();
+</script></body></html>`;
+}
+
+/// What a sheet's saved edits belong to: its CSV, hashed, so a new version starts from the model's rows.
+export function sheetBase(source: string) {
+  let hash = 5381;
+  for (let at = 0; at < source.length; at++) hash = ((hash << 5) + hash + source.charCodeAt(at)) | 0;
+  return `s${(hash >>> 0).toString(36)}-${source.length}`;
 }

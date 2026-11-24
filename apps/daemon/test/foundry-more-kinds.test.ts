@@ -22,3 +22,10 @@ test("the model is told the more kinds and what react may import", () => {
   expect(MORE_KINDS_RULES).toContain("kind mermaid");
   expect(MORE_KINDS_RULES).toContain("kind code");
 });
+
+test("step 3 of pass 273 A: a sheet is CSV with named columns, and one that won't draw says why", () => {
+  expect(() => checkKindSource("sheet", "Plot,pH,Nitrogen\nA1,6.4,22\nB2,7.1,18")).not.toThrow();
+  expect(() => checkKindSource("sheet", "Name,Age\nSmith, Ann,40")).toThrow("Row 1 has 3 cells");
+  expect(() => checkKindSource("sheet", "")).toThrow("[invalid_input]");
+  expect(MORE_KINDS_RULES).toContain("kind sheet: CSV, first row the column names");
+});

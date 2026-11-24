@@ -82,3 +82,18 @@ test("a saved copy inlines the libraries a React page loads", () => {
   // Without the library, the tag stays as it was.
   expect(exportedSource('<script src="foundry://kit/mermaid.js"></script>', kit)).toBe('<script src="foundry://kit/mermaid.js"></script>');
 });
+
+test("step 3 of pass 273 A: a sheet is drawn as a table that sorts, edits, adds up and keeps what you type", async () => {
+  const { sheetBase, sheetPage } = await import("../electron/foundry-more-kinds.ts");
+  const csv = 'Plot,pH,Cost\nA1,6.4,"$1,200.50"\n<B2>,7.1,$80\n';
+  const page = foundryDocument("sheet", csv, "Soil <samples>");
+  expect(page).toBe(sheetPage(csv, "Soil <samples>"));
+  expect(page).toContain("<title>Soil &lt;samples&gt;</title>");
+  expect(page).toContain('"head":["Plot","pH","Cost"]');
+  expect(page).toContain('"numbers":[false,true,true]');
+  expect(page).toContain("\\u003cB2>");
+  expect(page).not.toContain("<B2>");
+  expect(page).toContain('demesne.save("sheet"');
+  expect(page).toContain(`"base":"${sheetBase(csv)}"`);
+  expect(sheetBase(csv)).not.toBe(sheetBase(csv + "C3,6,1\n"));
+});

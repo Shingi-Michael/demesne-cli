@@ -144,7 +144,7 @@ export function growPreview(card: HTMLElement, start: Rect | undefined, name: El
   const height = card.offsetHeight;
   card.style.overflow = "hidden";
   card.animate([{ height: "0px", opacity: 0.3 }, { height: `${height}px`, opacity: 1 }], { duration: ms(380), easing: SOFT }).finished.then(() => { card.style.overflow = ""; }, () => { card.style.overflow = ""; });
-  name?.animate([{ boxShadow: "0 0 0 0 rgba(242,182,200,.5)" }, { boxShadow: "0 0 0 6px rgba(242,182,200,0)" }], { duration: ms(500), easing: "ease-out" });
+  name?.animate([{ boxShadow: "0 0 0 0 rgba(169,196,255,.5)" }, { boxShadow: "0 0 0 6px rgba(169,196,255,0)" }], { duration: ms(500), easing: "ease-out" });
   const end = rectOf(box);
   // A name scrolled away, or not on the page: grow from just left of the card.
   const origin = start && start.width > 0 && start.y + start.height > 0 && start.y < innerHeight ? start : { x: end.x - 60, y: end.y + 10, width: 40, height: 16 };
@@ -158,7 +158,7 @@ export function growPreview(card: HTMLElement, start: Rect | undefined, name: El
     { transform: "none", opacity: 1, borderRadius: "8px", boxShadow: "0 0 0 1px rgba(255,255,255,.08)" },
   ], { duration: ms(520), easing: EASE }).finished.then(() => {
     done();
-    box.animate([{ boxShadow: "0 0 0 1.5px rgba(242,182,200,.6), 0 0 18px rgba(242,182,200,.18)" }, { boxShadow: "0 0 0 1px var(--hair)" }], { duration: ms(700), easing: "ease-out" });
+    box.animate([{ boxShadow: "0 0 0 1.5px rgba(169,196,255,.6), 0 0 18px rgba(169,196,255,.18)" }, { boxShadow: "0 0 0 1px var(--hair)" }], { duration: ms(700), easing: "ease-out" });
   }, done);
 }
 
@@ -174,7 +174,7 @@ export function foldPreview(card: HTMLElement, end: Rect | undefined, name: Elem
     { transform: "translateY(-4px) scale(.98)", opacity: 1, offset: 0.2 },
     { transform: from(target, rect), opacity: 0 },
   ], { duration: ms(420), easing: "cubic-bezier(.5,0,.2,1)", fill: "forwards" }).finished.then(() => copy.remove(), () => copy.remove());
-  name?.animate([{ backgroundColor: "rgba(242,182,200,.22)" }, { backgroundColor: "transparent" }], { duration: ms(600), delay: ms(300), easing: "ease-out" });
+  name?.animate([{ backgroundColor: "rgba(169,196,255,.22)" }, { backgroundColor: "transparent" }], { duration: ms(600), delay: ms(300), easing: "ease-out" });
   card.style.overflow = "hidden";
   return card.animate([{ height: `${card.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0 }], { duration: ms(360), easing: SOFT, fill: "forwards" }).finished.then(() => undefined, () => undefined);
 }

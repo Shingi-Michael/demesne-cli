@@ -12,52 +12,53 @@
 /// roles. Where a project has no color for a role, the nearest published one is
 /// used. Tool surfaces are cool tonal derivatives of each theme's backgrounds.
 
-/// The canonical Demesne palette, used for surfaces and reference. Values are
-/// the redesign's `demesne/color` tokens (Figma "demesne UI redesign"); washes
-/// and diff rows are those tokens composited over `surface`, since terminals
-/// have no alpha.
+/// The canonical Demesne palette, used for surfaces and reference. This is
+/// Milky Way (Demesne 1.0): the black of space, starlight text and a cool blue
+/// for what you press, the same values the desktop's own theme draws with.
+/// Washes and diff rows are those tokens composited over `surface`, since
+/// terminals have no alpha.
 export const palette = {
-  ink: "#0B1218",
-  paper: "#C5D2DC",
-  strong: "#E6EEF4",
-  surface: "#0E161D",
-  raised: "#182530",
-  rule: "#1E2C38",
-  borderBright: "#2F4150",
-  secondary: "#8FA1AF",
-  muted: "#6B7D8B",
-  electric: "#5AA9E6",
-  electricBright: "#5AA9E6",
-  signal: "#E5534B",
-  citron: "#4CC38A",
-  thinking: "#E5A93C",
-  thinkingSurface: "#282821",
-  errorSurface: "#281D23",
-  accentSurface: "#172835",
-  menuSelection: "#172835",
+  ink: "#08090D",
+  paper: "#DCDEE2",
+  strong: "#E8EBF4",
+  surface: "#0E1016",
+  raised: "#181B23",
+  rule: "#1F2330",
+  borderBright: "#333949",
+  secondary: "#B3B7BD",
+  muted: "#80858C",
+  electric: "#8FB0FB",
+  electricBright: "#A9C4FF",
+  signal: "#EF8B8B",
+  citron: "#71C994",
+  thinking: "#E7B96A",
+  thinkingSurface: "#282420",
+  errorSurface: "#291F24",
+  accentSurface: "#141A2E",
+  menuSelection: "#141A2E",
   /// A selected row on a raised tile: selection composited over `raised`.
-  tileSelection: "#213749",
-  diffAddedSurface: "#0F2219",
-  diffRemovedSurface: "#26161A",
-  userSurface: "#0E161D",
-  inspect: "#5AA9E6",
-  execute: "#E5A93C",
-  toolSurface: "#0E161D",
-  toolActive: "#182530",
-  syntaxKeyword: "#C49CE6",
-  syntaxString: "#9CCF8D",
-  syntaxNumber: "#E5A93C",
-  syntaxComment: "#5F7280",
-  syntaxType: "#6FC2D6",
-  syntaxFunction: "#5AA9E6",
-  contextMessages: "#5AA9E6",
-  contextTools: "#C49CE6",
-  contextReserved: "#E5A93C",
-  contextFree: "#6B7D8B",
+  tileSelection: "#1B2340",
+  diffAddedSurface: "#182223",
+  diffRemovedSurface: "#241C22",
+  userSurface: "#0E1016",
+  inspect: "#8FB0FB",
+  execute: "#E7B96A",
+  toolSurface: "#0E1016",
+  toolActive: "#181B23",
+  syntaxKeyword: "#B9A8F8",
+  syntaxString: "#93D4B3",
+  syntaxNumber: "#ECC98F",
+  syntaxComment: "#6F757C",
+  syntaxType: "#86C9E8",
+  syntaxFunction: "#A9C4FF",
+  contextMessages: "#8FB0FB",
+  contextTools: "#B9A8F8",
+  contextReserved: "#E7B96A",
+  contextFree: "#80858C",
   // Figma Composer 40:105: 45% amber, 60% red, 40% blue over chrome.
-  composerQueuedBorder: "#6F582B",
-  composerStoppedBorder: "#8F3B39",
-  composerRestoredBorder: "#2C516D",
+  composerQueuedBorder: "#705C3C",
+  composerStoppedBorder: "#955A5C",
+  composerRestoredBorder: "#425072",
 } as const;
 
 export type PaletteColor = keyof typeof palette;
@@ -96,53 +97,53 @@ export interface Theme {
   systemFallback?: boolean;
 }
 
-/// The redesign's calmer dark palette (Figma "demesne UI redesign").
-/// Translucent request/thinking fills are composited onto its dark surfaces.
+/// Milky Way at night. Translucent request/thinking fills are composited
+/// onto its dark surfaces.
 const demesne: Record<PaletteColor, string> = { ...palette };
 
-/// The redesign palette carried to light terminals: the same blue accent and
-/// softer semantic tones, darkened for at least 4.5:1 text contrast on every
-/// light surface (dim `muted` text excepted, like the dark theme).
+/// Milky Way at dawn, for light terminals: the same blue accent and softer
+/// semantic tones, darkened for at least 4.5:1 text contrast on every light
+/// surface (dim `muted` text excepted, like the dark theme).
 const demesneLight: Record<PaletteColor, string> = {
-  ink: "#F6F8FA",
-  paper: "#1F2A33",
-  strong: "#1F2A33",
-  surface: "#EEF2F5",
-  raised: "#E2E8ED",
-  rule: "#CBD5DD",
-  borderBright: "#A7B6C2",
-  secondary: "#4B5D6B",
-  muted: "#55687A",
-  electric: "#1F62A8",
-  electricBright: "#1A5591",
+  ink: "#F7F7FC",
+  paper: "#24283A",
+  strong: "#24283A",
+  surface: "#EFF0F7",
+  raised: "#E3E5F0",
+  rule: "#CDD1E0",
+  borderBright: "#A9AFC6",
+  secondary: "#4A4F63",
+  muted: "#565D75",
+  electric: "#3054C0",
+  electricBright: "#2A4AAB",
   signal: "#B3302A",
   citron: "#166A3F",
-  thinking: "#8A5700",
-  thinkingSurface: "#E2DFD8",
-  errorSurface: "#E8DFE1",
-  accentSurface: "#D5E1EC",
-  menuSelection: "#D5E1EC",
-  tileSelection: "#C7D5E3",
-  diffAddedSurface: "#D4E2DF",
-  diffRemovedSurface: "#E8DFE1",
-  userSurface: "#EEF2F5",
-  inspect: "#1F62A8",
-  execute: "#8A5700",
-  toolSurface: "#EEF2F5",
-  toolActive: "#E2E8ED",
-  syntaxKeyword: "#7A3E9D",
-  syntaxString: "#2F6F1F",
-  syntaxNumber: "#8A5600",
-  syntaxComment: "#5E7684",
+  thinking: "#855400",
+  thinkingSurface: "#E4E0DE",
+  errorSurface: "#EAE1E7",
+  accentSurface: "#DDE3F6",
+  menuSelection: "#DDE3F6",
+  tileSelection: "#D8DFF5",
+  diffAddedSurface: "#D5E0E1",
+  diffRemovedSurface: "#EAE1E7",
+  userSurface: "#EFF0F7",
+  inspect: "#3054C0",
+  execute: "#855400",
+  toolSurface: "#EFF0F7",
+  toolActive: "#E3E5F0",
+  syntaxKeyword: "#5F45C2",
+  syntaxString: "#2A6E3B",
+  syntaxNumber: "#855400",
+  syntaxComment: "#565D75",
   syntaxType: "#0B6A74",
-  syntaxFunction: "#1F5FAD",
-  contextMessages: "#1F62A8",
-  contextTools: "#7A3E9D",
-  contextReserved: "#8A5700",
-  contextFree: "#55687A",
-  composerQueuedBorder: composite("#EEF2F5", "#8A5700", 0.45),
-  composerStoppedBorder: composite("#EEF2F5", "#B3302A", 0.6),
-  composerRestoredBorder: composite("#EEF2F5", "#1F62A8", 0.4),
+  syntaxFunction: "#2A4AAB",
+  contextMessages: "#3054C0",
+  contextTools: "#5F45C2",
+  contextReserved: "#855400",
+  contextFree: "#565D75",
+  composerQueuedBorder: composite("#EFF0F7", "#855400", 0.45),
+  composerStoppedBorder: composite("#EFF0F7", "#B3302A", 0.6),
+  composerRestoredBorder: composite("#EFF0F7", "#3054C0", 0.4),
 };
 
 /// https://draculatheme.com — purple is the signature accent, pink its lighter

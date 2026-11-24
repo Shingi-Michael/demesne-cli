@@ -1,17 +1,17 @@
 /* Desktop chrome surrounds the same conversation and panel surfaces. */
 :root {
-  --ink: #0b1218;
-  --paper: #c5d2dc;
-  --strong: #e6eef4;
-  --surface: #0e161d;
-  --raised: #182530;
-  --rule: #1e2c38;
-  --borderBright: #2f4150;
-  --secondary: #8fa1af;
-  --muted: #6b7d8b;
-  --electric: #5aa9e6;
-  --accentSurface: #172835;
-  --signal: #e5534b;
+  --ink: #08090d;
+  --paper: #dcdee2;
+  --strong: #e8ebf4;
+  --surface: #0e1016;
+  --raised: #181b23;
+  --rule: #1f2330;
+  --borderBright: #333949;
+  --secondary: #b3b7bd;
+  --muted: #80858c;
+  --electric: #8fb0fb;
+  --accentSurface: #141a2e;
+  --signal: #ef8b8b;
 }
 body.desktop { overflow: hidden; }
 #desktop-shell { height: 100%; display: flex; flex-direction: column; }
@@ -89,6 +89,8 @@ body.desktop {
   --ok: var(--citron);
   --bad: var(--signal);
   --warn: var(--thinking);
+  /* The full stop of the d. mark, this version's sign (Milky Way: a ringed planet in starlight blue). */
+  --mark-stop: #a9c4ff;
   /* The mark beside the blue: blue stays on what you press; this one marks where you are. Pink in
      most themes; Demesne's own themes (Milky Way) make it starlight below. */
   --blossom: #f2b6c8; --dusk: linear-gradient(135deg, var(--acc), var(--blossom)); --on-dusk: #14151a;

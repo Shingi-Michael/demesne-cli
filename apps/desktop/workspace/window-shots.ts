@@ -98,7 +98,7 @@ export function landShot(card: HTMLElement, from: Rect | undefined, layer: HTMLE
     picture.style.opacity = "";
     card.style.overflow = "";
     copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: "forwards" }).finished.then(() => copy.remove(), () => copy.remove());
-    card.animate([{ boxShadow: "0 0 0 1px rgba(242,182,200,0)" }, { boxShadow: "0 0 0 1.5px rgba(242,182,200,.65), 0 0 18px rgba(242,182,200,.18)", offset: 0.3 }, { boxShadow: "0 0 0 1px rgba(242,182,200,0)" }], { duration: 900 });
+    card.animate([{ boxShadow: "0 0 0 1px rgba(169,196,255,0)" }, { boxShadow: "0 0 0 1.5px rgba(169,196,255,.65), 0 0 18px rgba(169,196,255,.18)", offset: 0.3 }, { boxShadow: "0 0 0 1px rgba(169,196,255,0)" }], { duration: 900 });
     parts.forEach((part, index) => {
       part.style.opacity = "";
       part.animate([{ opacity: 0, transform: "translateX(-5px)" }, { opacity: 1, transform: "none" }], { duration: 260, delay: 120 + index * 140, easing: "ease-out", fill: "backwards" });

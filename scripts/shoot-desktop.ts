@@ -37,14 +37,16 @@ const f = await fixture({
     }
     const user = messages.findLast(message => message.role === "user")?.content;
     // A proposal run (in its own worktree): one edit, then done.
-    if (String(user).includes("Handle an empty name in greet()")) {
+    // The app adds a note after what the person typed, so match by what the message holds.
+    const asked = String(user).includes(prompt);
+    if (!asked && String(user).includes("Handle an empty name in greet()")) {
       if (!messages.some(message => message.role === "tool")) {
         yield { type: "tool_call_delta", index: 0, idDelta: "fix-1", nameDelta: "edit_file", argumentsDelta: JSON.stringify({ path: "hello.ts", edits: [{ oldText: "`${greeting}, ${name}!`", newText: "name ? `${greeting}, ${name}!` : `${greeting}!`" }] }) };
         yield { type: "finish", reason: "tool_calls" };
       } else { yield { type: "text_delta", delta: "greet('') now returns 'Hello!'." }; yield { type: "finish", reason: "stop" }; }
       return;
     }
-    if (user !== prompt) { yield { type: "text_delta", delta: "Ready." }; yield { type: "finish", reason: "stop" }; return; }
+    if (!asked) { yield { type: "text_delta", delta: "Ready." }; yield { type: "finish", reason: "stop" }; return; }
     const operation = [
       { name: "edit_file", input: { path: "hello.ts", edits: [{ oldText: "export const greeting = 'Hello';", newText: "export const greeting = process.env.GREETING ?? 'Hello';" }] } },
       { name: "run_command", input: { argv: [process.execPath, "run", "check"] } },
@@ -77,6 +79,9 @@ const pageErrors: string[] = [];
 page.on("pageerror", (error: Error) => { pageErrors.push(error.message); console.error("page:", error.message); });
 await page.waitForSelector("#app:not([hidden])", { timeout: 30_000 });
 await page.waitForTimeout(3000);
+// A Mac draws scrollbars over the page and only while you scroll; Linux draws
+// them always, so the published pictures leave them out.
+if (readme) await page.addStyleTag({ content: "::-webkit-scrollbar{display:none}*{scrollbar-width:none!important}" });
 const shot = async (name: string) => { await page.screenshot({ path: join(output, `${name}.png`) }); console.log("shot", name); };
 const toggle = async (selector: string, name: string) => {
   if (!(await page.locator(selector).count())) return;
@@ -86,12 +91,6 @@ const toggle = async (selector: string, name: string) => {
 };
 const named = (scratch: string, published: string) => readme ? `demesne-${published}` : scratch;
 await shot(named("01-start", "home"));
-if (readme) {
-  // Drive's ideas for the project, unfolded from Home's sentence.
-  await page.locator('[data-action="ideas-show"]:visible').first().click(); await page.waitForTimeout(2500);
-  await shot("demesne-drive");
-  await page.locator('[data-action="ideas-show"]:visible').first().click(); await page.waitForTimeout(400);
-}
 if (!readme) {
   // Drive's ideas unfold in place from its line (there is no Drive panel);
   // run the top one in its worktree and Home says a branch waits.
@@ -149,6 +148,17 @@ await page.locator('.turn-receipt button[data-action="toggle-steps"]').first().c
 await page.locator('.steps button[data-action="step"]').first().click(); await page.waitForTimeout(800);
 await shot(named("03-inline-diff", "ask"));
 if (readme) {
+  // Drive's ideas for the project, in its sheet. Drive has no control on the
+  // top bar and Home no longer carries its line, so Alt+J opens it in a chat.
+  await page.keyboard.press("Escape"); await page.waitForTimeout(300);
+  await page.locator("textarea:visible").first().click();
+  await page.keyboard.press("Alt+j");
+  await page.locator("#drive-sheet").waitFor({ state: "visible", timeout: 15_000 });
+  const ideas = page.locator('#drive-sheet [data-action="ideas-show"]:visible').first();
+  if (await ideas.getAttribute("aria-expanded") !== "true") await ideas.click();
+  await page.waitForTimeout(2500);
+  await shot("demesne-drive");
+  await page.keyboard.press("Alt+j"); await page.waitForTimeout(500);
   // Settings, read as a sentence.
   await page.locator(".sidebar-settings").first().click(); await page.waitForTimeout(900);
   await shot("demesne-settings");

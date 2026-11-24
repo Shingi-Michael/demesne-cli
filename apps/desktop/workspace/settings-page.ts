@@ -82,8 +82,8 @@ export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = 
 /// Each page's own colour (the Settings facelift): its light at the top of
 /// the page, its summary card, its row in the list and its switches.
 export const PAGE_TONES: Record<SettingsSection, string> = {
-  overview: "#f2b6c8", general: "#9fb4c8", notifications: "#ef8b8b", appearance: "#b79cf0", keys: "#9fb4c8",
-  models: "#7eaef0", providers: "#71c994", agents: "#f2b6c8", permissions: "#e7b96a", drive: "#5fb0c8",
+  overview: "#c9d2f5", general: "#9fb4c8", notifications: "#ef8b8b", appearance: "#b79cf0", keys: "#9fb4c8",
+  models: "#7eaef0", providers: "#71c994", agents: "#c9d2f5", permissions: "#e7b96a", drive: "#5fb0c8",
   connectors: "#a488ee", browser: "#9fb4c8", heartbeat: "#a488ee", usage: "#71c994", archived: "#7eaef0", data: "#9fb4c8",
 };
 export const SETTINGS_HOME: Partial<Record<SettingsSection, SettingsSection>> = { heartbeat: "connectors" };

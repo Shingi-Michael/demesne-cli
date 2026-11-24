@@ -55,10 +55,10 @@ d-built{display:flex;flex-direction:column;gap:var(--space-5);padding:var(--spac
 .bt-row>*{min-width:0;margin:0;display:flex;flex-direction:column;gap:var(--space-2)}
 .bt-cap{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:var(--text-sm);color:var(--muted);line-height:1.4}
 .bt-cap b{color:var(--ink);font-weight:600}
-.bt-cap em{font-style:normal;padding:0 7px;border-radius:6px;background:color-mix(in srgb,#f2b6c8 24%,transparent);color:color-mix(in srgb,#d9648c 72%,var(--ink));font-size:11.5px;line-height:18px}
+.bt-cap em{font-style:normal;padding:0 7px;border-radius:6px;background:color-mix(in srgb,#a9c4ff 24%,transparent);color:color-mix(in srgb,#4f6fe0 72%,var(--ink));font-size:11.5px;line-height:18px}
 .bt-cap .pill{font-size:11.5px}
 d-built d-shot{max-width:100%!important}
-.bt-pick .ds-frame{box-shadow:0 0 0 2px #f2b6c8}
+.bt-pick .ds-frame{box-shadow:0 0 0 2px #a9c4ff}
 .bt-none{padding:var(--space-6) var(--space-4);border-radius:10px;box-shadow:inset 0 0 0 1px var(--hair);color:var(--muted);font-size:var(--text-sm);text-align:center}
 d-built .ds-spot{border-radius:8px;box-shadow:0 0 0 2px #e8799b,0 0 0 4px color-mix(in srgb,var(--ink) 18%,transparent)}
 d-built .ds-spot::after{content:attr(data-mark);position:absolute;top:4px;right:4px;width:19px;height:19px;border-radius:50%;background:#e8799b;color:#2b0d17;font-size:11px;font-weight:600;line-height:19px;text-align:center}

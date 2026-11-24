@@ -1,5 +1,5 @@
 /// What changed: the first time a new version of a page shows, the parts the
-/// revision touched are outlined in pink for a few seconds, so you see
+/// revision touched are outlined in starlight blue for a few seconds, so you see
 /// where the edit landed without comparing by eye. Works for HTML pages and
 /// the ready kinds alike, since both arrive as a document.
 ///
@@ -69,7 +69,7 @@ export const CHANGED_SCRIPT = String.raw`(function () {
       var r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2 || getComputedStyle(el).visibility === "hidden") return;
       var box = document.createElement("div");
-      box.style.cssText = "position:absolute;border-radius:6px;box-shadow:0 0 0 2px #f2b6c8,0 0 0 6px rgba(242,182,200,.28);transition:opacity .6s ease"
+      box.style.cssText = "position:absolute;border-radius:6px;box-shadow:0 0 0 2px #a9c4ff,0 0 0 6px rgba(169,196,255,.28);transition:opacity .6s ease"
         + ";left:" + (r.left + scrollX - 4) + "px;top:" + (r.top + scrollY - 4) + "px;width:" + (r.width + 8) + "px;height:" + (r.height + 8) + "px";
       layer.appendChild(box); drawn++;
     });

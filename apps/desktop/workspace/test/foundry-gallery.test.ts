@@ -86,3 +86,15 @@ test("small words", () => {
   expect(projectName("/Users/me/work/slow-pour/")).toBe("slow-pour");
   expect(projectName(null)).toBe("Just a chat");
 });
+
+test("step 2: a row of kinds over the cards, each starting a new chat with its words, named for the project", async () => {
+  const { makeRow, MAKE_KINDS } = await import("../foundry-gallery.ts");
+  const row = makeRow("/work/slow-pour");
+  expect(row).toContain("Make something new in slow-pour");
+  expect(row.match(/class="fg-mk"/g)?.length).toBe(MAKE_KINDS.length);
+  expect(row).toContain('data-action="foundry-make" data-args="{&quot;kind&quot;:&quot;deck&quot;}"');
+  expect(makeRow(null)).toContain("Make something new</span>");
+  expect(MAKE_KINDS.every((one) => one.start.startsWith("/foundry Make a"))).toBe(true);
+  expect(galleryPage(view())).toContain('class="fg-make"');
+  expect(galleryPage(view({}, { list: [] }))).toContain('class="fg-make"');
+});

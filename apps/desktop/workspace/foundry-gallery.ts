@@ -1,7 +1,7 @@
 /// Pass 273 A, Foundry's front page: everything made, in every project, as
 /// cards with a picture of each, pinned first. Search at the top, then All,
 /// This project, Pinned and Shared. A card opens the long page for that one
-/// mockup, with a line back here.
+/// mockup, with a line back here. A row of kinds starts something new (step 2).
 import type { FoundryArtifact, FoundryShelfVersion } from "@demesne/protocol";
 import { dayWord } from "./chats-page.ts";
 import { frameURL, KIND_WORD, shelfKey } from "./foundry-page.ts";
@@ -116,13 +116,32 @@ export function galleryGrid(view: GalleryView) {
   return group("Pinned", pinned, true) + group(pinned.length ? "Recent" : view.gallery.query.trim() ? "Found" : "Recent", rest, false);
 }
 
+/// Step 2, make something new: the kinds a press can start, each with the
+/// words its new chat begins with. Nothing runs until you finish the sentence
+/// and send it.
+export const MAKE_KINDS: readonly { kind: string; label: string; start: string; icon: string }[] = [
+  { kind: "html", label: "Page", start: "/foundry Make a page for ", icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M7 12h6M7 16h10"/>' },
+  { kind: "deck", label: "Deck", start: "/foundry Make a deck about ", icon: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/>' },
+  { kind: "doc", label: "Doc", start: "/foundry Make a doc about ", icon: '<path d="M6 3h9l3 3v15H6z"/><path d="M9 10h6M9 14h6M9 18h3"/>' },
+  { kind: "dashboard", label: "Dashboard", start: "/foundry Make a dashboard of ", icon: '<path d="M4 20V13M9 20V6M14 20V10M19 20v-5"/>' },
+  { kind: "mermaid", label: "Diagram", start: "/foundry Make a diagram of ", icon: '<rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><path d="M6.5 8v10.5H14"/>' },
+];
+
+/// The row of kinds over the cards, named for where the new chat will live.
+export function makeRow(here: string | null) {
+  return `<div class="fg-make"><span class="fg-make-t">Make something new${here ? ` in ${h(projectName(here))}` : ""}</span><div class="fg-make-row">`
+    + MAKE_KINDS.map((one) => `<button type="button" class="fg-mk" ${act("foundry-make", { kind: one.kind })} title="${h(`Start a new chat that makes a ${one.label.toLowerCase()}`)}"><span class="fg-mk-i"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${one.icon}</svg></span>${h(one.label)}</button>`).join("")
+    + "</div></div>";
+}
+
 /// The whole front page: the title and search, the filters, then the cards.
 export function galleryPage(view: GalleryView, error = "") {
   const head = `<div class="fg-top"><h1 class="cp-title fd-h">Foundry</h1><form class="fg-search" role="search" data-kind="foundry">${SEARCH}<input type="search" id="fg-q" placeholder="Search everything made" value="${h(view.gallery.query)}" aria-label="Search everything made" autocomplete="off" spellcheck="false"></form></div>`
     + (error ? `<p class="sp-error" role="alert">${h(error)}</p>` : "");
-  if (!view.list.length) return head + `<div class="fd-empty"><b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
+  const make = makeRow(view.here);
+  if (!view.list.length) return head + make + `<div class="fd-empty"><b>Nothing made yet</b><span>Pick a kind above, or ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
   const chips = `<div class="fg-chips" role="group" aria-label="Show">${GALLERY_FILTERS.map(([key, label]) => `<button type="button" class="fg-chip${view.gallery.filter === key ? " on" : ""}" ${act("foundry-filter", { filter: key })} aria-pressed="${view.gallery.filter === key}">${label}</button>`).join("")}</div>`;
-  return head + chips + `<div id="fg-cards">${galleryGrid(view)}</div>`;
+  return head + make + chips + `<div id="fg-cards">${galleryGrid(view)}</div>`;
 }
 
 /// The long page for one mockup: a line back to the front page, its name,

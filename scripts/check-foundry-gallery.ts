@@ -122,6 +122,23 @@ try {
   await app.locator(`#page [data-fd="${ids["Trail cards"]}:1"]`).waitFor();
   assert.equal(await app.locator("#page .fd-item").count(), 1);
   console.log("PASS: a link in the chat opens that mockup's own page.");
+  // Step 2: a kind starts a new chat in this project with its words ready, and nothing runs until you send.
+  await app.locator("#page .fg-back").click();
+  await app.locator("#page .fg-mk").first().waitFor();
+  assert.deepEqual(await app.locator("#page .fg-mk").allTextContents(), ["Page", "Deck", "Doc", "Dashboard", "Diagram"]);
+  assert.equal(await app.locator("#page .fg-make-t").textContent(), "Make something new in workspace");
+  await app.screenshot({ path: "output/foundry-gallery-make.png" });
+  const before = (await f.client.listSessions()).length;
+  await app.locator("#page .fg-mk").filter({ hasText: "Deck" }).click();
+  await step(124, async () => await app.locator("#page").isHidden() && await editor.inputValue() === "/foundry Make a deck about ");
+  await step(125, async () => (await f.client.listSessions()).length === before + 1);
+  assert.equal(await app.evaluate(() => document.activeElement?.tagName), "TEXTAREA");
+  const newest = (await f.client.listSessions()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0]!;
+  assert.equal(newest.turns.length, 0, "nothing runs until you send");
+  assert.equal(newest.workspace?.root, f.workspace);
+  await app.waitForTimeout(1200);
+  await app.screenshot({ path: "output/foundry-gallery-make-chat.png" });
+  console.log("PASS: a kind starts a new chat in this project with its words ready, and nothing runs until you send.");
   assert.deepEqual(errors, []);
 } finally {
   await window?.close().catch(() => {});

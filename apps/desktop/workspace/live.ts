@@ -36,7 +36,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { codeWithFiles, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
-import { galleryGrid, galleryPage, oneHead, type FoundryGallery, type GalleryView } from "./foundry-gallery.ts";
+import { galleryGrid, galleryPage, MAKE_KINDS, oneHead, type FoundryGallery, type GalleryView } from "./foundry-gallery.ts";
 import { placeEdit } from "./foundry-edit.ts";
 import { watchFoundrySites } from "./foundry-sites.ts";
 import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
@@ -4959,6 +4959,9 @@ function showFoundryFocus() {
   target.classList.add("fd-here");
   setTimeout(() => target.classList.remove("fd-here"), 1600);
 }
+// Pass 273 A: the front page's search follows each key, and never submits.
+document.addEventListener("input", (event) => { if (event.target instanceof HTMLInputElement && event.target.id === "fg-q") foundrySearchTyped(event.target.value); });
+document.addEventListener("submit", (event) => { if (event.target instanceof HTMLElement && event.target.matches(".fg-search")) event.preventDefault(); });
 /// Pass 273 A: on the front page, typing anywhere starts a search.
 document.addEventListener("keydown", (event) => {
   if (pageOpen !== "foundry" || foundryGallery.one || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || overlay || event.key.length !== 1 || !/\S/.test(event.key)) return;
@@ -7348,6 +7351,15 @@ async function foundryAction(action: string, args: Record<string, any>) {
     foundryGallery.one = null; foundryOpen = null; foundryFocus = null;
     renderPage(); el("stage").scrollTop = 0;
     return;
+  }
+  // Step 2: a kind starts a new chat here with its words ready; nothing runs until you send.
+  if (action === "foundry-make") {
+    const one = MAKE_KINDS.find((item) => item.kind === args.kind);
+    if (!one) return;
+    openPage("");
+    try { await api("new-session", { reuse: true, start: one.start }); }
+    catch (error) { foundryUi.error = errorWords(error); return openPage("foundry"); }
+    return setDraft(one.start);
   }
   if (action === "foundry-filter") {
     foundryGallery.filter = (["all", "here", "pinned", "shared"] as const).find((key) => key === args.filter) ?? "all";

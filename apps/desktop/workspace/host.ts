@@ -1766,6 +1766,8 @@ export class WorkspaceHost {
         { plain: args.plain === true, reuse: args.reuse === true, waitForModel: false },
       );
       if (carried !== undefined) this.carryDraft(carried);
+      // Pass 273 A: Foundry's "Make something new" starts the new chat's draft; nothing runs until you send.
+      else if (typeof args.start === "string") this.carryDraft(args.start.slice(0, 400));
       return id;
     }
     if (method === "move-session") {

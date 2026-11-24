@@ -1231,6 +1231,7 @@ export * from "./foundry-built.ts";
 export * from "./foundry-styles.ts";
 export * from "./foundry-walk.ts";
 export * from "./foundry-sheet.ts";
+export * from "./foundry-board.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 
@@ -1325,9 +1326,10 @@ function parseRuleArguments(value: unknown): Record<string, unknown> {
 /// with chart and stats blocks) that Demesne draws with a fixed renderer.
 /// A react artifact is one component (JSX + Tailwind), a mermaid one a
 /// diagram, a code one a file of code, a sheet a CSV table you sort, type
-/// into and add up (apps/desktop/electron/foundry-more-kinds.ts).
-export type FoundryKind = "html" | "svg" | "markdown" | "deck" | "doc" | "dashboard" | "react" | "mermaid" | "code" | "sheet";
-export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown", "deck", "doc", "dashboard", "react", "mermaid", "code", "sheet"];
+/// into and add up, a board a whiteboard of notes and arrows you move
+/// (apps/desktop/electron/foundry-more-kinds.ts).
+export type FoundryKind = "html" | "svg" | "markdown" | "deck" | "doc" | "dashboard" | "react" | "mermaid" | "code" | "sheet" | "board";
+export const FOUNDRY_KINDS: readonly FoundryKind[] = ["html", "svg", "markdown", "deck", "doc", "dashboard", "react", "mermaid", "code", "sheet", "board"];
 /// What a react artifact may import (the kit brings each one, so it works offline).
 export const FOUNDRY_REACT_IMPORTS = ["react", "react-dom", "react-dom/client", "lucide-react", "recharts"] as const;
 /// The first word of a Mermaid diagram, which names its type.

@@ -1,6 +1,6 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import { isReadyKind, renderReadyKind } from "./foundry-kinds.ts";
-import { codePage, mermaidPage, reactPage, sheetPage } from "./foundry-more-kinds.ts";
+import { codePage, mermaidPage, reactPage, sheetPage, boardPage } from "./foundry-more-kinds.ts";
 export const APP_URL = "demesne://app/index.html";
 /** Whether the window is glass, with the Glass slider in Settings: on the
  *  Mac, Windows and Linux alike. DEMESNE_GLASS=0 keeps Linux or Windows
@@ -204,6 +204,7 @@ export function foundryDocument(kind: string, source: string, title: string) {
   if (kind === "mermaid") return mermaidPage(source, title);
   if (kind === "code") return codePage(source, title);
   if (kind === "sheet") return sheetPage(source, title);
+  if (kind === "board") return boardPage(source, title);
   if (kind === "svg") return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center}img{max-width:92%;max-height:92%}</style><img alt="${esc(title)}" src="data:image/svg+xml;base64,${Buffer.from(source).toString("base64")}">`;
   return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><pre style="white-space:pre-wrap;font:14px/1.6 system-ui;padding:24px">${esc(source)}</pre>`;
 }

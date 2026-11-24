@@ -29,3 +29,10 @@ test("step 3 of pass 273 A: a sheet is CSV with named columns, and one that won'
   expect(() => checkKindSource("sheet", "")).toThrow("[invalid_input]");
   expect(MORE_KINDS_RULES).toContain("kind sheet: CSV, first row the column names");
 });
+
+test("step 4 of pass 273 A: a whiteboard is JSON notes, arrows and groups, and one that won't draw says why", () => {
+  expect(() => checkKindSource("board", '{"notes":[{"id":"a","text":"Ask"},{"id":"b","text":"Book"}],"arrows":[{"from":"a","to":"b"}]}')).not.toThrow();
+  expect(() => checkKindSource("board", '{"notes":[{"id":"a","text":"Ask"}],"arrows":[{"from":"a","to":"b"}]}')).toThrow("isn't a note's id");
+  expect(() => checkKindSource("board", "")).toThrow("[invalid_input]");
+  expect(MORE_KINDS_RULES).toContain("kind board: JSON notes, arrows, groups");
+});

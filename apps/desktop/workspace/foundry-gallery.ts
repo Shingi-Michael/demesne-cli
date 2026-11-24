@@ -126,6 +126,7 @@ export const MAKE_KINDS: readonly { kind: string; label: string; start: string; 
   { kind: "sheet", label: "Sheet", start: "/foundry Make a sheet of ", icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M9 4v16"/>' },
   { kind: "dashboard", label: "Dashboard", start: "/foundry Make a dashboard of ", icon: '<path d="M4 20V13M9 20V6M14 20V10M19 20v-5"/>' },
   { kind: "mermaid", label: "Diagram", start: "/foundry Make a diagram of ", icon: '<rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><path d="M6.5 8v10.5H14"/>' },
+  { kind: "board", label: "Whiteboard", start: "/foundry Make a whiteboard for ", icon: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/><path d="M11 7h4a2 2 0 0 1 2 2v4"/>' },
 ];
 
 /// The row of kinds over the cards, named for where the new chat will live.

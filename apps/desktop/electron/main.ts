@@ -324,8 +324,8 @@ if (!lookJob) void app.whenReady().then(async () => {
       }
       let page = foundryDocument(found.kind, found.source, found.title);
       if (before && before.kind === found.kind) page = withChanges(page, foundryDocument(before.kind, before.source, before.title));
-      // A sheet (step 3 of pass 273 A) always keeps what you type in it.
-      if (((found.kind === "html" || found.kind === "react") && usesRemember(found.source)) || found.kind === "sheet") page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
+      // A sheet or a whiteboard (steps 3 and 4 of pass 273 A) always keeps what you do on it.
+      if (((found.kind === "html" || found.kind === "react") && usesRemember(found.source)) || found.kind === "sheet" || found.kind === "board") page = withRemember(page, kitFile("remember.js").toString("utf8"), { id, key: pageKey(id) });
       if (found.shots?.length) page = withPictures(page, Object.fromEntries(found.shots.map((one) => [one.id, `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`])));
       if (found.kind === "html" && found.shots?.length) page = withShots(page, Object.fromEntries(found.shots.map((one) => [one.id, { url: `foundry://shot/${encodeURIComponent(id)}/${encodeURIComponent(one.id)}`, width: one.width, height: one.height, scale: one.scale }])));
       // On the Foundry page (pass 221 A) a page can play its demo: the try runtime finds controls, demo.js plays the steps.
@@ -588,7 +588,7 @@ if (!lookJob) void app.whenReady().then(async () => {
       const drawn = found.kind === "react" || found.kind === "mermaid", source = drawn && other === true;
       const pdf = ready && ((found.kind === "deck") !== (other === true));
       const extension = pdf ? "pdf" : ready ? "html" : source ? (found.kind === "react" ? "jsx" : "mmd") : drawn ? "html"
-        : found.kind === "code" ? codeExtension(found.title) : ({ html: "html", svg: "svg", markdown: "md", sheet: "csv" } as Record<string, string>)[found.kind] ?? "txt";
+        : found.kind === "code" ? codeExtension(found.title) : ({ html: "html", svg: "svg", markdown: "md", sheet: "csv", board: "json" } as Record<string, string>)[found.kind] ?? "txt";
       const folder = app.getPath("downloads");
       const path = join(folder, copyName(found.title, found.version, extension, (name) => existsSync(join(folder, name))));
       if (pdf) await writeFile(path, await foundryPDF(session, id, found.version, found.kind));

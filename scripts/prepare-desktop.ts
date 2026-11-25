@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { prepareUi } from "./prepare-ui.ts";
 import { buildVersionArgs, resolveBuildId, resolveBuildVersion } from "./build-version.ts";
+import { signBackends } from "./sign-backends.ts";
 const root = resolve(import.meta.dir, ".."), desktop = join(root, "apps/desktop");
 const build = join(desktop, "build"), application = join(build, "app"), out = join(application, "ui"), backend = join(build, "backend");
 async function run(args: string[]) {
@@ -36,5 +37,7 @@ cpSync(join(backend, `demesne-host${suffix}`), join(backend, `demesne-desktop-ho
 await run([process.execPath, "run", "scripts/build-daemon.ts"]);
 cpSync(join(root, `dist/demesned${suffix}`), join(backend, `demesned${suffix}`));
 cpSync(join(root, "dist/node_modules"), join(backend, "node_modules"), { recursive: true, dereference: true });
+// The app run from this folder (development, the Electron checks) starts these too.
+await signBackends(backend);
 await sharp(join(desktop, "icon.svg")).resize(512, 512).png().toFile(join(build, "icon.png"));
 console.log(`Prepared Electron desktop and Bun backends for ${process.platform}-${process.arch}.`);

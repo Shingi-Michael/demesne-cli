@@ -16,7 +16,10 @@ The current path is:
   Supplying a certificate alone will not enable this path.
 - `scripts/prepare-desktop.ts` puts compiled Bun helpers (`demesne-host`, its
   `demesne-desktop-host` compatibility copy, and `demesned`) plus native image
-  dependencies under `Contents/Resources/backend`, outside ASAR.
+  dependencies under `Contents/Resources/backend`, outside ASAR. On macOS it
+  signs them ad hoc (`scripts/sign-backends.ts`), and `build-desktop.ts` signs
+  the packaged copies and the app again: Apple silicon kills a program whose
+  signature no longer matches it. Ad hoc is for this Mac only, not a release.
 - The workflow checks those files exist, then immediately uses `ditto` to zip
   `mac-arm64/Demesne.app`. It has no certificate import, notarization, stapling,
   signature verification or Gatekeeper assessment step. Checksums only establish

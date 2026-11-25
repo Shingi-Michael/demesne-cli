@@ -466,7 +466,8 @@ function serializeMessage(message: ProviderMessage): Record<string, unknown> {
         id: call.id,
         type: "function",
         function: { name: call.name, arguments: call.arguments },
-        ...(call.extra !== undefined ? { extra_content: call.extra } : {}),
+        // Claude's own thinking (anthropic.ts) is for Claude only.
+        ...(call.extra !== undefined && !(isRecord(call.extra) && "anthropicThinking" in call.extra) ? { extra_content: call.extra } : {}),
       })),
     };
   }

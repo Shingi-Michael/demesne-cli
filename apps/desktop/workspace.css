@@ -3704,8 +3704,8 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #comp
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer::before { content: ""; position: absolute; left: 12%; right: 12%; top: -26px; height: 40px; z-index: -1; pointer-events: none; opacity: 0; background: radial-gradient(50% 60% at 50% 100%, color-mix(in srgb, var(--mw-dust) 70%, transparent), transparent 75%); }
 @media (prefers-reduced-motion: no-preference) {
   html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-bar::before { transition: opacity 200ms var(--ease); }
-  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.sent::before { animation: mw-dawn 640ms var(--ease) both; }
+  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.sent::before { animation: mw-dawn 2600ms var(--ease) both; }
   html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.stopping .composer-bar::after { will-change: transform, opacity; animation: mw-horizon 2.4s linear infinite; }
 }
-@keyframes mw-dawn { 0% { opacity: 0; transform: translateY(6px); } 40% { opacity: 1; } 100% { opacity: 0; transform: none; } }
+@keyframes mw-dawn { 0% { opacity: 0; transform: translateY(6px); } 18% { opacity: 1; transform: none; } 55% { opacity: 1; } 100% { opacity: 0; transform: none; } }
 @keyframes mw-horizon { 0% { opacity: 0; transform: translateX(-30%); } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateX(380%); } }

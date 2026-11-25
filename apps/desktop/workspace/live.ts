@@ -7245,7 +7245,7 @@ function composerSent() {
   void form.offsetWidth;
   form.classList.add("sent");
   clearTimeout(composerSentTimer);
-  composerSentTimer = window.setTimeout(() => form.classList.remove("sent"), 700);
+  composerSentTimer = window.setTimeout(() => form.classList.remove("sent"), 2700);
 }
 /// Sending a message follows its reply from the bottom, even after the
 /// reader scrolled up earlier in the session.

@@ -357,6 +357,21 @@ Read about it:
 - [Parallel and iterative design, Nielsen Norman Group](https://www.nngroup.com/articles/parallel-and-iterative-design/): why several independent takes on one brief beat refining a single one.
 - [Promise.allSettled(), MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled): how several asks run at once and one failure doesn't sink the rest.
 
+## Point at the real app
+
+A mockup is one way to say what you want; the running app is the other. With your app open in the browser beside the chat, press the crosshair in the bar and click any part of the page (piece 4 of pass 274). Your next message then carries, for that part:
+
+- **What it is and where it is written.** The element, its selector and markup, and on a page served from this computer the file and line behind it (`findSource` in [point.ts](../apps/desktop/workspace/point.ts)).
+- **What it measures.** One line read off the page as drawn: "600 14px/20px Inter · #ffffff on #0f766e · 120 × 40 · padding 11px 18px · radius 10px" (`lookLine`). A change like "a little larger" or "match the header" starts from the real numbers.
+- **A picture of it.** The part with a little of the page around it, attached to the message and shown small on the chip, so the model sees what you see.
+
+Then say what should change in plain words. Several parts can be picked before you send. The whole of pointing (Esc, public pages, what never leaves the page) is in [the browser's page](browser.md).
+
+Read about it:
+- [Window.getComputedStyle(), MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/getComputedStyle): how a page says what an element really measures.
+- [Document.elementFromPoint(), MDN](https://developer.mozilla.org/en-US/docs/Web/API/Document/elementFromPoint): how a click becomes "this element".
+- [Source maps, web.dev](https://web.dev/articles/source-maps): how a running page leads back to the file and line it was written in.
+
 ## Taste that carries over
 
 What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.

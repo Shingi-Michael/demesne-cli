@@ -12,11 +12,16 @@ export interface PointPick {
   component?: string;
   /// A file (and line) the page itself names, from dev-build metadata.
   hint?: { file: string; line?: number };
+  /// What it measures as drawn (type, colours, size, spacing), read off the page.
+  look?: PointLook;
+  /// A picture of it with a little of the page around it (PNG, base64): it goes with the message.
+  picture?: string;
   /// Picked on a Foundry page in the pane: which artifact and version.
   foundry?: { id: string; title: string; version: number; kind: string };
   /// Picked on the chat's own browser page (the split): `page` is its whole address.
   where?: "browser";
 }
+export interface PointLook { font?: string; size?: string; line?: string; weight?: string; color?: string; background?: string; behind?: string; width?: number; height?: number; padding?: string; radius?: string; gap?: string; border?: string }
 export interface PointSource { path: string; line: number }
 export interface Pointed extends PointPick { id: string; source: PointSource | null }
 
@@ -32,13 +37,25 @@ export function pointLabel(pick: Pick<PointPick, "tag" | "label">): string {
   return word === "text" || word === "paragraph" ? `“${short}”` : `${short} ${word}`;
 }
 
+const said = (value: unknown, max = 60) => typeof value === "string" ? value.replace(/[`\n\r]/g, " ").trim().slice(0, max) : "";
+/// The element's measurements as one line: "600 14px/20px Inter · #ffffff on #0f766e · 120 × 40 · padding 11px 18px · radius 10px".
+export function lookLine(look: PointLook | undefined): string {
+  if (!look || typeof look !== "object") return "";
+  const type = [said(look.weight, 6), said(look.size, 12) + (said(look.line, 12) && said(look.line) !== "normal" ? `/${said(look.line, 12)}` : ""), said(look.font, 40)].filter(Boolean).join(" ");
+  const under = said(look.background, 20) || said(look.behind, 20);
+  const colour = said(look.color, 20) ? `${said(look.color, 20)}${under ? ` on ${under}` : ""}` : "";
+  const box = Number.isFinite(look.width) && Number.isFinite(look.height) ? `${look.width} × ${look.height}` : "";
+  return [type, colour, box, said(look.padding) && `padding ${said(look.padding)}`, said(look.radius) && `radius ${said(look.radius)}`, said(look.gap) && `gap ${said(look.gap)}`, said(look.border) && `border ${said(look.border)}`].filter(Boolean).join(" · ");
+}
+
 /// The picks as the start of the next message, one block per element. A
 /// part of a Foundry page names the artifact and version, so the model
 /// changes only that part with foundry_edit.
-export function pointMessage(points: readonly Pointed[]): string {
+export function pointMessage(points: readonly Pointed[], pictured: ReadonlyMap<string, string> = new Map()): string {
   if (!points.length) return "";
   const lines = points.map((point) => {
-    const markup = `  selector \`${point.selector}\`\n  \`\`\`html\n  ${point.html}\n  \`\`\``;
+    const measured = point.foundry ? "" : lookLine(point.look), shown = pictured.get(point.id);
+    const markup = `${measured ? `  measured: ${measured}\n` : ""}${shown ? `  the attached picture ${shown} shows it as drawn, with a little of the page around it\n` : ""}  selector \`${point.selector}\`\n  \`\`\`html\n  ${point.html}\n  \`\`\``;
     if (point.foundry) return `- ${pointLabel(point)} on the Foundry ${point.foundry.kind === "html" ? "page" : point.foundry.kind} "${point.foundry.title}" (id ${point.foundry.id}, v${point.foundry.version})\n${markup}`;
     if (point.where === "browser") return `- ${pointLabel(point)} on ${point.page}${point.source ? ` · \`${point.source.path}:${point.source.line}\`` : ""}${point.component ? ` · component ${point.component}` : ""}\n${markup}`;
     const where = point.source ? `\`${point.source.path}:${point.source.line}\`` : "source not found";

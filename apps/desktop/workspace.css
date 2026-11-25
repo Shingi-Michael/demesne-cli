@@ -674,6 +674,8 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop .rv-note input::placeholder { color: var(--t4); }
 .desktop #mention-chips .notes-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
 .desktop #mention-chips .point-chip { color: var(--acc); background: var(--acc-soft); border: 0; }
+/* A pick on the page carries its picture: a small one stands on the chip in place of the crosshair. */
+.desktop #mention-chips .point-chip .point-pic { height: 18px; width: auto; max-width: 64px; margin: -3px 6px -3px -2px; border-radius: 4px; object-fit: cover; object-position: left center; vertical-align: middle; box-shadow: 0 0 0 1px rgba(255,255,255,.14); }
 /* A part of a Foundry page: the theme's mark, the colour Foundry marks what you point at and what changed. */
 .desktop #mention-chips .point-chip.foundry { color: var(--blossom, #d5dbf0); background: color-mix(in srgb, var(--blossom, #d5dbf0) 14%, transparent); }
 /* Composer mode: one word under the box, coloured by mode; ⇧⇥ steps it. */

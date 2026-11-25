@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findSource, pointLabel, pointMessage, type PointPick } from "../point.ts";
+import { findSource, lookLine, pointLabel, pointMessage, type PointPick } from "../point.ts";
 
 const pick = (over: Partial<PointPick> = {}): PointPick => ({ tag: "button", text: "Save", label: "Save", selector: "div.btns > button.save", html: '<button class="save">Save</button>', page: "/settings", ...over });
 
@@ -61,5 +61,22 @@ describe("point at it", () => {
     expect(findSource(files, pick({ tag: "input", text: "", label: "", html: '<input id="email" type="email">' }))).toEqual({ path: "src/Form.tsx", line: 2 });
     expect(findSource(files, pick({ tag: "a", text: "Nowhere", label: "Nowhere", html: "<a>Nowhere</a>" }))).toBeNull();
     expect(findSource(files, pick({ text: "", label: "", html: "<div></div>", component: "Settings" }))).toEqual({ path: "src/Settings.tsx", line: 1 });
+  });
+
+  test("a pick on the page says what it measures, and names its picture", () => {
+    const look = { font: "Inter", size: "14px", line: "20px", weight: "600", color: "#ffffff", background: "#0f766e", behind: "#0f766e", width: 120, height: 40, padding: "11px 18px", radius: "10px", gap: "", border: "" };
+    expect(lookLine(look)).toBe("600 14px/20px Inter · #ffffff on #0f766e · 120 × 40 · padding 11px 18px · radius 10px");
+    // Text on a see-through element reads against what is behind it.
+    expect(lookLine({ ...look, background: "", behind: "#fbfaf7" })).toContain("#ffffff on #fbfaf7");
+    expect(lookLine(undefined)).toBe("");
+    const point = { ...pick({ page: "http://localhost:5173/", where: "browser", look, picture: "AAAA" }), id: "1", source: { path: "src/App.tsx", line: 4 } };
+    const message = pointMessage([point], new Map([["1", "pointed-1.png"]]));
+    expect(message).toContain("  measured: 600 14px/20px Inter");
+    expect(message).toContain("the attached picture pointed-1.png shows it");
+    // The picture itself never rides in the words.
+    expect(message).not.toContain("AAAA");
+    expect(pointMessage([point])).not.toContain("attached picture");
+    // A page's own words can't break out of the line.
+    expect(lookLine({ font: "Evil`\nfont", size: "14px" })).not.toMatch(/[`\n]/);
   });
 });

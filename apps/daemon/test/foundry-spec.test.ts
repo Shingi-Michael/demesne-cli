@@ -19,7 +19,8 @@ const measured = {
     { name: "Clinic picker", tag: "div", text: "", x: 96, y: 200, width: 400, height: 56, font: "400 16px Inter", color: "#1a1f1c", background: "none, on #f6f4ee", padding: "", radius: "", border: "1px #1a1f1c at 20%", gap: "8px", layout: "flex row" },
     { name: "Gone", missing: true }],
   words: ["Book a visit", "Pick a time that suits you", "Book the visit"],
-  motion: [{ on: 'button.book "Book the visit"', what: "background-color", duration: "160ms", easing: "ease-out", delay: "0ms" }, { on: ".sheet", what: "animation", name: "rise", duration: "240ms", easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", delay: "40ms", frames: "0% transform: translateY(100%) → 100% transform: none" }],
+  motion: [{ on: 'button.book "Book the visit"', what: "background-color", duration: "160ms", easing: "ease-out", delay: "0ms" }, { on: ".sheet", what: "animation", name: "rise", duration: "240ms", easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", delay: "40ms", frames: "0% transform: translateY(100%) → 100% transform: none" },
+    { on: 'div.sheet "Booked"', what: "animation", name: "rise", duration: "240ms", easing: "cubic-bezier(.2,.8,.2,1)", delay: "0ms", frames: "from transform: translateY(100%) → at rest", when: "each time it appears" }],
 };
 
 test("a measured colour is named by the project's token when one matches", () => {
@@ -43,7 +44,9 @@ test("the spec reads as short lines: numbers first, tokens named, missing parts 
   expect(button).toEqual({ name: "Book button", is: "<button> 180×44 at 96,620", words: "Book the visit", type: "600 16px/24px Inter", colour: "#ffffff", ground: "#0b6e4f (= --brand)", padding: "10px 20px", corners: "10px" });
   expect(picker).toMatchObject({ ground: "none, on #f6f4ee (= --paper)", line: "1px #1a1f1c at 20%", gap: "8px", layout: "flex row" });
   expect(gone!.missing).toMatch(/matched nothing/);
-  expect(spec.motion).toEqual(['button.book "Book the visit": background-color, 160ms, ease-out', ".sheet: animation rise (0% transform: translateY(100%) → 100% transform: none), 240ms, cubic-bezier(0.2, 0.8, 0.2, 1), after 40ms"]);
+  expect(spec.motion).toEqual(['button.book "Book the visit": background-color, 160ms, ease-out', ".sheet: animation rise (0% transform: translateY(100%) → 100% transform: none), 240ms, cubic-bezier(0.2, 0.8, 0.2, 1), after 40ms",
+    'div.sheet "Booked": animation rise (from transform: translateY(100%) → at rest), 240ms, cubic-bezier(.2,.8,.2,1), each time it appears']);
+  expect(specReport({ ...measured, places: [{ name: "Booked", words: ["See you Tuesday"] }, { name: "Empty", words: [] }] }, look)!.other_places).toEqual([{ name: "Booked", words: ["See you Tuesday"] }]);
   expect(specReport(null, look)).toBeNull();
   expect(specReport({ page: measured.page }, null)).toEqual({ page: "1280×1400, ground #f6f4ee, text #1a1f1c, 16px/24px Inter" });
 });

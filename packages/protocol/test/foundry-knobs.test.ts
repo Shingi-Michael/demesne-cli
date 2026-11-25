@@ -46,3 +46,10 @@ describe("Foundry knobs", () => {
     expect(knobStep({ min: 1, max: 2 })).toBe(0.05);
   });
 });
+
+test("a knob on the kit's move time needs no var(): a part with data-move uses it", () => {
+  const head = `<meta name="knob" content="Speed | --move | 120 | 480 | ms"><meta name="knob" content="Room | --pad | 8 | 24 | px"><style>:root{--move:240ms;--pad:16px} .a{padding:var(--pad)}</style>`;
+  expect(knobProblem(`${head}<div data-move="rise">Booked</div>`)).toBeNull();
+  expect(knobProblem(`${head}<div>Booked</div>`)).toContain("nothing on the page uses var(--move)");
+});
+

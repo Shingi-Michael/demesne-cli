@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { specMeasure, type SpecMeasure } from "../electron/foundry-spec-measure.ts";
 
@@ -59,6 +61,25 @@ describe.skipIf(process.env.DEMESNE_DOM_TESTS !== "1")("Foundry measures a mocku
 
   test("a hover rule counts, a rule that matches nothing does not", () => {
     expect(spec.motion.map((one) => one.on)).toEqual([".book", ".sheet", ".book:hover"]);
+  });
+
+  // Piece 8: the kit's moves (data-move) are in the hand-off with the page's own timing, also for a part not shown yet.
+  test("a kit move is read from the part: its name, the page's timing, and when it plays", async () => {
+    const kit = readFileSync(join(import.meta.dir, "../foundry-kit/base.css"), "utf8");
+    await tab.setContent(`<!doctype html><html><head><style>${kit}</style><style>:root{--move:320ms}</style></head><body><button>Book</button>
+      <div hidden><div class="sheet" data-move="rise">Booked for Tuesday</div></div><section data-option="Other" style="display:none"><p data-move="fade">Not drawn</p><div data-view="Later">x</div></section><ul><li data-move="lift" style="--move-after:80ms">Dr. Okafor</li><li data-move="spin">No such move</li></ul></body></html>`);
+    const moved = await tab.evaluate(specMeasure()) as SpecMeasure;
+    expect(moved.motion).toEqual([
+      { on: 'div.sheet "Booked for Tuesday"', what: "animation", name: "rise", duration: "320ms", easing: "cubic-bezier(.2,.8,.2,1)", delay: "0ms", frames: "from transform: translateY(100%) → at rest", when: "each time it appears" },
+      { on: 'li "Dr. Okafor"', what: "animation", name: "lift", duration: "320ms", easing: "cubic-bezier(.2,.8,.2,1)", delay: "80ms", frames: "from transform: translateY(12px); opacity: 0 → at rest", when: "each time it appears" },
+    ]);
+    expect(moved.places).toEqual([]);
+    // The kit really plays what the hand-off says.
+    const played = await tab.evaluate(() => { const s = getComputedStyle(document.querySelector("li[data-move=lift]")!); return [s.animationName, s.animationDuration, s.animationDelay, s.animationFillMode]; });
+    expect(played).toEqual(["d-lift", "0.32s", "0.08s", "both"]);
+    for (const [name, from] of [["rise", "transform:translateY(100%)"], ["lift", "transform:translateY(12px);opacity:0"], ["fade", "opacity:0"], ["slide", "transform:translateX(100%)"], ["pop", "transform:scale(.96);opacity:0"]])
+      expect(kit).toContain(`@keyframes d-${name}{from{${from}}}`);
+    await tab.setContent(PAGE);
   });
 
   test("nothing named: the page's own landmarks stand in", async () => {

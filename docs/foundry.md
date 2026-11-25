@@ -425,7 +425,8 @@ What the spec holds, for the page or for the one option you picked:
 - **Spacing and corners**: the steps the page keeps to.
 - **Each part the walkthrough names**: where it sits, how big it is, its words, type, colours, padding, corners, gap and layout. `Book button: <button> 133×44 at 96,230, 600 16px/24px Georgia, ground #0b6e4f (= brand), padding 10px 20px, corners 10px`.
 - **The words**, in reading order, so copy is carried over and not retyped from a picture.
-- **How it moves**: every transition and animation the page's own rules set, with what changes, how long and which easing.
+- **How it moves**: every transition and animation the page's own rules set, with what changes, how long and which easing, and every kit move (Motion, below).
+- **Places not showing yet**: a flow is measured with its first screen up, so the later screens and any sheet not opened are listed with their words.
 - **Your project's parts**: the components the project already has (Button, SlotPicker, …), with the rule to build with those and write a new one only where none fits.
 
 There is nothing to press: say "build it" or "build the second one" in the chat. Once the build runs, the chat still looks at it and puts it beside the mockup, as before (Built like the mockup, above).
@@ -439,6 +440,30 @@ Read about it:
 - [Window.getComputedStyle, MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/getComputedStyle): how a page's real sizes and colours are read after it is drawn.
 - [Element.getBoundingClientRect, MDN](https://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect): how a part's place and size are measured.
 - [Design tokens, W3C community group](https://www.designtokens.org/): why a named colour beats a hex typed again.
+
+## Motion
+
+A mockup that stands still leaves half the design unsaid: does the confirmation appear, or rise? How fast? A builder ends up guessing, and the build feels different from what you approved. Now a mockup says how its parts move, plays it when you use it, and hands the build the numbers (piece 8 of pass 274).
+
+- **A part says how it arrives.** `data-move` on any part: `rise` (a sheet or toast, up from below), `slide` (a drawer, in from the right), `pop` (a dialog or menu), `lift` (cards and rows, a short way up while fading in), `fade` (everything else). It plays once whenever the part appears: when the page opens, or when its place is shown.
+- **You see it by using the mockup.** Press Book on a booking page and the "Booked" sheet rises. Close it and press again, and it plays again. There is no play button and no timeline.
+- **The timing is the page's.** Three values, on `:root` or on one part: `--move` (how long, 240ms unless set), `--ease` (the curve, fast at first and settling) and `--move-after` (a wait, so a row of cards can arrive one after another). Since they are plain values, a [knob](#knobs) on `--move` lets you drag the speed.
+- **The hand-off carries it.** The measured spec lists each move by part: `div.sheet "Booked for Tuesday, 10:30": animation rise (from transform: translateY(100%) → at rest), 240ms, cubic-bezier(.2,.8,.2,1), each time it appears`. A control's own CSS transition (a hover, a press) is listed the same way.
+- **Still when it should be.** With "reduce motion" on in the system settings nothing moves, and Foundry's own look at a page is taken with motion off. Every move ends at the part's resting place, so the still page is the finished page.
+
+```html
+<button data-go="Booked">Book 10:30</button>
+<div data-view="Closed"></div>
+<div class="sheet" data-view="Booked" data-move="rise">Booked for Tuesday, 10:30</div>
+```
+
+- `xvfb-run -a bun scripts/check-foundry-motion.ts` presses Book in the real app and watches the sheet rise, rest, and rise again; `apps/desktop/test/foundry-spec.dom.test.ts` checks the kit's moves against what the hand-off says about them.
+
+Read about it:
+- [Using CSS animations, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_animations/Using_CSS_animations): keyframes, duration, delay and fill mode, which is all a move is.
+- [Easing functions, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/easing-function): what `cubic-bezier(.2,.8,.2,1)` means and why "fast, then settling" feels right for things arriving.
+- [prefers-reduced-motion, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion): the system setting that turns motion off.
+- [Easing and duration, Material Design](https://m3.material.io/styles/motion/easing-and-duration/tokens-specs): how long things should take, by size and distance.
 
 ## Taste that carries over
 

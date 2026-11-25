@@ -111,6 +111,23 @@ label.inline{display:inline-flex;align-items:center;gap:var(--space-2);margin:0;
 .center{text-align:center}
 .hidden{display:none!important}
 @media (max-width:640px){.grid.two,.grid.three{grid-template-columns:1fr}h1{font-size:var(--text-lg)}}
+/* How a part moves (piece 8 of pass 274): data-move="rise|lift|fade|slide|pop"
+   plays once whenever the part appears (the page opens, its place is shown).
+   Timing is the page's to set: --move, --ease and --move-after, on :root or
+   on the part. Every move ends at the part's own resting state, so a page
+   drawn with motion off is the finished page. */
+:scope{--move:240ms;--ease:cubic-bezier(.2,.8,.2,1);--move-after:0ms}
+[data-move]{animation-duration:var(--move);animation-timing-function:var(--ease);animation-delay:var(--move-after);animation-fill-mode:both}
+[data-move=rise]{animation-name:d-rise}
+[data-move=lift]{animation-name:d-lift}
+[data-move=fade]{animation-name:d-fade}
+[data-move=slide]{animation-name:d-slide}
+[data-move=pop]{animation-name:d-pop}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 }
+@keyframes d-rise{from{transform:translateY(100%)}}
+@keyframes d-lift{from{transform:translateY(12px);opacity:0}}
+@keyframes d-fade{from{opacity:0}}
+@keyframes d-slide{from{transform:translateX(100%)}}
+@keyframes d-pop{from{transform:scale(.96);opacity:0}}
 }

@@ -19,7 +19,7 @@ import { deckPPTX, docDOCX, sheetXLSX } from "./foundry-files.ts";
 import { copyFormats, otherFormats, type CopyFormat } from "@demesne/protocol";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
-import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
+import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, windowPlace, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
 import { withFoundryFiles } from "../../../packages/protocol/src/foundry-stage.ts";
 import { readPins, readShares, sharePage, unsharePage, type GitHubCall, type Shared, type Shares } from "./foundry-share.ts";
 protocol.registerSchemesAsPrivileged([{ scheme: "demesne", privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: "foundry", privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true } }]);
@@ -206,8 +206,11 @@ if (!lookJob) void app.whenReady().then(async () => {
   const liquidAddon = join(base, "liquid-glass.node"), liquidVariant = Number(process.env.DEMESNE_GLASS_VARIANT);
   const liquid = clear && process.env.DEMESNE_GLASS_VARIANT !== undefined && Number.isInteger(liquidVariant) && liquidVariant >= 0 && existsSync(liquidAddon);
   startupMark("window");
+  // The window opens where and as big as you last left it (window.json).
+  const placeFile = join(app.getPath("userData"), "window.json");
+  const place = windowPlace(existsSync(placeFile) ? readFileSync(placeFile, "utf8") : null, screen.getAllDisplays());
   window = new BrowserWindow({
-    width: 1180, height: 820, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#08090d",
+    ...place, minWidth: 900, minHeight: 620, show: false, title: "Demesne", backgroundColor: "#08090d",
     // The Mac: no title bar, the traffic lights on the sidebar's glass, and
     // the window translucent under the shell (the page paints the tint).
     ...(process.platform === "darwin" ? {
@@ -357,8 +360,15 @@ if (!lookJob) void app.whenReady().then(async () => {
   // The window's own size, kept from your last move or resize, to go back to
   // after full screen.
   let normalBounds = window.getBounds(), leftAt = 0;
-  const remember = () => { if (window && !window.isSimpleFullScreen() && !window.isFullScreen() && !window.isMaximized()) normalBounds = window.getBounds(); };
-  window.on("resized", remember).on("moved", remember);
+  // Kept on disk too, a moment after you stop, so the next launch opens the same.
+  let keepTimer: ReturnType<typeof setTimeout> | undefined;
+  const keep = () => { try { writeFileSync(placeFile, JSON.stringify(normalBounds)); } catch (error) { log(`Couldn't keep the window's place: ${String(error)}`); } };
+  const remember = () => {
+    if (!window || window.isSimpleFullScreen() || window.isFullScreen() || window.isMaximized()) return;
+    normalBounds = window.getBounds();
+    clearTimeout(keepTimer); keepTimer = setTimeout(keep, 400);
+  };
+  window.on("resized", remember).on("moved", remember).on("close", () => { clearTimeout(keepTimer); keep(); });
   // The Mac's simple full screen, on the desktop's Space.
   const simpleFullScreen = (on: boolean, why: string) => {
     if (!window || on === window.isSimpleFullScreen()) return;
@@ -390,16 +400,14 @@ if (!lookJob) void app.whenReady().then(async () => {
     window.on("maximize", () => simpleFullScreen(true, "green button"));
   }
   contents.on("render-process-gone", (_event, details) => { log(`renderer exited: ${details.reason}`); window?.show(); });
-  let readied = false, opened = false;
+  let readied = false;
   ipcMain.handle("demesne:request", async (event, method: unknown, args: unknown) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame || !localAppURL(event.senderFrame.url)) throw new Error("Desktop actions are restricted to the main application window");
     validateRequest(method, args);
     if (quitting) throw new Error("The desktop app is closing");
     if (method === "desktop-ready") {
-      // On the Mac the app opens in full screen, already at its size when it
-      // first shows, rather than showing the small window and growing.
-      if (process.platform === "darwin" && !opened) simpleFullScreen(true, "launch");
-      opened = true;
+      // The app opens as its own window, at the size you left it; the green
+      // button still takes it to full screen.
       window?.show(); window?.focus(); launchToFront();
       if (startup.length && !readied) {
         startupMark("shown");

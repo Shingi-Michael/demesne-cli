@@ -10,7 +10,8 @@ export const BACKENDS = ["demesne-host", "demesne-desktop-host", "demesned"] as 
 
 /// Who signs. Releases set DEMESNE_SIGN_IDENTITY to the project's own
 /// self-signed certificate (its SHA-1, see docs/macos-release-signing.md),
-/// and DEMESNE_SIGN_KEYCHAIN to the keychain holding it. macOS then knows
+/// and DEMESNE_SIGN_KEYCHAIN to the keychain holding it (which must also be on
+/// the keychain search list, or codesign can't find the key). macOS then knows
 /// every release as the same app, so permissions such as Screen Recording
 /// survive updates. Without it, "-" signs ad hoc: fine for this Mac, but
 /// each build is a new app to macOS and its permissions start over.

@@ -1576,6 +1576,8 @@ body.desktop { background: var(--shell, var(--ink)); }
 #desktop-shell { background: var(--shell, var(--ink)); }
 html.glass, html.glass body.desktop { background: transparent; }
 html.glass #desktop-shell { background: var(--shell-glass, var(--ink)); }
+/* A full-screen Space has no wallpaper behind the window, so the theme's own ground goes under the glass. */
+html.glass.fullscreen body.desktop { background: var(--ink); }
 /* On the glass the panel lets a little of the blur through too; popovers
    and menus stay solid. */
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { --ink: var(--panel-glass, var(--panel)); background: var(--panel-glass, var(--panel)); }
@@ -1630,7 +1632,7 @@ html.mac-chrome .sidebar-foot { margin-inline: -8px; padding-left: 18px; }
 /* The window's own buttons sit in a patch that is never a drag area: inside
    one, macOS is slow to show their marks and a click can start a drag. */
 #mac-lights-hole { display: none; }
-html.mac-chrome #mac-lights-hole { display: block; position: fixed; top: calc(10px + var(--notch-top, 0px)); left: 10px; width: 68px; height: 28px; z-index: 49; pointer-events: none; -webkit-app-region: no-drag; }
+html.mac-chrome #mac-lights-hole { display: block; position: fixed; top: 10px; left: 10px; width: 68px; height: 28px; z-index: 49; pointer-events: none; -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-sidebar > * { -webkit-app-region: no-drag; }
 html.mac-chrome #desktop-toolbar { -webkit-app-region: drag; }
 html.mac-chrome #desktop-toolbar :is(button, a, input, [role="button"], .bar-tab, header > *) { -webkit-app-region: no-drag; }
@@ -1642,25 +1644,8 @@ html.mac-chrome #desktop-shell:has(#desktop-sidebar[hidden]) #desktop-toolbar { 
    through the traffic lights, which are wider than the strip. */
 html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-sidebar { grid-row: 2; padding-top: 4px; }
 html.mac-chrome #desktop-shell.sidebar-collapsed #desktop-toolbar { grid-column: 1 / -1; padding-left: 84px; }
-/* The Mac's simple full screen has no title bar, so the page draws the
-   three buttons where the window's own sit (trafficLightPosition 18, 18). */
-/* The window can't move there, so the drag regions go: they'd swallow the
-   buttons' clicks, whatever is painted on top and even with no-drag here. */
+/* In full screen the window can't move, so the drag regions go. */
 html.fullscreen :is(#desktop-sidebar, #desktop-toolbar) { -webkit-app-region: no-drag; }
-#mac-lights { position: fixed; top: calc(18px + var(--notch-top, 0px)); left: 18px; z-index: 50; display: flex; gap: 8px; }
-/* Simple full screen covers the camera notch's strip too, so the shell starts
-   below it (main.ts measures it); the strip stays glass, like the menu bar. */
-html.fullscreen #desktop-shell { box-sizing: border-box; padding-top: var(--notch-top, 0px); }
-#mac-lights[hidden] { display: none; }
-#mac-lights button { position: relative; width: 12px; height: 12px; padding: 0; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.18); }
-#mac-lights [data-light="close"] { background: #ff5f57; }
-#mac-lights [data-light="minimize"] { background: #febc2e; }
-#mac-lights [data-light="fullscreen"] { background: #28c840; }
-#mac-lights button::after { position: absolute; inset: 0; display: grid; place-items: center; font: 600 9px/1 -apple-system, system-ui, sans-serif; color: rgb(0 0 0 / 0.55); opacity: 0; }
-#mac-lights:hover button::after { opacity: 1; }
-#mac-lights [data-light="close"]::after { content: "×"; font-size: 11px; }
-#mac-lights [data-light="minimize"]::after { content: "−"; }
-#mac-lights [data-light="fullscreen"]::after { content: "↙"; font-size: 8px; }
 
 /* The edge is a timeline (pass 74 A): where the scrollbar was, pointing at
    the panel's right edge shows the chat's shape. Filled dot = you, ring = an

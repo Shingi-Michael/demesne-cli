@@ -2667,6 +2667,29 @@ function updateTabsMore() {
   if (more.innerHTML !== html) more.innerHTML = html;
   more.hidden = !hidden.length;
   more.title = hidden.length ? `${hidden.length} more ${hidden.length === 1 ? "tab" : "tabs"}${asks ? ", one asks you" : ""}` : "";
+  placeTabJoin();
+}
+/// Milky Way joins the open tab to the page (pass 278 A): the page's edge leaves a gap where the tab
+/// and its curves meet it. The gap follows the tab as the strip scrolls and the window resizes; a tab
+/// scrolled out of sight leaves no gap.
+const TAB_CURVE = 10;
+let tabJoin = "";
+addEventListener("resize", () => placeTabJoin());
+function placeTabJoin() {
+  const page = document.querySelector<HTMLElement>("#desktop-shell > .live-app"), tab = document.querySelector<HTMLElement>("#desktop-toolbar .bar-tab.on");
+  if (!page) return;
+  const strip = tab?.parentElement, at = page.getBoundingClientRect();
+  let left = 0, right = 0;
+  if (tab && strip) {
+    const r = tab.getBoundingClientRect(), box = strip.getBoundingClientRect();
+    const l = Math.max(r.left, box.left), rr = Math.min(r.right, box.right);
+    if (rr - l > TAB_CURVE) { left = Math.round(l - at.left - TAB_CURVE); right = Math.round(rr - at.left + TAB_CURVE); }
+  }
+  const next = `${left},${right}`;
+  if (next === tabJoin) return;
+  tabJoin = next;
+  page.style.setProperty("--tab-l", `${left}px`);
+  page.style.setProperty("--tab-r", `${right}px`);
 }
 function showMoreTabs() {
   const strip = document.getElementById("workspace-tabs");

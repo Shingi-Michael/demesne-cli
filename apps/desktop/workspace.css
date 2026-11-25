@@ -3550,6 +3550,38 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > :
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > :is(.live-app, #desktop-home)::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 180px; z-index: -1; pointer-events: none; border-radius: inherit; opacity: .5; background: url("assets/milky-way-edge.png") top center / 1545px 180px no-repeat; }
 html[data-theme="demesne-light"] #desktop-shell > :is(.live-app, #desktop-home)::before { background: linear-gradient(180deg, rgba(150, 164, 222, .22), rgba(246, 223, 217, .10) 60%, transparent); }
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > .live-app.start::before { display: none; }
+/* Milky Way tabs (pass 278 A): the open tab is cut from the page's own glass, so the two read as one
+   piece. It is filled exactly like the page (in full screen the same frosted sky, pinned to the window,
+   so it runs on unbroken), it curves out softly where it meets the page, and the page's edge goes round
+   it instead of under it: .page-edge draws that edge, with a gap the width of the open tab and its
+   curves (--tab-l and --tab-r, set by live.ts as the tabs move). The top 24px of the page fades in its
+   stars and Home's sky, so the tab grows out of plain glass. The other tabs are quiet words. */
+.page-edge { display: none; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop { --page-fill: var(--panel, var(--ink)); --edge-ring: var(--panel-edge, var(--hair)); }
+html.glass:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop { --page-fill: linear-gradient(var(--sheen), var(--sheen)), var(--panel-glass, var(--panel)); --edge-ring: var(--rim-edge); }
+html.glass.fullscreen:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop { --page-fill: linear-gradient(var(--sheen), var(--sheen)), linear-gradient(rgb(var(--ink-deep) / max(var(--panel-a, 0.5), 0.6)), rgb(var(--ink-deep) / max(var(--panel-a, 0.5), 0.6))), var(--full-sky) center / cover fixed, var(--panel); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > #app.live-app { box-shadow: var(--panel-inset); }
+html.glass:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > #app.live-app { box-shadow: var(--float); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > .live-app > .page-edge { display: block; position: absolute; inset: 0; z-index: 29; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px var(--edge-ring);
+  -webkit-mask: linear-gradient(90deg, #000 var(--tab-l, 0px), transparent var(--tab-l, 0px), transparent var(--tab-r, 0px), #000 var(--tab-r, 0px)) top / 100% 2px no-repeat, linear-gradient(#000 0 0) 0 2px / 100% calc(100% - 2px) no-repeat;
+  mask: linear-gradient(90deg, #000 var(--tab-l, 0px), transparent var(--tab-l, 0px), transparent var(--tab-r, 0px), #000 var(--tab-r, 0px)) top / 100% 2px no-repeat, linear-gradient(#000 0 0) 0 2px / 100% calc(100% - 2px) no-repeat; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > :is(.live-app, #desktop-home)::before { -webkit-mask-image: linear-gradient(transparent, #000 24px); mask-image: linear-gradient(transparent, #000 24px); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) .mw-hero { -webkit-mask-image: linear-gradient(transparent, #000 24px, #000 76%, transparent); mask-image: linear-gradient(transparent, #000 24px, #000 76%, transparent); }
+/* Room for the curves at the strip's ends, and one pixel down so the tab covers the page's top row. */
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #workspace-tabs, html:is([data-theme="demesne"], [data-theme="demesne-light"]) #workspace-pins:not(:empty) { gap: 14px; height: calc(100% + 1px); margin-bottom: -1px; padding-inline: 12px; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab { margin-bottom: 5px; border-color: transparent; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab:not(.on):hover { background: var(--tone2); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab.on { --tab-curve: 10px; height: 41px; margin-bottom: 0; overflow: visible; border: 0; border-radius: 10px 10px 0 0; z-index: 2;
+  background: linear-gradient(var(--edge-ring) 0 0) left top / 1px calc(100% - var(--tab-curve)) no-repeat, linear-gradient(var(--edge-ring) 0 0) right top / 1px calc(100% - var(--tab-curve)) no-repeat, var(--page-fill); box-shadow: inset 0 1px 0 var(--edge-ring); }
+/* The curves: the page's fill outside a quarter circle, with the edge drawn along it. The circle's
+   centre sits half a pixel in, so its ends meet the tab's side line and the page's top line exactly. */
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab.on::before, html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab.on::after { --c: calc(var(--tab-curve) - .5px); content: ""; position: absolute; bottom: 0; width: calc(var(--tab-curve) + 1px); height: calc(var(--tab-curve) + 1px); pointer-events: none; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab.on::before { left: calc(var(--tab-curve) * -1); background: radial-gradient(circle at .5px .5px, transparent var(--c), var(--edge-ring) var(--c) calc(var(--c) + 1px), transparent calc(var(--c) + 1px)), var(--page-fill);
+  -webkit-mask: radial-gradient(circle at .5px .5px, transparent calc(var(--c) - .5px), #000 var(--c)); mask: radial-gradient(circle at .5px .5px, transparent calc(var(--c) - .5px), #000 var(--c)); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab.on::after { right: calc(var(--tab-curve) * -1); background: radial-gradient(circle at calc(100% - .5px) .5px, transparent var(--c), var(--edge-ring) var(--c) calc(var(--c) + 1px), transparent calc(var(--c) + 1px)), var(--page-fill);
+  -webkit-mask: radial-gradient(circle at calc(100% - .5px) .5px, transparent calc(var(--c) - .5px), #000 var(--c)); mask: radial-gradient(circle at calc(100% - .5px) .5px, transparent calc(var(--c) - .5px), #000 var(--c)); }
+/* × only on the open tab and the one under the pointer (a tab you clicked away from keeps focus). */
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-toolbar .bar-tab:not(.on, :hover) .bar-tab-close { opacity: 0; }
 /* Milky Way before the app is up, and when it can't come up: the galaxy alone on the night sky, about
    where Home's sky will be (the flagship arrives with Home). The theme isn't known yet on these two
    screens, so an unset data-theme counts as Demesne's own. */

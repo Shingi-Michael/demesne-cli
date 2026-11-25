@@ -82,8 +82,29 @@ test("in its own full-screen Space the Milky Way themes put the ringed planet un
   const rules = css.split("\n").filter((line) => line.includes("--full-sky"));
   expect(rules.length).toBeGreaterThan(2);
   for (const rule of rules) expect(rule).toMatch(/^html\.glass\.fullscreen(:is\(\[data-theme="demesne"\], \[data-theme="demesne-light"\]\)|\[data-theme="demesne-light"\]) /);
-  // pinned to the window, so the sidebar and the page show one sky
-  expect(rules.filter((rule) => rule.includes("var(--full-sky) center / cover fixed"))).toHaveLength(2);
+  // pinned to the window, so the sidebar, the page and the open tab (pass 278) show one sky
+  expect(rules.filter((rule) => rule.includes("var(--full-sky) center / cover fixed"))).toHaveLength(3);
   // Home's own galaxy steps aside for it
   expect(css).toContain('html.glass.fullscreen:is([data-theme="demesne"], [data-theme="demesne-light"]) .mw-sky { opacity: 0; }');
+});
+
+test("the open tab is one piece with the page in the Milky Way themes (pass 278 A)", () => {
+  const css = readFileSync(join(import.meta.dir, "../../workspace.css"), "utf8");
+  const html = readFileSync(join(import.meta.dir, "../../index.html"), "utf8");
+  const mw = 'html:is([data-theme="demesne"], [data-theme="demesne-light"])';
+  // the page's edge is its own layer inside the page, hidden for other themes
+  expect(html).toMatch(/<div class="app live-app" id="app" hidden>.*<div class="page-edge" aria-hidden="true"><\/div>/);
+  expect(css).toContain(".page-edge { display: none; }");
+  // it leaves a gap where the tab meets the page, which live.ts moves with the tab
+  const at = css.indexOf(`${mw} #desktop-shell > .live-app > .page-edge {`), edge = css.slice(at, css.indexOf("}", at));
+  expect(edge).toContain("var(--tab-l, 0px)");
+  expect(edge).toContain("var(--tab-r, 0px)");
+  // the tab and its curves are filled exactly like the page
+  const tab = css.split(`${mw} #desktop-toolbar .bar-tab.on`).slice(1).map((rule) => rule.slice(0, rule.indexOf("}")));
+  expect(tab.length).toBeGreaterThanOrEqual(3);
+  expect(tab.every((rule) => rule.includes("var(--page-fill)") || rule === "::before," || rule.includes('content: ""'))).toBe(true);
+  // the page draws no ring of its own there, or it would run under the tab
+  expect(css).toContain(`html.glass:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > #app.live-app { box-shadow: var(--float); }`);
+  const live = readFileSync(join(import.meta.dir, "../live.ts"), "utf8");
+  expect(live).toContain('page.style.setProperty("--tab-l"');
 });

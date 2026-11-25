@@ -7934,7 +7934,9 @@ async function dispatch(
   // A thread's name, under the reply that started it or in the sidebar: its
   // line in the ribbon while it is live, its own chat once it is merged.
   if (action === "thread-jump") {
-    const id = String(args.id ?? ""), fix = state!.threads.list.find((item) => item.id === id), chat = fix?.sessionId ?? (typeof args.chat === "string" ? args.chat : "");
+    const id = String(args.id ?? ""), fix = state!.threads.list.find((item) => item.id === id);
+    // A thread whose chat is gone has no chat to open: its line, with Delete, opens instead.
+    const chat = fix ? fix.sessionId ?? "" : typeof args.chat === "string" ? args.chat : "";
     const live = fix && fix.status !== "applied" && state!.session?.id === state!.threads.from && !pageOpen;
     if (chat && (args.go === "chat" || !live)) { await dispatch("select-session", { id: chat }); return; }
     if (!fix) return;

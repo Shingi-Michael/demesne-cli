@@ -38,6 +38,30 @@ test("a running thread whose chat is gone stops, and can be deleted", async () =
   expect((await fixes.act(fix.id, "discard")).status).toBe("discarded");
 });
 
+test("a stopped thread whose chat is gone stops naming it, and can be deleted", async () => {
+  const { workspace, fixes, lose } = setup();
+  const fix = await fixes.startThread(workspace, "parent", { title: "Mock up", brief: "x", files: ["a.ts"] });
+  // It had stopped on its own before its chat went.
+  Object.assign(fixes.get(fix.id)!, { status: "failed", error: "The agent made no changes." });
+  lose();
+  const [listed] = fixes.threads("parent");
+  expect(listed!.status).toBe("failed");
+  expect(listed!.sessionId).toBeNull();
+  expect((await fixes.act(fix.id, "discard")).status).toBe("discarded");
+  expect(fixes.threads("parent").map((item) => item.status)).toEqual(["discarded"]);
+});
+
+test("a stopped thread whose chat is gone can be tried again from scratch", async () => {
+  const { workspace, fixes, lose } = setup();
+  const fix = await fixes.startThread(workspace, "parent", { title: "Mock up", brief: "x", files: ["a.ts"] });
+  Object.assign(fixes.get(fix.id)!, { status: "failed" });
+  lose();
+  fixes.threads("parent");
+  const again = await fixes.act(fix.id, "retry");
+  expect(again.status).toBe("running");
+  expect(again.sessionId).toBe("child");
+});
+
 test("deleting a running thread whose chat vanished doesn't hang", async () => {
   const { workspace, fixes, lose } = setup();
   const fix = await fixes.startThread(workspace, "parent", { title: "Mock up", brief: "x", files: ["a.ts"] });

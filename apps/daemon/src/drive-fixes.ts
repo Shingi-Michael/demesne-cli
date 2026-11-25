@@ -227,15 +227,21 @@ export class DriveFixes {
     if (workspace) void this.noticeMerged(workspace);
     // A working thread whose chat is gone never comes back: it stops, so the
     // person can try it again or delete it.
-    for (const fix of this.fixes) if (fix.thread && fix.from === from && this.orphaned(fix)) this.fail(fix, new Error("Its chat is gone, so it can't finish."));
+    // Whatever its state, it stops naming that chat: its row then opens its
+    // line in the ribbon, where Delete and Try again are, not a chat that isn't there.
+    for (const fix of this.fixes) if (fix.thread && fix.from === from && this.orphaned(fix)) {
+      if (fix.status === "running") this.fail(fix, new Error("Its chat is gone, so it can't finish."));
+      Object.assign(fix, { sessionId: null, turnId: null });
+      this.save();
+    }
     return workspace ? this.list(workspace).filter((fix) => fix.thread && fix.from === from) : [];
   }
 
   get(id: string) { return this.fixes.find((fix) => fix.id === id); }
 
-  /// Running, but its turn (and the chat it was in) no longer exists.
+  /// Still open, but its turn (and the chat it was in) no longer exists.
   private orphaned(fix: DriveFix) {
-    return fix.status === "running" && Boolean(fix.turnId) && !this.host.turn(fix.turnId!);
+    return ACTIVE.has(fix.status) && Boolean(fix.sessionId && fix.turnId) && !this.host.turn(fix.turnId!);
   }
 
   /// Waits for a running fix to finish (tests and shutdown).
@@ -359,6 +365,8 @@ export class DriveFixes {
       return fix;
     }
     const thread = fix.thread!;
+    // Its chat is gone but its worktree and branch stayed: start over cleanly.
+    if (!fix.sessionId) await this.cleanup(fix, true);
     const after = thread.after ? this.get(thread.after) : null;
     if (thread.after && after?.status === "applied") delete thread.after;
     else if (thread.after && (!after || !ACTIVE.has(after.status) || after.status === "failed")) throw new Error(`Try "${after?.title ?? "the thread it is built on"}" again first: this thread is built on it.`);

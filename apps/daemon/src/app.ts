@@ -411,7 +411,7 @@ export function createDaemonApp(options: {
   // GitHub through your gh login: a PR with its checks and open review comments, a check's log, a reply.
   if (options.github !== false) for (const tool of githubTools()) tools.register(tool);
   tools.register(foundrySaveTool(store, look, looks));
-  tools.register(foundryReadTool(store));
+  tools.register(foundryReadTool(store, look));
   tools.register(foundryEditTool(store, look, looks));
   // Trying a page needs the app that renders it, like the look.
   const tryer = options.foundryTry ?? (lookWith ? electronTry(lookWith) : undefined);

@@ -16,13 +16,15 @@ import type { ImageOutput } from "./artifacts.ts";
 export const FOUNDRY_LOOK_PREFIX = "foundry-look-";
 
 /// design: the page's design numbers (apps/desktop/electron/foundry-look-measure.ts DesignMeasure), shown to the model with targets and scored by eval-foundry-quality.
-export interface LookedPage { width: number; height: number; issues: string[]; png: string; design?: Record<string, number> }
+/// spec: what the page measures for a hand-off (foundry-spec-measure.ts SpecMeasure), only when the look asked for it.
+export interface LookedPage { width: number; height: number; issues: string[]; png: string; design?: Record<string, number>; spec?: unknown }
 export interface LookResult { pages: LookedPage[]; errors: string[] }
 /// phone: the page is a phone screen (surface phone); it is looked at at a phone's width, everything else at the desktop's.
 /// shots: the real pictures the page shows (<d-shot>, pass 240 A), by id, base64.
 export interface PageShots { shots?: Record<string, { data: string; mimeType: string; width: number; height: number; scale: number }> }
 /// option: draw only that option of the page (its index among the <d-compare>'s options), as Foundry stages it (pass 241 A: the pick, for comparing with a build).
-export type FoundryLook = (page: { kind: string; source: string; title: string; phone?: boolean; option?: number } & PageShots, signal: AbortSignal) => Promise<LookResult | null>;
+/// spec: also measure the page for a hand-off, with these named parts (foundry-spec.ts).
+export type FoundryLook = (page: { kind: string; source: string; title: string; phone?: boolean; option?: number; spec?: { parts: { name: string; at?: string }[] } } & PageShots, signal: AbortSignal) => Promise<LookResult | null>;
 
 /// The app binary that can render a page: DEMESNE_ELECTRON (with
 /// DEMESNE_ELECTRON_APP for an unpacked app folder), else the app this daemon

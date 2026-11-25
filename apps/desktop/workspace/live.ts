@@ -3415,7 +3415,9 @@ function runHTML(run: WorkspaceRun, index: number) {
         if (part.kind === "looks") {
           // Page checks in a row (pass 271): one line, every picture in one strip.
           const look = pageLookGroup(part.tools, lookPicture), lookKey = `${run.id}:${part.tools[0]!.id}`;
-          steps += `<details class="explored stretch look-group" data-detail="${lookKey}"${detailsOpen.has(lookKey) ? " open" : ""}><summary>${stepIcon(part.tools[0]!)}<span class="verb">${h(look.verb)}</span>${look.files ? `<span class="files">${h(look.files)}</span>` : ""}${CHEVRON}<span class="sp"></span><small class="meta"><span class="success">✓</span> ${duration(look.durationMs)}</small></summary><div>${look.below}</div></details>`;
+          // Opened side by side (pass 272): while any still open, one running row says how many are done.
+          const lookMeta = look.running ? spinner() : `<span class="success">✓</span> ${duration(look.durationMs)}`;
+          steps += `<details class="explored stretch look-group${look.running ? " running" : ""}" data-detail="${lookKey}"${detailsOpen.has(lookKey) ? " open" : ""}><summary>${stepIcon(part.tools[0]!)}<span class="verb">${h(look.verb)}</span>${look.files ? `<span class="files">${h(look.files)}</span>` : ""}${look.below ? CHEVRON : ""}<span class="sp"></span><small class="meta">${lookMeta}</small></summary><div>${look.below}</div></details>`;
           continue;
         }
         const words = stretchWords(part.tools, (tool) => totals(run, tool as ToolEntry)), first = part.tools[0]!, stretchKey = `${run.id}:${first.id}`;

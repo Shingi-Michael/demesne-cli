@@ -74,21 +74,35 @@ export function pageLookRow(tool: { state: string; drafting?: boolean; input: Re
   return { verb: look.steps.length ? "Tried" : "Opened", target: h(pageName(look.url)), meta, tone: look.errorCount || failed ? "failed" : "", below: steps + errors + shots };
 }
 
-type LookTool = { state: string; drafting?: boolean; waiting?: boolean; input: Record<string, unknown>; message?: string; durationMs?: number };
+type LookTool = { state: string; drafting?: boolean; waiting?: boolean; input: Record<string, unknown>; message?: string; durationMs?: number; startedAt?: number };
 
-/// A finished look with nothing to point at: no failed step, no console error.
+/// How long looks took from the first start to the last finish: side by side
+/// that is the slowest one, one after another their sum. Without start times, the sum.
+export function lookSpan(tools: readonly LookTool[]): number {
+  const timed = tools.filter((tool) => Number.isFinite(tool.startedAt) && Number.isFinite(tool.durationMs));
+  if (timed.length !== tools.length || !timed.length) return tools.reduce((sum, tool) => sum + (tool.durationMs ?? 0), 0);
+  return Math.max(...timed.map((tool) => tool.startedAt! + tool.durationMs!)) - Math.min(...timed.map((tool) => tool.startedAt!));
+}
+
+/// A look that can sit in the group: one still opening (looks called in the
+/// same round open side by side), or a finished one with nothing to point at:
+/// no failed step, no console error.
 export function cleanLook(tool: LookTool & { name: string }): boolean {
-  if (tool.name !== "look_at_page" || tool.state !== "done" || tool.waiting || tool.drafting) return false;
+  if (tool.name !== "look_at_page" || tool.waiting) return false;
+  if (tool.state === "running" || tool.drafting) return true;
+  if (tool.state !== "done") return false;
   const look = pageLookOutcome(tool.message);
   return Boolean(look) && !look!.errorCount && !look!.steps.some((line) => line.startsWith("✕"));
 }
 
 /// Consecutive clean looks as one row: "Opened 4 pages · localhost:56639",
 /// and under it one strip of every picture they took, in order.
-export function pageLookGroup(tools: readonly LookTool[], picture: (id: string) => string | undefined): { verb: string; files: string; durationMs: number; below: string } {
+/// While some still open: "Opening 3 pages · 1 of 3 done", running.
+export function pageLookGroup(tools: readonly LookTool[], picture: (id: string) => string | undefined): { verb: string; files: string; durationMs: number; below: string; running: boolean; done: number } {
   const looks = tools.map((tool) => pageLookOutcome(tool.message)).filter((look): look is PageLookOutcome => Boolean(look));
-  const tried = looks.some((look) => look.steps.length);
-  const hosts = [...new Set(looks.map((look) => hostOf(look.url)))];
+  const open = tools.filter((tool) => tool.state === "running" || tool.drafting).length, done = tools.length - open;
+  const tried = looks.some((look) => look.steps.length) || tools.some((tool) => stepCount(tool.input.steps));
+  const hosts = [...new Set([...looks.map((look) => hostOf(look.url)), ...tools.filter((tool) => !pageLookOutcome(tool.message)).map((tool) => hostOf(String(tool.input.url ?? "")))])].filter(Boolean);
   const shots = looks.flatMap((look) => look.pictures.map((p) => {
     const page = pageName(look.url), short = pagePart(look.url) || captionShort(p.label);
     const caption = pictureCaption(p.label, page), src = picture(p.id);
@@ -96,10 +110,11 @@ export function pageLookGroup(tools: readonly LookTool[], picture: (id: string) 
       + `<img data-picture="${h(p.id)}" alt="${h(caption)}" style="aspect-ratio:${p.width} / ${p.height}"${src ? ` src="${h(src)}"` : ""}><span>${h(short)}</span></button>`;
   }));
   return {
-    verb: `${tried ? "Tried" : "Opened"} ${tools.length} pages`,
-    files: hosts.length === 1 ? hosts[0]! : "",
-    durationMs: tools.reduce((sum, tool) => sum + (tool.durationMs ?? 0), 0),
+    verb: open ? `${tried ? "Trying" : "Opening"} ${tools.length} pages` : `${tried ? "Tried" : "Opened"} ${tools.length} pages`,
+    files: [hosts.length === 1 ? hosts[0]! : "", open ? `${done} of ${tools.length} done` : ""].filter(Boolean).join(" · "),
+    durationMs: lookSpan(tools),
     below: shots.length ? `<div class="pl-shots">${shots.join("")}</div>` : "",
+    running: open > 0, done,
   };
 }
 

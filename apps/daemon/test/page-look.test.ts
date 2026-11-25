@@ -70,3 +70,19 @@ test("a missing page viewer is named, not blamed on the page's server", async ()
   expect(error?.message).toContain("/nowhere/Demesne.app");
   expect(error?.message).not.toContain("dev server");
 });
+
+test("page checks in one round open side by side, three at a time", async () => {
+  // A stand-in viewer: each look takes 600ms and says when it started.
+  const viewer = ["/bin/sh", "-c", "sleep 0.6; echo '{\"steps\":[],\"tree\":[],\"errors\":[],\"pictures\":[]}'", "viewer"];
+  const look = electronPageLook(viewer);
+  const signal = new AbortController().signal, plan = { width: 1280, steps: [] };
+  const started = performance.now();
+  const three = await Promise.all([1, 2, 3].map((n) => look(`http://localhost:${5170 + n}/`, plan, signal)));
+  const together = performance.now() - started;
+  expect(three.every((one) => one !== null)).toBe(true);
+  expect(together).toBeLessThan(1500); // one after another would be 1.8s or more
+  // A fourth waits for a free window: two rounds of 600ms, not one.
+  const again = performance.now();
+  await Promise.all([1, 2, 3, 4].map((n) => look(`http://localhost:${5170 + n}/`, plan, signal)));
+  expect(performance.now() - again).toBeGreaterThan(1100);
+});

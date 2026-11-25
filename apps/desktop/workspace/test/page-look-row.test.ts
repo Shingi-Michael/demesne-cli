@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanLook, lookFailure, pageLookGroup, pageLookRow, pageName } from "../page-look-row.ts";
+import { cleanLook, lookFailure, lookSpan, pageLookGroup, pageLookRow, pageName } from "../page-look-row.ts";
 
 const message = JSON.stringify({ url: "http://localhost:5173/home", title: "Home", width: "1280px", errors: [], errorCount: 0,
   steps: ["✓ click “Sign in”: button “Sign in” → went to /home", "✕ click “Save”: nothing matches"],
@@ -62,6 +62,20 @@ test("a look that failed or found errors keeps its own row", () => {
   const ok = { url: "http://localhost:5173/", title: "", width: "", errors: [], pictures: [] };
   expect(cleanLook({ name: "look_at_page", state: "done", input: {}, message: JSON.stringify({ ...ok, steps: ["✕ click “Save”: nothing matches"], errorCount: 0 }) })).toBe(false);
   expect(cleanLook({ name: "look_at_page", state: "done", input: {}, message: JSON.stringify({ ...ok, steps: [], errorCount: 2 }) })).toBe(false);
-  expect(cleanLook({ name: "look_at_page", state: "running", input: {} })).toBe(false);
   expect(cleanLook({ name: "look_at_page", state: "failed", input: {} })).toBe(false);
+  expect(cleanLook({ name: "look_at_page", state: "running", waiting: true, input: {} })).toBe(false);
+});
+
+test("looks opening side by side are one running row that counts them done", () => {
+  const ok = (n: number, startedAt: number) => ({ name: "look_at_page", state: "done", startedAt, durationMs: 3000, input: { url: `localhost:5173/p${n}` },
+    message: JSON.stringify({ url: `http://localhost:5173/p${n}`, title: "", width: "1280px", errors: [], errorCount: 0, steps: [], pictures: [] }) });
+  const opening = (n: number) => ({ name: "look_at_page", state: "running", startedAt: 1000, input: { url: `localhost:5173/p${n}` } });
+  expect(cleanLook(opening(1))).toBe(true);
+  const mid = pageLookGroup([ok(1, 1000), opening(2), opening(3)], () => undefined);
+  expect([mid.verb, mid.files, mid.running]).toEqual(["Opening 3 pages", "localhost:5173 · 1 of 3 done", true]);
+  const end = pageLookGroup([ok(1, 1000), ok(2, 1050), ok(3, 1100)], () => undefined);
+  expect([end.verb, end.files, end.running]).toEqual(["Opened 3 pages", "localhost:5173", false]);
+  // Side by side the row says the slowest, not the sum; one after another, the sum.
+  expect(end.durationMs).toBe(3100);
+  expect(lookSpan([ok(1, 0), ok(2, 3000), ok(3, 6000)])).toBe(9000);
 });

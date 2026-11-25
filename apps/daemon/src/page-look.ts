@@ -7,13 +7,16 @@ import { existsSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { isRecord, parseSteps, TRY_MAX_STEPS, type TryStep } from "@demesne/protocol";
 import type { ImageOutput } from "./artifacts.ts";
-import { queued, runJob, type TriedStep } from "./foundry-look.ts";
+import { pool, runJob, type TriedStep } from "./foundry-look.ts";
 import { resolveWorkspacePath, toolError, type AgentTool } from "./tools.ts";
 
 export const LOOK_AT_PAGE = "look_at_page";
 /// Its pictures are named this way, so a model that sees gets them (engine.ts).
 export const PAGE_LOOK_PREFIX = "page-look-";
 export const PAGE_LOOKS_PER_TURN = 6;
+/// Page checks called in the same round open side by side, this many at once
+/// (the engine runs read-only tools of one round together).
+export const PAGE_LOOKS_AT_ONCE = 3;
 
 export interface PageLookResult { width: number; title: string; url: string; steps: TriedStep[]; tree: string[]; errors: string[]; pictures: { after: string; png: string }[] }
 export type PageLook = (url: string, plan: { width: number; steps: TryStep[] }, signal: AbortSignal) => Promise<PageLookResult | null>;
@@ -46,7 +49,8 @@ export function viewerMissing(command: string[]): Error {
   return toolError("VIEWER_MISSING", `the page viewer isn't there (${command[0] ?? "no program"}), so no page can be opened`, "this is not the page's fault: say you couldn't look, and check the page another way (run_command, or the browser tool)");
 }
 
-export function electronPageLook(command: string[]): PageLook {
+export function electronPageLook(command: string[], limit = PAGE_LOOKS_AT_ONCE): PageLook {
+  const queued = pool(limit);
   return (url, plan, signal) => queued(async () => {
     const program = command[0];
     if (!program || (program.includes("/") && !existsSync(program))) throw viewerMissing(command);
@@ -92,6 +96,7 @@ export function lookAtPageTool(look: PageLook, looks = new Map<string, number>()
         + "{click: name}, {type: text, into?: name}, {key: Enter|Tab|Escape|Backspace|Space|ArrowUp|ArrowDown|ArrowLeft|ArrowRight}, {scroll: px}, {hover: name}, {wait: ms}. "
         + "A name is a control's visible text, label, aria-label or placeholder (a CSS selector also works). "
         + "Use it after changing a web UI, to check it looks and works right before you answer. "
+        + "Checking several pages: call it for each in the same round; they open side by side. "
         + "This is one look that starts fresh each time; to stay in a page across calls (sign in, go several pages deep, act on what you find), use browser.",
       inputSchema: {
         type: "object",

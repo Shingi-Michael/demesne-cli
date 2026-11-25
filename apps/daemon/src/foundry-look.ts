@@ -74,6 +74,20 @@ export function queued<T>(work: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/// At most `limit` jobs at once; the rest wait their turn, first come first
+/// served. Each off-screen app has its own profile, so they can run side by
+/// side; the limit keeps a burst of them from eating the Mac's memory.
+export function pool(limit: number) {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return async function run<T>(work: () => Promise<T>): Promise<T> {
+    if (running >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    running++;
+    try { return await work(); }
+    finally { running--; waiting.shift()?.(); }
+  };
+}
+
 /// Starts the app on one job file and reads the JSON line it prints; null when it can't.
 export async function runJob(command: string[], job: unknown, signal: AbortSignal): Promise<unknown> {
   if (signal.aborted) return null;

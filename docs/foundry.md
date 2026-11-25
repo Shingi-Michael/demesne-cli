@@ -328,6 +328,20 @@ Read about it:
 - [Cascade layers, MDN](https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Styling_basics/Cascade_layers) and [@scope, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/@scope): why a scoped rule was beating the page's own, and how a layer fixes it.
 - [HSL and hue, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/hsl): the check compares hues, the angle on the colour wheel.
 
+## Whole flows
+
+A sign-up, a checkout or a booking is several screens, and one screen alone doesn't show whether the journey works. An ask that spans screens now comes back as one mockup holding all of them (piece 2 of pass 274).
+
+- **How it is written.** The screens sit in a `<d-flow>`, each a place with a name (`data-view="Find a time"`), in the order a person meets them. A control that moves on says where (`data-go="Your details"`). This is the same "places" mechanism tabs in a mockup already used; a flow adds the map.
+- **The map.** Above the screens Foundry draws one quiet line: every screen by name with an arrow to the next, the one you are on marked. Under it, where this screen's own controls lead: "Screen 2 of 4 · from here: Back → Find a time · Continue → Confirm". The map is drawn by the kit ([parts.js](../apps/desktop/foundry-kit/parts.js), `d-flow`), so the model draws no steps bar of its own.
+- **It works.** Press the button in the screen and you are on the next one, at real size. Press a name in the map to jump. Notes pin to the screen you are on, as on any mockup.
+- **Nothing is dead.** At save a flow is checked (`flowProblem` in [foundry.ts](../apps/daemon/src/foundry.ts)): two to twelve screens, each named once, every `data-go` leading to a screen that exists, and at least one control that leads somewhere. What is wrong goes back to the model with the fix.
+
+Read about it:
+- [User flows, Nielsen Norman Group](https://www.nngroup.com/articles/user-journeys-vs-user-flows/): what a flow is, and how it differs from a journey.
+- [Wizards: definition and design recommendations, Nielsen Norman Group](https://www.nngroup.com/articles/wizards/): one decision per screen, and telling people where they are.
+- [Using custom elements, MDN](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements): how a tag like `<d-flow>` draws itself.
+
 ## Taste that carries over
 
 What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.

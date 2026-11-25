@@ -6,6 +6,7 @@
 /// place, a number you type, or a link. Nothing opens a menu.
 import { DEFAULT_DRIVE_LIMITS, PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, planWindows, type ModelScore, type NearbyAgent, type PlanLimits } from "@demesne/protocol";
 import type { ChatsPageChat } from "./chats-page.ts";
+import { HOME_SKIES, PIECES, type HomeSky } from "./milkyway.ts";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -186,7 +187,7 @@ export interface SettingsView {
   fold: string;
   general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string; check: { title: string; line: string; tone: "" | "bad"; can: boolean } } };
   notify: Record<NotifyKind, boolean>;
-  appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; activityBorder: boolean; systemSource?: {enabled:boolean;path:string;error?:string} | null };
+  appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; homeSky: HomeSky; activityBorder: boolean; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
   usage: ModelScore[] | null;
   modelWords: (model: { id: string; displayName?: string }) => string;
@@ -737,7 +738,13 @@ function appearanceTop(view: SettingsView, themeLabel: string, groups: [string, 
   };
   const make = `<button type="button" class="ap-card make" data-action="settings-command" data-args='{"text":"/themefy "}'><span class="ap-art plain">+</span><span class="ap-name">Make one…</span></button>`;
   const all = groups.flatMap(([, items]) => items);
-  return preview + `<div class="st-head"><span>Theme</span>${view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }, " quiet") : ""}</div><div class="ap-cards">${all.map(card).join("")}${make}</div>`;
+  // Home's sky (pass 276): what flies over Home, each choice drawn as itself.
+  const sky = HOME_SKIES.map(([id, label]) => {
+    const on = view.appearance.homeSky === id, picture = id === "none" ? "" : `<img src="${PIECES[id]}" alt="" decoding="async" loading="lazy" draggable="false">`;
+    return `<button type="button" class="ap-card${on ? " on" : ""}" aria-pressed="${on}" data-action="settings-local" data-args="${h(JSON.stringify({ key: "homeSky", value: id }))}"><span class="ap-art">${picture}</span><span class="ap-name">${h(label)}</span></button>`;
+  }).join("");
+  return preview + `<div class="st-head"><span>Theme</span>${view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }, " quiet") : ""}</div><div class="ap-cards">${all.map(card).join("")}${make}</div>`
+    + `<div class="st-head"><span>Home’s sky</span><span>What flies over Home</span></div><div class="ap-cards sky-cards" role="group" aria-label="Home’s sky">${sky}</div>`;
 }
 
 const SERIES = ["var(--acc)", "var(--blossom, #f2b6c8)", "var(--ok, #6cc68e)", "var(--t4)"];

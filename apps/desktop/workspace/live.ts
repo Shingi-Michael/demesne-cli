@@ -19,7 +19,7 @@ import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
 import { light as threadLight, threadBriefHTML, threadsNews, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook, type ThreadState } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
-import { mountMilkyWay, type MilkyWay } from "./milkyway.ts";
+import { isHomeSky, mountMilkyWay, type HomeSky, type MilkyWay } from "./milkyway.ts";
 import { awaySentences, lastPrompt, type AwayAsk, type AwayPart } from "./away.ts";
 import { StateReceiver, type StateUpdate } from "./state-wire.ts";
 import { codeDiff } from "@demesne/workbench/change-diff.ts";
@@ -4094,6 +4094,9 @@ let reviewShown = false;
 /// Home's sky (the galaxy and the flagship) lives behind the start screen
 /// only, and is left alone while a chat or a page is showing.
 let homeSky: MilkyWay | null = null, homeSkyTried = false, homeSkyDark: boolean | null = null;
+/// Settings › Appearance › Home's sky (pass 276): what flies over Home, kept on this computer.
+let homeSkyPiece: HomeSky = "flagship";
+try { const saved = localStorage.getItem("demesne-home-sky"); if (isHomeSky(saved)) homeSkyPiece = saved; } catch {}
 const colorProbe = document.createElement("canvas").getContext("2d");
 function inkIsDark() {
   if (!colorProbe) return true;
@@ -4109,7 +4112,7 @@ function renderHomeSky(show: boolean) {
     homeSkyTried = true;
     // the picture ends just above the greeting
     const floor = () => { const eyebrow = el("hero").querySelector(".hero-eyebrow, h1"); return eyebrow ? eyebrow.getBoundingClientRect().top - host.getBoundingClientRect().top : host.clientHeight * .47; };
-    try { homeSkyDark = inkIsDark(); homeSky = mountMilkyWay(host, homeSkyDark, floor); } catch { homeSky = null; }
+    try { homeSkyDark = inkIsDark(); homeSky = mountMilkyWay(host, homeSkyDark, floor, homeSkyPiece); } catch { homeSky = null; }
   }
   host.hidden = !show || !homeSky;
   // Hidden, it only rests: reading the ink's colour asks the browser for
@@ -4683,7 +4686,7 @@ function settingsView(): SettingsView {
       const option = s.themeOptions.find((item) => item.name === name);
       return { name, label: option?.label ?? name, light: option ? isLightTheme(name) : undefined,
         colors: option?.colors ? { bg: option.colors.ink, surface: option.colors.surface, accent: option.colors.electric, text: option.colors.paper } : undefined };
-    }), canUndo: s.themeCanUndo, systemSource: s.systemThemeSource, zoom: zoomLevel, glass: glassLevel, ink: inkName, activityBorder },
+    }), canUndo: s.themeCanUndo, systemSource: s.systemThemeSource, zoom: zoomLevel, glass: glassLevel, ink: inkName, homeSky: homeSkyPiece, activityBorder },
     archived: archivedChats,
     usage: usageScores,
     modelWords,
@@ -7575,6 +7578,7 @@ async function dispatch(
       renderStatus();
     }
     if (args.key === "ink" && isInk(args.value)) { inkName = args.value; try { localStorage.setItem("demesne-ink", inkName); } catch {} applyInk(); }
+    if (args.key === "homeSky" && isHomeSky(args.value)) { homeSkyPiece = args.value; try { localStorage.setItem("demesne-home-sky", homeSkyPiece); } catch {} homeSky?.setPiece(homeSkyPiece); }
     if (args.key === "updates") { const next = await api<AppUpdate>("desktop-update", { action: args.value === true ? "on" : "off" }).catch(() => null); if (next) appUpdate = next; }
     if (args.key === "awake") { keepAwake = args.value === true; try { localStorage.setItem("demesne-awake", keepAwake ? "on" : "off"); } catch {} renderAwake(); }
     return renderPage();

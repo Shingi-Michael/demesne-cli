@@ -7048,6 +7048,7 @@ async function submitText(value = editor.value, wait = false) {
     clearTimeout(draftTimer);
     editor.value = "";
     renderComposer();
+    composerSent();
     await api("submit", { text: value, wait });
     return;
   }
@@ -7232,7 +7233,19 @@ async function submitText(value = editor.value, wait = false) {
     }
   }
   followLatest();
+  composerSent();
   await api("submit", { text: value });
+}
+/// The moment a message leaves: the composer takes `sent` for one beat, so a
+/// theme can mark it (Milky Way's Horizon lets a dawn rise behind the box).
+let composerSentTimer = 0;
+function composerSent() {
+  const form = el("composer");
+  form.classList.remove("sent");
+  void form.offsetWidth;
+  form.classList.add("sent");
+  clearTimeout(composerSentTimer);
+  composerSentTimer = window.setTimeout(() => form.classList.remove("sent"), 700);
 }
 /// Sending a message follows its reply from the bottom, even after the
 /// reader scrolled up earlier in the session.

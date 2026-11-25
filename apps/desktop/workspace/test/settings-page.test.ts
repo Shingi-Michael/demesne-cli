@@ -82,7 +82,7 @@ test("numbers are typed as you would say them", () => {
   expect(homeWords("/Users/mike/projects/x", "/Users/mike")).toBe("~/projects/x");
 });
 
-test("every section draws, in four categories with Overview first (pass 207)", () => {
+test("every section draws, in four categories with Overview first", () => {
   expect(SETTINGS_ORDER).toEqual(["overview", "general", "notifications", "appearance", "keys", "models", "providers", "agents", "permissions", "drive", "connectors", "browser", "usage", "archived", "data"]);
   for (const section of SETTINGS_ORDER) expect(settingsPage(view({ section }))).toContain('class="cp-title"');
   expect(settingsPage(view({ section: "providers" }))).toContain('<h1 class="cp-title">Accounts</h1>');
@@ -329,7 +329,7 @@ test("Agents › Side work has How often for subagents, Usual unless set", () =>
   expect(more).toMatch(/class="on" aria-pressed="true" data-action="subagent-often" data-args="[^"]*more/);
 });
 
-test("Settings › Agents: one switch, then each agent everywhere, some projects or off (pass 206 A)", () => {
+test("Settings › Agents: one switch, then each agent everywhere, some projects or off", () => {
   const agents = { off: false, agents: [
     { id: "claude", name: "Claude Code", mode: "every" as const, projects: [] },
     { id: "codex", name: "Codex", mode: "some" as const, projects: ["/Users/mike/projects/demesne-cli"] },

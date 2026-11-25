@@ -3137,7 +3137,9 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) { margin-left: 0; box-shadow: none; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session { gap: 13.5px; padding-left: 11.5px; border-radius: var(--r); }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) :is(.sidebar-more, .sidebar-empty) { padding-left: 41px; border-radius: var(--r); }
-#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-rename { height: 30px; padding-left: 11.5px; gap: 13.5px; border-radius: var(--r); }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-rename { position: relative; z-index: 1; height: 30px; padding-left: 11.5px; gap: 13.5px; border-radius: var(--r); }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .kid .sidebar-rename { padding-left: 25px; }
+#desktop-sidebar .sidebar-rename input { caret-color: var(--t1); }
 #desktop-sidebar .sidebar-rename input { font-size: 13px !important; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .kid .sidebar-session { padding-left: 25px; }
 #desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { background: color-mix(in srgb, var(--t1) 10%, transparent); box-shadow: none; }

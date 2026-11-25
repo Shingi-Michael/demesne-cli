@@ -941,7 +941,7 @@ function renderSidebar() {
       const hand = prHandable(pr, prOpenSince) ? btn("pr-hand", "Hand it to the chat", { id }, "sidebar-back-opt key") : "";
       return `<div class="sidebar-pr-line" role="group" aria-label="Pull request #${pr.number}"><span class="sidebar-pr-head">${head}</span>${lines}${hand}${github}</div>`;
     })() : "";
-    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${quietWork ? "" : dot(tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
+    if (renaming === id) return `<div class="sidebar-item${nested ? " kid" : ""}"><form class="sidebar-rename" data-id="${h(id)}">${dot(quietWork ? "" : tone)}<input name="title" value="${h(title)}" maxlength="200" aria-label="Rename ${h(title)}" autocomplete="off"></form></div>`;
     return `<div class="sidebar-item${nested ? " kid" : ""}${back ? " back" : ""}${pr && !say ? " has-pr" : ""}${rowLit.has(id) ? " lit" : ""}">${open}<span class="sidebar-row-actions">${pin}${archive}${say ? "" : chip}</span></div>${backLine}${prLine}`;
   };
   // A group's rows, the first six unless searching or expanded.
@@ -1245,11 +1245,17 @@ async function rowMenuAction(what: string): Promise<unknown> {
 // keeps it, Escape puts it back.
 // The first click opens the chat and redraws the row, so the second click
 // may not complete on the same element: the second press starts the rename.
+// Only a chat that was already open renames: two quick clicks that open a
+// chat (a common way to open one) leave its title alone.
+let renameArmed: string | null = null;
 document.getElementById("sidebar-projects")?.addEventListener("mousedown", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLElement>(".sidebar-session");
-  if (!button || button.dataset.action !== "select-session" || event.detail < 2 || event.button !== 0) return;
+  if (!button || button.dataset.action !== "select-session" || event.button !== 0) return;
+  const id = JSON.parse(button.dataset.args ?? "{}").id ?? null;
+  if (event.detail < 2) { renameArmed = id && id === state?.session?.id ? id : null; return; }
+  if (!id || renameArmed !== id) return;
   event.preventDefault();
-  renaming = JSON.parse(button.dataset.args ?? "{}").id ?? null;
+  renaming = id;
   renderSidebar();
 }, true);
 function endRename(save: boolean) {

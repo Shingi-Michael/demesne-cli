@@ -1233,6 +1233,7 @@ export * from "./foundry-walk.ts";
 export * from "./foundry-sheet.ts";
 export * from "./foundry-board.ts";
 export * from "./foundry-knobs.ts";
+export * from "./foundry-files.ts";
 export * from "./agents-nearby.ts";
 export * from "./pull-requests.ts";
 

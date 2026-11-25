@@ -1935,6 +1935,9 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fn-keys kbd, .fd-notes kbd { font: inherit; color: var(--t2); }
 .fd-notes { display: flex; align-items: center; gap: 9px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-notes[hidden] { display: none; }
+/* Piece 6 of pass 274, Present: a deck over the whole window, nothing else on it. */
+.fd-present { position: fixed; inset: 0; z-index: 4000; background: #000; }
+.fd-present-frame { display: block; width: 100%; height: 100%; border: 0; background: #000; }
 /* Piece 5 of pass 274, knobs: a quiet row of sliders over the opened mockup, one per value the page named. Grey; no colour. */
 .fd-knobs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 26px; margin: 8px 2px 12px; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-knob { display: inline-flex; align-items: center; gap: 9px; }

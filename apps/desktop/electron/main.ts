@@ -15,6 +15,8 @@ import { serveBrowser } from "./browser-inapp.ts";
 import { withChanges } from "./foundry-changed.ts";
 import { TRY_RUNTIME } from "./foundry-try.ts";
 import { POINT_CANCEL, POINT_SCRIPT } from "./point.ts";
+import { deckPPTX, docDOCX, sheetXLSX } from "./foundry-files.ts";
+import { copyFormats, otherFormats, type CopyFormat } from "@demesne/protocol";
 import { startCaptureKeys } from "./capture-keys.ts";
 import { githubToken, installFor, Updater } from "./updater.ts";
 import { APP_URL, allowAppReload, assetPath, desktopBlurs, desktopGlass, FOUNDRY_CSP, FOUNDRY_DEMO_KINDS, FOUNDRY_KIT, foundryKitFile, foundryPageCall, type PageCall, foundryShotURL, withShots, withPictures, type ShotPlace, liquidGlass, usesRemember, withRemember, exportedSource, copyName, macVibrancy, notchInset, foundryDocument, foundryURL, localAppURL, nextZoom, openTarget, placeRect, previewURL, validateRequest, ZOOM_LEVELS, ZOOM_VERSION } from "./policy.ts";
@@ -582,21 +584,24 @@ if (!lookJob) void app.whenReady().then(async () => {
       return withPictures(html, pictures);
     };
     if (method === "desktop-foundry-copy") {
-      const { version, other } = args as Record<string, unknown>;
+      const { version, other, format: asked } = args as Record<string, unknown>;
       const { id, found } = await foundryFound((args as Record<string, unknown>).id, version);
-      const ready = isReadyKind(found.kind);
-      // More kinds: a React page or a diagram as a page that runs on its own, or (other) its source.
-      const drawn = found.kind === "react" || found.kind === "mermaid", source = drawn && other === true;
-      const pdf = ready && ((found.kind === "deck") !== (other === true));
-      const extension = pdf ? "pdf" : ready ? "html" : source ? (found.kind === "react" ? "jsx" : "mmd") : drawn ? "html"
-        : found.kind === "code" ? codeExtension(found.title) : ({ html: "html", svg: "svg", markdown: "md", sheet: "csv", board: "json" } as Record<string, string>)[found.kind] ?? "txt";
+      // Piece 6 of pass 274: each kind saves as the file the world expects (a deck as PowerPoint, a doc as Word,
+      // a sheet as Excel), with no menu; the other formats are offered once on the line after.
+      const formats = copyFormats(found.kind);
+      const format = typeof asked === "string" && (formats as string[]).includes(asked) ? asked as CopyFormat : other === true && formats[1] ? formats[1] : formats[0]!;
+      const extension = format === "code" ? codeExtension(found.title) : format;
       const folder = app.getPath("downloads");
       const path = join(folder, copyName(found.title, found.version, extension, (name) => existsSync(join(folder, name))));
-      if (pdf) await writeFile(path, await foundryPDF(session, id, found.version, found.kind));
-      else await writeFile(path, source ? found.source : await standalone(id, found, false), "utf8");
+      if (format === "pdf") await writeFile(path, await foundryPDF(session, id, found.version, found.kind));
+      else if (format === "png") await writeFile(path, await foundryPNG(session, id, found.version));
+      else if (format === "pptx") await writeFile(path, deckPPTX(found.source, found.title));
+      else if (format === "docx") await writeFile(path, docDOCX(found.source, found.title));
+      else if (format === "xlsx") await writeFile(path, sheetXLSX(found.source, found.title));
+      else await writeFile(path, format === "html" ? await standalone(id, found, false) : found.source, "utf8");
       savedCopies.add(path);
-      // ready: there is another format to offer (a deck's page, a doc's PDF, a component's source).
-      return { path, name: path.slice(folder.length + 1), pdf, ready: ready || drawn };
+      const others = format === formats[0] ? otherFormats(found.kind, format) : [];
+      return { path, name: path.slice(folder.length + 1), pdf: format === "pdf", format, others, ready: others.length > 0 };
     }
     // Share outside Demesne (step 8): the version as a page on your GitHub
     // Pages, at a link nobody can guess. A mockup not shared before asks
@@ -737,6 +742,24 @@ if (!lookJob) void app.whenReady().then(async () => {
   // Also show initialization errors if the host cannot bootstrap.
   window.show();
 }).catch(error => { log(String(error)); dialog.showErrorBox("Demesne could not start", String(error)); void quit(); });
+
+/// A page as a picture at real size (piece 6 of pass 274): drawn off screen at 1440 wide and as tall as it is
+/// (up to 8000), then captured whole. For a slide in a doc, a ticket, or a message.
+async function foundryPNG(session: Electron.Session, id: string, version: number) {
+  const win = new BrowserWindow({ show: false, width: 1440, height: 900, useContentSize: true, webPreferences: { session, sandbox: true, contextIsolation: true, nodeIntegration: false, offscreen: true } });
+  try {
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    win.webContents.on("will-navigate", (event) => event.preventDefault());
+    await win.loadURL(`foundry://artifact/${encodeURIComponent(id)}?v=${version}`);
+    await Promise.race([win.webContents.executeJavaScript("document.fonts.ready.then(() => true)"), new Promise((done) => setTimeout(done, 3000))]);
+    const high = Number(await win.webContents.executeJavaScript("Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)").catch(() => 900)) || 900;
+    win.setContentSize(1440, Math.max(200, Math.min(8000, Math.ceil(high))));
+    await new Promise((done) => setTimeout(done, 400));
+    const shot = await win.webContents.capturePage();
+    if (shot.isEmpty()) throw new Error("The page could not be pictured");
+    return shot.toPNG();
+  } finally { win.destroy(); }
+}
 
 /// A deck, doc or dashboard as a PDF (pass 262 C, as before #555): drawn off
 /// screen in the window's own session, so foundry:// and the kit load as on

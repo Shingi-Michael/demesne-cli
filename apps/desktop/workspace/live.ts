@@ -61,7 +61,7 @@ import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, us
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
 import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
 import { watchFoundryStages } from "./foundry-stage.ts";
-import { knobsMessage, previewable, type FilePreview } from "@demesne/protocol";
+import { knobsMessage, previewable, type CopyFormat, type FilePreview } from "@demesne/protocol";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
@@ -7174,6 +7174,7 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
   if (action === "foundry-compare") { open.compare = !open.compare; if (open.compare) delete open.code; renderPage(); return true; }
   if (action === "foundry-edit") { await foundryEdit(open); return true; }
   if (action === "foundry-knobs-send") { await sendFoundryKnobs(open); return true; }
+  if (action === "foundry-present") { presentFoundry(open); return true; }
   if (action === "foundry-shrink") {
     foundryOpen = null;
     foundryFocus = { id: open.id, version: open.at, quiet: true };
@@ -7196,9 +7197,9 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
   if (action === "foundry-copy") {
     open.said = "Saving a copy…"; open.saved = null; paintFoundrySaid();
     try {
-      const saved = await api<{ path: string; name: string; pdf: boolean; ready: boolean }>("desktop-foundry-copy", { id: open.id, version: open.shown, ...(args.other ? { other: true } : {}) });
+      const saved = await api<{ path: string; name: string; pdf: boolean; ready: boolean; others?: CopyFormat[] }>("desktop-foundry-copy", { id: open.id, version: open.shown, ...(args.format ? { format: args.format } : args.other ? { other: true } : {}) });
       open.said = `Saved ${saved.name} to Downloads`;
-      open.saved = { path: saved.path, pdf: saved.pdf, ready: saved.ready && !args.other };
+      open.saved = { path: saved.path, pdf: saved.pdf, ready: saved.ready && !args.other && !args.format, others: args.other || args.format ? [] : saved.others ?? [] };
     } catch (error) { open.said = `Couldn't save a copy: ${errorWords(error)}`; open.saved = null; }
     clearTimeout(foundrySaidTimer);
     foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === open) { open.said = ""; open.saved = null; paintFoundrySaid(); } }, 12_000);
@@ -7257,6 +7258,27 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
 /// dashboard's newest version where it sits; Done keeps every change you
 /// made as one new version, "Edited by you", and shows it.
 const EDIT_SAID = "Click any text to change it. Done keeps your changes as a new version.";
+/// Piece 6 of pass 274, Present: the deck alone over the whole window, in a frame of its own. The page inside
+/// moves with the arrow keys and shows its notes on N; when it hears Esc it says so, and the window comes back.
+let stopPresenting: (() => void) | null = null;
+function presentFoundry(open: FoundryOpen) {
+  stopPresenting?.();
+  const title = foundryList?.find((item) => item.id === open.id)?.title ?? "Deck";
+  const layer = document.createElement("div");
+  layer.className = "fd-present";
+  layer.innerHTML = `<iframe class="fd-present-frame" src="${h(`foundry://artifact/${encodeURIComponent(open.id)}?v=${open.shown}&present=1`)}" sandbox="allow-scripts" referrerpolicy="no-referrer" title="${h(`${title}, presenting`)}"></iframe>`;
+  const frame = layer.querySelector("iframe")!;
+  const heard = (event: MessageEvent) => { const data = event.data as { demesne?: string; state?: string } | null; if (event.source === frame.contentWindow && data?.demesne === "deck" && data.state === "stopped") stop(); };
+  const key = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); stop(); } };
+  function stop() { window.removeEventListener("message", heard); window.removeEventListener("keydown", key, true); layer.remove(); stopPresenting = null; }
+  window.addEventListener("message", heard);
+  window.addEventListener("keydown", key, true);
+  // The keys go to the deck: it takes the focus as soon as it is there, and again if you click beside it.
+  frame.addEventListener("load", () => frame.focus());
+  layer.addEventListener("pointerdown", () => frame.focus());
+  document.body.append(layer);
+  stopPresenting = stop;
+}
 /// Piece 5 of pass 274: where you left the knobs goes to the chat that made the mockup as one message,
 /// and that chat's model keeps them as the next version. The page stays on Foundry.
 async function sendFoundryKnobs(open: FoundryOpen) {

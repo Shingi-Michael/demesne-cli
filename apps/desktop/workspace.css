@@ -1910,7 +1910,6 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fd-mini { position: relative; overflow: hidden; height: calc(var(--oh) * var(--k, .3)); border-radius: var(--r); background: #fff; box-shadow: 0 0 0 1px var(--hair); }
 .fd-mini-frame { position: absolute; left: 0; top: 0; width: var(--ow); height: var(--oh); border: 0; background: #fff; transform: scale(var(--k, .3)); transform-origin: 0 0; pointer-events: none; }
 .fd-doc { max-width: 760px; padding: 28px 32px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair); color: var(--t1); }
-.fd-here .fd-stage, .fd-here .fd-doc { box-shadow: 0 0 0 2px color-mix(in srgb, var(--t1) 40%, transparent), 0 18px 40px -22px rgba(0, 0, 0, .6); }
 /* Pass 242 A: notes on a mockup, pinned where you point. Nothing is outlined:
    a small grey + rests beside a still pointer, a click drops a grey pin
    exactly there (its point is the spot) with a one-line note beside it. A
@@ -3470,9 +3469,12 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
    versions, shows its code, saves a copy and closes it. Greys only. The rest
    of the page stays look-only. */
 #stage:has(> #page[data-kind="foundry"]:not([hidden])) { container-type: inline-size; padding-left: 0; padding-right: 0; }
-/* Pass 263 A: Foundry is a page of its own, so the opened mockup runs edge to edge across it, with no box; its words keep a margin. */
-.fd-item.fd-open { --fd-w: 100cqw; --fd-pad: 28px; box-sizing: border-box; width: var(--fd-w); margin-left: calc((100% - var(--fd-w)) / 2); padding-inline: var(--fd-pad); }
-.fd-open > .fd-stage, .fd-open > .fd-wipe, .fd-open > .fd-code, .fd-open > .fd-doc { margin-inline: calc(var(--fd-pad) * -1); border-radius: 0; box-shadow: none; }
+/* Every mockup on the long page runs edge to edge across it, with no box (pass 263 A did it for the opened one;
+   Mike, 2026-11-25: no border and no space around a mockup); its words keep a margin. */
+/* The day is a quiet heading in the flow: it no longer sticks over the mockups as a band. */
+.fd-day { position: static; box-sizing: border-box; width: 100cqw; margin-left: calc((100% - 100cqw) / 2); padding-inline: 28px; background: none; backdrop-filter: none; }
+.fd-item { --fd-w: 100cqw; --fd-pad: 28px; box-sizing: border-box; width: var(--fd-w); margin-left: calc((100% - var(--fd-w)) / 2); padding-inline: var(--fd-pad); }
+.fd-item > .fd-stage, .fd-item > .fd-wipe, .fd-open > .fd-code, .fd-open > .fd-doc { margin-inline: calc(var(--fd-pad) * -1); border-radius: 0; box-shadow: none; }
 .fd-open > .fd-tabs + .fd-stage { box-shadow: 0 -1px 0 var(--hair); }
 .fd-open .fd-stage:not(.fd-s), .fd-open .fd-stage.graphic { height: max(520px, calc(100vh - 170px)); }
 .fd-open .fd-doc { max-width: none; }
@@ -3482,18 +3484,6 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-open > .fd-knobs { margin: -2px 2px 10px; }
 .fd-open > .fd-story { margin-top: 16px; }
 .fd-open > .fd-story > .fd-ver { margin-top: 0; }
-/* One mockup opened on its own page: one row holds the way back, its name, where it came from and its controls. */
-.fg-one:has(.fd-hd) { align-items: center; margin-bottom: 12px; }
-.fg-one:has(.fd-hd) .fd-h { font-size: 20px; line-height: 26px; }
-.fg-one .fg-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font-size: 12.5px; }
-.fg-one .fg-from .fd-link { color: inherit; box-shadow: none; }
-.fg-one:has(.fd-hd) .fg-meta { flex: none; }
-.fg-one .fd-hd { margin-left: auto; }
-/* Opened, the page's head row is the mockup's own line: its kind and time sit after the name, not at the far end. */
-.desktop #page[data-kind="foundry"]:has(.fg-one.fd-ln) { padding-top: 6px; }
-.fg-one.fd-ln { margin: 0 0 12px; color: var(--t3); font-size: 12.5px; }
-.fg-one.fd-ln .fd-ln-r { margin-left: 0; }
-.fg-one.fd-ln .fg-meta { flex: none; }
 .fd-ln .fd-link { color: inherit; box-shadow: none; }
 .fd-ln b .fd-link:hover { box-shadow: inset 0 -1px 0 var(--hair2); }
 .fd-hd { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-left: 10px; align-self: center; }

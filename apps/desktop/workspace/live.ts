@@ -36,7 +36,7 @@ import { agentFace } from "@demesne/brand";
 import type { AgentRunsOn, SocialPost, SocialProfile, SocialRemembered, SocialsView } from "@demesne/client";
 import { dayLine } from "./assistant-chat.ts";
 import { codeWithFiles, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
-import { galleryGrid, galleryPage, MAKE_KINDS, oneHead, type FoundryGallery, type GalleryView } from "./foundry-gallery.ts";
+import { galleryGrid, galleryPage, MAKE_KINDS, pageHead, type FoundryGallery, type GalleryView } from "./foundry-gallery.ts";
 import { placeEdit } from "./foundry-edit.ts";
 import { KNOBS_SEND, knobsSet } from "./foundry-knobs.ts";
 import { watchFoundrySites } from "./foundry-sites.ts";
@@ -4535,7 +4535,7 @@ function ensureMockupNames() {
   }).catch(() => { foundryNamesAt = -2; });
 }
 /// The version a chat link asked for: the long page scrolls to it once drawn.
-let foundryFocus: { id: string; version?: number; quiet?: boolean } | null = null;
+let foundryFocus: { id: string; version?: number } | null = null;
 /// Pass 262 C: the one mockup grown to full width on the long page, if any.
 let foundryOpen: FoundryOpen | null = null;
 /// Pass 273 A: the front page's search and filter, and the one mockup whose
@@ -5063,10 +5063,8 @@ function showFoundryFocus() {
   const target = version ? root.querySelector<HTMLElement>(`[data-fd="${CSS.escape(shelfKey(focus.id, version))}"]`) : null;
   if (!target) return;
   foundryFocus = null;
+  // Scrolled to the top of the page, and grown: no outline around it to say which one.
   target.scrollIntoView({ block: "start" });
-  if (focus.quiet) return;
-  target.classList.add("fd-here");
-  setTimeout(() => target.classList.remove("fd-here"), 1600);
 }
 // Pass 273 A: the front page's search follows each key, and never submits.
 document.addEventListener("input", (event) => { if (event.target instanceof HTMLInputElement && event.target.id === "fg-q") foundrySearchTyped(event.target.value); });
@@ -5158,13 +5156,13 @@ function renderPage() {
     const saves = foundrySaveCount();
     if (saves !== foundrySaves) { foundrySaves = saves; void loadFoundry(); }
     foundryNotesTick();
-    // Pass 273 A: a link to a mockup opens its own long page; otherwise the front page.
+    // A link to a mockup, or its card, opens the long page there; otherwise the front page.
     if (foundryFocus?.id) foundryGallery.one = foundryFocus.id;
     const one = foundryGallery.one ? foundryList?.find((item) => item.id === foundryGallery.one) : null;
     if (foundryList && foundryVersions && !one) { foundryGallery.one = null; html = galleryPage(galleryView(here), foundryUi.error); }
     else html = foundryPage({ list: foundryList, versions: foundryVersions, error: foundryUi.error, changed: foundryChanged, open: foundryOpen, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null,
       builtIn: (id) => { const pr = pullRequests.get(id); return pr?.state === "merged" ? { number: pr.number, createdAt: pr.createdAt } : null; },
-      ...(one ? { only: one.id, head: oneHead(one, foundryPins.includes(one.id), foundryShared.has(one.id)) } : {}) });
+      ...(one ? { head: pageHead() } : {}) });
   } else if (pageOpen === "customize") {
     // A file being edited keeps its words through a redraw.
     const area = root.querySelector<HTMLTextAreaElement>(".cz-edit textarea");
@@ -7283,7 +7281,7 @@ function paintFoundrySaid() {
 async function foundryOpenAction(action: string, args: Record<string, any>) {
   if (action === "foundry-grow") {
     growFoundry(String(args.id), Number.isSafeInteger(args.version) ? args.version : undefined);
-    foundryFocus = foundryOpen ? { id: foundryOpen.id, version: foundryOpen.at, quiet: true } : null;
+    foundryFocus = foundryOpen ? { id: foundryOpen.id, version: foundryOpen.at } : null;
     renderPage(); showFoundryFocus();
     return true;
   }
@@ -7295,7 +7293,7 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
   if (action === "foundry-present") { presentFoundry(open); return true; }
   if (action === "foundry-shrink") {
     foundryOpen = null;
-    foundryFocus = { id: open.id, version: open.at, quiet: true };
+    foundryFocus = { id: open.id, version: open.at };
     renderPage(); showFoundryFocus();
     return true;
   }
@@ -7333,7 +7331,7 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
       if (foundryOpen !== open) return true;
       const kept: FoundryOpen = { id: made.id, at: made.version, shown: made.version, said: `Started “${made.title}” from v${from}. Pin notes on it or name it in the chat to take it another way; the first stays as it was.` };
       foundryOpen = kept;
-      foundryFocus = { id: made.id, version: made.version, quiet: true };
+      foundryFocus = { id: made.id, version: made.version };
       clearTimeout(foundrySaidTimer);
       foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === kept) { kept.said = ""; paintFoundrySaid(); } }, 15_000);
       await loadFoundry();
@@ -7449,7 +7447,7 @@ async function foundryEdit(open: FoundryOpen) {
     const saved = await api<{ version: number }>("foundry-save", { id: open.id, source: editing.source, baseVersion: editing.base });
     if (foundryOpen !== open) return;
     foundryOpen = { id: open.id, at: saved.version, shown: saved.version, said: `Kept your ${editing.changes === 1 ? "change" : `${editing.changes} changes`} as v${saved.version}` };
-    foundryFocus = { id: open.id, version: saved.version, quiet: true };
+    foundryFocus = { id: open.id, version: saved.version };
     const kept = foundryOpen;
     clearTimeout(foundrySaidTimer);
     foundrySaidTimer = window.setTimeout(() => { if (foundryOpen === kept) { kept.said = ""; paintFoundrySaid(); } }, 12_000);
@@ -7540,11 +7538,8 @@ function paintGalleryCards() {
 }
 async function foundryAction(action: string, args: Record<string, any>) {
   // Pass 273 A: the front page.
-  if (action === "foundry-one") {
-    foundryGallery.one = String(args.id); foundryOpen = null;
-    renderPage(); el("stage").scrollTop = 0;
-    return;
-  }
+  // A card opens the long page at its mockup, grown to the full width, with every other mockup above and below it.
+  if (action === "foundry-one") return openFoundry(String(args.id));
   if (action === "foundry-home") {
     foundryGallery.one = null; foundryOpen = null; foundryFocus = null;
     renderPage(); el("stage").scrollTop = 0;

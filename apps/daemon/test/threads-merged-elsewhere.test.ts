@@ -84,7 +84,7 @@ test("a pushed thread whose pull request was merged on GitHub turns Merged, and 
     if (argv[0] === "gh") { asked.push(line); return ok(merged ? '[{"url":"https://github.com/o/r/pull/7"}]' : "[]"); }
     return ok();
   };
-  const fixes = new DriveFixes(state, join(root, "worktrees"), { activity: () => ({ steps: 0, last: null }) } as unknown as FixHost, run, () => now);
+  const fixes = new DriveFixes(state, join(root, "worktrees"), { activity: () => ({ steps: 0, last: null }), turn: () => ({ id: "t1" }) } as unknown as FixHost /* its chat still exists (drive-fixes.ts orphaned) */, run, () => now);
   await fixes.noticeMerged("/repo");
   expect(asked).toHaveLength(0); // never pushed: GitHub isn't asked
   pushed = true; now += 6_000;

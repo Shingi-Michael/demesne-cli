@@ -1802,7 +1802,7 @@ async function pointAtPage() {
   finally { if (pointing === "browser" && pointingPage === chat) { pointing = null; pointingPage = ""; } renderBrowserSplit(); }
   if (!pick || state?.session?.id !== chat) return;
   let source: PointSource | null = null;
-  if (localPage(pick.page)) try { source = await api<PointSource | null>("point-source", { pick }); } catch { /* sent without a source */ }
+  if (localPage(pick.page)) try { const { picture: _picture, ...asked } = pick; source = await api<PointSource | null>("point-source", { pick: asked }); } catch { /* sent without a source */ }
   pointed.push({ ...pick, id: `${Date.now()}:${pointed.length}`, source });
   renderComposer();
   editor.focus();
@@ -5586,7 +5586,7 @@ function composerDraft(width: number) {
     .map((match) => match[1]!)
     .filter((path) => state!.files.some((file) => file.path === path || (path.endsWith("/") && file.path.startsWith(path))));
   const notes = diffNotes.size && !question ? btn("notes-clear", `${diffNotes.size} note${diffNotes.size === 1 ? "" : "s"} on the changes ×`, {}, "chip notes-chip").replace("<button ", '<button title="Sent with your next message. Click to drop them." ') : "";
-  const points = question ? "" : pointed.map((point) => btn("point-remove", `⌖ ${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : point.where === "browser" ? `On ${point.page}; the page and selector go with your message` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
+  const points = question ? "" : pointed.map((point) => btn("point-remove", `${point.picture ? `<img class="point-pic" alt="" src="data:image/png;base64,${h(point.picture)}">` : "⌖ "}${h(pointLabel(point))} ×`, { id: point.id }, `chip point-chip${point.foundry ? " foundry" : ""}`).replace("<button ", `<button title="${h(point.foundry ? `On ${point.foundry.title} v${point.foundry.version}` : point.source ? `${point.source.path}:${point.source.line}` : point.where === "browser" ? `On ${point.page}; the page, selector${point.look ? ", measurements" : ""}${point.picture ? " and a picture of it" : ""} go with your message` : "Source not found; the page and selector go with your message")}. Click to drop it." `)).join("");
   // Notes pinned on Foundry and not sent: they go with the next message here (a click shows them).
   const foundryChips = question ? "" : ridingNotes().map((key) => {
     const id = key.slice(0, key.lastIndexOf(":")), mockup = foundryList?.find((item) => item.id === id), count = foundryNotes.waiting.get(key)?.length ?? 0;
@@ -6890,7 +6890,16 @@ async function submitText(value = editor.value, wait = false) {
   draftSentAt = Date.now();
   if (!state) return;
   // Notes on the diff open the next message; a message may be only notes.
-  const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
+  // What was pointed at on the page goes with its picture, as far as a message can carry pictures.
+  const pictured = new Map<string, string>();
+  if (!pendingQuestion() && !value.startsWith("/")) for (const point of pointed) {
+    if (!point.picture || state.attachments.length + pictured.size >= 10) continue;
+    const name = `pointed-${pictured.size + 1}.png`;
+    const sent = await api<{ id: string } | undefined>("attach", { name, mimeType: "image/png", data: point.picture }).catch(() => undefined);
+    if (sent?.id) { pictured.set(point.id, name); attachmentPreviews.set(sent.id, `data:image/png;base64,${point.picture}`); }
+  }
+  if (!state) return;
+  const notes = !pendingQuestion() && !value.startsWith("/") ? [pointMessage(pointed, pictured), notesMessage([...diffNotes.values()])].filter(Boolean).join("\n\n") : "";
   // Mockups named with "@" go with it by id, so the model reads that one.
   const named = value.startsWith("/") ? "" : mockupRefs(mentionedMockups(value, foundryNames));
   // Folded pastes go after the words, whole.

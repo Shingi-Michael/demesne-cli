@@ -8,7 +8,7 @@
  * Run bun scripts/prepare-desktop.ts first (Linux: xvfb-run -a). */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { electronBrowser } from "../apps/daemon/src/browser.ts";
@@ -252,6 +252,11 @@ try {
   assert.equal(await split.locator('[data-go="point"]').getAttribute("aria-pressed"), "false");
   assert.equal(await win.locator("#browser-split.yours").count(), 0, "pointing does not take the page from the model");
   assert.equal((await real("/cart"))!.title, "Cart", "the click picked; it did not reach the page");
+  // The pick carries a picture of the element as drawn (on the chip, small) and what it measures.
+  const picture = chip.locator("img.point-pic");
+  await until("the chip shows the pick's picture", () => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0).catch(() => 0), (wide) => wide > 20);
+  assert.match((await chip.getAttribute("title")) ?? "", /selector, measurements and a picture of it go with your message/);
+  writeFileSync(join(output, "pointed.png"), Buffer.from(((await picture.getAttribute("src")) ?? "").split(",")[1] ?? "", "base64"));
   await win.screenshot({ path: join(output, "point.png") });
   // Esc stops pointing with nothing picked.
   await split.getByRole("button", { name: "Point at something on the page", exact: true }).click();

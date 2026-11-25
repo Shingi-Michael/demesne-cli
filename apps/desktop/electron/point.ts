@@ -60,6 +60,17 @@ export const POINT_SCRIPT = String.raw`(() => new Promise((resolve) => {
     }
     return undefined;
   };
+  // What the element measures as drawn: its type, colours, size and spacing, so "change this" starts from real numbers.
+  const hex = (value) => { const m = /rgba?\(([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\)/.exec(value || ""); if (!m) return ""; const a = m[4] === undefined ? 1 : m[4].endsWith("%") ? parseFloat(m[4]) / 100 : parseFloat(m[4]); if (a === 0) return ""; return "#" + [m[1], m[2], m[3]].map((n) => Math.round(Number(n)).toString(16).padStart(2, "0")).join("") + (a < 1 ? " at " + Math.round(a * 100) + "%" : ""); };
+  const look = (el) => {
+    const s = getComputedStyle(el), r = el.getBoundingClientRect();
+    let behind = "";
+    for (let at = el; at && at.nodeType === 1 && !behind; at = at.parentElement) behind = hex(getComputedStyle(at).backgroundColor);
+    const short = (value) => value && !/^(0px|none|normal|auto)( \1)*$/.test(value) ? value : "";
+    return { font: (s.fontFamily.split(",")[0] || "").replace(/["']/g, "").trim().slice(0, 40), size: s.fontSize, line: s.lineHeight, weight: s.fontWeight, color: hex(s.color), background: hex(s.backgroundColor), behind: behind,
+      width: Math.round(r.width), height: Math.round(r.height), padding: short(s.padding), radius: short(s.borderRadius), gap: short(s.gap), border: parseFloat(s.borderTopWidth) > 0 ? s.borderTopWidth + " " + hex(s.borderTopColor) : "" };
+  };
+  const place = (el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height, wide: innerWidth, high: innerHeight }; };
   const show = (el) => {
     const r = el.getBoundingClientRect();
     Object.assign(box.style, { display: "block", left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
@@ -77,7 +88,7 @@ export const POINT_SCRIPT = String.raw`(() => new Promise((resolve) => {
   const click = (event) => {
     block(event);
     if (!target) return;
-    done({ tag: target.tagName.toLowerCase(), text: (target.innerText || "").replace(/\s+/g, " ").trim().slice(0, 120), label: words(target), selector: selector(target), html: markup(target), page: location.pathname + location.search, component: component(target), hint: source(target) });
+    done({ tag: target.tagName.toLowerCase(), text: (target.innerText || "").replace(/\s+/g, " ").trim().slice(0, 120), label: words(target), selector: selector(target), html: markup(target), page: location.pathname + location.search, component: component(target), hint: source(target), look: look(target), rect: place(target) });
   };
   const key = (event) => { if (event.key === "Escape") { block(event); done(null); } };
   const events = [["mousemove", move], ["click", click], ["mousedown", block], ["mouseup", block], ["pointerdown", block], ["pointerup", block], ["keydown", key]];

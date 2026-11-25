@@ -936,10 +936,29 @@ export function createBrowserHost(options: { profile: string; kept: boolean; wri
       // Going to another page, or the tab closing, ends it with nothing picked.
       const away = new Promise<null>((resolve) => { contents.once("did-start-navigation", () => resolve(null)); contents.once("destroyed", () => resolve(null)); });
       const pick = await Promise.race([runs(POINT_SCRIPT) as Promise<Record<string, unknown> | null>, away]);
-      return pick && typeof pick === "object" ? { ...pick, page: contents.getURL().slice(0, 300), where: "browser" } : null;
+      if (!pick || typeof pick !== "object") return null;
+      return { ...pick, page: contents.getURL().slice(0, 300), where: "browser", ...await pictureOf(contents, pick.rect) };
     } finally { tab.pointing = false; }
   }
   return { line, place, shutdown, view, point, has: (id: string) => chats.has(id) };
+}
+
+/// A picture of what was pointed at, with a little of the page around it so it reads in context: a PNG, never more
+/// than 900 px on a side. The picker's outline is gone by the time it is taken. Nothing when it can't be taken.
+async function pictureOf(contents: Electron.WebContents, rect: unknown): Promise<{ picture?: string }> {
+  const r = rect as Record<string, number> | null;
+  if (!r || ![r.x, r.y, r.width, r.height, r.wide, r.high].every((n) => typeof n === "number" && Number.isFinite(n)) || r.width! < 1 || r.height! < 1) return {};
+  try {
+    await new Promise((done) => setTimeout(done, 120));
+    const k = contents.getZoomFactor(), pad = 24;
+    const left = Math.max(0, r.x! - pad), top = Math.max(0, r.y! - pad), right = Math.min(r.wide!, r.x! + r.width! + pad), bottom = Math.min(r.high!, r.y! + r.height! + pad);
+    if (right - left < 2 || bottom - top < 2) return {};
+    let shot = await contents.capturePage({ x: Math.round(left * k), y: Math.round(top * k), width: Math.round((right - left) * k), height: Math.round((bottom - top) * k) });
+    if (shot.isEmpty()) return {};
+    const size = shot.getSize(), most = Math.max(size.width, size.height);
+    if (most > 900) shot = shot.resize({ width: Math.round(size.width * 900 / most), height: Math.round(size.height * 900 / most), quality: "good" });
+    return { picture: shot.toPNG().toString("base64") };
+  } catch { return {}; }
 }
 
 /// The world the picker runs in on a public page: apart from the page's own scripts.

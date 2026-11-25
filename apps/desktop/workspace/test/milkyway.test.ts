@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { mountMilkyWay, SKY } from "../milkyway.ts";
 
@@ -50,4 +50,22 @@ test("the pictures the sky names ship with the app, and stay light", () => {
     expect(existsSync(join(workspace, path))).toBe(true);
     expect(statSync(join(workspace, path)).size).toBeLessThan(400_000);
   }
+});
+
+test("in its own full-screen Space the Milky Way themes put the ringed planet under the glass (pass 275 C)", () => {
+  const css = readFileSync(join(import.meta.dir, "../../workspace.css"), "utf8");
+  const assets = join(import.meta.dir, "../assets");
+  // night and dawn, each already frosted, small enough to load at once
+  for (const name of ["milky-way-full-night.jpg", "milky-way-full-dawn.jpg"]) {
+    expect(css).toContain(`url("assets/${name}")`);
+    expect(statSync(join(assets, name)).size).toBeLessThan(120_000);
+  }
+  // only in full screen, only for Demesne's own themes; other themes keep their plain ground
+  const rules = css.split("\n").filter((line) => line.includes("--full-sky"));
+  expect(rules.length).toBeGreaterThan(2);
+  for (const rule of rules) expect(rule).toMatch(/^html\.glass\.fullscreen(:is\(\[data-theme="demesne"\], \[data-theme="demesne-light"\]\)|\[data-theme="demesne-light"\]) /);
+  // pinned to the window, so the sidebar and the page show one sky
+  expect(rules.filter((rule) => rule.includes("var(--full-sky) center / cover fixed"))).toHaveLength(2);
+  // Home's own galaxy steps aside for it
+  expect(css).toContain('html.glass.fullscreen:is([data-theme="demesne"], [data-theme="demesne-light"]) .mw-sky { opacity: 0; }');
 });

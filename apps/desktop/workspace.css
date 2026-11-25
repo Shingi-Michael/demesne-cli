@@ -1593,6 +1593,19 @@ html.glass[data-appearance="light"] body.desktop { --rim: rgb(255 255 255 / 0.6)
    it are the same colour at every height. */
 html.glass #desktop-shell { background: linear-gradient(180deg, var(--sheen), transparent 340px), var(--shell-glass, var(--ink)); box-shadow: inset 0 1px 0 var(--rim); }
 html.glass #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { background: linear-gradient(180deg, var(--sheen), transparent 30%), var(--panel-glass, var(--panel)); box-shadow: 0 0 0 1px var(--rim-edge), inset 0 1px 0 var(--rim), var(--float); }
+/* Milky Way in full screen (pass 275 C). A full-screen Space has nothing behind the window, so the
+   theme brings its own sky for the glass to frost: a ringed planet rising at the lower left, lit from
+   behind, with the Milky Way above it (dawn in the light theme). The picture is frosted already and
+   pinned to the window (fixed), so the sidebar and the page line up as one sky and nothing is blurred
+   while the app runs. The glass is never clearer than 28% (sidebar) and 60% (page) here, so words
+   stay easy to read over the sky; a more solid Glass setting still wins. The tints are gradients
+   because a colour may only be a background's last layer.
+   Home's own galaxy steps aside and the flagship flies in front of this sky. */
+html.glass.fullscreen:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop { --full-sky: url("assets/milky-way-full-night.jpg"); }
+html.glass.fullscreen[data-theme="demesne-light"] body.desktop { --full-sky: url("assets/milky-way-full-dawn.jpg"); }
+html.glass.fullscreen:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell { background: linear-gradient(180deg, var(--sheen), transparent 340px), linear-gradient(rgb(var(--ink-base) / max(var(--shell-a, 0.325), 0.28)), rgb(var(--ink-base) / max(var(--shell-a, 0.325), 0.28))), var(--full-sky) center / cover fixed, var(--ink); }
+html.glass.fullscreen:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > :is(.live-app, #desktop-home, #desktop-error) { background: linear-gradient(180deg, var(--sheen), transparent 30%), linear-gradient(rgb(var(--ink-deep) / max(var(--panel-a, 0.5), 0.6)), rgb(var(--ink-deep) / max(var(--panel-a, 0.5), 0.6))), var(--full-sky) center / cover fixed, var(--panel); }
+html.glass.fullscreen:is([data-theme="demesne"], [data-theme="demesne-light"]) .mw-sky { opacity: 0; }
 html.glass body.desktop .answer .markdown { position: relative; isolation: isolate; }
 /* Its soft edge is a spread shadow, not a blur filter: a filter makes every
    answer its own blurred layer, which scrolling repaints, and at full screen

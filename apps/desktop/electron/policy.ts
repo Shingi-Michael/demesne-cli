@@ -38,20 +38,6 @@ export function liquidGlass(platform: string, darwinRelease: string, env: Record
 export const allowAppReload = (url: string, isMainFrame: boolean) => isMainFrame && url === APP_URL;
 /** A chat's live preview may load only pages served on this machine. */
 type Rect = { x: number; y: number; width: number; height: number };
-/** How far down the Mac's simple full screen must start so nothing sits
- *  behind the camera notch. Simple full screen covers the whole display, the
- *  notch's strip included (macOS's own full screen leaves that strip black).
- *  On a notched display the menu bar is as tall as the notch (about 32–38pt,
- *  against 24–25pt elsewhere), so its height is the inset. With the menu bar
- *  hidden it can't be measured: a built-in display with the notched panels'
- *  taller shape gets the usual 38pt. */
-export function notchInset(display: { bounds: Rect; workArea: Rect; internal?: boolean }) {
-  const bar = display.workArea.y - display.bounds.y;
-  if (bar > 30) return bar;
-  if (bar > 0) return 0;
-  return display.internal && display.bounds.height / display.bounds.width > 0.64 ? 38 : 0;
-}
-
 /** Where the window opens: the size and place you last left it, read from
  *  window.json, when that still fits on a display you have now; otherwise
  *  the default size, centred by Electron. A saved window larger than its

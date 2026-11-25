@@ -41,10 +41,6 @@ const mac = /Mac/i.test(navigator.platform);
 // wherever the desktop blurs what shows through (the Mac, Hyprland).
 if (mac) document.documentElement.classList.add("mac-chrome");
 if (native?.glass) document.documentElement.classList.add("glass");
-document.getElementById("mac-lights")?.addEventListener("click", (event) => {
-  const light = (event.target as HTMLElement).closest<HTMLElement>("[data-light]")?.dataset.light;
-  if (light) void request("desktop-window", { action: light }).catch(() => {});
-});
 let workspace: string | null = null, mounted = false, busy = true, fatal = false;
 let recentProjects: string[] = [];
 const bridge = createDesktopBridge(invoke, showError);
@@ -177,9 +173,6 @@ async function start() {
         if(event.payload.action==="appearance")void updateAppearance(event.payload.dark===true).catch(showActionError);
         else if (event.payload.action === "fullscreen") {
           document.documentElement.classList.toggle("fullscreen", event.payload.on === true);
-          // Below the camera notch, which simple full screen also covers.
-          document.documentElement.style.setProperty("--notch-top", `${Math.max(0, Number(event.payload.top) || 0)}px`);
-          document.getElementById("mac-lights")!.hidden = !(mac && event.payload.on === true);
         }
         else if (event.payload.action === "open-project") void openProject();
         else if (event.payload.action === "open-chat" && mounted && !fatal)

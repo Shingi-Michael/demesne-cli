@@ -1,5 +1,7 @@
 /** Real Electron regression: thinking updates the working line without moving an
- * open checklist or reloading an inline preview. After prepare-desktop, run:
+  * open checklist or reloading an inline preview, and a streamed answer followed
+  * by a new step keeps the turn's nodes (the shell, the preview, the answer's
+  * paragraph) instead of rebuilding them. After prepare-desktop, run:
  *   bun scripts/check-reasoning-steady.ts [prepared app directory]
  * On headless Linux, prefix the command with xvfb-run -a. */
 import assert from "node:assert/strict";
@@ -11,6 +13,7 @@ import { fixture } from "../apps/desktop/workspace/test/fixture.ts";
 const prompt = "Check the live preview against the plan";
 const headings = ["Checking the preview", "Checking the input", "Finishing the check"];
 const gates = headings.map(() => Promise.withResolvers<void>()), finish = Promise.withResolvers<void>();
+const answer = Promise.withResolvers<void>(), step = Promise.withResolvers<void>(), stepDone = Promise.withResolvers<void>();
 let round = 0;
 const f = await fixture({
   providerId: "fixture", modelId: "slow",
@@ -27,11 +30,18 @@ const f = await fixture({
       case 1:
         yield { type: "tool_call_delta", index: 0, idDelta: "server", nameDelta: "run_command", argumentsDelta: JSON.stringify({ argv: [process.execPath, "serve.ts"], background: true }) };
         yield { type: "finish", reason: "tool_calls" }; return;
-      default:
+      case 2:
         for (const [i, heading] of headings.entries()) {
           await gates[i]!.promise;
           yield { type: "reasoning_delta", delta: `**${heading}**\n\n` };
         }
+        await answer.promise;
+        yield { type: "text_delta", delta: "Checking the preview now." };
+        await step.promise;
+        yield { type: "tool_call_delta", index: 0, idDelta: "read", nameDelta: "read_file", argumentsDelta: JSON.stringify({ path: "serve.ts" }) };
+        yield { type: "finish", reason: "tool_calls" }; return;
+      default:
+        stepDone.resolve();
         await finish.promise;
         yield { type: "text_delta", delta: "The preview is ready." }; yield { type: "finish", reason: "stop" };
     }
@@ -69,12 +79,28 @@ try {
     assert.deepEqual(await read.evaluate(stats => stats()), { sameShell: true, sameFrame: true, ribbonMoves: 0, loads: 0 }, `redraw on reasoning chunk ${i + 1}`);
     assert.equal(await draft.inputValue(), "Keep this unsent text");
   }
+  // Text streams in, then a new step starts and finishes: both used to swap
+  // the turn's shell for a fresh one, which flashed the window.
+  answer.resolve();
+  const paragraph = turn.getByText("Checking the preview now.", { exact: true });
+  await paragraph.waitFor();
+  const same = await paragraph.evaluateHandle(node => { const p = node.closest("p") ?? node; return () => p.isConnected; });
+  step.resolve();
+  await stepDone.promise;
+  await turn.locator("button.tool-row", { hasText: "serve.ts" }).first().waitFor();
+  await page.waitForTimeout(400);
+  const after = await read.evaluate(stats => stats());
+  assert.equal(after.sameShell, true, "a new step rebuilt the turn's shell");
+  assert.equal(after.sameFrame, true, "a new step replaced the preview");
+  assert.equal(after.loads, 0, "a new step reloaded the preview");
+  assert.equal(await same.evaluate(connected => connected()), true, "a new step replaced the answer's paragraph");
+  assert.equal(await draft.inputValue(), "Keep this unsent text");
   finish.resolve();
   await turn.getByText("The preview is ready.", { exact: true }).waitFor();
   await turn.locator(".plan-ribbon.ended").waitFor();
-  console.log("PASS: streamed reasoning updates the working line without moving the checklist or reloading the preview.");
+  console.log("PASS: reasoning, streamed text and a new step keep the turn, the checklist and the preview in place.");
 } finally {
-  for (const gate of gates) gate.resolve(); finish.resolve();
+  for (const gate of [...gates, answer, step, stepDone]) gate.resolve(); finish.resolve();
   await desktop?.close().catch(() => {});
   await f.close();
 }

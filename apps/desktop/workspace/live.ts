@@ -3835,7 +3835,6 @@ function morph(old: Element, fresh: Element) {
 /// What an open step shows, keyed by the step it belongs to.
 const foldKey = (fold: Element) => (fold.previousElementSibling as HTMLElement | null)?.dataset.args ?? "";
 function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, retained: Array<[HTMLElement, HTMLElement]>) {
-  const old = [...content.childNodes];
   // The checklist ribbon is the same element from step to step and into its
   // pill: its line fills and its light keeps moving instead of being drawn
   // anew (it stuttered), its name rolls, and it shrinks when the turn ends.
@@ -3849,19 +3848,80 @@ function replaceTurnShell(content: HTMLElement, fragment: DocumentFragment, reta
   // A step that was already open doesn't fade in again.
   const shown = new Set([...content.querySelectorAll(".step-fold")].map(foldKey));
   for (const fold of fragment.querySelectorAll<HTMLElement>(".step-fold")) if (shown.has(foldKey(fold))) fold.classList.add("steady");
-  content.append(fragment);
+  // The new shell is laid over the one on screen: rows, folds, previews and
+  // pictures that are still there keep their nodes, and only what changed is
+  // touched. Building it afresh and swapping it in flashed the see-through
+  // window for a frame on every step, reloaded previews and thumbnails, and
+  // replayed what fades in.
+  // Edits and commit trees are live views placed after this; never written over.
+  const slots = new Map(retained), keep = new Set<HTMLElement>([...retained.map(([, element]) => element), ...[...fileEditViews.values(), ...repoViews.values()].map((view) => view.element)]);
+  reconcileChildren(content, [...fragment.childNodes], slots, keep);
   // A move into a parent the page has not styled yet starts whatever is
   // moving in the element over. Reading the new parent's style first lets
   // the ribbon's light, shine and fills carry on through the move.
-  if (ribbon && ribbonWas && freshRibbon?.parentElement) void getComputedStyle(freshRibbon.parentElement).display;
-  for (const [slot, element] of retained) {
-    const parent = slot.parentElement!;
-    if (element.isConnected && parent.moveBefore) parent.moveBefore(element, slot);
-    else parent.insertBefore(element, slot);
-    slot.remove();
-  }
-  for (const node of old) if (!retained.some(([, element]) => element === node)) node.remove();
+  if (ribbon && ribbonWas && ribbon.parentElement) void getComputedStyle(ribbon.parentElement).display;
+  // Slots inside parts that were new: their answers go in where they stand.
+  for (const [slot, element] of retained) if (slot.isConnected) { placeAt(slot.parentNode!, element, slot); slot.remove(); }
   if (ribbon && ribbonWas) planMoved(ribbon, ribbonWas);
+}
+/// What a node is, for laying a new shell over the old: the step, entry,
+/// fold or preview it belongs to, else its tag and first class.
+function shellKey(node: Node) {
+  if (node.nodeType !== Node.ELEMENT_NODE) return `#${node.nodeType}`;
+  const element = node as HTMLElement, data = element.dataset;
+  if (data.entry !== undefined) return `entry:${data.entry}`;
+  if (data.preview !== undefined) return `preview:${data.preview}`;
+  if (data.fileEdit !== undefined) return `edit:${data.fileEdit}`;
+  if (data.repoFlow !== undefined) return `repo:${data.repoFlow}`;
+  if (data.detail !== undefined) return `detail:${data.detail}`;
+  if (data.args !== undefined) return `args:${element.tagName}:${data.action ?? ""}:${data.args}`;
+  if (element.id) return `id:${element.id}`;
+  return `${element.tagName}.${element.classList[0] ?? ""}`;
+}
+function placeAt(parent: Node, node: Node, before: Node | null) {
+  if (node === before || (node.parentNode === parent && node.nextSibling === before)) return;
+  const move = (parent as ParentNode & { moveBefore?: (node: Node, child: Node | null) => void }).moveBefore;
+  if (node.isConnected && parent.isConnected && move) {
+    try { move.call(parent, node, before); return; } catch { /* falls back to a plain insert */ }
+  }
+  parent.insertBefore(node, before);
+}
+/// Makes `parent`'s children match `fresh`, keeping every old node that has a
+/// match (in order) and changing it in place. `slots` are stand-ins in the new
+/// shell for live parts kept as they are (answers, the checklist).
+function reconcileChildren(parent: Node, fresh: ChildNode[], slots: Map<HTMLElement, HTMLElement>, keep: Set<HTMLElement>) {
+  const old = [...parent.childNodes], used = new Set<Node>();
+  let from = 0;
+  fresh.forEach((next, index) => {
+    let node: Node = next;
+    const live = next.nodeType === Node.ELEMENT_NODE ? slots.get(next as HTMLElement) : undefined;
+    if (live) { node = live; slots.delete(next as HTMLElement); used.add(live); }
+    else {
+      const key = shellKey(next);
+      let match = -1;
+      for (let i = from; i < old.length; i++) {
+        const candidate = old[i]!;
+        if (!used.has(candidate) && !keep.has(candidate as HTMLElement) && shellKey(candidate) === key) { match = i; break; }
+      }
+      if (match >= 0) {
+        const was = old[match]!;
+        used.add(was); from = match + 1;
+        morphNode(was, next, slots, keep);
+        node = was;
+      }
+    }
+    placeAt(parent, node, parent.childNodes[index] ?? null);
+  });
+  while (parent.childNodes.length > fresh.length) parent.lastChild!.remove();
+}
+function morphNode(was: Node, now: Node, slots: Map<HTMLElement, HTMLElement>, keep: Set<HTMLElement>) {
+  if (was.nodeType !== Node.ELEMENT_NODE) { if (was.nodeValue !== now.nodeValue) was.nodeValue = now.nodeValue; return; }
+  const old = was as Element, fresh = now as Element;
+  for (const attr of [...old.attributes]) if (!fresh.hasAttribute(attr.name)) old.removeAttribute(attr.name);
+  for (const attr of [...fresh.attributes]) if (old.getAttribute(attr.name) !== attr.value) old.setAttribute(attr.name, attr.value);
+  // Nothing to compare inside a frame or a picture: its source is its content.
+  if (old instanceof HTMLIFrameElement || old instanceof HTMLImageElement) return;
+  reconcileChildren(old, [...fresh.childNodes], slots, keep);
 }
 /// An open checklist longer than it shows scrolls to the step it is on.
 function planInView() {
@@ -4020,7 +4080,9 @@ function renderConversation() {
         if (entry?.type !== "assistant") continue;
         let view = saved.views.get(id);
         if (!view) {
-          view = new MarkdownView({ preserveNodes: windowsDesktopChat });
+          // Paragraphs still being written change in place, on every platform:
+          // swapping them for fresh nodes shimmered the streaming answer.
+          view = new MarkdownView({ preserveNodes: true });
           saved.views.set(id, view);
         }
         view.element.dataset.answer = run.id;

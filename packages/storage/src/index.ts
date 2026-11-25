@@ -3014,7 +3014,7 @@ function toolResultMetadata(name: string, resultText: string): Record<string, un
   if (name === "routine" && typeof value.routine === "string" && ["added", "paused", "resumed", "removed"].includes(value.routine) && typeof value.id === "string" && value.id.length <= 100) {
     return { message: JSON.stringify({ routine: value.routine, id: value.id, when: String(value.when ?? "").slice(0, 100), prompt: String(value.prompt ?? "").slice(0, 600), on: value.on !== false }) };
   }
-  if ((name === "foundry_save" || name === "foundry_edit") && typeof value.id === "string" && /^[\w-]{1,200}$/.test(value.id)
+  if ((name === "foundry_save" || name === "foundry_edit" || name === "foundry_models") && typeof value.id === "string" && /^[\w-]{1,200}$/.test(value.id)
     && typeof value.title === "string" && FOUNDRY_KINDS.includes(value.kind as FoundryKind)
     && typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version > 0) {
     // The chat's chip shows the description, the version's name and the pick (pass 208 A).

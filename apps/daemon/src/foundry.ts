@@ -41,6 +41,7 @@ Demesne itself, drawn with the app's own markup and stylesheet, so it starts out
 - Change it by its real names; your CSS always wins over the app's: #desktop-sidebar, .sidebar-nav > button, .sidebar-new, .sidebar-search, .sidebar-project, .project-face, .sidebar-session (.selected), .sidebar-release, .sidebar-foot, #desktop-toolbar, .bar-tab (.on), #drive-pill, #app (the panel), #conversation, .turn .request, .answer .markdown, .turn-receipt, #composer .composer-box, .composer-bar, #cards .card. Colours and sizes are the app's tokens: var(--t1) to var(--t4) text, --acc, --ok, --bad, --hair, --tone, --tone2, --surface, --r-sm --r --r-lg. To add or move a piece, do it in a script after load: document.querySelector("d-app .sidebar-nav").append(node).
 - Inside the window the kit does not apply. A plain button (.primary, .danger), input, h1 to h3 and .muted take Demesne's tokens; style anything else from the tokens above.
 Places: any elements marked data-view="Name" are places (siblings; the first shows); anything with data-go="Name" goes there. Give every tab and chat you name a view, so nothing you click is dead.
+- <d-flow><section data-view="Find a time">… <button data-go="Your details">Book 10:30</button></section><section data-view="Your details">…</section>…</d-flow> a whole flow, for an ask that spans screens (sign-up, checkout, onboarding, booking): two to twelve screens as places, in the order a person meets them, each drawn in full at real size. Foundry draws the map above them (every screen by name, the one you are on, where its controls lead), so draw no steps bar of your own unless the product has one. Every screen's main control has a data-go to the next; give the last one a way back or on. Walk it in why.walkthrough screen by screen.
 - <d-message from="you">text</d-message>, <d-message meta="gpt-6.1 · 4s" files="1 file changed" checks="checks passed" steps="2 steps">answer</d-message> (the d. mark and the receipt under it), <d-composer placeholder="Ask anything" mode="Ask" model="GPT-6.1" reply="first answer|second answer">: a real input; Enter puts the message above it, then the next reply (or answer it yourself: on its "send" event, event.detail.text, call event.preventDefault()).
 - <d-card title="Changes" icon="git-branch">…</d-card>, <d-row title="Keep awake" note="While it works"><d-toggle on></d-toggle></d-row> (a settings row; group rows in a box), <d-seg options="Home|Last chat" value="Home">, <d-tabs items="Week|Month">.
 Anywhere:
@@ -529,6 +530,28 @@ function checkTaste(store: DemesneStore, kind: FoundryKind | undefined, id: stri
     + "Hint: make the page follow each one that applies, then save again with why.followed naming those in a few words each (\"none\" when none apply), and say in your answer which you followed");
 }
 
+/// Piece 2 of pass 274, whole flows: a <d-flow> holds two to twelve screens,
+/// each named once, and every data-go on the page leads to a screen that
+/// exists, so nothing you press in a flow is dead.
+export const FLOW_MAX_SCREENS = 12;
+const checkFlow = (source: string) => { const problem = flowProblem(source); if (problem) throw new Error(problem); };
+export function flowProblem(source: string): string | null {
+  const flow = /<d-flow\b[^>]*>([\s\S]*?)<\/d-flow>/i.exec(source);
+  if (!flow) return /<d-flow\b/i.test(source) ? "[invalid_input] <d-flow> is not closed. Hint: end it with </d-flow>" : null;
+  const attribute = (text: string, name: string) => [...text.matchAll(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "gi"))].map((match) => (match[1] ?? match[2] ?? "").trim());
+  const screens = attribute(flow[1]!, "data-view").filter(Boolean);
+  if (screens.length < 2) return `[invalid_input] A flow needs at least two screens, and this has ${screens.length}. Hint: each screen is a child of <d-flow> with data-view="Its name"; one screen alone is a plain page`;
+  if (screens.length > FLOW_MAX_SCREENS) return `[invalid_input] A flow holds up to ${FLOW_MAX_SCREENS} screens, not ${screens.length}. Hint: keep the screens the ask is about, or split it into two flows`;
+  const lower = screens.map((name) => name.toLowerCase());
+  const twice = lower.find((name, at) => lower.indexOf(name) !== at);
+  if (twice) return `[invalid_input] Two screens of the flow are called "${screens[lower.indexOf(twice)]}". Hint: each screen needs its own name`;
+  const everywhere = new Set(attribute(source, "data-view").map((name) => name.toLowerCase()));
+  const dead = attribute(flow[1]!, "data-go").find((name) => !everywhere.has(name.toLowerCase()));
+  if (dead !== undefined) return `[invalid_input] Something in the flow goes to "${dead}", which is not a screen. Hint: its screens are ${screens.join(", ")}`;
+  if (!/\bdata-go\s*=/.test(flow[1]!)) return "[invalid_input] Nothing in the flow leads anywhere. Hint: give each screen's main control data-go=\"The next screen's name\"";
+  return null;
+}
+
 /// Piece 1 of pass 274, your project's look: a page for a project whose code
 /// names its colours and type is checked against them before it is shown.
 /// What is off (a colour far from every hue of the palette, a font the project
@@ -686,6 +709,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       const stage = reviewStage(given, input.source);
       checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       checkKindSource(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
+      checkFlow(input.source);
       const shots = checkShots(store, id, input.source, context.sessionId);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
@@ -803,6 +827,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const stage = given?.surface ? reviewStage(given, source) : given;
       checkControls(current.kind, source);
       checkKindSource(current.kind, source);
+      checkFlow(source);
       const shots = checkShots(store, input.id, source, context.sessionId);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();

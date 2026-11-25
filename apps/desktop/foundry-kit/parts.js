@@ -14,7 +14,7 @@
   var doc = document;
 
   var CSS = `
-:where(d-window,d-browser,d-phone,d-demesne,d-message,d-composer,d-card,d-row,d-toggle,d-seg,d-tabs,d-icon,d-avatar,d-chart,d-stat,d-compare,d-mark,d-sidebar,d-review,d-crop,d-shot){box-sizing:border-box}
+:where(d-window,d-browser,d-phone,d-demesne,d-message,d-composer,d-card,d-row,d-toggle,d-seg,d-tabs,d-icon,d-avatar,d-chart,d-stat,d-compare,d-mark,d-sidebar,d-review,d-crop,d-shot,d-flow){box-sizing:border-box}
 d-icon{display:inline-flex;width:var(--size,16px);height:var(--size,16px);flex:none;vertical-align:-.15em}
 d-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
 d-avatar{display:inline-grid;place-items:center;flex:none;width:var(--size,28px);height:var(--size,28px);border-radius:50%;font-size:calc(var(--size,28px)*.4);font-weight:600;color:#fff;letter-spacing:0}
@@ -33,6 +33,15 @@ d-phone{display:inline-block}
 .dp-status b{width:110px;height:30px;border-radius:20px;background:#111}
 .dp-screen>.dp-body{overflow:auto}
 d-styles{display:none}
+d-flow{display:block}
+.dp-flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 16px;font:12px/1.4 var(--font,system-ui,sans-serif);color:var(--muted)}
+.dp-flow button{all:unset;cursor:pointer;padding:4px 11px;border-radius:99px;box-shadow:inset 0 0 0 1px var(--hair);color:var(--muted);white-space:nowrap}
+.dp-flow button:hover{color:var(--ink)}
+.dp-flow button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dp-flow button.on{background:var(--tone-2);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--hair-2,var(--hair))}
+.dp-flow .dp-arrow{opacity:.6}
+.dp-flow .dp-exits{flex-basis:100%;margin-top:2px}
+.dp-flow .dp-exits b{font-weight:500;color:var(--secondary,var(--ink))}
 d-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:24px;align-items:start}
 d-compare>*{min-width:0;display:flex;flex-direction:column;gap:12px}
 .dp-opt{display:flex;align-items:baseline;gap:8px;font-weight:600;font-size:14px}
@@ -228,6 +237,40 @@ d-seg button.on,d-tabs button.on{background:var(--dm-raised,var(--paper));color:
     else go(doc, name);
   });
   if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", function () { firstViews(doc); }); else setTimeout(function () { firstViews(doc); });
+
+  /// A whole flow (piece 2 of pass 274): the screens of one journey, each a
+  /// place (data-view="Find a time"), in the order a person meets them.
+  /// Above them a quiet map: every screen by name with what follows it, the
+  /// one you are on marked, and under it where this screen's own controls
+  /// lead ("Book 10:30 → Your details"). A control with data-go moves on, as
+  /// in any mockup with places; a name in the map jumps there.
+  define("d-flow", function (el) {
+    var screens = Array.prototype.filter.call(el.children, function (child) { return child.hasAttribute("data-view"); });
+    if (screens.length < 2) return;
+    var nav = doc.createElement("nav"); nav.className = "dp-flow"; nav.setAttribute("data-chrome", ""); nav.setAttribute("aria-label", "Screens of this flow");
+    var name = function (screen) { return screen.getAttribute("data-view"); };
+    var current = function () { return Array.prototype.find.call(screens, function (screen) { return !screen.hidden; }) || screens[0]; };
+    var draw = function () {
+      var now = current(), exits = [], seen = {};
+      Array.prototype.forEach.call(now.querySelectorAll("[data-go]"), function (link) {
+        var to = Array.prototype.find.call(screens, function (screen) { return same(name(screen), link.getAttribute("data-go")); });
+        var label = (link.getAttribute("aria-label") || link.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40);
+        if (!to || to === now || seen[label + ">" + name(to)]) return;
+        seen[label + ">" + name(to)] = true; exits.push((label ? "<b>" + esc(label) + "</b> → " : "→ ") + esc(name(to)));
+      });
+      nav.innerHTML = screens.map(function (screen, at) {
+        return (at ? '<span class="dp-arrow" aria-hidden="true">→</span>' : "") + '<button type="button" data-flow="' + at + '"' + (screen === now ? ' class="on" aria-current="step"' : "") + ">" + esc(name(screen)) + "</button>";
+      }).join("") + '<span class="dp-exits">Screen ' + (screens.indexOf(now) + 1) + " of " + screens.length + (exits.length ? " · from here: " + exits.slice(0, 4).join(" · ") : " · the end of this flow") + "</span>";
+    };
+    el.insertBefore(nav, el.firstChild);
+    nav.addEventListener("click", function (event) {
+      var step = event.target.closest && event.target.closest("[data-flow]");
+      if (step) { go(el, name(screens[Number(step.getAttribute("data-flow"))])); draw(); }
+    });
+    // A control in a screen went somewhere (the page's one click handler does the going): the map follows.
+    el.addEventListener("click", function (event) { if (event.target.closest && event.target.closest("[data-go]")) setTimeout(draw); });
+    setTimeout(draw);
+  });
 
   define("d-icon", function (el) { size(el); el.innerHTML = icon(el.getAttribute("name")); });
   define("d-avatar", function (el) {

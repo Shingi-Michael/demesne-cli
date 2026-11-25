@@ -41,7 +41,9 @@ test("Demesne's rules are numbered, and say what the old paragraph said", () => 
   expect(block).toContain("Start from a real picture");
   // Pass 246 A: when to offer a range of styles instead of options (about 100 characters more).
   expect(block).toContain("one page in <d-styles> instead");
-  expect(block.length).toBeLessThan(6000);
+  // Piece 2 of pass 274: several screens go in one page as a flow (about 55 characters more).
+  expect(block).toContain("in <d-flow> (kit:parts)");
+  expect(block.length).toBeLessThan(6100);
 });
 
 test("your guide for every chat and the project's are both read, the project's last", () => {

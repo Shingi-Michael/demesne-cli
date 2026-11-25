@@ -74,7 +74,7 @@ test("the agent receives screenshot pixels after a tool call and on replay", asy
   let resolve!: () => void;
   let completed = new Promise<void>((done) => { resolve = done; });
   const options = { databasePath: join(root, "data/state.sqlite"), providerVision: true, processor: {
-    providerId: "test", modelId: "vision-test", contextCapacity: 32768, maxOutputTokens: 1024,
+    providerId: "test", modelId: "vision-test", contextCapacity: 65536, maxOutputTokens: 1024,
     async listModels() { return []; },
     async *stream(messages: ProviderMessage[]) {
       if (++round === 1) yield { type: "tool_call_delta" as const, index: 0, idDelta: "capture", nameDelta: "view_image", argumentsDelta: '{"path":"screen.png"}' };

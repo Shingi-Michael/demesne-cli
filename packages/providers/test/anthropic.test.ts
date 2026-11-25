@@ -141,3 +141,44 @@ test("a level chosen before the list loaded looks the model up once", async () =
   expect(body.output_config).toEqual({ effort: "low" });
   expect(asked.filter((path) => path === `/v1/models/${model}`)).toHaveLength(1);
 });
+
+const loop = (extra: unknown) => [
+  { role: "user" as const, content: "check" },
+  { role: "assistant" as const, content: null, toolCalls: [{ id: "t1", name: "look", arguments: "{}", extra }] },
+  { role: "tool" as const, toolCallId: "t1", content: "ok" },
+];
+const thought = { anthropicThinking: [{ type: "thinking", thinking: "Look first.", signature: "sig-1" }] };
+const done = () => sse([{ type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 1 } } }, { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }, { type: "message_stop" }]);
+
+test("thinking sent back asks Claude to drop a block whose earlier messages changed", async () => {
+  const bodies: { beta: string | null; body: any }[] = [];
+  const provider = new AnthropicProvider("test", "Claude", transport(async r => {
+    if (new URL(r.url).pathname.startsWith("/v1/models")) return Response.json({ data: [{ id: model, capabilities: caps({}, { adaptive: yes, disabled: yes }) }], has_more: false });
+    bodies.push({ beta: r.headers.get("anthropic-beta"), body: await r.json() });
+    return done();
+  }));
+  await provider.listModels(signal);
+  for await (const _ of provider.stream({ model, reasoningLevel: "medium", messages: loop(thought) }, signal)) {}
+  expect(bodies[0]!.beta).toBe("thinking-binding-controls-2026-08-01");
+  expect(bodies[0]!.body.thinking).toEqual({ type: "adaptive", display: "summarized", block_binding: { prefix_mismatch_behavior: "drop_block" } });
+  // With nothing to send back, no beta and no binding.
+  for await (const _ of provider.stream({ model, reasoningLevel: "medium", messages: [{ role: "user", content: "hi" }] }, signal)) {}
+  expect(bodies[1]!.beta).toBeNull();
+  expect(bodies[1]!.body.thinking).toEqual({ type: "adaptive", display: "summarized" });
+});
+
+test("a thinking block Claude still refuses is left out and the round goes again", async () => {
+  const bodies: any[] = [];
+  const provider = new AnthropicProvider("test", "Claude", transport(async r => {
+    if (new URL(r.url).pathname.startsWith("/v1/models")) return Response.json({ data: [{ id: model, capabilities: caps({}, { adaptive: yes, disabled: yes }) }], has_more: false });
+    const body = await r.json(); bodies.push(body);
+    if (bodies.length === 1) return Response.json({ type: "error", error: { type: "invalid_request_error", message: "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation." } }, { status: 400 });
+    return done();
+  }));
+  await provider.listModels(signal);
+  const events = [];
+  for await (const e of provider.stream({ model, reasoningLevel: "medium", messages: loop(thought) }, signal)) events.push(e);
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1].messages[1].content).toEqual([{ type: "tool_use", id: "t1", name: "look", input: {} }]);
+  expect(events.at(-1)).toEqual({ type: "finish", reason: "stop" });
+});

@@ -64,6 +64,7 @@ function images(message: ProviderMessage): Anthropic.ImageBlockParam[] {
 /// thinking: thinking is on for this request, so the current tool loop's
 /// thinking goes back (it must, in a loop; older turns' is dropped by Claude anyway).
 function history(input: ProviderMessage[], thinking = false) {
+  let replayed = false;
   const system: Anthropic.TextBlockParam[] = [];
   const messages: { role: "user" | "assistant"; content: Anthropic.ContentBlockParam[] }[] = [];
   const loopStart = input.findLastIndex((message) => message.role === "user");
@@ -79,7 +80,7 @@ function history(input: ProviderMessage[], thinking = false) {
       blocks.push({ type: "tool_result", tool_use_id: message.toolCallId, content: pictures.length ? [...(message.content ? [{ type: "text" as const, text: message.content }] : []), ...pictures] : message.content });
     } else {
       const extra = message.role === "assistant" ? message.toolCalls?.[0]?.extra : undefined;
-      if (thinking && index > loopStart && isClaudeThinking(extra)) blocks.push(...extra[CLAUDE_THINKING]);
+      if (thinking && index > loopStart && isClaudeThinking(extra)) { blocks.push(...extra[CLAUDE_THINKING]); replayed = true; }
       if (message.content) blocks.push({ type: "text", text: message.content });
       if (message.role === "user") blocks.push(...images(message));
       else for (const call of message.toolCalls ?? []) blocks.push({ type: "tool_use", id: call.id, name: call.name, input: JSON.parse(call.arguments || "{}") });
@@ -89,7 +90,18 @@ function history(input: ProviderMessage[], thinking = false) {
     if (previous?.role === role) previous.content.push(...blocks);
     else messages.push({ role, content: blocks });
   }
-  return { system, messages };
+  return { system, messages, replayed };
+}
+
+/// Claude binds each thinking block to the exact messages before it. Demesne
+/// shortens earlier tool output as a chat grows (forget-reads.ts), so a block
+/// can outlive its prefix; then Claude is asked to drop it rather than fail.
+export const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
+const dropStale = { block_binding: { prefix_mismatch_behavior: "drop_block" } };
+/// A 400 about a thinking block's signature or its binding: worth one more try without them.
+export function staleThinking(error: unknown): boolean {
+  if (!(error instanceof Anthropic.APIError) || error.status !== 400) return false;
+  return /thinking/i.test(error.message) && /signature|block_binding|bound to|thinking-binding/i.test(error.message);
 }
 
 export class AnthropicProvider implements ProviderAdapter {
@@ -123,13 +135,19 @@ export class AnthropicProvider implements ProviderAdapter {
   async *stream(request: ProviderRequest, signal: AbortSignal): AsyncGenerator<ProviderStreamEvent> {
     const level = request.reasoningLevel ?? (request.thinkingEnabled === false ? "off" : undefined);
     const params = thinkingParams(level ? await this.thinkingOf(request.model, signal) : undefined, level, request.maxOutputTokens ?? 4096);
-    const stream = await this.client().messages.create({ model: request.model, stream: true,
-      ...history(request.messages, params.on), max_tokens: params.max_tokens,
-      ...(params.thinking ? { thinking: params.thinking } : {}),
-      ...(params.output_config ? { output_config: params.output_config } : {}),
-      cache_control: { type: "ephemeral" },
-      ...(request.tools?.length ? { tools: request.tools.map(t => ({ name: t.name, description: t.description, input_schema: { ...t.inputSchema, type: "object" as const } })) } : {}),
-    }, { signal });
+    const ask = (replay: boolean) => {
+      const { replayed, ...turns } = history(request.messages, params.on && replay);
+      return this.client().messages.create({ model: request.model, stream: true,
+        ...turns, max_tokens: params.max_tokens,
+        ...(params.thinking ? { thinking: (replayed ? { ...params.thinking, ...dropStale } : params.thinking) as Anthropic.ThinkingConfigParam } : {}),
+        ...(params.output_config ? { output_config: params.output_config } : {}),
+        cache_control: { type: "ephemeral" },
+        ...(request.tools?.length ? { tools: request.tools.map(t => ({ name: t.name, description: t.description, input_schema: { ...t.inputSchema, type: "object" as const } })) } : {}),
+      }, { signal, ...(replayed ? { headers: { "anthropic-beta": THINKING_BINDING_BETA } } : {}) });
+    };
+    // Should Claude still refuse its own earlier thinking (or the beta that
+    // drops it), the round goes again without it: the work goes on.
+    const stream = await ask(true).catch((error) => { if (params.on && staleThinking(error)) return ask(false); throw error; });
     let usage: Anthropic.Usage | undefined;
     let finish = "stop";
     // This reply's thinking blocks, in order, to hand back with its tool calls.

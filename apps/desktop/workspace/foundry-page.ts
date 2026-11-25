@@ -4,7 +4,7 @@
 /// goes to the chat. HTML and SVG
 /// render in a foundry:// frame that has no network, no app access and no
 /// shared origin; Markdown renders through the app's sanitizer.
-import { drawnSurface, type FoundryArtifact, type FoundryKind, type FoundryShelfVersion, type FoundryWalk } from "@demesne/protocol";
+import { COPY_WORDS, copyFormats, otherFormats, drawnSurface, type CopyFormat, type FoundryArtifact, type FoundryKind, type FoundryShelfVersion, type FoundryWalk } from "@demesne/protocol";
 import { dayWord } from "./chats-page.ts";
 
 const h = (value: unknown) =>
@@ -101,7 +101,7 @@ export interface FoundryOpen {
   shown: number;
   code?: string | null;
   said?: string;
-  saved?: { path: string; pdf: boolean; ready: boolean } | null;
+  saved?: { path: string; pdf: boolean; ready: boolean; others?: CopyFormat[] } | null;
   /// Step 8, share outside Demesne: asking before a first share, then the link.
   share?: { asking?: boolean; url?: string; version?: number } | null;
   /// Step 3, edit in place: a deck, doc or dashboard's newest version with
@@ -160,6 +160,8 @@ export function openHead(open: FoundryOpen, all: readonly number[], kind?: Found
       ? open.shown !== all.at(-1) ? `<button type="button" class="fd-hd-b" disabled aria-label="Edit the newest version" title="Edit the newest version">${icon(PENCIL)}</button>`
         : ico("foundry-edit", {}, editing ? '<path d="m5 12.5 4.5 4.5L19 7.5"/>' : PENCIL, editing ? "Done editing" : "Edit the text", ` aria-pressed="${editing}"`)
       : "")
+    // Piece 6 of pass 274: a deck presents in the whole window; the arrow keys move, N shows the notes, Esc leaves.
+    + (kind === "deck" && !editing && !code && !compare ? ico("foundry-present", {}, '<path d="M8 5.5v13l10.5-6.5z"/>', "Present (Esc to leave)") : "")
     + (editing ? "" : ico("foundry-code", {}, '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>', code ? "Show the page" : "Show the code", ` aria-pressed="${code}"`))
     // Step 7: a new mockup that starts from this version, so one good page can branch into a second idea.
     + (editing ? "" : ico("foundry-branch", {}, BRANCH, `Start a new one from v${open.shown}`))
@@ -182,7 +184,9 @@ export function savedLine(open: FoundryOpen, kind: FoundryKind) {
   if (!open.said) return "";
   const saved = open.saved;
   const show = saved ? `<button type="button" class="fd-said-b" data-action="foundry-copy-show">Show</button>` : "";
-  const other = saved && saved.ready ? `<button type="button" class="fd-said-b" data-action="foundry-copy" data-args='{"other":true}'>${kind === "deck" ? "Also as a web page" : kind === "react" ? "Also as the .jsx" : kind === "mermaid" ? "Also as the .mmd" : "Also as PDF"}</button>` : "";
+  // Piece 6 of pass 274: the other files this kind can be, offered once in words (never a menu).
+  const formats = saved?.others ?? (saved?.ready ? otherFormats(kind, copyFormats(kind)[0]!).slice(0, 1) : []);
+  const other = formats.map((format) => `<button type="button" class="fd-said-b" data-action="foundry-copy" data-args='${h(JSON.stringify({ format }))}'>Also as ${h(COPY_WORDS[format] ?? format)}</button>`).join("");
   return `${h(open.said)}${show}${other}`;
 }
 

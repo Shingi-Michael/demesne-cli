@@ -192,7 +192,12 @@ test("pass 262 C: the mockup you open grows where it sits, with a quiet head lin
   expect(open).toContain('<p class="fd-said" role="status" data-kind="html" hidden></p>');
   expect(savedLine({ id: "a1", at: 2, shown: 2, said: "Saved Orders board v2.html to Downloads", saved: { path: "/x", pdf: false, ready: false } }, "html"))
     .toBe('Saved Orders board v2.html to Downloads<button type="button" class="fd-said-b" data-action="foundry-copy-show">Show</button>');
-  expect(savedLine({ id: "d", at: 1, shown: 1, said: "Saved Plan v1.pdf to Downloads", saved: { path: "/y", pdf: true, ready: true } }, "deck")).toContain(">Also as a web page</button>");
+  // Piece 6 of pass 274: a deck saves as PowerPoint; the other files are offered once, in words.
+  const deckLine = savedLine({ id: "d", at: 1, shown: 1, said: "Saved Plan v1.pptx to Downloads", saved: { path: "/y", pdf: false, ready: true, others: ["pdf", "html"] } }, "deck");
+  expect(deckLine).toContain(`data-args='{&quot;format&quot;:&quot;pdf&quot;}'>Also as PDF</button>`);
+  expect(deckLine).toContain(">Also as a web page</button>");
+  expect(savedLine({ id: "s", at: 1, shown: 1, said: "Saved Budget v1.xlsx to Downloads", saved: { path: "/y", pdf: false, ready: true, others: ["csv"] } }, "sheet")).toContain(">Also as CSV</button>");
+  expect(savedLine({ id: "d", at: 1, shown: 1, said: "Saved Plan v1.pdf to Downloads", saved: { path: "/y", pdf: true, ready: false, others: [] } }, "deck")).not.toContain("Also as");
   expect(savedLine({ id: "r", at: 1, shown: 1, said: "Saved Counter v1.html to Downloads", saved: { path: "/z", pdf: false, ready: true } }, "react")).toContain(">Also as the .jsx</button>");
   expect(savedLine({ id: "a1", at: 2, shown: 2 }, "html")).toBe("");
 });

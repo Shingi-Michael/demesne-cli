@@ -81,7 +81,7 @@ export const READY_KINDS_RULES = "Ready kinds: slides are kind deck, a report, b
   + "Markdown with optional front matter at the top (---, title:, subtitle:, author:, date:, theme: paper|ink|forest|ocean|sand|plum, accent: #hex, ---); "
   + "```chart blocks (type: bar|line|area|hbar|donut, title:, labels: a, b, c, then a line per series, Name: 1, 2, 3); ```stats blocks (a tile per line: label | value | delta | note); > [!NOTE] / [!TIP] / [!WARNING] callouts. "
   + "A deck splits into slides on lines that are only ---: one idea per slide, few words; # 3.1× with a sentence becomes a big-number slide, a lone quote a quote slide, a heading and a chart a chart slide, a list with a chart a split "
-  + "(<!-- layout: title|statement|number|quote|split|chart|points --> overrides). A dashboard's ## headings group its stats, charts and tables. Anything interactive or custom is html.";
+  + "(<!-- layout: title|statement|number|quote|split|chart|points --> overrides; <!-- notes: … --> are a slide's speaker notes). A dashboard's ## headings group its stats, charts and tables. Anything interactive or custom is html.";
 
 /// More kinds (apps/desktop/electron/foundry-more-kinds.ts): what the model
 /// would write anyway, drawn by Demesne with libraries from the app.

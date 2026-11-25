@@ -126,6 +126,12 @@ html.present[data-kind] body{background:#000}
 .present .deck-strip,.present .deck-bar{display:none}
 .present .deck-stage{width:min(100vw,calc(100vh * 16 / 9))}
 .present .slide{border-radius:0;box-shadow:none}
+/* Present: the slide's speaker notes under it (N), and a line that says the keys, then goes. */
+.deck-notes,.deck-hint{display:none}
+.present .deck-notes:not([hidden]){display:block;position:fixed;left:0;right:0;bottom:0;max-height:32vh;overflow:auto;margin:0;padding:18px 32px;background:rgba(0,0,0,.84);color:#f1f1ee;font:400 19px/1.5 Inter,system-ui,sans-serif;white-space:pre-wrap}
+.present .deck-hint:not([hidden]){display:block;position:fixed;left:50%;bottom:22px;transform:translateX(-50%);margin:0;padding:7px 14px;border-radius:99px;background:rgba(0,0,0,.6);color:rgba(255,255,255,.82);font:400 13px/1.4 Inter,system-ui,sans-serif;transition:opacity .6s}
+.present .deck-hint.gone{opacity:0;pointer-events:none}
+@media print{.deck-notes,.deck-hint{display:none!important}}
 @media (max-width:640px){
   .deck{padding:var(--space-3)}
   .js .deck-stage{width:100%}

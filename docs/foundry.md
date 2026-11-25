@@ -389,6 +389,30 @@ Read about it:
 - [Window.postMessage(), MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage): how the slider on Foundry reaches the page in its frame.
 - [Slider design: rules of thumb, Nielsen Norman Group](https://www.nngroup.com/articles/gui-slider-controls/): when a slider is the right control, and why it shows its value.
 
+## Out in the right file
+
+A mockup is rarely the end of the road: a deck gets presented from PowerPoint, a report gets sent as a Word file, a budget gets opened in Excel. Save a copy now gives each kind the file the rest of the world opens, with no menu (piece 6 of pass 274).
+
+| Kind | Save a copy gives | Then offered on the line after |
+| --- | --- | --- |
+| Deck | PowerPoint (.pptx), with speaker notes | PDF, a web page |
+| Doc | Word (.docx) | PDF, a web page |
+| Sheet | Excel (.xlsx), totals as real formulas | CSV |
+| Page | HTML that stands on its own | a picture (.png) of the whole page at real size |
+| Dashboard | HTML | PDF, a picture |
+
+- **The words stay words.** A slide's title, bullets and tables are text you can edit in PowerPoint, in the deck's own colours; a doc's headings are real heading styles, so Word's outline and contents work; lists are lists, links are links. A chart comes along as its numbers in a table, not as a drawing.
+- **Totals are formulas.** Under every number column of a sheet sits `=SUM(…)`, so the total follows when someone changes a row. Money and percentages keep their format.
+- **Speaker notes.** A deck's slide can carry what to say: `<!-- notes: Open with the phone queue. -->`. Notes never show on the slide. They land in PowerPoint's notes pane.
+- **Present.** An opened deck has a play mark in its head line: the deck takes the whole window, one slide at a time. The arrow keys move, N shows the slide's notes under it, Esc gives the window back.
+- **Nothing is installed and nothing leaves the computer.** The files are written by Demesne itself ([foundry-files.ts](../apps/desktop/electron/foundry-files.ts)) as plain Office Open XML in a zip.
+
+Read about it:
+- [Office Open XML, Wikipedia](https://en.wikipedia.org/wiki/Office_Open_XML): what a .pptx, .docx and .xlsx file is inside.
+- [About the Open XML SDK, Microsoft Learn](https://learn.microsoft.com/office/open-xml/about-the-open-xml-sdk): the parts each file is made of.
+- [ZIP file format, Wikipedia](https://en.wikipedia.org/wiki/ZIP_(file_format)): the container all three share.
+- [webContents.capturePage, Electron](https://www.electronjs.org/docs/latest/api/web-contents#contentscapturepagerect-opts): how the picture of a page is taken.
+
 ## Taste that carries over
 
 What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.

@@ -249,6 +249,12 @@ export function slideLayout(source: string, index: number): SlideLayout {
   return "points";
 }
 
+/// A slide's speaker notes (piece 6 of pass 274): <!-- notes: what to say --> anywhere in the slide.
+/// They never show on the slide; they go to the notes pane of the PowerPoint file, and show under the slide when you present and press N.
+export function slideNotes(slide: string): string {
+  return [...slide.matchAll(/<!--\s*notes?\s*:\s*([\s\S]*?)-->/gi)].map((found) => found[1]!.trim()).filter(Boolean).join("\n\n");
+}
+
 export function renderDeck(source: string, fallbackTitle: string) {
   const { meta, body } = frontMatter(source);
   const marked = markdown({ width: 800, height: 340 });
@@ -257,7 +263,8 @@ export function renderDeck(source: string, fallbackTitle: string) {
   const total = slides.length;
   const html = slides.map((slide, i) => {
     const layout = slideLayout(slide, i);
-    let inner = marked.parse(slide.replace(/<!--\s*layout\s*:[^>]*-->/gi, "")) as string;
+    let inner = marked.parse(slide.replace(/<!--\s*(?:layout|notes?)\s*:[\s\S]*?-->/gi, "")) as string;
+    const notes = slideNotes(slide);
     if (layout === "split") {
       // Words on the left, the chart or stats on the right.
       const visual = /<(figure|div class="k-stats")[\s\S]*$/.exec(inner)?.[0] ?? "";
@@ -266,9 +273,9 @@ export function renderDeck(source: string, fallbackTitle: string) {
       inner = `${head}<div class="s-cols"><div class="s-words">${words}</div><div class="s-visual">${visual}</div></div>`;
     }
     const foot = i === 0 && (meta.author || meta.date) ? `<span>${esc([meta.author, meta.date].filter(Boolean).join(" · "))}</span>` : `<span>${esc(title)}</span><span>${i + 1} / ${total}</span>`;
-    return `<section class="slide" data-layout="${layout}" data-index="${i + 1}" aria-label="Slide ${i + 1} of ${total}"><div class="s-in">${inner}</div><footer class="s-foot">${foot}</footer></section>`;
+    return `<section class="slide" data-layout="${layout}" data-index="${i + 1}"${notes ? ` data-notes="${esc(notes)}"` : ""} aria-label="Slide ${i + 1} of ${total}"><div class="s-in">${inner}</div><footer class="s-foot">${foot}</footer></section>`;
   }).join("");
-  const body2 = `<main class="deck" aria-roledescription="slide deck"><div class="deck-stage">${html}</div><nav class="deck-strip" aria-label="Slides" data-chrome></nav><div class="deck-bar" data-chrome><button type="button" class="deck-prev" aria-label="Previous slide">‹</button><span class="deck-count">1 / ${total}</span><button type="button" class="deck-next" aria-label="Next slide">›</button></div></main>`;
+  const body2 = `<main class="deck" aria-roledescription="slide deck"><div class="deck-stage">${html}</div><nav class="deck-strip" aria-label="Slides" data-chrome></nav><div class="deck-bar" data-chrome><button type="button" class="deck-prev" aria-label="Previous slide">‹</button><span class="deck-count">1 / ${total}</span><button type="button" class="deck-next" aria-label="Next slide">›</button></div><aside class="deck-notes" data-chrome aria-label="Speaker notes" hidden></aside><p class="deck-hint" data-chrome hidden>← → to move · N for notes · Esc to leave</p></main>`;
   return page("deck", title, meta, body2);
 }
 

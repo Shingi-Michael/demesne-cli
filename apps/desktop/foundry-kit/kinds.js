@@ -37,6 +37,13 @@
       strip.appendChild(button);
       return button;
     });
+    // Present (piece 6 of pass 274): the deck alone in the window, one slide at a time. N shows the slide's
+    // speaker notes under it; Esc tells the Foundry page to put the window back.
+    var presenting = /[?&]present=1(&|$)/.test(location.search), notes = doc.querySelector(".deck-notes"), hint = doc.querySelector(".deck-hint");
+    if (presenting) {
+      root.classList.add("present");
+      if (hint) { hint.hidden = false; setTimeout(function () { hint.classList.add("gone"); }, 3200); }
+    }
     var at = 0, start = Number((location.hash.match(/^#(\d+)$/) || [])[1]) - 1;
     function go(index) {
       at = Math.max(0, Math.min(slides.length - 1, index));
@@ -44,6 +51,7 @@
       thumbs.forEach(function (thumb, i) { thumb.setAttribute("aria-current", String(i === at)); });
       if (thumbs[at] && root.classList.contains("js")) thumbs[at].scrollIntoView({ block: "nearest", inline: "nearest" });
       if (count) count.textContent = (at + 1) + " / " + slides.length;
+      if (notes) notes.textContent = slides[at].getAttribute("data-notes") || "No notes for this slide.";
       try { history.replaceState(null, "", "#" + (at + 1)); } catch (e) {}
     }
     root.classList.add("js");
@@ -62,7 +70,8 @@
       else if (key === "ArrowLeft" || key === "ArrowUp" || key === "PageUp") { event.preventDefault(); go(at - 1); }
       else if (key === "Home") go(0);
       else if (key === "End") go(slides.length - 1);
-      else if (key === "Escape" && root.classList.contains("present")) { root.classList.remove("present"); tell("stopped"); }
+      else if ((key === "n" || key === "N") && presenting && notes) { notes.hidden = !notes.hidden; if (hint) hint.classList.add("gone"); }
+      else if (key === "Escape" && root.classList.contains("present")) { if (!presenting) root.classList.remove("present"); tell("stopped"); }
     });
     function tell(state) { try { parent.postMessage({ demesne: "deck", state: state, slide: at + 1, slides: slides.length }, "*"); } catch (e) {} }
     window.addEventListener("message", function (event) {

@@ -3557,12 +3557,14 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) .desktop #browser-
 /* Setup: its own bands step back so the page's edge of stars runs across the top. */
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) .desktop #setup, html:is([data-theme="demesne"], [data-theme="demesne-light"]) .desktop #setup header { background: transparent; }
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) #desktop-shell > .live-app.start:has(> #setup:not([hidden]))::before { display: block; }
-.sidebar-stars { display: none; }
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) #sidebar-projects { display: flex; flex-direction: column; }
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) #sidebar-projects > * { flex: none; }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-stars { display: block; margin-top: auto; padding: 36px 0 26px 18px; color: var(--t1); opacity: .2; pointer-events: none; }
-.sidebar-stars svg { display: block; width: 190px; height: 70px; }
-#desktop-shell.sidebar-collapsed .sidebar-stars { display: none; }
+/* Cassiopeia, small, on the release line it names (Demesne's own themes):
+   no longer a drawing in the room the list leaves. */
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-release:is([data-state="name"], :not([data-state])) { display: flex; align-items: center; gap: 8px; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-release:is([data-state="name"], :not([data-state]))::before { content: ""; flex: none; width: 30px; height: 12px; background: currentColor; opacity: .75;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 12'%3E%3Cpath d='M1.5 9.5 6.6 4.6 13 7.4 19.3 2.2 28.4 6.4' fill='none' stroke='%23000' stroke-width='.8' opacity='.6'/%3E%3Cg%3E%3Ccircle cx='1.5' cy='9.5' r='1.25'/%3E%3Ccircle cx='6.6' cy='4.6' r='.95'/%3E%3Ccircle cx='13' cy='7.4' r='1.25'/%3E%3Ccircle cx='19.3' cy='2.2' r='.95'/%3E%3Ccircle cx='28.4' cy='6.4' r='1.25'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 12'%3E%3Cpath d='M1.5 9.5 6.6 4.6 13 7.4 19.3 2.2 28.4 6.4' fill='none' stroke='%23000' stroke-width='.8' opacity='.6'/%3E%3Cg%3E%3Ccircle cx='1.5' cy='9.5' r='1.25'/%3E%3Ccircle cx='6.6' cy='4.6' r='.95'/%3E%3Ccircle cx='13' cy='7.4' r='1.25'/%3E%3Ccircle cx='19.3' cy='2.2' r='.95'/%3E%3Ccircle cx='28.4' cy='6.4' r='1.25'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat; }
 
 /* The cards in the pill's glass (pass 271 A). At rest each card is still one
    quiet line. The card you open (rest on it, click it, tab into it) lifts
@@ -3593,6 +3595,18 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-stars { d
 @keyframes threads-light { from { --threads-a: -90deg; } to { --threads-a: 270deg; } }
 .desktop :is(#completion, #overlay.popover, #context-card, #sidebar-glance) { border: 0; border-radius: 16px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 70%, var(--surface)); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85), 0 24px 60px -20px rgb(0 0 0 / .7); }
 .desktop :is(#threads-ribbon .plan-ribbon.tr .pr-card, .compaction-card) { position: relative; border: 0; border-radius: 18px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85); }
+/* A group's chats hang from a hairline under its folder, through the
+   column the folder and the row marks share; the open chat is a short pink
+   bar on that line, pink marking where you are. Pinned has no folder, so
+   only the bar. */
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) { position: relative; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats):not(.sidebar-pinned-chats):has(.sidebar-item)::before { content: ""; position: absolute; left: 19px; top: 0; bottom: 6px; width: 1px; background: var(--hair); pointer-events: none; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected { position: relative; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected::after { content: ""; position: absolute; left: 18px; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--blossom); pointer-events: none; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .kid .sidebar-session.selected::after { left: 32px; }
+#desktop-sidebar :is(.sidebar-project-chats, .sidebar-group-chats) .sidebar-session.selected .sidebar-session-mark:not(.warn, .acc, .working, .bad) { visibility: hidden; }
+#desktop-sidebar .sidebar-pinned-chats .sidebar-session.selected .sidebar-pin-mark { visibility: hidden; }
+
 .desktop .compaction-card { border-radius: 16px; }
 .desktop :is(#completion, #overlay.popover, #context-card, #sidebar-glance, .compaction-card)::after, .desktop #threads-ribbon .plan-ribbon.tr .pr-card::after { content: ""; position: absolute; inset: 0; z-index: 3; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--threads-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 60%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 34%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
 @media (prefers-reduced-motion: no-preference) {

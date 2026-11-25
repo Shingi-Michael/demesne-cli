@@ -1012,12 +1012,13 @@ function renderSidebar() {
     housedList.hidden = !show;
     housedList.innerHTML = show ? housedLines() : "";
   }
-  // Pinned chats lead the list, whichever project they are in.
+  // Pinned chats lead the list, whichever project they are in, under the
+  // same small label as Projects: a group of chats, not a place to go.
   const pinnedChats = sorted(listed.filter((item) => item.pinned && matches(item)));
   const pinnedList = document.getElementById("sidebar-pinned");
   if (pinnedList) {
     pinnedList.hidden = !pinnedChats.length;
-    pinnedList.innerHTML = pinnedChats.length ? group("pinned", "Pinned", groupRows("pinned", pinnedChats), 0) : "";
+    pinnedList.innerHTML = pinnedChats.length ? `<div class="sidebar-label"><span>Pinned</span></div><div class="sidebar-group-chats sidebar-pinned-chats">${groupRows("pinned", pinnedChats).join("")}</div>` : "";
   }
   const rest = listed.filter((item) => !item.pinned);
   const groups: string[] = [];

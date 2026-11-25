@@ -1,3 +1,4 @@
+import { loadProjectLook } from "./project-look.ts";
 import { previewFile, PreviewError } from "./file-preview.ts";
 import { collectDriveReview } from "./drive-review.ts";
 import { listSourceDocuments, sourceDocumentResponse } from "./source-documents.ts";
@@ -1906,6 +1907,8 @@ export function createDaemonApp(options: {
 
       // Notes pinned on Foundry and not sent yet, for every mockup.
       if (path[0] === "v1" && path[1] === "foundry-notes" && path.length === 2 && request.method === "GET") return json({ waiting: store.waitingFoundryNotes() });
+      // Piece 1 of pass 274: a project's own look, read from its code, for Foundry's front page.
+      if (path[0] === "v1" && path[1] === "project-look" && path.length === 2 && request.method === "GET") return json({ look: loadProjectLook(url.searchParams.get("workspace")) });
       // Pass 273 A: Foundry's front page searches names, descriptions, asks and the words on each page.
       if (path[0] === "v1" && path[1] === "foundry-search" && path.length === 2 && request.method === "GET") {
         const query = (url.searchParams.get("q") ?? "").slice(0, 200).trim();

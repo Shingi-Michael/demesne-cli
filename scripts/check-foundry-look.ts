@@ -1,91 +1,108 @@
-// Foundry's look, for real: the desktop app renders a page with known faults
-// off screen and must name each one. Run after `bun scripts/prepare-desktop.ts`
-// (Linux needs a display: xvfb-run -a bun scripts/check-foundry-look.ts).
+/** Real Electron check for piece 1 of pass 274, your project's look: a
+ * project whose Tailwind config names its colours and fonts has its look on
+ * Foundry's front page as one quiet line; a mockup drawn off that look goes
+ * back to the model once and comes out in the project's values, and its page
+ * says "Project look: Checked against tailwind.config.ts: 2 things fixed
+ * before you saw it".
+ * Run after `bun scripts/prepare-desktop.ts`, under xvfb-run -a. */
+import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { designReport, electronLook, lookReport } from "../apps/daemon/src/foundry-look.ts";
+import { fixture, eventually } from "../apps/desktop/workspace/test/fixture.ts";
 
-const root = resolve(import.meta.dir, "..");
-const electron = process.env.DEMESNE_ELECTRON ?? join(root, "node_modules/electron/dist", process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron");
-const command = [electron, ...(process.env.DEMESNE_ELECTRON ? [] : [join(root, "apps/desktop/build/app")]), ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])];
-const page = `<link rel="stylesheet" href="foundry://kit/base.css">
-<style>body{background:#fff;color:#111}.wide{width:520px}.today{width:40px;white-space:nowrap;border:1px solid}.badges{width:120px;overflow:hidden;white-space:nowrap}.faint{color:#ddd}.stack{position:relative}.stack p{position:absolute;top:0;margin:0}</style>
-<main class="container"><h1>Garden plan</h1><div class="wide">Beds along the fence</div><button class="today">Today's habits</button>
-<div class="badges"><span class="pill">Needs full sun all day</span></div><p class="faint">Watering schedule</p>
-<div class="stack"><p>Tomatoes</p><p>Basil</p></div><a class="chip" href="#" style="display:inline-block;height:24px;margin-top:40px">More</a> <p>Read <a href="#">the notes</a> first.</p></main>`;
-const started = Date.now();
-const look = await electronLook(command)({ kind: "html", title: "Garden plan", source: page }, new AbortController().signal);
-assert(look, "the app rendered the page");
-// A mockup is looked at once, at the desktop's width; only a phone screen is looked at at a phone's.
-assert.equal(look.pages.length, 1, "one look, at the desktop's width");
-const [desktop] = look.pages;
-assert.equal(desktop?.width, 1280);
-const asPhone = await electronLook(command)({ kind: "html", title: "Garden plan", source: page, phone: true }, new AbortController().signal);
-assert(asPhone && asPhone.pages.length === 1, "a phone screen is looked at once too");
-const [phone] = asPhone.pages;
-assert.equal(phone?.width, 390);
-const all = (issues: string[]) => issues.join("\n");
-assert.match(all(phone!.issues), /Scrolls sideways by \d+px at 390px wide; too wide: div\.wide/);
-assert.doesNotMatch(all(desktop!.issues), /Scrolls sideways/);
-for (const issues of [desktop!.issues, phone!.issues]) {
-  assert.match(all(issues), /Text spills out of its box: button\.today/);
-  assert.match(all(issues), /span\.pill "Needs full sun all day" is clipped by div\.badges/);
-  assert.match(all(issues), /Hard to read \(1\.\d:1 contrast, needs 4\.5:1\): p\.faint/);
-  assert.match(all(issues), /p "Tomatoes" overlaps p "Basil"/);
+const step = async (line: number, check: () => Promise<boolean>, ms = 10000) => { try { await eventually(check, ms); } catch { throw new Error(`Did not happen: the wait on line ${line}`); } };
+const TAILWIND = `export default { theme: { extend: {
+  colors: { primary: { DEFAULT: "#0f766e", 600: "#0d5f59" }, paper: "#fbfaf7", ink: "#1c2422", warn: "#b45309" },
+  fontFamily: { display: ["Georgia", "serif"], sans: ["Inter", "system-ui"] },
+  borderRadius: { card: "10px" },
+} } };`;
+const page = (accent: string, font: string) => `<!doctype html><html><head><link rel="stylesheet" href="foundry://kit/base.css"><style>:root{--accent:${accent};--paper:#fbfaf7;--ink:#1c2422} body{margin:0;padding:48px;background:var(--paper);color:var(--ink)} h1{font-family:${font};font-size:32px;margin:0 0 8px} .go{display:inline-block;margin-top:24px;padding:12px 20px;border-radius:10px;background:var(--accent);color:#fff;font-weight:600}</style></head><body><main><h1>Book a visit</h1><p>Harbor Clinic · Dr. Okafor · Tuesday, 10:30</p><span class="go">Book 10:30</span></main></body></html>`;
+const WHY = { direction: "Calm, for patients booking a visit.", look_at: "The Book button.", starts_from: "new", dropped: "The map.",
+  walkthrough: [{ what: "A booking page for the clinic's patients.", parts: [{ name: "Heading", says: "Says what you are doing." }, { name: "Book button", says: "Books the chosen time." }], why: "One thing to do, so one button." }] };
+const saves: string[] = [];
+
+const f = await fixture({
+  providerId: "fixture", modelId: "foundry-look",
+  async listModels() { return [{ id: "foundry-look", provider: "fixture", contextWindow: 262144 }]; },
+  async *stream(messages) {
+    const at = messages.findLastIndex((message) => message.role === "user");
+    const results = messages.slice(at + 1).filter((message) => message.role === "tool");
+    const last = results.at(-1);
+    const said = last ? (typeof last.content === "string" ? last.content : JSON.stringify(last.content)) : "";
+    if (last && !said.includes("[look]")) { yield { type: "text_delta", delta: "Here is the booking page, in the clinic's own colours and type." }; yield { type: "finish", reason: "stop" }; return; }
+    if (last) saves.push(said);
+    // First drawn in a look of its own (purple, Poppins); after the note, in the project's.
+    yield { type: "tool_call_delta", index: 0, idDelta: `save-${at}-${results.length}`, nameDelta: "foundry_save", argumentsDelta: JSON.stringify({ title: "Booking page", kind: "html", description: "Pick a time and book it.", note: "First take",
+      source: last ? page("#0f766e", "Georgia, serif") : page("#7c3aed", '"Poppins", sans-serif'), why: WHY }) };
+    yield { type: "finish", reason: "tool_calls" };
+  },
+});
+mkdirSync(join(f.workspace, "src/components/ui"), { recursive: true });
+writeFileSync(join(f.workspace, "tailwind.config.ts"), TAILWIND);
+for (const name of ["Button", "DayPicker", "SlotPill", "Field"]) writeFileSync(join(f.workspace, "src/components", `${name}.tsx`), "export {};\n");
+let desktop: Awaited<ReturnType<typeof electron.launch>> | undefined, window: Page | undefined;
+try {
+  desktop = await electron.launch({ args: [resolve("apps/desktop/build/app"), ...(process.getuid?.() === 0 ? ["--no-sandbox"] : []), `--user-data-dir=${join(f.root, "electron-data")}`, `--workspace=${f.workspace}`, `--server=${f.server.url}`],
+    env: { ...f.env, DEMESNE_BUN: process.execPath }, timeout: 30000 });
+  window = await desktop.firstWindow();
+  const app = window;
+  app.setDefaultTimeout(15000);
+  await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900));
+  const errors: string[] = [];
+  app.on("pageerror", (error) => errors.push(error.message));
+  await app.locator("#composer-model").waitFor();
+  const editor = app.locator("textarea");
+  await app.waitForFunction(() => { try { const host = (window.demesneInspect?.() as { host?: { session?: string; busy?: boolean } })?.host; return !!host?.session && !host.busy; } catch { return false; } });
+  await app.waitForTimeout(200);
+  // Before anything is made, the front page says the project's look, read from its code.
+  await app.locator('[data-action="page-open"][data-args*="foundry"]').first().click();
+  const lookLine = app.locator("#page .fg-look");
+  await lookLine.waitFor();
+  const words = (await lookLine.textContent())!;
+  assert.match(words, /’s look/);
+  assert.match(words, /Georgia and Inter/);
+  assert.match(words, /10px corners/);
+  assert.match(words, /4 components/);
+  assert.match(words, /read from tailwind\.config\.ts/);
+  assert.equal(await lookLine.locator(".fg-look-sw i").count(), 5);
+  assert.equal(await lookLine.locator("button, a, input").count(), 0, "the look line has nothing to press");
+  mkdirSync("output", { recursive: true });
+  await app.screenshot({ path: "output/foundry-look-front.png" });
+  console.log("PASS: the front page shows the project's look, read from its code.");
+
+  // A mockup drawn off the look goes back once, and comes out in the project's values.
+  await app.locator('[data-action="page-open"][data-args*="foundry"]').first().click();
+  await editor.fill("/foundry make a booking page"); await editor.press("Enter");
+  const chip = app.locator("#conversation .fd-chip").filter({ hasText: "Booking page" });
+  await chip.waitFor();
+  assert.equal(saves.length, 1, "sent back once");
+  assert.match(saves[0]!, /colour #7c3aed is far from every colour of its palette \(nearest: primary #0f766e\)/);
+  assert.match(saves[0]!, /font Poppins is not one of the project's \(Georgia, Inter\)/);
+  const id = (await f.client.foundryList()).artifacts.find((item) => item.title === "Booking page")!.id;
+  const made = await f.client.foundryGet(id);
+  assert.equal(made.version, 1, "the purple take was never kept");
+  assert.ok(made.source.includes("#0f766e") && !made.source.includes("#7c3aed"));
+  console.log("PASS: a mockup off the look goes back to the model once, with what to use instead.");
+
+  // Its page says so, on one quiet line.
+  await chip.click();
+  await app.locator(`#page [data-fd="${id}:1"]`).waitFor();
+  const why = app.locator(`#page [data-fd="${id}:1"] .fd-why`);
+  await step(80, async () => /Project look\s*Checked against tailwind\.config\.ts: 2 things fixed before you saw it/.test(((await why.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ")));
+  // And it is drawn in them: what the page sets wins over the kit's own values.
+  const frame = () => app.frames().find((one) => one.url().includes(id));
+  await step(84, async () => !!frame() && await frame()!.evaluate(() => !!document.querySelector(".go")).catch(() => false));
+  const drawn = await frame()!.evaluate(() => ({ button: getComputedStyle(document.querySelector(".go")!).backgroundColor, heading: getComputedStyle(document.querySelector("h1")!).fontFamily }));
+  assert.equal(drawn.button, "rgb(15, 118, 110)", "the button is the project's teal");
+  assert.match(drawn.heading, /^Georgia/, "the heading is in the project's display face");
+  await app.mouse.move(5, 5);
+  await app.waitForTimeout(600);
+  await app.screenshot({ path: "output/foundry-look-page.png" });
+  console.log("PASS: the mockup's page says it was checked against the project's look.");
+  assert.deepEqual(errors, []);
+} finally {
+  await window?.close().catch(() => {});
+  await desktop?.close().catch(() => {});
+  await f.close();
 }
-// On a phone screen only, a small thing to tap is named (WCAG 2.5.5).
-assert.match(all(phone!.issues), /Too small to tap \(\d+×\d+px, needs 44×44\): a\.chip/);
-assert.doesNotMatch(all(desktop!.issues), /Too small to tap/);
-assert.doesNotMatch(all(phone!.issues), /the notes/, "a link inside a sentence is exempt");
-// Kit colours (color-mix) read right in both schemes: no false contrast alarms on pills or tints.
-const pills = `<link rel="stylesheet" href="foundry://kit/base.css"><main class="container"><p class="secondary">Second line</p><span class="pill">Kit pill</span><span class="pill accent">Accent</span><p class="muted">Muted note</p><label><span style="color:transparent">✓</span><span style="color:var(--paper,#fff);background:var(--paper,#fff)">✓</span> Water</label></main>`;
-for (const scheme of ["light", "dark"]) {
-  const quiet = await electronLook(command)({ kind: "html", title: "Kit", source: pills.replace("<main", `<main data-scheme="${scheme}"`).replace("<link", `<html data-theme="${scheme}"><link`) }, new AbortController().signal);
-  assert(quiet);
-  for (const shot of quiet.pages) assert.deepEqual(shot.issues, [], `kit text in ${scheme} at ${shot.width}px`);
-}
-// The design numbers the quality eval scores (foundry-look-measure.ts DESIGN_MEASURE).
-const design = desktop!.design!;
-assert(design, "design numbers come with the look");
-for (const key of ["sizes", "body", "lead", "rhythm", "aligned", "colours", "surface"]) assert(typeof design[key] === "number", `design.${key}`);
-assert(design.sizes >= 2 && design.lead > 1 && design.colours >= 2, JSON.stringify(design));
-// Step 3: the model sees them against targets, by the design guide's rule.
-const numbers = designReport(design);
-assert.equal(numbers.off.length + numbers.ok.length, 6, "every number has a target");
-assert(lookReport(look, false).look.next, "the look says what to do next");
-console.log("design numbers off target:", numbers.off);
-// The parts draw a real frame: a Demesne mock and a phone frame render with no faults, and paint the screen.
-const parts = `<html data-theme="dark"><link rel="stylesheet" href="foundry://kit/base.css"><main class="container" style="max-width:1180px"><h1>Calmer settings</h1>
-<d-demesne page="Customize" tabs="Settings"><h2>General</h2><div><d-row title="Keep this computer awake" note="While a chat or Drive runs"><d-toggle on></d-toggle></d-row>
-<d-row title="Open on"><d-seg options="Home|Last chat"></d-seg></d-row></div><d-card slot="cards" title="What changed" icon="sparkles">Three pages fold into one.</d-card></d-demesne>
-<d-compare recommended="A"><section data-option="A · Phone"><d-phone><div style="padding:16px"><d-stat label="This week" value="32 km" delta="+12%"></d-stat><d-chart type="bar" values="3,5,4,7" labels="M,T,W,T"></d-chart><d-avatar name="Amara Okafor"></d-avatar> <d-icon name="calendar"></d-icon></div></d-phone></section>
-<section data-option="B · Window"><d-window title="Splits" width="700"><d-chart type="donut" values="40,30,30" labels="Easy,Tempo,Long"></d-chart></d-window></section></d-compare></main>
-<script src="foundry://kit/parts.js"></script>`;
-const partsLook = await electronLook(command)({ kind: "html", title: "Parts", source: parts }, new AbortController().signal);
-assert(partsLook, "the app rendered the parts page");
-for (const shot of partsLook.pages) { if (shot.issues.length) console.error(shot.width, shot.issues); assert.deepEqual(shot.issues, [], `parts at ${shot.width}px`); }
-assert.deepEqual(partsLook.errors, [], "parts log no console errors");
-assert(partsLook.pages[0]!.design!.surface > 0.2, `parts paint the screen: ${JSON.stringify(partsLook.pages[0]!.design)}`);
-// Pass 240 A: a review's real picture rides in the job and is drawn in the look (here, the parts page's own picture).
-const picture = partsLook.pages[0]!.png, bytes = Buffer.from(picture, "base64"), size = { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
-const shotPage = (src: string) => `<link rel="stylesheet" href="foundry://kit/base.css"><d-review><section data-today><d-shot src="${src}" marks="0,0,${size.width},80"></d-shot></section></d-review><script src="foundry://kit/parts.js"></script>`;
-const shotLook = await electronLook(command)({ kind: "html", title: "Review", source: shotPage("s1"), shots: { s1: { data: picture, mimeType: "image/png", ...size, scale: 1 } } }, new AbortController().signal);
-const noShot = await electronLook(command)({ kind: "html", title: "Review", source: shotPage("gone") }, new AbortController().signal);
-assert(shotLook && noShot, "the app rendered the review pages");
-if (process.env.FOUNDRY_LOOK_SHOTS) await Bun.write(join(process.env.FOUNDRY_LOOK_SHOTS, "review-shot.png"), Buffer.from(shotLook.pages[0]!.png, "base64"));
-assert.deepEqual(shotLook.errors, [], "a review with its picture logs no console errors");
-// A look with the picture drawn holds far more than the same sheet saying the picture is not kept.
-const heavy = shotLook.pages[0]!.png.length, light = noShot.pages[0]!.png.length;
-assert(heavy > light * 3, `the picture is drawn in the look: ${heavy} bytes against ${light} without it`);
-// The ready kinds: a deck, a doc and a dashboard, drawn by the app from content alone, render with no faults or errors.
-const READY = { deck: "---\ntitle: Q1 launch\nauthor: Growth team\ndate: April 2027\ntheme: forest\n---\n# Q1 launch\nWhat the free tier did to sign-ups, and what we do next.\n\n---\n\n# 3.1\u00d7\nSign-ups a week, from 1,200 to 3,700, with no change to paid conversion.\n\n---\n\n## Sign-ups tripled after the free tier\n\n```chart\ntype: bar\nlabels: W1, W2, W3, W4, W5, W6\nSign-ups: 1200, 1500, 1800, 2400, 3100, 3700\n```\n\n---\n\n## Where they came from\n\n- **Search** grew fastest, up 4\u00d7 since the launch post\n- Word of mouth doubled\n- Paid stayed flat: we spent the same\n\n```chart\ntype: donut\nlabels: Search, Word of mouth, Paid, Other\nvalues: 46, 28, 18, 8\n```\n\n---\n\n> The free tier didn't cannibalise paid. It filled the top of the funnel.\n>\n> Priya Shah, Head of Growth\n\n---\n\n## Next quarter\n\n1. Double down on search: 12 new guides\n2. Referral credit for word of mouth\n3. Keep paid flat until conversion moves\n\n---\n\n## The numbers\n\n```stats\nSign-ups | 3,700 | +210% | a week\nPaid conversion | 4.1% | +0.1 pt\nChurn | 2.3% | \u22120.4 pt | monthly\n```\n", doc: "---\ntitle: Q1 launch brief\nsubtitle: The free tier tripled sign-ups without hurting paid conversion. Here is what happened and what we propose next.\nauthor: Growth team\ndate: 3 April 2027\n---\n## Summary\n\nWe launched the free tier on 6 January. Weekly sign-ups went from **1,200 to 3,700** in six weeks, and paid conversion held at 4.1%.\n\n```stats\nSign-ups | 3,700 | +210% | a week\nPaid conversion | 4.1% | +0.1 pt\nChurn | 2.3% | \u22120.4 pt\n```\n\n## What happened\n\nSearch did most of the work. The launch post ranked for \"free invoicing app\" within two weeks.\n\n```chart\ntype: line\ntitle: Weekly sign-ups by channel\nlabels: W1, W2, W3, W4, W5, W6\nSearch: 400, 600, 900, 1300, 1700, 2000\nWord of mouth: 500, 550, 600, 700, 900, 1000\nPaid: 300, 350, 300, 400, 500, 700\n```\n\n> [!NOTE]\n> Paid spend was flat across the quarter, so the paid line is a fair control.\n\n## Risks\n\n| Risk | Likelihood | Impact |\n| --- | --- | --- |\n| Support load grows with free users | High | Medium |\n| Search ranking drops | Medium | High |\n| Free users never convert | Low | High |\n\n## Proposal\n\n1. Publish 12 search guides next quarter.\n2. Give referral credit for word of mouth.\n3. Keep paid spend flat until conversion moves.\n", dashboard: "---\ntitle: Launch numbers\nsubtitle: The free tier, six weeks in\ndate: Updated 3 Apr\ntheme: ink\n---\n```stats\nSign-ups | 3,700 | +210% | this week\nPaid conversion | 4.1% | +0.1 pt\nActive teams | 18,240 | +32%\nChurn | 2.3% | \u22120.4 pt | monthly\n```\n\n## Growth\n\n```chart\ntype: area\ntitle: Weekly sign-ups\nlabels: W1, W2, W3, W4, W5, W6\nvalues: 1200, 1500, 1800, 2400, 3100, 3700\n```\n\n```chart\ntype: donut\ntitle: Where they came from\nlabels: Search, Word of mouth, Paid, Other\nvalues: 46, 28, 18, 8\n```\n\nSearch grew fastest after the launch post ranked. Paid stayed flat.\n\n## Teams\n\n| Team | Plan | Seats | MRR |\n| --- | --- | --- | --- |\n| Halden & Co | Pro | 42 | $1,260 |\n| Northwind | Team | 18 | $540 |\n| Brightline | Pro | 31 | $930 |\n| Okafor Studio | Team | 9 | $270 |\n\n```chart\ntype: hbar\ntitle: Top countries\nlabels: UK, US, Germany, Kenya, Brazil\nvalues: 1200, 980, 640, 410, 300\n```\n" };
-for (const [kind, source] of Object.entries(READY)) {
-  const ready = await electronLook(command)({ kind, title: kind, source }, new AbortController().signal);
-  assert(ready, `the app drew the ${kind}`);
-  for (const shot of ready.pages) { if (shot.issues.length) console.error(kind, shot.width, shot.issues); assert.deepEqual(shot.issues, [], `${kind} at ${shot.width}px`); }
-  assert.deepEqual(ready.errors, [], `${kind} logs no console errors`);
-  if (process.env.FOUNDRY_LOOK_SHOTS) for (const shot of ready.pages) await Bun.write(join(process.env.FOUNDRY_LOOK_SHOTS, `${kind}-${shot.width}.png`), Buffer.from(shot.png, "base64"));
-  console.log(kind, JSON.stringify(ready.pages.map(({ width, design }) => ({ width, design }))));
-}
-for (const shot of [...look.pages, ...asPhone.pages]) assert(Buffer.from(shot.png, "base64").subarray(1, 4).toString() === "PNG", "a picture of each look");
-console.log(`Foundry look passed in ${Date.now() - started} ms:`, JSON.stringify(look.pages.map(({ width, issues }) => ({ width, issues }))));

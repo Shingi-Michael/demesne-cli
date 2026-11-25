@@ -2,7 +2,7 @@
 /// cards with a picture of each, pinned first. Search at the top, then All,
 /// This project, Pinned and Shared. A card opens the long page for that one
 /// mockup, with a line back here. A row of kinds starts something new (step 2).
-import type { FoundryArtifact, FoundryShelfVersion } from "@demesne/protocol";
+import type { FoundryArtifact, FoundryShelfVersion, ProjectLook } from "@demesne/protocol";
 import { dayWord } from "./chats-page.ts";
 import { frameURL, KIND_WORD, shelfKey } from "./foundry-page.ts";
 
@@ -32,6 +32,8 @@ export interface GalleryView {
   found?: ReadonlySet<string> | null;
   chatTitle: (id: string) => string | null;
   now?: number;
+  /// Piece 1 of pass 274: the look of the project this window is in, read from its code.
+  look?: ProjectLook | null;
 }
 
 export const projectName = (root: string | null) => root ? root.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || root : "Just a chat";
@@ -136,11 +138,30 @@ export function makeRow(here: string | null) {
     + "</div></div>";
 }
 
+/// Piece 1 of pass 274: the look of the project this window is in, as one
+/// quiet line under the make row: its colours as small swatches, its type,
+/// its corners, how many components, and the files it was read from. It is
+/// what Foundry draws this project's mockups in; there is nothing to press.
+export function lookLine(here: string | null, look: ProjectLook | null | undefined) {
+  if (!here || !look) return "";
+  const swatches = look.colors.slice(0, 8).map((one) => `<i style="background:${h(one.value)}" title="${h(`${one.name} ${one.value}`)}"></i>`).join("");
+  const parts = [
+    look.fonts.length ? h(look.fonts.slice(0, 2).join(" and ")) : "",
+    look.corners.length ? `${h(look.corners[0]!)} corners` : "",
+    look.componentCount ? `${look.componentCount} ${look.componentCount === 1 ? "component" : "components"}` : "",
+    look.kit ? h(look.kit) : "",
+  ].filter(Boolean);
+  const from = look.from.length ? `read from ${h(look.from.slice(0, 2).join(" and "))}${look.from.length > 2 ? ` and ${look.from.length - 2} more` : ""}` : "read from its components";
+  return `<p class="fg-look" aria-label="${h(`${projectName(here)}'s look`)}"><span class="fg-look-t">${h(projectName(here))}’s look</span>`
+    + (swatches ? `<span class="fg-look-sw" role="img" aria-label="${h(`Colours: ${look.colors.slice(0, 8).map((one) => one.name).join(", ")}`)}">${swatches}</span>` : "")
+    + parts.map((part) => `<span>${part}</span>`).join("") + `<span class="fg-look-from">${from}</span></p>`;
+}
+
 /// The whole front page: the title and search, the filters, then the cards.
 export function galleryPage(view: GalleryView, error = "") {
   const head = `<div class="fg-top"><h1 class="cp-title fd-h">Foundry</h1><form class="fg-search" role="search" data-kind="foundry">${SEARCH}<input type="search" id="fg-q" placeholder="Search everything made" value="${h(view.gallery.query)}" aria-label="Search everything made" autocomplete="off" spellcheck="false"></form></div>`
     + (error ? `<p class="sp-error" role="alert">${h(error)}</p>` : "");
-  const make = makeRow(view.here);
+  const make = makeRow(view.here) + lookLine(view.here, view.look);
   if (!view.list.length) return head + make + `<div class="fd-empty"><b>Nothing made yet</b><span>Pick a kind above, or ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
   const chips = `<div class="fg-chips" role="group" aria-label="Show">${GALLERY_FILTERS.map(([key, label]) => `<button type="button" class="fg-chip${view.gallery.filter === key ? " on" : ""}" ${act("foundry-filter", { filter: key })} aria-pressed="${view.gallery.filter === key}">${label}</button>`).join("")}</div>`;
   return head + make + chips + `<div id="fg-cards">${galleryGrid(view)}</div>`;

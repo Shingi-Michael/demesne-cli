@@ -69,7 +69,7 @@ import { customizePage, type CustomizeUi } from "./customize-page.ts";
 import { tableCells, tableCsv, tableMarkdown } from "./md-table.ts";
 import { GLASS_DEFAULT, GLASS_SHARP_DEFAULT, glassAlphas, isInk, isSettingsSection, notifyKinds, parseNumber, settingsNav, settingsHome, settingsPage, SETTINGS_ORDER, type BrowserSigninsView, type Ink, type NotifyKind, type SettingsInfo, type SettingsSection, type SettingsView } from "./settings-page.ts";
 import type { CustomizeView } from "./customize.ts";
-import type { ChatCache, FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, Routine } from "@demesne/protocol";
+import type { ChatCache, FoundryArtifact, FoundryArtifactDetail, FoundryListResponse, FoundryShelfVersion, PlanLimits, ProjectLook, Routine } from "@demesne/protocol";
 import { cacheHalfHTML } from "./cache-line.ts";
 import { glanceHTML, type Glance } from "./glance.ts";
 import { backChoices, backState } from "./back-later.ts";
@@ -4444,6 +4444,8 @@ const foundryGallery: FoundryGallery = { query: "", filter: "all", one: null };
 let foundryPins: string[] = [], foundryShared = new Set<string>();
 /// The mockups the daemon found by the words on their pages, for the search typed now.
 let foundryFound: { query: string; ids: Set<string> } | null = null, foundrySearchTimer = 0;
+/// Piece 1 of pass 274: the look of the project this window is in, read from its code by the daemon.
+let foundryLook: { workspace: string; look: ProjectLook | null } | null = null;
 /// Documents on the long page, rendered once they scroll near ("id:version").
 const foundryDocs = new Map<string, string>(), foundryDocsLoading = new Set<string>();
 const foundryUi = { error: "" };
@@ -4797,6 +4799,13 @@ async function loadFoundry() {
   try {
     const [shelf, marks] = await Promise.all([api<FoundryListResponse>("foundry-shelf"), api<{ pins: string[]; shared: string[] }>("desktop-foundry-gallery").catch(() => null)]);
     if (marks) { foundryPins = marks.pins; foundryShared = new Set(marks.shared); }
+    const lookFor = foundryHere();
+    if (!lookFor) foundryLook = null;
+    else void api<ProjectLook | null>("foundry-look", { workspace: lookFor }).then((look) => {
+      const changed = JSON.stringify(foundryLook) !== JSON.stringify({ workspace: lookFor, look });
+      foundryLook = { workspace: lookFor, look };
+      if (changed && pageOpen === "foundry" && !foundryGallery.one && !document.querySelector("#page #fg-q:focus")) renderPage();
+    }).catch(() => {});
     foundryList = shelf.artifacts;
     foundryVersions = shelf.versions ?? shelf.artifacts.map((item) => ({ artifactId: item.id, version: item.version, createdAt: item.updatedAt, sessionId: item.sessionId, note: "" }));
     foundryNames = shelf.artifacts.map(({ id, title, version, description, kind }) => ({ id, title, version, description: description ?? "", kind }));
@@ -7314,7 +7323,7 @@ document.addEventListener("keydown", (event) => {
 /// Foundry's long page: links from the chat, and the day strip. You only look here.
 /// Pass 273 A: what the front page draws from.
 function galleryView(here: string | null | undefined): GalleryView {
-  return { list: foundryList ?? [], versions: foundryVersions ?? [], gallery: foundryGallery, here: here ?? null, pins: foundryPins, shared: foundryShared,
+  return { list: foundryList ?? [], versions: foundryVersions ?? [], gallery: foundryGallery, here: here ?? null, pins: foundryPins, shared: foundryShared, look: here && foundryLook?.workspace === here ? foundryLook.look : null,
     found: foundryFound && foundryFound.query === foundryGallery.query.trim() ? foundryFound.ids : null, chatTitle: (id) => state?.sessions.find((item) => item.id === id)?.title ?? null };
 }
 const foundryHere = () => document.getElementById("sidebar-sessions")?.dataset.workspace || state?.workspace || null;

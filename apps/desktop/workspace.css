@@ -1957,6 +1957,12 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fg-mk:focus-visible { outline: 2px solid var(--focus, var(--hair2)); outline-offset: 2px; }
 .fg-mk-i { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--tone2); }
 .fg-mk-i .ico { width: 14px; height: 14px; }
+/* Piece 1 of pass 274: the project's look, one quiet line under the make row. */
+.fg-look { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: -8px 0 18px; color: var(--t3); font-size: 12.5px; }
+.fg-look-t { color: var(--t2); }
+.fg-look-sw { display: inline-flex; gap: 3px; }
+.fg-look-sw i { width: 12px; height: 12px; border-radius: 4px; box-shadow: 0 0 0 1px var(--hair) inset; }
+.fg-look-from { opacity: .8; }
 .fg-chips { display: flex; gap: 4px; margin-bottom: 8px; }
 .fg-chip { all: unset; cursor: pointer; padding: 4px 11px; border-radius: 99px; color: var(--t3); font-size: 13px; }
 .fg-chip:hover { color: var(--t1); }

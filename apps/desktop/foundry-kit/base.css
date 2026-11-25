@@ -10,6 +10,11 @@
 @font-face{font-family:Inter;src:url(foundry://kit/fonts/inter-latin-600-normal.woff2) format("woff2");font-weight:600;font-display:swap}
 /* Everything below stops at <d-app>, the window a <d-demesne> draws: inside
    it the app's own styles apply (kit/app.css), not the kit's. */
+/* The kit sits in a layer of its own: a scoped rule beats an unscoped one of
+   the same weight (scope proximity comes before order), so without the layer
+   a page's own ":root{--accent:…}" or "h1{font-family:…}" lost to the kit.
+   In a layer, anything the page writes wins, whatever its weight. */
+@layer kit{
 @scope (:root) to (d-app){
 :scope{
   color-scheme:light dark;
@@ -107,4 +112,5 @@ label.inline{display:inline-flex;align-items:center;gap:var(--space-2);margin:0;
 .hidden{display:none!important}
 @media (max-width:640px){.grid.two,.grid.three{grid-template-columns:1fr}h1{font-size:var(--text-lg)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+}
 }

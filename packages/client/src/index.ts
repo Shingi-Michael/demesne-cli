@@ -251,6 +251,10 @@ export class DemesneClient {
   async foundryList(): Promise<import("@demesne/protocol").FoundryListResponse> {
     return this.request("/v1/foundry");
   }
+  /// Piece 1 of pass 274: a project's own look, read from its code (null when it names none).
+  async projectLook(workspace: string): Promise<{ look: import("@demesne/protocol").ProjectLook | null }> {
+    return this.request(`/v1/project-look?workspace=${encodeURIComponent(workspace)}`);
+  }
   /// Pass 273 A: the mockups whose name, description, asks or page words hold every word of the query.
   async foundrySearch(query: string): Promise<{ ids: string[] }> {
     return this.request(`/v1/foundry-search?q=${encodeURIComponent(query)}`);

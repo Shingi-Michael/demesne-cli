@@ -1360,8 +1360,25 @@ export interface FoundryWhy {
   from?: string;
   /// Which of the person's learned likes this version follows (pass 245 A), in a few words each.
   followed?: string;
+  /// Piece 1 of pass 274: how this version sits with the project's own look ("2 things fixed before you saw it").
+  onLook?: string;
   /// Pass 263 A: the walkthrough of each variant, shown under the mockup.
   walk?: import("./foundry-walk.ts").FoundryWalk[];
+}
+
+/// Piece 1 of pass 274: a project's own look, read from its code.
+export interface ProjectLookColor { name: string; value: string }
+export interface ProjectLook {
+  /// The files it was read from, relative to the project.
+  from: string[];
+  colors: ProjectLookColor[];
+  fonts: string[];
+  corners: string[];
+  /// Component names found in the project (the first of them), and how many there are in all.
+  components: string[];
+  componentCount: number;
+  /// The UI kit the project is built on, when one is known ("shadcn/ui", "MUI").
+  kit?: string;
 }
 
 export interface FoundryVersion {

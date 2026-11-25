@@ -308,6 +308,26 @@ On the Foundry page the why sits under the description as three quiet lines, one
 
 `foundry_save` and `foundry_edit` take it as `why: {direction, look_at, dropped}`. A save that makes a new page version without it is turned back with a hint. The model fixing its own page in the same ask (after a look or a try) keeps the why it already gave. A later ask is a new version, so it says what changed and why. `foundry_edit` with only `id` and `why` sets the why of the latest version without making a new one. Versions saved before this, and the ready kinds, have none. It is stored per version in the `why` column of `foundry_versions`.
 
+## Your project's look
+
+A mockup for a project should look like that project, not like Foundry. So Foundry reads the project's own look from its code and draws in it (piece 1 of pass 274). Nothing is set up and nothing is written: the look is read from the code each time, so it is never out of date.
+
+- **What is read** ([project-look.ts](../apps/daemon/src/project-look.ts)). Colours, fonts and corners from a Tailwind config (`tailwind.config.ts`) and from the custom properties of the project's stylesheets (`globals.css`, `tokens.css`, `theme.css` and the like, in the usual folders; shadcn's bare `173 77% 26%` triplets count). Component names from `components/` or `src/components/`. The kit the project is built on (shadcn/ui, MUI, Chakra and others) from `components.json` or `package.json`.
+- **Where you see it.** One quiet line under Make something new on the front page: the project's colours as small swatches, its fonts, its corners, how many components, and the files it was read from. There is nothing to press.
+- **How a mockup uses it.** The look rides in the design guide the model reads, after the rules: the colours by name, the fonts, the corners, the components. A page for the project sets `--accent`, `--ink` and `--paper` from them and uses the project's fonts.
+- **Checked before you see it.** At save, the page's colours and fonts are compared with the look (`offLook`). A colour whose hue is far from every hue of the palette, or a font the project doesn't use, goes back to the model once per ask with what to use instead ("nearest: primary #0f766e"). Greys, whites and blacks always pass. The version then carries a "Project look" why line: "Checked against tailwind.config.ts: 2 things fixed before you saw it", or "Drawn in the project's own look".
+- **A new look on purpose.** Ask for one ("try it in purple") and the second save goes through as it is; the line then reads "1 thing off the project's look, kept on purpose". A style you picked for the project (below) and your own design rules still win over the look.
+- **Sharing it.** A `DESIGN.md` at the project's root was already read as the project's design guide. Ask a chat to "write our look to DESIGN.md" and it writes the values there, in the plain format other design tools read.
+
+One fix came with this. The kit's styles are scoped (so they stop at a drawn Demesne window), and a scoped rule beats an unscoped one of the same weight. A page's own `:root { --accent: … }` or `h1 { font-family: … }` was therefore losing to the kit's defaults. The kit now sits in a cascade layer (`@layer kit`), so whatever a page writes wins.
+
+Read about it:
+- [Design tokens, the W3C community group format](https://www.designtokens.org/tr/drafts/format/): colours, type and radii as named values, which is what Foundry reads out of the code.
+- [Theme variables, Tailwind CSS docs](https://tailwindcss.com/docs/theme): where a Tailwind project names its colours, fonts and radii.
+- [Using CSS custom properties, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties): the `--name: value` lines read from stylesheets.
+- [Cascade layers, MDN](https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Styling_basics/Cascade_layers) and [@scope, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/@scope): why a scoped rule was beating the page's own, and how a layer fixes it.
+- [HSL and hue, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/hsl): the check compares hues, the angle on the colour wheel.
+
 ## Taste that carries over
 
 What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.

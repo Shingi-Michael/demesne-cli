@@ -14,6 +14,7 @@ import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FR
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
+import { loadProjectLook, nearest, offLook } from "./project-look.ts";
 import { called, rewriteCalled } from "./tool-search.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
@@ -528,6 +529,40 @@ function checkTaste(store: DemesneStore, kind: FoundryKind | undefined, id: stri
     + "Hint: make the page follow each one that applies, then save again with why.followed naming those in a few words each (\"none\" when none apply), and say in your answer which you followed");
 }
 
+/// Piece 1 of pass 274, your project's look: a page for a project whose code
+/// names its colours and type is checked against them before it is shown.
+/// What is off (a colour far from every hue of the palette, a font the project
+/// doesn't use) goes back to the model once per ask with what to use instead;
+/// the version then says how it sits with the look, on its "Project look" line.
+const lookOff = new Map<string, number>();
+const LOOK_KINDS: readonly FoundryKind[] = ["html", "svg", "react"];
+function withLook(store: DemesneStore, kind: FoundryKind | undefined, id: string | undefined, why: FoundryWhy | undefined, source: string, context: ToolContext): FoundryWhy | undefined {
+  if (!kind || !LOOK_KINDS.includes(kind) || REVIEW_PAGE.test(source) || STYLES_PAGE.test(source) || /<d-demesne\b/i.test(source)) return why;
+  const look = loadProjectLook(context.workspaceRoot);
+  if (!look) return why;
+  const problems = offLook(source, look);
+  const asked = context.turnId ? lookOff.get(context.turnId) : undefined;
+  const from = look.from.join(", ") || "its components";
+  if (problems.length && asked === undefined && context.turnId) {
+    lookOff.set(context.turnId, problems.length);
+    if (lookOff.size > 300) lookOff.delete(lookOff.keys().next().value!);
+    const lines = problems.map((problem) => {
+      if (problem.what === "font") return `- font ${problem.value} is not one of the project's (${look.fonts.join(", ")})`;
+      const near = nearest(problem.value, look);
+      return `- colour ${problem.value} is far from every colour of its palette${near ? ` (nearest: ${near.name} ${near.value})` : ""}`;
+    });
+    throw new Error(`[look] This page is off the project's own look, read from ${from}:\n${lines.join("\n")}\n`
+      + "Hint: draw it in the project's colours and fonts (the design guide lists them) and save again; if the ask is for a new look, save again as it is");
+  }
+  const things = (count: number) => `${count} ${count === 1 ? "thing" : "things"}`;
+  const onLook = problems.length ? `${things(problems.length)} off the project's look, kept on purpose`
+    : asked ? `Checked against ${from}: ${things(asked)} fixed before you saw it`
+    : `Drawn in the project's own look, read from ${from}`;
+  const before = id ? store.getFoundryArtifact(id) : null;
+  const base = why ?? before?.versions.find((item) => item.version === before.version)?.why ?? { direction: "", look: "", dropped: "" };
+  return { ...base, onLook };
+}
+
 /// A page of styles (pass 246 A): the answer names them, and the pick becomes the project's style.
 export const STYLES_ANSWER = "Name each style in your answer in a few words, and say which you would pick and why.";
 export const stylesKeep = (id: string) => `When they choose a style, keep it as the project's style: remember {design: true, style_of: "${id}", rule: "<style name>"}.`;
@@ -645,7 +680,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       if (!(said && REVIEW_PAGE.test(input.source))) checkWhy(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, context.turnId, said);
       if (!id) checkStart(store, kind, input.source, said, !!basedOn, context);
       if (!REVIEW_PAGE.test(input.source)) checkTaste(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, said, context);
-      const why = withWalk(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, said, input.source);
+      const why = withLook(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, withWalk(store, id ? store.getFoundryArtifact(id)?.kind : kind, id, said, input.source), input.source, context);
       checkCritique(id, context.turnId, undefined, "foundry_edit");
       const { stage: given, dropped } = stageWithPage(input);
       const stage = reviewStage(given, input.source);
@@ -762,7 +797,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       const said = whyFor(input.why, source);
       if (!(said && REVIEW_PAGE.test(source))) checkWhy(store, current.kind, input.id, context.turnId, said);
       if (!REVIEW_PAGE.test(source)) checkTaste(store, current.kind, input.id, said, context);
-      const why = withWalk(store, current.kind, input.id, said, source);
+      const why = withLook(store, current.kind, input.id, withWalk(store, current.kind, input.id, said, source), source, context);
       checkCritique(input.id, context.turnId, input.critique);
       const { stage: given, dropped } = stageWithPage(input);
       const stage = given?.surface ? reviewStage(given, source) : given;

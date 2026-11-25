@@ -10,6 +10,8 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { ProjectLook } from "@demesne/protocol";
+import { projectLookBlock } from "./project-look.ts";
 
 /// Where a project keeps its guide; the first that exists is read.
 export const DESIGN_GUIDE_FILES = [".demesne/design.md", "DESIGN.md"] as const;
@@ -101,7 +103,7 @@ export function loadDesignGuides(workspaceRoot: string | undefined, home = homed
 
 /// The guide as the model reads it: Demesne's numbered rules, then the
 /// person's own, which win.
-export function designGuideBlock(guides: readonly DesignGuide[], where = DESIGN_GUIDE_FILES[0] as string): string {
+export function designGuideBlock(guides: readonly DesignGuide[], where = DESIGN_GUIDE_FILES[0] as string, look: ProjectLook | null = null): string {
   const theirs = guides.map((guide) => `From ${guide.path}:\n${guide.content}${guide.truncated ? "\n[cut at 8 KB; keep the guide to rules]" : ""}`).join("\n\n");
   return "# Design guide\n\nEvery Foundry page you design (kind html or svg) follows these rules. Check your page against them by number before you answer, and fix what breaks one.\n"
     + DESIGN_RULES.map((rule, index) => `${index + 1}. ${rule}`).join("\n")
@@ -111,7 +113,9 @@ export function designGuideBlock(guides: readonly DesignGuide[], where = DESIGN_
       : "")
     + `\nWhen the person gives a lasting rule about how things should look ("never…", "always…", "I don't like…" said as a standing preference), keep it with the remember tool and design: true: it is added to ${where} and holds for every later mockup. A one-off ask about this page is not a rule.`
     + (guides.some((guide) => learnedRules(guide.content).length) ? `\n${LEARNED_HOW}` : "")
-    + (guides.some((guide) => pickedStyle(guide.content)) ? `\n${STYLE_HOW}` : "");
+    + (guides.some((guide) => pickedStyle(guide.content)) ? `\n${STYLE_HOW}` : "")
+    // Piece 1 of pass 274: the project's own look, read from its code. A style they picked wins over it.
+    + (look ? `\n\n${projectLookBlock(look)}` : "");
 }
 
 /// Pass 246 A, a range of styles: the style the person picked from a page of

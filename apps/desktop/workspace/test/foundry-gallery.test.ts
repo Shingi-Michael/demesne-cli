@@ -98,3 +98,18 @@ test("step 2: a row of kinds over the cards, each starting a new chat with its w
   expect(galleryPage(view())).toContain('class="fg-make"');
   expect(galleryPage(view({}, { list: [] }))).toContain('class="fg-make"');
 });
+
+test("piece 1 of pass 274: the project's look is one quiet line under the make row, with nothing to press", async () => {
+  const { lookLine } = await import("../foundry-gallery.ts");
+  const look = { from: ["tailwind.config.ts", "src/app/globals.css"], colors: [{ name: "primary", value: "#0f766e" }, { name: "paper", value: "#fbfaf7" }], fonts: ["Georgia", "Inter"], corners: ["10px"], components: ["Button"], componentCount: 14, kit: "shadcn/ui" };
+  const line = lookLine("/work/harbor-clinic", look);
+  expect(line).toContain("harbor-clinic’s look");
+  expect(line).toContain('<i style="background:#0f766e" title="primary #0f766e"></i>');
+  expect(line).toContain("<span>Georgia and Inter</span><span>10px corners</span><span>14 components</span><span>shadcn/ui</span>");
+  expect(line).toContain("read from tailwind.config.ts and src/app/globals.css");
+  expect(line).not.toContain("<button");
+  expect(lookLine("/work/harbor-clinic", null)).toBe("");
+  expect(lookLine(null, look)).toBe("");
+  expect(galleryPage({ ...view(), here: "/work/harbor-clinic", look })).toContain('class="fg-look"');
+  expect(galleryPage(view())).not.toContain('class="fg-look"');
+});

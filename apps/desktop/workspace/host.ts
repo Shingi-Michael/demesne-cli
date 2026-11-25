@@ -1577,6 +1577,7 @@ export class WorkspaceHost {
       "foundry-list",
       "foundry-shelf",
       "foundry-search",
+      "foundry-look",
       "foundry-get",
       // A real picture a review shows (pass 240 A), for the foundry: handler.
       "foundry-shot",
@@ -2264,6 +2265,7 @@ export class WorkspaceHost {
     // window and by the viewer frame (which has no session).
     if (method === "foundry-list") return (await this.client.foundryList()).artifacts;
     if (method === "foundry-shelf") return await this.client.foundryList();
+    if (method === "foundry-look") return typeof args.workspace === "string" && args.workspace ? (await this.client.projectLook(args.workspace.slice(0, 2000))).look : null;
     if (method === "foundry-search") return (await this.client.foundrySearch(string(args.query, "search", 200))).ids;
     // The chat's browser in the split (pass 248 D): its newest picture, your input while it is yours, handing it back.
     if (method === "browser-frame") {

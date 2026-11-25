@@ -273,7 +273,7 @@ export function foundryPage(view: FoundryView) {
     const taste = why?.followed && !/^none\b/i.test(why.followed) ? why.followed : "";
     // Pass 263 A: with a walkthrough under the mockup, only what it dropped and your taste stay up here.
     const walked = !!why?.walk?.length;
-    const reasons = why ? ([["Direction", walked ? "" : why.direction], ["Look at", walked ? "" : why.look], ["Dropped", why.dropped], ["Your taste", taste]] as const).filter(([, text]) => text) : [];
+    const reasons = why ? ([["Direction", walked ? "" : why.direction], ["Look at", walked ? "" : why.look], ["Dropped", why.dropped], ["Your taste", taste], ["Project look", why.onLook ?? ""]] as const).filter(([, text]) => text) : [];
     const because = reasons.length ? `<dl class="fd-why" aria-label="Why it looks this way">${reasons.map(([label, text]) => `<dt>${label}</dt><dd>${h(text)}</dd>`).join("")}</dl>` : "";
     const before = open?.compare && open.code === undefined && !open.editing ? earlierOf(versionsOf(shown, artifact.id), open.shown) : undefined;
     const beforeSlot = before === undefined ? undefined : shown.find((item) => item.artifactId === artifact.id && item.version === before);

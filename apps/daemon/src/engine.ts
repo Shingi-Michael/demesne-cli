@@ -28,6 +28,7 @@ import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
 import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { designGuideBlock, loadDesignGuides } from "./design-guide.ts";
+import { loadProjectLook } from "./project-look.ts";
 import { FOUNDRY_TOOL_NAMES } from "./foundry.ts";
 import { noteSeen } from "./foundry-seen.ts";
 import { WEB_TOOL_NAMES } from "./web.ts";
@@ -1269,7 +1270,7 @@ export class AgentEngine {
     }
     // A waiting Foundry tool brings the design guide with it: on a large
     // window the guide is in the instructions, here it is read when needed.
-    const toolGuide: ToolGuide = (definition) => definition.name === "foundry_save" ? designGuideBlock(loadDesignGuides(workspaceRoot, this.options.designHome)) : null;
+    const toolGuide: ToolGuide = (definition) => definition.name === "foundry_save" ? designGuideBlock(loadDesignGuides(workspaceRoot, this.options.designHome), undefined, loadProjectLook(workspaceRoot)) : null;
     if (call.name === TOOL_SEARCH) {
       this.store.startToolCall(toolCallId);
       const { found, result } = searchTools(this.turnDeferrable.get(turnId)?.deferrable ?? [], input, toolGuide);
@@ -1598,7 +1599,7 @@ export function agentSystemPrompt(options: { workspaceRoot?: string; plain?: boo
     options.memory ?? null,
     options.definitions.some((tool) => tool.name === "foundry_save") ? FOUNDRY_GUIDANCE : null,
     options.designing ?? options.definitions.some((tool) => tool.name === "foundry_save")
-      ? designGuideBlock(loadDesignGuides(options.workspaceRoot, options.home)) : null,
+      ? designGuideBlock(loadDesignGuides(options.workspaceRoot, options.home), undefined, loadProjectLook(options.workspaceRoot)) : null,
     options.definitions.some((tool) => tool.name === "capture_window")
       ? "Demesne is a native desktop app, not a website. To screenshot Demesne, use capture_window with application Demesne. If its window cannot be identified, ask the user to make it visible; do not scan web-server ports or substitute another app." : null]
     .filter((entry): entry is string => Boolean(entry)).join("\n");

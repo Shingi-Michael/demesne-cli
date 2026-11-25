@@ -1,11 +1,12 @@
 /// Settings, as a page in place of the conversation. The sidebar becomes its
-/// list (Back to chats, a search over every row, then the sections in four
-/// groups) and the page holds the chosen section: a title, one line on what
+/// list (Back to chats, a search over every row, then Overview and the
+/// sections in four groups) and the page holds the chosen section: a title, one line on what
 /// it holds, and groups of rows on a hairline ring. Each row is a title, one
 /// quiet line and its control on the right: a switch, words that unfold in
 /// place, a number you type, or a link. Nothing opens a menu.
 import { DEFAULT_DRIVE_LIMITS, PLAN_LIMIT_AMBER, PLAN_LIMIT_DRIVE_PAUSE, planWindows, type ModelScore, type NearbyAgent, type PlanLimits } from "@demesne/protocol";
 import type { ChatsPageChat } from "./chats-page.ts";
+import { HOME_SKIES, PIECES, type HomeSky } from "./milkyway.ts";
 
 const h = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -49,9 +50,9 @@ export interface SettingsInfo {
 
 export type SettingsSection = "overview" | "general" | "notifications" | "appearance" | "keys" | "archived" | "usage" | "permissions" | "drive" | "models" | "agents" | "providers" | "connectors" | "browser" | "heartbeat" | "data";
 const icon = (path: string) => `<svg viewBox="0 0 24 24" class="ico" aria-hidden="true">${path}</svg>`;
-/// Settings › the list (pass 154 B; Agents from pass 206 A): ten pages, each worth opening. The
-/// sections that held a row or two live inside another page now, and their
-/// ids still open it (SETTINGS_HOME), so links and search keep working.
+/// Settings › the list: Overview, then the pages in four groups. A section
+/// that lives inside another page (Heartbeat, on Connections) keeps its id,
+/// which still opens that page (SETTINGS_HOME), so links and search keep working.
 export const SETTINGS_GROUPS: [string, [SettingsSection, string, string][]][] = [
   ["", [
     ["overview", "Overview", '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'],
@@ -134,9 +135,8 @@ export function ruleGroups<T extends { rule: string }>(rules: readonly T[]): { h
   const groups = new Map<string, T[]>();
   for (const item of rules) {
     const at = item.rule.indexOf(":"), tool = at < 0 ? item.rule : item.rule.slice(0, at);
-    const files: Record<string, string> = { edit_file: "edits", write_file: "new files", delete_path: "deletes", move_path: "moves", apply_patch: "patches" };
     const head = tool === "run_command" ? (ruleWords(item.rule).what.trim().split(/\s+/)[0] || "commands")
-      : files[tool] ?? (tool.startsWith("mcp__") ? tool.split("__")[1] || "connectors" : tool.replace(/_/g, " "));
+      : FILE_GROUPS[tool] ?? (tool.startsWith("mcp__") ? tool.split("__")[1] || "connectors" : tool.replace(/_/g, " "));
     groups.set(head, [...(groups.get(head) ?? []), item]);
   }
   const sorted = [...groups].map(([head, items]) => ({ head, rules: items })).sort((a, b) => b.rules.length - a.rules.length || a.head.localeCompare(b.head));
@@ -147,6 +147,7 @@ export function ruleGroups<T extends { rule: string }>(rules: readonly T[]): { h
   return [...sorted.filter((group) => group.rules.length > 1), { head: "other", rules: singles.flatMap((group) => group.rules) }];
 }
 const SINGLES_SHOWN = 3;
+const FILE_GROUPS: Record<string, string> = { edit_file: "edits", write_file: "new files", delete_path: "deletes", move_path: "moves", apply_patch: "patches" };
 
 /// What a file rule lets it do (edit, delete), so two rules on one path read
 /// apart; empty for commands and connectors.
@@ -186,7 +187,7 @@ export interface SettingsView {
   fold: string;
   general: { openOn: "home" | "last"; awake: boolean; updates?: { on: boolean; line: string; check: { title: string; line: string; tone: "" | "bad"; can: boolean } } };
   notify: Record<NotifyKind, boolean>;
-  appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; activityBorder: boolean; systemSource?: {enabled:boolean;path:string;error?:string} | null };
+  appearance: { theme: string; themes: SettingsTheme[]; canUndo: boolean; zoom: number | null; glass: number; ink: Ink; homeSky: HomeSky; activityBorder: boolean; systemSource?: {enabled:boolean;path:string;error?:string} | null };
   archived: ChatsPageChat[] | null;
   usage: ModelScore[] | null;
   modelWords: (model: { id: string; displayName?: string }) => string;
@@ -200,7 +201,7 @@ export interface SettingsView {
   online: boolean;
   /// What each plan has left, for the model's provider first.
   plans: PlanLimits[];
-  /// Settings › Browser: sign-ins from your other browsers, for the project open now (pass 261 A).
+  /// Settings › Browser: sign-ins from your other browsers, for the project open now.
   browser: BrowserSigninsView;
 }
 
@@ -271,7 +272,7 @@ const number = (key: string, value: number, unit: string, label: string, fallbac
   (fallback === undefined ? "" : `<span class="st-default">${value === fallback ? "default" : `default ${h(fallback.toLocaleString("en-US"))}${btn("settings-config", "Reset", { key, value: null }, "st-reset")}`}</span>`) +
   `<span class="st-stepper">${stepButton(key, value, -1, label)}<label class="st-num"><input type="text" inputmode="numeric" data-key="${h(key)}" data-value="${value}" value="${h(value.toLocaleString("en-US"))}" aria-label="${h(label)}" autocomplete="off" spellcheck="false">${unit ? `<span>${h(unit)}</span>` : ""}</label>${stepButton(key, value, 1, label)}</span>`;
 /// How far − and + move a number: a step that suits its size.
-export const stepOf = (value: number) => value >= 1_000_000 ? 100_000 : value >= 10_000 ? 1_000 : value >= 1_000 ? 100 : value >= 100 ? 10 : 1;
+const stepOf = (value: number) => value >= 1_000_000 ? 100_000 : value >= 10_000 ? 1_000 : value >= 1_000 ? 100 : value >= 100 ? 10 : 1;
 function stepButton(key: string, value: number, way: 1 | -1, label: string) {
   const max = SETTINGS_KEYS[key]?.max ?? Infinity, next = Math.min(max, Math.max(1, value + way * stepOf(way < 0 && value > 1 ? value - 1 : value)));
   const off = next === value;
@@ -298,7 +299,7 @@ function shortcuts(mac: boolean): Group[] {
 const listWords = (items: string[]) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 const folderName = (root: string) => root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
 
-/// Settings › Agents (pass 206 A): one switch for every agent, then each
+/// Settings › Agents: one switch for every agent, then each
 /// agent everywhere, in some projects (ticked under it), or off.
 function agentsPage(view: SettingsView): Page {
   const choice = view.info?.agents;
@@ -398,7 +399,7 @@ function pages(view: SettingsView): Page[] {
     }) : [{ title: "Nothing yet", line: "Turns show here once a model has answered" }] },
     { name: "Drive runs", rows: [{ title: "Runs", line: runs ? `${landed} applied or opened as a PR` : "None in the last 30 days", control: `<span class="st-count">${runs}</span>`, keywords: "drive runs branches" }] },
   ] });
-  const rules = info?.allow ?? [], mode = view.permissions.mode;
+  const rules = info?.allow ?? [];
   out.push({ id: "permissions", title: "Permissions", sub: "What it may do without asking, and where.", html: permissionsTop(view), groups: [
     { name: "Mode", hidden: true, rows: [{ title: "Mode", line: "Ask, Accept edits, Plan or Auto for this chat", keywords: "mode ask accept edits plan auto approvals" }] },
     { name: "It no longer asks about", hidden: true, rows: rules.map(({ rule }) => ({ title: `\`${ruleWords(rule).what}\``, line: ruleWords(rule).how, keywords: "allow rule always learned approvals" })) },
@@ -439,12 +440,12 @@ function pages(view: SettingsView): Page[] {
       control: link("anthropic-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("provider-signout", "Remove saved key", { key: item.key }, " quiet") : ""),
       fold: view.fold === `anthropic:${item.key}` ? `<div data-anthropic-provider="${h(item.key)}"></div>` : "", keywords: "anthropic claude api key connect" };
     if (item.kind === "google") return { title: item.label, line: `${item.active ? "In use. " : ""}${item.detail}`,
-          control: link("google-ai-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("google-ai-disconnect", "Remove saved key", { key: item.key }, " quiet") : ""),
-          fold: view.fold === `google:${item.key}` ? `<div data-google-provider="${h(item.key)}"></div>` : "", keywords: "google gemini ai studio api key test connect" };
-        const signing = view.providers.signingIn === item.key;
-        const action = signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "";
-        // Codex, ChatGPT and OpenRouter sign in through the browser: \"api key\" finds only providers that take one.
-        return { title: item.label, line: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`, control: action ? link(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }, item.status === "signed-in" || signing ? "" : " key") : "", keywords: `sign in account local provider${item.kind === "api-key" ? " api key" : ""}` };
+      control: link("google-ai-open", item.status === "signed-in" ? "Manage" : "Add key", { key: item.key }) + (item.status === "signed-in" ? link("google-ai-disconnect", "Remove saved key", { key: item.key }, " quiet") : ""),
+      fold: view.fold === `google:${item.key}` ? `<div data-google-provider="${h(item.key)}"></div>` : "", keywords: "google gemini ai studio api key test connect" };
+    const signing = view.providers.signingIn === item.key;
+    const action = signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "";
+    // Codex, ChatGPT and OpenRouter sign in through the browser: "api key" finds only providers that take one.
+    return { title: item.label, line: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`, control: action ? link(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }, item.status === "signed-in" || signing ? "" : " key") : "", keywords: `sign in account local provider${item.kind === "api-key" ? " api key" : ""}` };
   };
   // Accounts sorts itself: what works first, then what you could add.
   const signedIn = view.providers.items.filter((item) => item.status === "signed-in"), notYet = view.providers.items.filter((item) => item.status !== "signed-in");
@@ -492,7 +493,7 @@ function pages(view: SettingsView): Page[] {
   return merged(sorted(out, view));
 }
 
-/// Settings › Browser (pass 261 A): the sites you're signed in to in another browser, ticked to bring
+/// Settings › Browser: the sites you're signed in to in another browser, ticked to bring
 /// into this project's browser, and what it already has. Email and money sites show, greyed, and can't be ticked.
 function browserPage(view: SettingsView): Page {
   const b = view.browser, data = b.data, sub = "Bring the sign-ins you need in from your other browsers, so the model doesn't have to sign in. Only the sites you pick come in.";
@@ -526,7 +527,7 @@ function browserPage(view: SettingsView): Page {
   return { id: "browser", title: "Browser", sub, groups };
 }
 
-/// Pass 207: each row on the page it's about. Side work joins Agents, your
+/// Each row on the page it's about. Side work joins Agents, your
 /// chats join the archived ones on Chats, Appearance's rows split into the
 /// window and the System palette, and Notifications and Data get a picture.
 function sorted(out: Page[], view: SettingsView): Page[] {
@@ -559,7 +560,6 @@ function sorted(out: Page[], view: SettingsView): Page[] {
   }
   return out;
 }
-
 
 /// Data and daemon: whether the daemon runs, at the top, with its restart.
 function daemonCard(view: SettingsView): string {
@@ -632,7 +632,8 @@ function summary(view: SettingsView, id: SettingsSection): string {
   }
 }
 
-/// Pass 154 B: the small pages join a bigger one, in the list's order.
+/// A section kept inside another page joins it (SETTINGS_HOME); then the
+/// pages take the list's order and their final titles.
 const RENAME: Partial<Record<SettingsSection, { title: string; sub: string }>> = {
   models: { title: "Models", sub: "Which model answers, and how far one turn may go." },
   providers: { title: "Accounts", sub: "Where models come from: sign-ins, API keys and model servers on this computer." },
@@ -640,12 +641,11 @@ const RENAME: Partial<Record<SettingsSection, { title: string; sub: string }>> =
   archived: { title: "Chats", sub: "Every conversation on this computer, and the ones you put away." },
   data: { title: "Data and daemon", sub: "The background program that runs your chats, and where Demesne keeps things." },
 };
-const GROUP_NAMES: Record<string, string> = { "Tell me when": "Notifications", "Archived": "Archived chats" };
 function merged(out: Page[]): Page[] {
   for (const [from, to] of Object.entries(SETTINGS_HOME) as [SettingsSection, SettingsSection][]) {
     const source = out.find((page) => page.id === from), target = out.find((page) => page.id === to);
     if (!source || !target) continue;
-    target.groups.push(...source.groups.map((group) => ({ ...group, name: GROUP_NAMES[group.name] ?? group.name, right: group.name === "Tell me when" && !group.right ? "while the app is out of focus" : group.right, hint: group.name === "Tell me when" ? source.sub : group.hint })));
+    target.groups.push(...source.groups);
     if (source.html) target.html = (target.html ?? "") + source.html;
     if (source.note && source.note !== target.note) target.note = target.note ? `${target.note} ${source.note}` : source.note;
   }
@@ -737,17 +737,23 @@ function appearanceTop(view: SettingsView, themeLabel: string, groups: [string, 
   };
   const make = `<button type="button" class="ap-card make" data-action="settings-command" data-args='{"text":"/themefy "}'><span class="ap-art plain">+</span><span class="ap-name">Make one…</span></button>`;
   const all = groups.flatMap(([, items]) => items);
-  return preview + `<div class="st-head"><span>Theme</span>${view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }, " quiet") : ""}</div><div class="ap-cards">${all.map(card).join("")}${make}</div>`;
+  // Home's sky (pass 276): what flies over Home, each choice drawn as itself.
+  const sky = HOME_SKIES.map(([id, label]) => {
+    const on = view.appearance.homeSky === id, picture = id === "none" ? "" : `<img src="${PIECES[id]}" alt="" decoding="async" loading="lazy" draggable="false">`;
+    return `<button type="button" class="ap-card${on ? " on" : ""}" aria-pressed="${on}" data-action="settings-local" data-args="${h(JSON.stringify({ key: "homeSky", value: id }))}"><span class="ap-art">${picture}</span><span class="ap-name">${h(label)}</span></button>`;
+  }).join("");
+  return preview + `<div class="st-head"><span>Theme</span>${view.appearance.canUndo ? link("settings-set", "Undo", { method: "theme-undo", args: {} }, " quiet") : ""}</div><div class="ap-cards">${all.map(card).join("")}${make}</div>`
+    + `<div class="st-head"><span>Home’s sky</span><span>What flies over Home</span></div><div class="ap-cards sky-cards" role="group" aria-label="Home’s sky">${sky}</div>`;
 }
 
 const SERIES = ["var(--acc)", "var(--blossom, #f2b6c8)", "var(--ok, #6cc68e)", "var(--t4)"];
 /// Usage: each plan's windows, then turns a day stacked by model.
-function usageTop(view: SettingsView, scores: ModelScore[], withPlans = true): string {
-  const plans = withPlans ? view.plans.filter((plan) => planWindows(plan).length) : [];
+function usageTop(view: SettingsView, scores: ModelScore[]): string {
+  const plans = view.plans.filter((plan) => planWindows(plan).length);
   const planCards = plans.length ? `<div class="us-plans">${plans.map((plan) => `<div class="us-plan"><div class="ov-top"><span>${h(planTitle(plan))}</span>${plan.provider.toLowerCase() === "chatgpt" ? link("open-link", "Manage ↗", { url: "https://chatgpt.com/settings/usage" }, " quiet") : ""}</div><div class="ov-rings">${planWindows(plan).map(({ name, window }) => `<div>${ring(window.usedPercent, 34)}<span><b>${pct(window.usedPercent)} of ${h(windowWords(name))}</b><small>${h(resetAt(window.resetsAt) || "no reset reported")}</small></span></div>`).join("")}</div></div>`).join("")}</div>` : "";
   const counted = scores.filter((score) => score.daily?.length);
   if (!counted.length) return planCards;
-  const series = [...counted.slice(0, 3).map((score, i) => ({ name: view.modelWords({ id: score.model }), daily: score.daily!, color: SERIES[i]! }))];
+  const series = counted.slice(0, 3).map((score, i) => ({ name: view.modelWords({ id: score.model }), daily: score.daily!, color: SERIES[i]! }));
   if (counted.length > 3) series.push({ name: "Other models", daily: dailyTotal(counted.slice(3)), color: SERIES[3]! });
   const days = series[0]!.daily.length, totals = Array.from({ length: days }, (_, i) => series.reduce((sum, item) => sum + (item.daily[i] ?? 0), 0));
   const top = Math.max(1, ...totals), all = totals.reduce((a, b) => a + b, 0);

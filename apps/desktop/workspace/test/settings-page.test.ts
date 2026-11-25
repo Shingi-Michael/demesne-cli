@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { DEFAULT_AGENT_LIMITS } from "@demesne/config";
 import { AGENT_DEFAULTS, ruleGroups, glassAlphas, GLASS_DEFAULT, homeWords, notifyKinds, parseNumber, ruleWords, settingsNav, settingsPage, settingsSearch, shortNumber, SETTINGS_ORDER, type SettingsInfo, type SettingsView } from "../settings-page.ts";
+import { HOME_SKIES, PIECES } from "../milkyway.ts";
 
 const info: SettingsInfo = {
   home: "/Users/mike",
@@ -22,7 +23,7 @@ const view = (patch: Partial<SettingsView> = {}): SettingsView => ({
   browser: { project: "slowpour", root: "/Users/mike/projects/slowpour", data: null, picked: [], busy: "", said: "" },
   general: { openOn: "home", awake: true },
   notify: { wait: true, error: true, drive: true, done: false, social: true },
-  appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral", activityBorder: true },
+  appearance: { theme: "demesne", themes: [{ name: "demesne", label: "Demesne" }, { name: "demesne-light", label: "Demesne Light" }], canUndo: false, zoom: 1, glass: 25, ink: "neutral", homeSky: "flagship", activityBorder: true },
   archived: [], usage: [], modelWords: (model) => model.id,
   permissions: { mode: "ask", asks: { thisWeek: 12, lastWeek: 31 } },
   drive: { project: "demesne-cli", auto: { on: true, quietMinutes: 20, perDay: 3, usedToday: 1 } },
@@ -81,7 +82,7 @@ test("numbers are typed as you would say them", () => {
   expect(homeWords("/Users/mike/projects/x", "/Users/mike")).toBe("~/projects/x");
 });
 
-test("every section draws, in four categories with Overview first (pass 207)", () => {
+test("every section draws, in four categories with Overview first", () => {
   expect(SETTINGS_ORDER).toEqual(["overview", "general", "notifications", "appearance", "keys", "models", "providers", "agents", "permissions", "drive", "connectors", "browser", "usage", "archived", "data"]);
   for (const section of SETTINGS_ORDER) expect(settingsPage(view({ section }))).toContain('class="cp-title"');
   expect(settingsPage(view({ section: "providers" }))).toContain('<h1 class="cp-title">Accounts</h1>');
@@ -238,6 +239,21 @@ test("Glass shows where the window is glass (the Mac, Hyprland), Ink only for De
   expect(settingsPage(view({ section: "appearance", appearance: { ...view().appearance, theme: "custom-sunset" } }))).not.toContain("st-inks");
 });
 
+test("Home's sky offers every piece as a picture, marks the chosen one, and saves the next on this computer (pass 276)", () => {
+  const page = settingsPage(view({ section: "appearance", appearance: { ...view().appearance, homeSky: "station" } }));
+  const row = page.match(/<div class="ap-cards sky-cards"[^]*?<\/div>/)?.[0] ?? "";
+  expect(page).toContain("Home’s sky");
+  for (const [id, label] of HOME_SKIES) {
+    expect(row).toContain(`&quot;key&quot;:&quot;homeSky&quot;,&quot;value&quot;:&quot;${id}&quot;`);
+    expect(row).toContain(`>${label}</span>`);
+  }
+  // each piece is drawn as itself; the plain sky has no picture
+  for (const path of Object.values(PIECES)) expect(row).toContain(`src="${path}"`);
+  expect(row.match(/<img /g)).toHaveLength(5);
+  expect(row.match(/class="ap-card on"[^>]*/g)).toEqual([expect.stringContaining("&quot;station&quot;")]);
+  expect(row.match(/aria-pressed="true"/g)).toHaveLength(1);
+});
+
 test("Activity border switch reflects its local preference and toggles the next value", () => {
   for (const activityBorder of [true, false]) {
     const html = settingsPage(view({ section: "appearance", appearance: { ...view().appearance, activityBorder } }));
@@ -313,7 +329,7 @@ test("Agents › Side work has How often for subagents, Usual unless set", () =>
   expect(more).toMatch(/class="on" aria-pressed="true" data-action="subagent-often" data-args="[^"]*more/);
 });
 
-test("Settings › Agents: one switch, then each agent everywhere, some projects or off (pass 206 A)", () => {
+test("Settings › Agents: one switch, then each agent everywhere, some projects or off", () => {
   const agents = { off: false, agents: [
     { id: "claude", name: "Claude Code", mode: "every" as const, projects: [] },
     { id: "codex", name: "Codex", mode: "some" as const, projects: ["/Users/mike/projects/demesne-cli"] },

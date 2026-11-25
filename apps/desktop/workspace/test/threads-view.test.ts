@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { DriveFix } from "@demesne/protocol";
-import { light, liveThreads, threadBriefHTML, threadDoing, threadLine, threadReportHTML, threadsBar, threadsBegunHTML, threadsMessageHTML, threadsNews, threadsRibbonHTML, threadState, type ThreadState, type ThreadsLook, type ThreadsView } from "../threads-view.ts";
+import { light, liveThreads, threadBriefHTML, threadDoing, threadLine, threadReportHTML, threadsBar, threadsBegunHTML, threadsMessageHTML, threadsNews, threadsRibbonHTML, threadSideFix, threadSideHeadHTML, threadState, type ThreadState, type ThreadsLook, type ThreadsView } from "../threads-view.ts";
 
 const fix = (id: string, more: Partial<DriveFix> = {}): DriveFix => ({ id, workspace: "/p", title: `Thread ${id}`, signals: [], branch: `thread/${id}`, path: `/w/${id}`, base: "abc",
   sessionId: `s-${id}`, turnId: `t-${id}`, status: "running", startedAt: new Date().toISOString(), finishedAt: null, from: "orch", thread: { brief: "Do it.", files: [`${id}.ts`] }, ...more });
@@ -246,4 +246,26 @@ test("pass 272 A: the ribbon laps once when a known thread finishes, asks or sto
   expect(threadsNews(seen, [fix("c", { status: "failed" })])).toBe(true);
   // Merged leaves quietly.
   expect(threadsNews(seen, [fix("a", { status: "applied" })])).toBe(false);
+});
+
+test("the open thread sits beside the chat that started it, and only there (pass 279 A)", () => {
+  const list = [fix("a"), ready("b"), fix("c", { status: "starting", thread: { brief: "x", files: [], proposed: true }, sessionId: undefined })];
+  const here = { mine: true, browser: false };
+  expect(threadSideFix(view(list, { open: "a" }), here)?.id).toBe("a");
+  expect(threadSideFix(view(list, { open: "b" }), here)?.id).toBe("b");
+  // Nothing open, another chat, the browser up, or a thread with no chat yet: no side.
+  expect(threadSideFix(view(list), here)).toBeNull();
+  expect(threadSideFix(view(list, { open: "a" }), { mine: false, browser: false })).toBeNull();
+  expect(threadSideFix(view(list, { open: "a" }), { mine: true, browser: true })).toBeNull();
+  expect(threadSideFix(view(list, { open: "c" }), here)).toBeNull();
+  expect(threadSideFix(view([fix("d", { status: "applied" })], { open: "d" }), here)).toBeNull();
+});
+
+test("the side's head names the thread, says what it's on, and opens it as a tab", () => {
+  const head = threadSideHeadHTML(fix("a", { title: "Add <French>", activity: { steps: 2, last: "read_file hello.ts" } }));
+  expect(head).toContain('<b class="ts-name">Add &lt;French&gt;</b>');
+  expect(head).toContain("thread/a · Reading hello.ts");
+  expect(head).toContain('data-action="select-session" data-args="{&quot;id&quot;:&quot;s-a&quot;}">Open as a tab');
+  expect(head).toContain('data-action="thread-close"');
+  expect(head).toContain("th-light work");
 });

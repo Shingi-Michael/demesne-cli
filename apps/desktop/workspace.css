@@ -533,41 +533,41 @@ html[data-theme="demesne-light"] .sidebar-session-age { color: #686c73; }
 /* Composer: one quiet box holding what you type, with a faint send mark in
    its right corner; the mention, approval, model and context controls sit
    under it as plain words, not chips. */
-.desktop #composer { position: static; display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
-.desktop #composer:focus-within { box-shadow: none; }
-.desktop #composer .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 11px 50px 11px 16px; border: 1px solid var(--line2); border-radius: 12px; background: var(--surface); box-shadow: 0 5px 24px #00000012; }
-.desktop #composer .composer-box:focus-within { border-color: color-mix(in srgb, var(--acc) 50%, var(--line2)); }
-.desktop #composer.queued .composer-box { border-color: var(--composerQueuedBorder); }
-.desktop #composer.restored .composer-box { border-color: var(--composerRestoredBorder); }
-.desktop #composer.stop-armed .composer-box { border-color: var(--composerStoppedBorder); }
-.desktop #composer textarea { min-height: 22px; padding-right: 0; font-size: 14px; line-height: 22px; }
-.desktop .live-app.start #composer textarea { min-height: 44px; }
-.desktop #composer .send { position: absolute; right: 9px; bottom: 7px; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: transparent; color: var(--t4); box-shadow: none; }
-.desktop #composer .send:hover:not(:disabled) { background: var(--surface2); color: var(--t1); }
-.desktop #composer.has-draft .send { background: var(--dusk); color: var(--on-dusk); }
-.desktop #composer.has-draft .send:hover:not(:disabled) { background: var(--dusk); color: var(--on-dusk); filter: brightness(1.06); }
-.desktop #composer .send .ico { width: 17px; height: 17px; stroke-width: 2; }
-.desktop #composer .send > kbd, .desktop #composer .send #send-label, .desktop #composer .send #tokens, .desktop #composer .send .send-stop { display: none; }
-.desktop #composer .send .send-arrow { display: block; }
-.desktop #composer.stopping .send { color: var(--t2); }
-.desktop #composer.stopping .send .send-arrow { display: none; }
-.desktop #composer.stopping .send .send-stop { display: block; width: 14px; height: 14px; fill: currentColor; stroke: none; }
-.desktop #composer .composer-bar { position: static; display: flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 0 10px; }
-.desktop #composer .composer-bar .sp { flex: 1; }
-.desktop #composer .composer-bar .cb, .desktop #composer .composer-bar .cb-box { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; color: var(--t3); }
-.desktop #composer .composer-bar .cb:hover { background: var(--surface2); color: var(--t1); }
-.desktop #composer .composer-bar .cb .ico { width: 15px; height: 15px; }
-.desktop #composer .composer-effort { margin-left: 4px; color: var(--t4); }
-.desktop #composer .composer-bar .hints { margin-left: 6px; }
-.desktop .live-app:not(.start) #composer .composer-bar .hints { display: none; }
+.desktop :is(#composer, #ts-composer) { position: static; display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.desktop :is(#composer, #ts-composer):focus-within { box-shadow: none; }
+.desktop :is(#composer, #ts-composer) .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 11px 50px 11px 16px; border: 1px solid var(--line2); border-radius: 12px; background: var(--surface); box-shadow: 0 5px 24px #00000012; }
+.desktop :is(#composer, #ts-composer) .composer-box:focus-within { border-color: color-mix(in srgb, var(--acc) 50%, var(--line2)); }
+.desktop :is(#composer, #ts-composer).queued .composer-box { border-color: var(--composerQueuedBorder); }
+.desktop :is(#composer, #ts-composer).restored .composer-box { border-color: var(--composerRestoredBorder); }
+.desktop :is(#composer, #ts-composer).stop-armed .composer-box { border-color: var(--composerStoppedBorder); }
+.desktop :is(#composer, #ts-composer) textarea { min-height: 22px; padding-right: 0; font-size: 14px; line-height: 22px; }
+.desktop .live-app.start :is(#composer, #ts-composer) textarea { min-height: 44px; }
+.desktop :is(#composer, #ts-composer) .send { position: absolute; right: 9px; bottom: 7px; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0; border-radius: 8px; background: transparent; color: var(--t4); box-shadow: none; }
+.desktop :is(#composer, #ts-composer) .send:hover:not(:disabled) { background: var(--surface2); color: var(--t1); }
+.desktop :is(#composer, #ts-composer).has-draft .send { background: var(--dusk); color: var(--on-dusk); }
+.desktop :is(#composer, #ts-composer).has-draft .send:hover:not(:disabled) { background: var(--dusk); color: var(--on-dusk); filter: brightness(1.06); }
+.desktop :is(#composer, #ts-composer) .send .ico { width: 17px; height: 17px; stroke-width: 2; }
+.desktop :is(#composer, #ts-composer) .send > kbd, .desktop :is(#composer, #ts-composer) .send #send-label, .desktop :is(#composer, #ts-composer) .send #tokens, .desktop :is(#composer, #ts-composer) .send .send-stop { display: none; }
+.desktop :is(#composer, #ts-composer) .send .send-arrow { display: block; }
+.desktop :is(#composer, #ts-composer).stopping .send { color: var(--t2); }
+.desktop :is(#composer, #ts-composer).stopping .send .send-arrow { display: none; }
+.desktop :is(#composer, #ts-composer).stopping .send .send-stop { display: block; width: 14px; height: 14px; fill: currentColor; stroke: none; }
+.desktop :is(#composer, #ts-composer) .composer-bar { position: static; display: flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 0 10px; }
+.desktop :is(#composer, #ts-composer) .composer-bar .sp { flex: 1; }
+.desktop :is(#composer, #ts-composer) .composer-bar .cb, .desktop :is(#composer, #ts-composer) .composer-bar .cb-box { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; color: var(--t3); }
+.desktop :is(#composer, #ts-composer) .composer-bar .cb:hover { background: var(--surface2); color: var(--t1); }
+.desktop :is(#composer, #ts-composer) .composer-bar .cb .ico { width: 15px; height: 15px; }
+.desktop :is(#composer, #ts-composer) .composer-effort { margin-left: 4px; color: var(--t4); }
+.desktop :is(#composer, #ts-composer) .composer-bar .hints { margin-left: 6px; }
+.desktop .live-app:not(.start) :is(#composer, #ts-composer) .composer-bar .hints { display: none; }
 
 /* Branch chip with changes: a button that asks for a commit and a PR. */
 /* The context ring's breakdown, unfolded above it. */
-.desktop #composer .composer-bar #composer-context { cursor: pointer; }
-.desktop #composer .composer-bar #composer-context { gap: 0; font-variant-numeric: tabular-nums; }
-.desktop #composer .composer-bar #composer-context:is(:hover, .on) { background: var(--tone2); color: var(--t1); }
-.desktop #composer .composer-bar #composer-context .cw-dot { color: var(--t4); white-space: pre; }
-.desktop #composer .composer-bar #composer-context .cw-plan.warn { color: var(--warn); }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-context { cursor: pointer; }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-context { gap: 0; font-variant-numeric: tabular-nums; }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-context:is(:hover, .on) { background: var(--tone2); color: var(--t1); }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-context .cw-dot { color: var(--t4); white-space: pre; }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-context .cw-plan.warn { color: var(--warn); }
 .desktop #context-card { position: absolute; right: 6px; bottom: calc(100% + 6px); z-index: 20; width: 248px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12.5px; color: var(--t2); }
 .desktop :is(#context-card, #cards .ctx-card) .context-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--t4); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
 .desktop :is(#context-card, #cards .ctx-card) .context-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line2); margin-bottom: 10px; }
@@ -607,13 +607,13 @@ body.desktop kbd { border: 0; border-radius: var(--r-sm); background: var(--tone
 .desktop .approval-row button { border-radius: var(--r-sm); }
 .desktop .approval-row button kbd { background: transparent; }
 /* Composer: a tone with a hairline ring, a soft ring when focused. */
-.desktop #composer .composer-box { border: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
-.desktop #composer .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair)), var(--shadow-2); }
-.desktop #composer.queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder), var(--shadow-2); }
-.desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder), var(--shadow-2); }
-.desktop #composer.stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder), var(--shadow-2); }
-.desktop #composer .send, .desktop #composer .composer-bar .cb, .desktop #composer .composer-bar .cb-box { border-radius: var(--r-sm); }
-.desktop #composer .composer-bar .cb-box { border: 0; }
+.desktop :is(#composer, #ts-composer) .composer-box { border: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 0 0 1px var(--hair), var(--shadow-2); }
+.desktop :is(#composer, #ts-composer) .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair)), var(--shadow-2); }
+.desktop :is(#composer, #ts-composer).queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder), var(--shadow-2); }
+.desktop :is(#composer, #ts-composer).restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder), var(--shadow-2); }
+.desktop :is(#composer, #ts-composer).stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder), var(--shadow-2); }
+.desktop :is(#composer, #ts-composer) .send, .desktop :is(#composer, #ts-composer) .composer-bar .cb, .desktop :is(#composer, #ts-composer) .composer-bar .cb-box { border-radius: var(--r-sm); }
+.desktop :is(#composer, #ts-composer) .composer-bar .cb-box { border: 0; }
 .desktop #context-card { border: 0; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--hair), var(--shadow-3); }
 .desktop :is(#context-card, #cards .ctx-card) .context-bar { background: var(--tone2); }
 /* Sheets, popovers and menus: no outline, a hairline ring and one shadow. */
@@ -639,11 +639,11 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
   .desktop #hero { animation: desktop-fade 260ms var(--ease); }
   #desktop-shell { transition: grid-template-columns 200ms var(--ease); }
   .desktop button, .sidebar-session, .sidebar-nav button, .sidebar-settings, .menu-row, .tool-row, .desktop .composer-bar .cb, .desktop .settings-segments button, .desktop .settings-toggle, .st-nav, .st-link, .st-word, .st-choice { transition: background-color 140ms var(--ease), color 140ms var(--ease), box-shadow 140ms var(--ease), opacity 140ms var(--ease); }
-  .desktop #composer .composer-box, .sidebar-search, .desktop .filter-wrap input { transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
+  .desktop :is(#composer, #ts-composer) .composer-box, .sidebar-search, .desktop .filter-wrap input { transition: box-shadow 160ms var(--ease), background-color 160ms var(--ease); }
   .desktop .settings-toggle i { transition: left 160ms var(--ease), background-color 160ms var(--ease); }
   .desktop .ring { transition: --usage 300ms var(--ease); }
-  .desktop #composer .send { transition: color 140ms var(--ease), background-color 140ms var(--ease), transform 140ms var(--ease); }
-  .desktop #composer.has-draft .send:hover:not(:disabled) { transform: translateX(1px); }
+  .desktop :is(#composer, #ts-composer) .send { transition: color 140ms var(--ease), background-color 140ms var(--ease), transform 140ms var(--ease); }
+  .desktop :is(#composer, #ts-composer).has-draft .send:hover:not(:disabled) { transform: translateX(1px); }
 }
 /* Review in the turn: "N files changed" unfolds the turn's diffs under the
    answer. Click a line to leave a note; notes ride with the next message. */
@@ -679,11 +679,11 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 /* A part of a Foundry page: the theme's mark, the colour Foundry marks what you point at and what changed. */
 .desktop #mention-chips .point-chip.foundry { color: var(--blossom, #d5dbf0); background: color-mix(in srgb, var(--blossom, #d5dbf0) 14%, transparent); }
 /* Composer mode: one word under the box, coloured by mode; ⇧⇥ steps it. */
-.desktop #composer .composer-bar #composer-mode kbd { font: 11px Inter, system-ui, sans-serif; color: var(--t4); background: none; border: 0; padding: 0; margin-left: 2px; }
-.desktop #composer .composer-bar #composer-mode.mode-edits { color: var(--ok); }
-.desktop #composer .composer-bar #composer-mode.mode-plan { color: var(--acc); }
-.desktop #composer .composer-bar #composer-mode.mode-auto { color: var(--warn); }
-.desktop #composer .composer-bar #composer-mode.mode-orchestrate { color: var(--electric, var(--acc)); }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-mode kbd { font: 11px Inter, system-ui, sans-serif; color: var(--t4); background: none; border: 0; padding: 0; margin-left: 2px; }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-mode.mode-edits { color: var(--ok); }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-mode.mode-plan { color: var(--acc); }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-mode.mode-auto { color: var(--warn); }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-mode.mode-orchestrate { color: var(--electric, var(--acc)); }
 /* ⇧⇥ opens the word into all four modes in place, the current one lit. */
 .desktop #composer-mode .mode-list { display: inline-flex; align-items: center; }
 .desktop #composer-mode .mode-opt { display: inline-block; max-width: 0; padding: 0; overflow: hidden; white-space: nowrap; opacity: 0; border-radius: var(--r-sm); color: var(--t4); }
@@ -691,9 +691,9 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .desktop #composer-mode.open .mode-opt { max-width: 120px; opacity: 1; padding: 0 6px; }
 .desktop #composer-mode.open .mode-opt.on { background: var(--tone2); }
 .desktop #composer-mode.open .mode-opt.mode-ask.on { color: var(--t1); }
-.desktop #composer.mode-plan .composer-box { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 38%, transparent), var(--shadow-2); }
+.desktop :is(#composer, #ts-composer).mode-plan .composer-box { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 38%, transparent), var(--shadow-2); }
 @media (prefers-reduced-motion: no-preference) {
-  .desktop #composer .composer-box { transition: box-shadow 180ms var(--ease); }
+  .desktop :is(#composer, #ts-composer) .composer-box { transition: box-shadow 180ms var(--ease); }
   .desktop #composer-mode .mode-opt { transition: max-width 240ms var(--ease), opacity 180ms var(--ease), padding 240ms var(--ease), background-color 140ms var(--ease), color 140ms var(--ease); }
 }
 
@@ -1237,12 +1237,12 @@ body.desktop button:focus-visible, body.desktop textarea:focus-visible { outline
 .mw-hero[data-piece="planet"] .mw-ship { right: 4%; top: 3%; max-width: 50%; max-height: 96%; }
 .live-app.start #stage { position: relative; z-index: 1; }
 .live-app.start .intro h1, .live-app.start .hero-eyebrow { text-shadow: 0 1px 16px var(--ink), 0 0 3px var(--ink); }
-.live-app.start #composer { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }
-.desktop .live-app:not(.start) #composer { background: var(--surface); }
+.live-app.start :is(#composer, #ts-composer) { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px) saturate(1.2); }
+.desktop .live-app:not(.start) :is(#composer, #ts-composer) { background: var(--surface); }
 
 /* Where a chat lives: one word under Home's composer, unfolding its choices
    in place; a plain chat ends with one quiet line that can move it. */
-.desktop #composer .composer-bar #composer-where { color: var(--t2); }
+.desktop :is(#composer, #ts-composer) .composer-bar #composer-where { color: var(--t2); }
 #composer-where .where-caret { color: var(--t4); font-size: 11px; transition: transform 160ms var(--ease); }
 #composer-where.open .where-caret { transform: rotate(180deg); }
 .where-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 6px 2px 0; }
@@ -1631,17 +1631,17 @@ body.desktop *, .desktop .live-app:not(.start) .stage { scrollbar-width: none; }
 body.desktop ::-webkit-scrollbar { display: none; width: 0; height: 0; }
 body.desktop :is(pre, .diff, .rv-diff, .step-fold, .pv-view) { scrollbar-width: thin; scrollbar-color: var(--hair2) transparent; }
 /* The composer is a tint inside the panel, not a box on a shadow. */
-.desktop #composer .composer-box { border: 0; border-radius: var(--composer-radius, 12px); background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
+.desktop :is(#composer, #ts-composer) .composer-box { border: 0; border-radius: var(--composer-radius, 12px); background: var(--tone); box-shadow: 0 0 0 1px var(--hair); }
 /* Match Home's glass and controls to the textbox's painted outer edge.
    Its existing ring extends 1px beyond its layout box on each side. Keep the
    textbox at its original width and widen the borderless lower surface to it. */
-.desktop .live-app #composer { --composer-radius: 12px; width: calc(100% + 2px); margin-inline: -1px; border-radius: var(--composer-radius); }
-.desktop .live-app #composer .composer-box { margin-inline: 1px; }
-.desktop .live-app #composer .composer-bar { box-sizing: border-box; width: 100%; min-width: 0; align-self: stretch; border-radius: 0 0 var(--composer-radius) var(--composer-radius); }
-.desktop #composer .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair2)); }
-.desktop #composer.queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder); }
-.desktop #composer.restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder); }
-.desktop #composer.stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder); }
+.desktop .live-app :is(#composer, #ts-composer) { --composer-radius: 12px; width: calc(100% + 2px); margin-inline: -1px; border-radius: var(--composer-radius); }
+.desktop .live-app :is(#composer, #ts-composer) .composer-box { margin-inline: 1px; }
+.desktop .live-app :is(#composer, #ts-composer) .composer-bar { box-sizing: border-box; width: 100%; min-width: 0; align-self: stretch; border-radius: 0 0 var(--composer-radius) var(--composer-radius); }
+.desktop :is(#composer, #ts-composer) .composer-box:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair2)); }
+.desktop :is(#composer, #ts-composer).queued .composer-box { box-shadow: 0 0 0 1px var(--composerQueuedBorder); }
+.desktop :is(#composer, #ts-composer).restored .composer-box { box-shadow: 0 0 0 1px var(--composerRestoredBorder); }
+.desktop :is(#composer, #ts-composer).stop-armed .composer-box { box-shadow: 0 0 0 1px var(--composerStoppedBorder); }
 .desktop .request { border-radius: 12px; }
 .desktop .pill, .desktop .chip, .desktop .approval-actions button, .desktop .question-card :is(input, button), .desktop .setup-list, .desktop .auth-card, .desktop #overlay.sheet, .desktop #context-card, .desktop .settings-segments, .desktop .settings-toggle { border-color: transparent; box-shadow: inset 0 0 0 1px var(--hair); }
 .desktop #context-card { box-shadow: inset 0 0 0 1px var(--hair), var(--shadow-2); border-radius: 12px; }
@@ -3332,7 +3332,7 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .desktop .steps .ico.k-mail, .desktop .ico.k-mail { color: var(--k-mail); }
 .desktop .tool-row .ask-d.step-face { width: 16px; height: 16px; }
 .desktop .turn-receipt .receipt-action .ico.ico16, .desktop .turn-receipt .receipt-files .chev.ico16 { width: 14px; height: 14px; }
-.desktop #composer .send .send-arrow.ico16 { width: 20px; height: 20px; stroke-width: 1.5; }
+.desktop :is(#composer, #ts-composer) .send .send-arrow.ico16 { width: 20px; height: 20px; stroke-width: 1.5; }
 .desktop .code-header button { display: grid; place-items: center; width: 22px; height: 18px; color: var(--t3); }
 .desktop .code-header button:hover { color: var(--t1); }
 .desktop .code-header button.copied { color: var(--k-run); }
@@ -3361,6 +3361,36 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 /* The chat's browser, beside the chat (pass 248 D). The window splits: the
    chat on the left, the model's browser on the right, live. Greys, with one
    small light: blue while the model drives, amber while the page is yours. */
+/* A thread beside its orchestrator (pass 279 A): its own chat on the right. */
+#thread-side { display: none; }
+.desktop .live-app.thread-side-on:not(.browser-split-on) #cards { display: none !important; }
+.desktop .live-app.thread-side-on:not(.browser-split-on) #thread-side:not([hidden]) { position: relative; display: flex; flex-direction: column; flex: none; width: 46%; min-width: 0; border-left: 1px solid var(--hair); color: var(--t1); animation: bs-arrive 260ms cubic-bezier(.32,.72,0,1); }
+.desktop #thread-side.resizing { user-select: none; }
+.desktop #thread-side .ts-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 2; }
+.desktop #thread-side .ts-grip::after { content: ""; position: absolute; left: 2.5px; top: calc(50% - 16px); width: 3px; height: 32px; border-radius: 2px; background: var(--hair2); opacity: 0; transition: opacity 160ms var(--ease); }
+.desktop #thread-side:is(:hover, .resizing) .ts-grip::after { opacity: 1; }
+.desktop #thread-side .ts-head { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--hair); font-size: 13px; min-width: 0; }
+.desktop #thread-side .ts-head .th-light { flex: none; }
+.desktop #thread-side .ts-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.desktop #thread-side .ts-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font-size: 12px; }
+.desktop #thread-side .ts-sp { flex: 1; }
+.desktop #thread-side .ts-tab { flex: none; white-space: nowrap; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--t3); font: inherit; font-size: 12px; cursor: pointer; }
+.desktop #thread-side .ts-tab:hover { background: var(--hair); color: var(--t1); }
+.desktop #thread-side .ts-x { flex: none; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--t3); cursor: pointer; }
+.desktop #thread-side .ts-x:hover { background: var(--hair); color: var(--t1); }
+.desktop #thread-side .ts-x svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.desktop #thread-side :is(.ts-tab, .ts-x):focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.desktop #thread-side .ts-conv { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px 12px; scrollbar-width: thin; }
+.desktop #thread-side .ts-turns { display: flex; flex-direction: column; gap: 18px; }
+.desktop #thread-side .ts-empty { margin: 0; color: var(--t3); font-size: 13px; }
+.desktop #thread-side .ts-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 18px 18px; }
+.desktop #thread-side .ts-asks:empty { display: none; }
+.desktop #thread-side .ts-ask { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--hair); font-size: 12.5px; }
+.desktop #thread-side .ts-ask .from { color: var(--warn); flex: none; }
+.desktop #thread-side .ts-ask .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
+.desktop #thread-side .ts-ask .acts { display: flex; gap: 6px; flex: none; }
+.desktop .live-app.browser-split-on #thread-side { display: none !important; }
+.desktop .live-app.thread-side-on:not(.browser-split-on) #threads-ribbon .tr-item.open > .tr-head .tr-row { background: var(--hair); border-radius: 8px; }
 #browser-split { display: none; }
 .desktop .live-app.browser-split-on #cards { display: none !important; }
 .desktop .live-app.browser-split-on #browser-split:not([hidden]) { position: relative; display: flex; flex-direction: column; flex: none; width: 48%; min-width: 0; border-left: 1px solid var(--hair); animation: bs-arrive 260ms cubic-bezier(.32,.72,0,1); }
@@ -3672,30 +3702,30 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) .sidebar-release:i
    transform only, so a see-through window never repaints the chat. */
 html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop { --mw-star: var(--blossom); --mw-dust: #d9b98a; --mw-frost: rgb(255 255 255 / 0.04); --mw-frost2: rgb(255 255 255 / 0.02); --mw-drop: 0 18px 40px -20px rgb(0 0 0 / 0.6); }
 html[data-theme="demesne-light"] body.desktop { --mw-dust: #c99a5b; --mw-frost: rgb(255 255 255 / 0.7); --mw-frost2: rgb(255 255 255 / 0.5); --mw-drop: 0 18px 40px -22px rgb(0 0 0 / 0.18); }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer {
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) {
   position: relative; gap: 0; isolation: isolate;
   background: linear-gradient(180deg, var(--mw-frost), var(--mw-frost2)), color-mix(in srgb, var(--surface) 70%, transparent);
   box-shadow: 0 0 0 1px var(--hair), 0 -18px 40px -28px color-mix(in srgb, var(--mw-dust) 45%, transparent), var(--mw-drop);
 }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop .live-app.start #composer { background: linear-gradient(180deg, var(--mw-frost), var(--mw-frost2)), color-mix(in srgb, var(--surface) 80%, transparent); }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair2)), 0 -18px 40px -28px color-mix(in srgb, var(--mw-dust) 45%, transparent), var(--mw-drop); }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.queued { box-shadow: 0 0 0 1px var(--composerQueuedBorder), var(--mw-drop); }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.restored { box-shadow: 0 0 0 1px var(--composerRestoredBorder), var(--mw-drop); }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.stop-armed { box-shadow: 0 0 0 1px var(--composerStoppedBorder), var(--mw-drop); }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-box { background: none; box-shadow: none; border-radius: var(--composer-radius, 12px) var(--composer-radius, 12px) 0 0; }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-bar { position: relative; padding: 4px 10px 6px; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop .live-app.start :is(#composer, #ts-composer) { background: linear-gradient(180deg, var(--mw-frost), var(--mw-frost2)), color-mix(in srgb, var(--surface) 80%, transparent); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer):focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, var(--hair2)), 0 -18px 40px -28px color-mix(in srgb, var(--mw-dust) 45%, transparent), var(--mw-drop); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer).queued { box-shadow: 0 0 0 1px var(--composerQueuedBorder), var(--mw-drop); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer).restored { box-shadow: 0 0 0 1px var(--composerRestoredBorder), var(--mw-drop); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer).stop-armed { box-shadow: 0 0 0 1px var(--composerStoppedBorder), var(--mw-drop); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) .composer-box { background: none; box-shadow: none; border-radius: var(--composer-radius, 12px) var(--composer-radius, 12px) 0 0; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) .composer-bar { position: relative; padding: 4px 10px 6px; }
 /* The horizon, and the point of light that runs along it. */
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-bar::before,
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-bar::after { content: ""; position: absolute; top: 0; height: 1px; pointer-events: none; }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-bar::before { left: 0; right: 0; opacity: 0.7; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--mw-star) 70%, transparent) 50%, transparent); }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.has-draft .composer-bar::before { opacity: 1; }
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-bar::after { left: 0; width: 22%; opacity: 0; background: radial-gradient(50% 50% at 50% 50%, var(--mw-star), transparent); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) .composer-bar::before,
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) .composer-bar::after { content: ""; position: absolute; top: 0; height: 1px; pointer-events: none; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) .composer-bar::before { left: 0; right: 0; opacity: 0.7; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--mw-star) 70%, transparent) 50%, transparent); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer).has-draft .composer-bar::before { opacity: 1; }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) .composer-bar::after { left: 0; width: 22%; opacity: 0; background: radial-gradient(50% 50% at 50% 50%, var(--mw-star), transparent); }
 /* The dawn: a glow above the box, shown for a beat when a message leaves. */
-html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer::before { content: ""; position: absolute; left: 12%; right: 12%; top: -26px; height: 40px; z-index: -1; pointer-events: none; opacity: 0; background: radial-gradient(50% 60% at 50% 100%, color-mix(in srgb, var(--mw-dust) 70%, transparent), transparent 75%); }
+html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer)::before { content: ""; position: absolute; left: 12%; right: 12%; top: -26px; height: 40px; z-index: -1; pointer-events: none; opacity: 0; background: radial-gradient(50% 60% at 50% 100%, color-mix(in srgb, var(--mw-dust) 70%, transparent), transparent 75%); }
 @media (prefers-reduced-motion: no-preference) {
-  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer .composer-bar::before { transition: opacity 200ms var(--ease); }
-  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.sent::before { animation: mw-dawn 2600ms var(--ease) both; }
-  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop #composer.stopping .composer-bar::after { will-change: transform, opacity; animation: mw-horizon 2.4s linear infinite; }
+  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer) .composer-bar::before { transition: opacity 200ms var(--ease); }
+  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer).sent::before { animation: mw-dawn 2600ms var(--ease) both; }
+  html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#composer, #ts-composer).stopping .composer-bar::after { will-change: transform, opacity; animation: mw-horizon 2.4s linear infinite; }
 }
 @keyframes mw-dawn { 0% { opacity: 0; transform: translateY(6px); } 18% { opacity: 1; transform: none; } 55% { opacity: 1; } 100% { opacity: 0; transform: none; } }
 @keyframes mw-horizon { 0% { opacity: 0; transform: translateX(-30%); } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateX(380%); } }

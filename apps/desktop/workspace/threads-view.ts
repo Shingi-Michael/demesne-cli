@@ -277,3 +277,21 @@ export function threadReportHTML(report: ThreadReport, time: string): string {
     report.review?.sentBack ? `sent back ${report.review.sentBack === 1 ? "once" : `${report.review.sentBack} times`}` : ""].filter(Boolean).join(" · ");
   return `<div class="request thread-report${failed ? " failed" : ""}" title="${esc(report.summary)}">${button("thread-jump", `<i class="th-light ${failed ? "failed" : "ready"}" aria-hidden="true"></i><b>${esc(report.title)}</b><span class="tr-what">${esc(what)}</span>`, { id: report.fix, chat: report.chat }, "tr-line")}<span class="request-meta"><time>${esc(time)}</time></span></div>`;
 }
+
+/// The head of a thread opened beside its orchestrator (pass 279 A): its
+/// light and name, its branch and what it is on, a way to give it the whole
+/// window as its own tab, and × to put the side away.
+export function threadSideHeadHTML(fix: DriveFix, list: DriveFix[] = []): string {
+  const sub = [fix.branch ? esc(fix.branch) : "", threadLine(fix, list)].filter(Boolean).join(" · ");
+  const tab = fix.sessionId ? button("select-session", "Open as a tab", { id: fix.sessionId }, "ts-tab") : "";
+  return `<div class="ts-head">${light(fix)}<b class="ts-name">${esc(fix.title)}</b><span class="ts-sub">${sub}</span><span class="ts-sp"></span>${tab}<button type="button" class="ts-x" data-action="thread-close" data-args="${esc(JSON.stringify({ id: fix.id }))}" aria-label="Close this thread's side" title="Close (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div>`;
+}
+
+/// Whether the open thread shows beside the chat: only in the chat that
+/// started it, once the thread has a chat of its own, and never over a
+/// page or the browser.
+export function threadSideFix(view: ThreadsView, here: { mine: boolean; browser: boolean }): DriveFix | null {
+  if (!here.mine || here.browser || !view.open) return null;
+  const fix = view.list.find((item) => item.id === view.open);
+  return fix?.sessionId && fix.status !== "applied" && fix.status !== "discarded" ? fix : null;
+}

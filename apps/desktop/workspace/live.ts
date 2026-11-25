@@ -16,7 +16,7 @@ import { parseThreadReport } from "../../../packages/protocol/src/thread-report.
 import { browserTarget } from "./browser-row.ts";
 import { browserSteps, downloadWords, findWords, outsideDoing, type OutsideSignin, handOverAsk, keyInputs, localPage, pagePoint, RING_MS, ringSpot, openableOutside, splitDoing, splitOpen, splitWidth, tabName, zoomWords, type SplitDownload, type SplitTab } from "./browser-split.ts";
 import { parseThreadNote } from "../../../packages/protocol/src/thread-note.ts";
-import { light as threadLight, threadBriefHTML, threadsNews, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, type ThreadsLook, type ThreadState } from "./threads-view.ts";
+import { light as threadLight, threadBriefHTML, threadsNews, threadReportHTML, threadsBegunHTML, threadsMessageHTML, threadsRibbonHTML, threadSideFix, threadSideHeadHTML, type ThreadsLook, type ThreadState } from "./threads-view.ts";
 import { agentPlace, projectSlug, type NearbyAgent } from "../../../packages/protocol/src/agents-nearby.ts";
 import { advance, cubeSvg, moving, restingCube } from "./working-cube.ts";
 import { isHomeSky, mountMilkyWay, type HomeSky, type MilkyWay } from "./milkyway.ts";
@@ -427,6 +427,12 @@ function missionLinks() {
 const chatTitle = (id: string) => state?.sessions.find((item) => item.id === id)?.title || "your chat";
 /// Drive's page fills the main column in place of the conversation.
 const stepsOpen = new Set<string>();
+/// The thread open beside its orchestrator (pass 279 A), drawn by renderThreadSide.
+const threadSide = {
+  for: "", signature: "", turns: new Map<string, { node: HTMLElement; run: unknown; signature: string }>(),
+  working: null as WorkingLine | null,
+  width: (() => { try { return Number(localStorage.getItem("demesne-thread-side")) || 0; } catch { return 0; } })(),
+};
 /// Steps whose diff or output is unfolded in place, keyed run:tool.
 const stepOpen = new Set<string>();
 // File diffs are opt-in: keep the chat compact until an edit row is opened.
@@ -3936,7 +3942,9 @@ function revealCompactedTurn(id: string) {
   if (compacted && (compacted.hiddenIds.has(id) || state.checkpoint.turnId === id))
     expandedCompactions.add(state.checkpoint.id);
 }
-function renderConversation() {
+/// The chat's turns, and the thread beside it (its steps fold with the same clicks).
+function renderConversation() { renderChatTurns(); renderThreadSide(); }
+function renderChatTurns() {
   if (!state) return;
   // A server that starts during the newest turn unfolds its page once.
   const newest = state.runs.at(-1);
@@ -8607,12 +8615,135 @@ function renderThreads() {
   if (host.dataset.html !== html) { drawThreadsRibbon(host, html); host.dataset.html = html; }
   host.hidden = !html;
   el("app").classList.toggle("has-threads", Boolean(html));
+  renderThreadSide();
   // One lap of silver round the ribbon's edge when a thread finishes or needs you, then still.
   if (threadsNews(threadsStateSeen, view.list) && html) {
     host.classList.remove("lap"); void host.offsetWidth; host.classList.add("lap");
     clearTimeout(threadsLapTimer); threadsLapTimer = setTimeout(() => host.classList.remove("lap"), CARD_LAP_MS);
   }
 }
+/// A thread beside its orchestrator (pass 279 A): open a line in the ribbon
+/// and the thread's own chat sits on the right, its steps drawn as any
+/// chat's, with a box of its own to steer it. One at a time; × or Esc puts
+/// it away, and the line between the two moves like the browser's.
+function renderThreadSide() {
+  const aside = el("thread-side"), app = el("app");
+  const view = state?.threads;
+  const mine = Boolean(state && view && inSession(state) && !pageOpen && state.session?.id === view.from);
+  const fix = view ? threadSideFix(view, { mine, browser: app.classList.contains("browser-split-on") }) : null;
+  app.classList.toggle("thread-side-on", Boolean(fix));
+  aside.hidden = !fix;
+  if (!fix || !state) {
+    if (threadSide.for) { aside.innerHTML = ""; threadSide.for = threadSide.signature = ""; threadSide.turns.clear(); }
+    return;
+  }
+  if (threadSide.for !== fix.id) {
+    threadSide.for = fix.id; threadSide.signature = ""; threadSide.turns.clear();
+    threadSide.working ??= new WorkingLine(spinner);
+    aside.innerHTML = `<div class="ts-grip" aria-hidden="true"></div><div class="ts-top"></div><div class="ts-conv"><div class="ts-turns"></div></div><div class="ts-foot"><div class="ts-asks"></div><form class="composer" id="ts-composer" data-thread-form><div class="composer-box"><textarea rows="1" spellcheck="false" aria-label="Message this thread" placeholder="Tell this thread something…"></textarea><button type="submit" class="send" aria-label="Send to this thread"><svg class="ico send-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg><svg class="ico send-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div></form></div>`;
+    aside.querySelector(".ts-conv")!.append(threadSide.working.element);
+    gripThreadSide(aside);
+  }
+  const total = el("workspace").clientWidth || innerWidth;
+  aside.style.width = `${splitWidth(threadSide.width || Math.round(total * 0.46), total)}px`;
+  const top = aside.querySelector<HTMLElement>(".ts-top")!, head = threadSideHeadHTML(fix, view!.list);
+  if (top.dataset.html !== head) { top.innerHTML = head; top.dataset.html = head; }
+  const chat = view!.chat && view!.chat.of === fix.id ? view!.chat : null;
+  const form = aside.querySelector<HTMLFormElement>("#ts-composer")!, working = Boolean(chat?.activeTurnId);
+  form.classList.toggle("working", working);
+  form.classList.toggle("stopping", working && !form.classList.contains("has-draft"));
+  form.querySelector("textarea")!.placeholder = working ? "Steer it while it works…" : "Tell this thread something…";
+  form.querySelector(".send")!.setAttribute("aria-label", form.classList.contains("stopping") ? "Stop this thread" : "Send to this thread");
+  const conv = aside.querySelector<HTMLElement>(".ts-conv")!, turns = aside.querySelector<HTMLElement>(".ts-turns")!;
+  const atEnd = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 40;
+  const shared = JSON.stringify([view!.list.map((item) => [item.id, item.status]), chat?.activeTurnId ?? null, [...stepsOpen], [...stepOpen], [...detailsOpen], [...expanded]]);
+  let moved = false;
+  if (!chat) {
+    if (!turns.firstElementChild?.classList.contains("ts-empty")) { turns.innerHTML = `<p class="ts-empty">Opening the thread…</p>`; threadSide.turns.clear(); }
+  } else {
+    turns.querySelector(".ts-empty")?.remove();
+    const keep = new Set<string>();
+    asThread(() => chat.runs.forEach((run, index) => {
+      keep.add(run.id);
+      let saved = threadSide.turns.get(run.id);
+      if (!saved) {
+        const node = document.createElement("article");
+        node.className = "turn";
+        turns.append(node);
+        saved = { node, run: null, signature: "" };
+        threadSide.turns.set(run.id, saved);
+      }
+      if (saved.run === run && saved.signature === shared) return;
+      saved.node.innerHTML = runHTML(run, index);
+      for (const slot of saved.node.querySelectorAll<HTMLElement>("[data-entry]")) {
+        const entry = run.entries.find((item) => item.id === Number(slot.dataset.entry));
+        if (entry?.type === "assistant") slot.innerHTML = markdown(splitNextPrompt(entry.raw).text);
+      }
+      saved.run = run; saved.signature = shared; moved = true;
+    }));
+    for (const [id, saved] of threadSide.turns) if (!keep.has(id)) { saved.node.remove(); threadSide.turns.delete(id); moved = true; }
+  }
+  const last = chat?.runs.at(-1);
+  if (last) asThread(() => workingLine(threadSide.working!, last));
+  else threadSide.working!.update(null);
+  if (moved && atEnd) conv.scrollTop = conv.scrollHeight;
+  // An approval answers here; a question comes to the chat on the left.
+  const asks = (chat?.approvals ?? []).map((approval) => `<div class="ts-ask"><span class="from">Before it goes on</span><span class="what">${h(approval.summary || approval.name)}</span><span class="acts">${btn("thread-approve", "Allow once", { id: approval.id }, "primary")}${btn("thread-approve", "Deny", { id: approval.id, decision: "deny" })}</span></div>`).join("");
+  const askHost = aside.querySelector<HTMLElement>(".ts-asks")!;
+  if (askHost.dataset.html !== asks) { askHost.innerHTML = asks; askHost.dataset.html = asks; }
+}
+/// The line between the chat and the thread moves either way; the width is kept.
+function gripThreadSide(aside: HTMLElement) {
+  const grip = aside.querySelector<HTMLElement>(".ts-grip")!;
+  grip.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    grip.setPointerCapture(event.pointerId);
+    aside.classList.add("resizing");
+    const right = el("workspace").getBoundingClientRect().right, total = el("workspace").clientWidth;
+    const move = (e: PointerEvent) => { threadSide.width = splitWidth(right - e.clientX, total); aside.style.width = `${threadSide.width}px`; };
+    const up = () => {
+      grip.removeEventListener("pointermove", move); aside.classList.remove("resizing");
+      try { localStorage.setItem("demesne-thread-side", String(threadSide.width)); } catch {}
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up, { once: true });
+    grip.addEventListener("pointercancel", up, { once: true });
+  });
+}
+function sendToThread(form: HTMLFormElement, stop = false) {
+  const input = form.querySelector("textarea")!, text = input.value.trim();
+  if (!text) { if (stop && form.classList.contains("working")) void api("thread-cancel", {}).catch((error) => notice(error instanceof Error ? error.message : String(error))); return; }
+  input.value = "";
+  form.classList.remove("has-draft");
+  form.classList.toggle("stopping", form.classList.contains("working"));
+  void api("thread-send", { text }).catch((error) => { input.value = text; form.classList.add("has-draft"); notice(error instanceof Error ? error.message : String(error)); });
+}
+document.addEventListener("submit", (event) => {
+  const form = (event.target as Element).closest?.<HTMLFormElement>("[data-thread-form]");
+  if (!form) return;
+  event.preventDefault();
+  sendToThread(form, Boolean((event as SubmitEvent).submitter));
+});
+document.addEventListener("input", (event) => {
+  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea"), form = input?.form;
+  if (!form) return;
+  form.classList.toggle("has-draft", Boolean(input!.value.trim()));
+  form.classList.toggle("stopping", form.classList.contains("working") && !form.classList.contains("has-draft"));
+});
+document.addEventListener("keydown", (event) => {
+  const input = (event.target as Element).closest?.<HTMLTextAreaElement>("[data-thread-form] textarea");
+  if (!input || event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  sendToThread(input.form!);
+});
+// Esc inside the thread's side puts it away; Esc in the chat keeps its own meanings.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || el("thread-side").hidden) return;
+  if (!(event.target as Element).closest?.("#thread-side")) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  void act(() => api("thread-close", {}));
+});
 /// Redraws the ribbon in place: the card stays (so it folds and unfolds
 /// smoothly), and only the lines that changed are replaced.
 function drawThreadsRibbon(host: HTMLElement, html: string) {

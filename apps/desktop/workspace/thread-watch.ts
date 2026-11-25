@@ -186,6 +186,43 @@ export class ThreadWatch {
     };
   }
 
+  /// The open line's chat, followed live.
+  private get chat() {
+    const fix = this.state.open ? this.fix(this.state.open) : null;
+    return fix?.sessionId ? this.follows.get(fix.sessionId)?.chat ?? null : null;
+  }
+
+  /// Words for the open thread, from its side beside the chat (pass 279):
+  /// they steer it while it works, else start its next turn.
+  async send(text: string) {
+    const fix = this.state.open ? this.fix(this.state.open) : null, chat = this.chat;
+    const content = text.trim();
+    if (!fix?.sessionId || !chat || !content) throw new Error("Open a thread first.");
+    const client = this.options.client();
+    if (chat.active) {
+      try { await client.steer(fix.sessionId, { id: crypto.randomUUID(), text: content }); return; }
+      catch { /* it ended first: send it as the next message */ }
+    }
+    const { turn } = await client.submitTurn(fix.sessionId, { content, permissionMode: "allow" });
+    chat.ensureTurn(turn);
+    this.options.publish();
+  }
+
+  /// Stop: the open thread's running turn ends where it is, like Stop in a chat.
+  async cancel() {
+    const turn = this.chat?.active;
+    if (turn) await this.options.client().cancelTurn(turn.id);
+  }
+
+  /// A permission the open thread waits on, answered from its side.
+  async approve(id: string, decision: "allow_once" | "deny") {
+    const chat = this.chat;
+    if (!chat?.approvals.has(id)) throw new Error("This permission is no longer pending.");
+    await this.options.client().resolvePermission(id, decision);
+    chat.approvals.delete(id);
+    this.options.publish();
+  }
+
   /// Merges one ready thread onto your branch.
   async mergeOne(id: string) {
     const fix = this.fix(id);
@@ -263,6 +300,9 @@ export class ThreadWatch {
   async handle(method: string, args: Record<string, unknown>) {
     if (method === "thread-open") return this.show(String(args.id ?? ""));
     if (method === "thread-close") return this.close();
+    if (method === "thread-send") return this.send(String(args.text ?? ""));
+    if (method === "thread-cancel") return this.cancel();
+    if (method === "thread-approve") return this.approve(String(args.id ?? ""), args.decision === "deny" ? "deny" : "allow_once");
     if (method === "thread-delete") return this.deleteThread(String(args.id ?? ""));
     if (method === "thread-merge") return this.mergeOne(String(args.id ?? ""));
     if (method === "thread-start") return this.startThread(String(args.id ?? ""));

@@ -237,9 +237,9 @@ export function watchFoundryStages(root: HTMLElement): () => void {
     if (!item || !list.length) return;
     const had = item.querySelector<HTMLElement>(":scope > .fd-knobs");
     if (had) { const { set, moved } = knobsSet(had); if (moved) setKnobs(stage, set); return; }
-    // Over the page, under its version line: in sight while you look at what they change.
-    const ver = item.querySelector<HTMLElement>(":scope > .fd-ver");
-    if (ver) ver.insertAdjacentHTML("afterend", knobsHTML(list)); else stage.insertAdjacentHTML("beforebegin", knobsHTML(list));
+    // Over the page, right under its one head line: in sight while you look at what they change.
+    const head = item.querySelector<HTMLElement>(":scope > .fd-ln");
+    if (head) head.insertAdjacentHTML("afterend", knobsHTML(list)); else stage.insertAdjacentHTML("beforebegin", knobsHTML(list));
   }
   const turned = (event: Event) => {
     const input = event.target as HTMLInputElement, row = input.closest?.<HTMLElement>(".fd-knobs");

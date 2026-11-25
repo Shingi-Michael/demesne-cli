@@ -165,6 +165,8 @@ try {
 
   // Errors come back: a mockup that throws while you use it says so under it, and Send puts it in the chat.
   await page.keyboard.press("Escape");
+  // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+  await page.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
   await page.locator("#sidebar-sessions .sidebar-session, #sidebar-chats [data-action=select-session]").first().click();
   await ready(); await page.waitForTimeout(300);
   await editor.fill("/foundry a broken tip jar"); await editor.press("Enter");

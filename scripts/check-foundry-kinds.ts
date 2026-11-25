@@ -85,6 +85,8 @@ try {
   const frameOf = (key: string) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${idOf(key)}?v=1`) && found.url().includes("stack=1")) as Frame | undefined;
   const openIt = async (key: string) => {
     if (await page!.locator("#page .fd-open").count()) await page!.keyboard.press("Escape");
+    // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+    await page!.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
     await page!.locator("#sidebar-sessions .sidebar-session, #sidebar-chats [data-action=select-session]").first().click();
     await chips.filter({ hasText: SAVES[key]!.title }).first().click();
     const item = page!.locator(`#page [data-fd="${idOf(key)}:1"]`);

@@ -5043,7 +5043,19 @@ async function loadRoutines(method = "routines", args: Record<string, unknown> =
   renderPage();
   if (method === "routine-add") document.querySelector<HTMLInputElement>("#routine-new input")?.focus({ preventScroll: true });
 }
+/// Pass 277 B: one mockup open on its own page has the whole window; the
+/// sidebar folds while it shows and comes back after (frontend.ts keeps the
+/// fold only if you didn't fold it yourself, and never saves it).
+let foundryWideSaid = false;
+function syncFoundryWide() {
+  // A link to a mockup (foundryFocus) opens its own page too, picked on the next draw: fold for it already.
+  const wide = pageOpen === "foundry" && Boolean(foundryGallery.one || foundryFocus?.id);
+  if (wide === foundryWideSaid) return;
+  foundryWideSaid = wide;
+  document.dispatchEvent(new CustomEvent("demesne:foundry-wide", { detail: wide }));
+}
 function renderPage() {
+  syncFoundryWide();
   if (pageOpen !== "settings") clearGoogleAIForm();
   renderSettingsNav();
   const root = document.getElementById("page");
@@ -5078,6 +5090,8 @@ function renderPage() {
     const active = state.sessions.filter((item) => item.turns && !deletedSessions.has(item.id)).map((item) => ({ id: item.id, title: item.title, at: item.updatedAt, workspace: item.workspace ?? null, here: item.workspace === here }));
     html = chatsPageHtml(pageOpen, active, archivedChats);
   }
+  // A link to a mockup only picks its page above, so the sidebar folds now, before the page is drawn at its width.
+  syncFoundryWide();
   root.dataset.kind = pageOpen;
   if (root.dataset.html === html) return;
   // Whatever field has the keyboard keeps it, with its caret, across the redraw.
@@ -8605,6 +8619,7 @@ function renderState(next: Snapshot) {
   const start = !inSession(next) && !pageOpen;
   el("app").classList.toggle("start", start);
   el("app").classList.toggle("paging", Boolean(pageOpen));
+  syncFoundryWide();
   el("app").classList.toggle("settings-on", pageOpen === "settings");
   el("hero").hidden = !start;
   el("conversation").hidden = start || Boolean(pageOpen);

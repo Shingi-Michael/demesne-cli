@@ -52,6 +52,8 @@ try {
   await step(48, async () => !!frame() && (await cells(0).catch(() => [])).length === 4);
   assert.deepEqual(await frame()!.evaluate(() => [...document.querySelectorAll("thead th")].map((cell) => cell.textContent)), ["Plot", "Crop", "pH", "Nitrogen (ppm)", "Cost"]);
   assert.deepEqual(await totals(), ["Total", "", "26.2", "95", "$413.75"]);
+  // Pass 277 B: the sidebar folds as the mockup opens; a click in the first moments of a resized frame can miss.
+  await app.waitForTimeout(600);
   console.log("PASS: a sheet is drawn as a table with its totals at the foot.");
 
   // Pressing a column's name sorts by it, again the other way, a third time back.

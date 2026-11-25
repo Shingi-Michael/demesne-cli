@@ -170,7 +170,7 @@ export function galleryPage(view: GalleryView, error = "") {
 /// The long page for one mockup: a line back to the front page, its name,
 /// where it is from, and its pin.
 export function oneHead(item: FoundryArtifact, pinned: boolean, shared: boolean) {
-  return `<button type="button" class="fg-back" data-action="foundry-home">← Foundry</button>`
-    + `<div class="fg-one"><h1 class="cp-title fd-h">${h(item.title)}</h1><span class="fg-meta">${h(kindWord(item))} · ${h(projectName(item.workspace))}${shared ? " · Shared" : ""}</span>`
+  // One row: the way back, the name and where it is from, and the pin; the design starts right under it.
+  return `<div class="fg-one"><button type="button" class="fg-back" data-action="foundry-home">← Foundry</button><h1 class="cp-title fd-h">${h(item.title)}</h1><span class="fg-meta">${h(kindWord(item))} · ${h(projectName(item.workspace))}${shared ? " · Shared" : ""}</span>`
     + `<button type="button" class="fg-pin${pinned ? " on" : ""}" ${act("foundry-pin", { id: item.id, pinned: !pinned })} aria-pressed="${pinned}" aria-label="${pinned ? "Unpin" : "Pin to the top"}" title="${pinned ? "Unpin" : "Pin to the top"}">${PIN}</button></div>`;
 }

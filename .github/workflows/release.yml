@@ -140,6 +140,35 @@ jobs:
           key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock', 'apps/desktop/electron-builder.json') }}
           restore-keys: |
             electron-${{ runner.os }}-${{ runner.arch }}-
+      # Sign with the project's own self-signed certificate, so macOS knows
+      # every release as the same app and keeps its permissions (Screen
+      # Recording, Accessibility) across updates. Ad hoc signing ties them to
+      # one build. Free; see docs/macos-release-signing.md.
+      - name: Load signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          P12: ${{ secrets.MAC_SIGN_P12 }}
+          P12_PASSWORD: ${{ secrets.MAC_SIGN_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12" ] || [ -z "$P12_PASSWORD" ]; then
+            echo "::error::MAC_SIGN_P12 and MAC_SIGN_P12_PASSWORD are not set; an ad hoc release would reset every Mac's permissions on update."
+            exit 1
+          fi
+          kc="$RUNNER_TEMP/demesne-sign.keychain-db"
+          kcpw=$(openssl rand -hex 16)
+          rm -f "$kc"
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security import "$RUNNER_TEMP/sign.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign >/dev/null
+          rm -f "$RUNNER_TEMP/sign.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" >/dev/null
+          identity=$(security find-identity -p codesigning "$kc" | awk '/Demesne Self-Signed/ {print $2; exit}')
+          [ -n "$identity" ] || { echo "::error::The certificate in MAC_SIGN_P12 has no code-signing identity."; exit 1; }
+          echo "DEMESNE_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "DEMESNE_SIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
       - name: Build app bundle
         shell: bash
         env:
@@ -166,10 +195,17 @@ jobs:
           # Apple silicon; refuse to ship one.
           for file in demesne-host demesne-desktop-host demesned; do codesign --verify --strict "$app/Contents/Resources/backend/$file"; done
           codesign --verify "$app"
+          # Signed by the certificate, not ad hoc: the designated requirement
+          # must name its root, or permissions would reset on update.
+          codesign -d -r- "$app" 2>&1 | grep -qi "certificate root = H\"$DEMESNE_SIGN_IDENTITY\""
           test -d "$app/Contents/Resources/backend/node_modules/sharp"
           ditto -c -k --keepParent "$app" "${{ matrix.artifact }}"
           # Compatibility for saved copies of the old installer.
           cp "${{ matrix.artifact }}" demesne-desktop-darwin-arm64.zip
+      - name: Remove signing keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/demesne-sign.keychain-db" 2>/dev/null || true
       - name: Package Linux app
         if: runner.os == 'Linux'
         run: |

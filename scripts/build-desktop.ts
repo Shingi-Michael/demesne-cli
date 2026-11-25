@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { codesign, signBackends } from "./sign-backends.ts";
+import { codesign, signBackends, signWith } from "./sign-backends.ts";
 const args = process.argv.slice(2).filter(arg => arg !== "--");
 const platformFlags = { "--mac": "darwin", "-m": "darwin", "--linux": "linux", "-l": "linux", "--win": "win32", "-w": "win32" };
 for (const arg of args) {
@@ -21,8 +21,10 @@ if (process.exitCode === 0 && process.platform === "darwin") {
   const app = resolve(import.meta.dir, "../apps/desktop/release/mac-arm64/Demesne.app");
   if (existsSync(app)) {
     await signBackends(join(app, "Contents/Resources/backend"));
-    await codesign(["--force", "--sign", "-", app]);
+    await codesign(["--force", ...signWith(), app]);
     await codesign(["--verify", app]);
-    console.log("Signed the Bun backends and Demesne.app ad hoc for this Mac.");
+    console.log(process.env.DEMESNE_SIGN_IDENTITY
+      ? "Signed the Bun backends and Demesne.app with the Demesne certificate."
+      : "Signed the Bun backends and Demesne.app ad hoc for this Mac.");
   }
 }

@@ -1,5 +1,27 @@
 # macOS release signing readiness
 
+## Today: the Demesne self-signed certificate
+
+Releases are signed with a free, self-signed code-signing certificate,
+"Demesne Self-Signed" (SHA-1 `020E1109E186C10661280EBBC743A4ACDF5AEE1B`,
+valid to 2046). It is kept as two repository secrets, `MAC_SIGN_P12` (the
+base64 PKCS#12 with its private key) and `MAC_SIGN_P12_PASSWORD`, and a copy is
+in the release owner's login keychain. The release workflow imports it into a
+temporary keychain, `scripts/sign-backends.ts` signs the backends and the app
+with it (`DEMESNE_SIGN_IDENTITY`, `DEMESNE_SIGN_KEYCHAIN`), and the workflow
+refuses to ship an app whose designated requirement doesn't name its root.
+
+**Why:** ad hoc signing (`codesign --sign -`) gives an app no identity but its
+own hash, so macOS treats every release as a new app and drops the permissions
+given to the last one (Screen Recording, Accessibility). With the certificate
+the requirement is `identifier "com.demesne.desktop" and certificate root = H"020e…"`,
+the same for every release, so permissions survive updates.
+
+**Keep the certificate.** Replacing it changes the requirement once more, and
+every Mac has to grant its permissions again. It is not trusted by Gatekeeper
+(that needs Developer ID, below), so first-launch warnings are unchanged.
+Local builds stay ad hoc unless `DEMESNE_SIGN_IDENTITY` is set.
+
 ## Assessment
 
 **Not ready for signed public distribution.** This is a source-level assessment;

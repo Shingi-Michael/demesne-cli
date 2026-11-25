@@ -52,6 +52,27 @@ export function notchInset(display: { bounds: Rect; workArea: Rect; internal?: b
   return display.internal && display.bounds.height / display.bounds.width > 0.64 ? 38 : 0;
 }
 
+/** Where the window opens: the size and place you last left it, read from
+ *  window.json, when that still fits on a display you have now; otherwise
+ *  the default size, centred by Electron. A saved window larger than its
+ *  display's work area shrinks to fit, and one off every display (a monitor
+ *  unplugged) starts over. */
+export function windowPlace(saved: string | null, displays: { workArea: Rect }[], least = { width: 900, height: 620 }, fallback = { width: 1180, height: 820 }): Partial<Rect> & { width: number; height: number } {
+  let place: Rect;
+  try {
+    const value = JSON.parse(saved ?? "null");
+    if (!value || !["x", "y", "width", "height"].every((key) => Number.isFinite(value[key]))) return fallback;
+    place = { x: Math.round(value.x), y: Math.round(value.y), width: Math.round(value.width), height: Math.round(value.height) };
+  } catch { return fallback; }
+  // The display holding most of the window, at least a corner's worth (100pt each way).
+  const overlap = (area: Rect) => Math.max(0, Math.min(place.x + place.width, area.x + area.width) - Math.max(place.x, area.x)) * Math.max(0, Math.min(place.y + place.height, area.y + area.height) - Math.max(place.y, area.y));
+  const home = displays.map((one) => one.workArea).filter((area) => overlap(area) >= 100 * 100).sort((a, b) => overlap(b) - overlap(a))[0];
+  if (!home) return fallback;
+  const width = Math.min(Math.max(place.width, least.width), home.width), height = Math.min(Math.max(place.height, least.height), home.height);
+  const x = Math.min(Math.max(place.x, home.x), home.x + home.width - width), y = Math.min(Math.max(place.y, home.y), home.y + home.height - height);
+  return { x, y, width, height };
+}
+
 export function previewURL(value: string) {
   try {
     const url = new URL(value);

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, browserKey, outsideSignin, openTarget, placeRect, validateRequest } from "../electron/policy.ts";
+import { APP_URL, allowAppReload, desktopBlurs, desktopGlass, foundryPageCall, foundryShotURL, usesRemember, withRemember, withShots, liquidGlass, macVibrancy, notchInset, FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, foundryURL, previewURL, assetPath, localAppURL, nextZoom, browserKey, outsideSignin, openTarget, placeRect, validateRequest, windowPlace } from "../electron/policy.ts";
 
 test("project switching may reload only the exact main application document", () => {
   expect(allowAppReload(APP_URL, true)).toBe(true);
@@ -208,4 +208,22 @@ test("pass 262 C: a saved copy stands on its own and gets a free name in Downloa
   expect(copyName("Orders/board", 2, "html", () => false)).toBe("Ordersboard v2.html");
   expect(copyName("Orders board", 2, "html", (name) => taken.has(name))).toBe("Orders board v2 (2).html");
   expect(copyName("  ", 1, "svg", () => false)).toBe("Mockup v1.svg");
+});
+
+test("the window opens where you left it, when that still fits a display", () => {
+  const laptop = { workArea: { x: 0, y: 25, width: 1512, height: 957 } }, monitor = { workArea: { x: 1512, y: 0, width: 2560, height: 1415 } };
+  expect(windowPlace(null, [laptop])).toEqual({ width: 1180, height: 820 });
+  expect(windowPlace("not json", [laptop])).toEqual({ width: 1180, height: 820 });
+  expect(windowPlace('{"x":1}', [laptop])).toEqual({ width: 1180, height: 820 });
+  expect(windowPlace('{"x":100,"y":80,"width":1000,"height":700}', [laptop])).toEqual({ x: 100, y: 80, width: 1000, height: 700 });
+  // Bigger than the display: shrinks to its work area.
+  expect(windowPlace('{"x":0,"y":0,"width":3000,"height":2000}', [laptop])).toEqual({ x: 0, y: 25, width: 1512, height: 957 });
+  // Below the least size: grows to it.
+  expect(windowPlace('{"x":100,"y":80,"width":400,"height":300}', [laptop])).toEqual({ x: 100, y: 80, width: 900, height: 620 });
+  // Left on a monitor that is gone: starts over; still plugged in: stays there.
+  const onMonitor = '{"x":2000,"y":100,"width":1400,"height":900}';
+  expect(windowPlace(onMonitor, [laptop])).toEqual({ width: 1180, height: 820 });
+  expect(windowPlace(onMonitor, [laptop, monitor])).toEqual({ x: 2000, y: 100, width: 1400, height: 900 });
+  // Hanging off an edge: pulled back on.
+  expect(windowPlace('{"x":1200,"y":500,"width":1000,"height":700}', [laptop])).toEqual({ x: 512, y: 282, width: 1000, height: 700 });
 });

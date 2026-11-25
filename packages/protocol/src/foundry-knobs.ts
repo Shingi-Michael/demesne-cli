@@ -67,7 +67,9 @@ export function knobProblem(source: string): string | null {
     seen.add(knob.name);
     const value = declaredValue(source, knob.name);
     if (value === null) return `[invalid_input] The knob "${knob.label}" turns ${knob.name}, but the page never sets it to a number. Declare it in :root, like ${knob.name}: ${knob.min}${knob.unit}. ${HINT}`;
-    if (!new RegExp(`var\\(\\s*${escape(knob.name)}\\b`).test(source)) return `[invalid_input] The knob "${knob.label}" turns ${knob.name}, but nothing on the page uses var(${knob.name}), so moving it would change nothing. ${HINT}`;
+    // The kit's own moves use --move and --move-after (base.css, data-move): a page with a move uses them without writing var().
+    const kitUses = (knob.name === "--move" || knob.name === "--move-after") && /\bdata-move\s*=/.test(source);
+    if (!kitUses && !new RegExp(`var\\(\\s*${escape(knob.name)}\\b`).test(source)) return `[invalid_input] The knob "${knob.label}" turns ${knob.name}, but nothing on the page uses var(${knob.name}), so moving it would change nothing. ${HINT}`;
     if (value < knob.min || value > knob.max) return `[invalid_input] The knob "${knob.label}" runs ${knob.min} to ${knob.max}, but the page sets ${knob.name} to ${value}. Start it inside its range. ${HINT}`;
   }
   return null;

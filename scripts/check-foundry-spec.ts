@@ -22,9 +22,9 @@ writeFileSync(join(project, "src/tokens.css"), ":root{--brand:#0b6e4f;--ink:#1a1
 for (const name of ["Button", "SlotPicker", "ClinicCard"]) writeFileSync(join(project, `src/components/${name}.tsx`), `export const ${name} = () => null;`);
 
 const option = (name: string, lead: string) => `<section data-option="${name}"><main class="booking"><h1>${lead}</h1><p class="lede">Pick a time that suits you at Harbor Clinic.</p>
-<div class="slots"><button class="slot">9:00</button><button class="slot">9:30</button><button class="slot">10:00</button></div><button class="book">Book the visit</button></main></section>`;
+<div class="slots"><button class="slot">9:00</button><button class="slot">9:30</button><button class="slot">10:00</button></div><button class="book" data-go="${name} booked">Book the visit</button><div class="over"><div data-view="${name} closed"></div><div class="sheet" data-view="${name} booked" data-move="rise">Booked for Tuesday, 10:30</div></div></main></section>`;
 const PAGE = `<link rel="stylesheet" href="foundry://kit/base.css"><script src="foundry://kit/parts.js"></script>
-<style>:root{--accent:#0b6e4f;--ink:#1a1f1c;--paper:#f6f4ee}.booking{padding:48px 96px;display:flex;flex-direction:column;gap:24px;background:#f6f4ee;color:#1a1f1c;font:16px/24px Georgia,serif}
+<style>:root{--accent:#0b6e4f;--ink:#1a1f1c;--paper:#f6f4ee;--move:320ms}.booking{padding:48px 96px;display:flex;flex-direction:column;gap:24px;background:#f6f4ee;color:#1a1f1c;font:16px/24px Georgia,serif}
 .booking h1{margin:0;font:700 40px/44px Georgia,serif}.booking p{margin:0}.slots{display:grid;grid-template-columns:repeat(3,120px);gap:8px}
 .slot{padding:8px 16px;border:1px solid rgba(26,31,28,.2);border-radius:10px;background:#fff;color:#1a1f1c;font:inherit}
 .book{align-self:start;padding:10px 20px;border:0;border-radius:10px;background:#0b6e4f;color:#fff;font:600 16px/24px Georgia,serif;transition:background-color 160ms ease-out}</style>
@@ -59,6 +59,10 @@ try {
   assert((spec.type as string[]).some((line) => /Georgia 40px, weight 700, line 44px: “Choose your clinic”/.test(line)));
   assert((spec.words as string[]).includes("Book the visit") && !(spec.words as string[]).includes("Book a visit"), "the words are the drawn option's only");
   assert((spec.motion as string[]).some((line) => /^\.book: background-color, 160ms, ease-out/.test(line)), "how the button moves is in the hand-off");
+  // Piece 8: a kit move on a part not shown yet is in the hand-off, with the page's own timing.
+  assert((spec.motion as string[]).includes('div.sheet "Booked for Tuesday, 10:30": animation rise (from transform: translateY(100%) → at rest), 320ms, cubic-bezier(.2,.8,.2,1), each time it appears'), "the sheet's rise is in the hand-off");
+  assert.equal((spec.motion as string[]).filter((line) => line.includes("rise")).length, 1, "only the drawn option's sheet");
+  assert.deepEqual(spec.other_places, [{ name: "Clinic first booked", words: ["Booked for Tuesday, 10:30"] }]);
   assert.deepEqual(read.project.components.sort(), ["Button", "ClinicCard", "SlotPicker"]);
   assert.match(read.how, /foundry_built/);
   console.log(`PASS a measured hand-off: ${spec.parts.length} parts, ${spec.colours.length} colours, ${spec.type.length} type styles in ${Date.now() - started}ms`);

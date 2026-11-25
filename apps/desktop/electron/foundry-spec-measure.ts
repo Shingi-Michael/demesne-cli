@@ -9,8 +9,8 @@
 /// its type, colours, padding and corners), the words in reading order, and
 /// how things move (transitions and animations with their timing).
 export interface SpecPart { name: string; tag: string; text: string; x: number; y: number; width: number; height: number; font: string; color: string; background: string; padding: string; radius: string; border: string; gap: string; layout: string; missing?: boolean }
-/// on: the rule's selector; frames: an animation's first and last keyframes.
-export interface SpecMotion { on: string; what: string; duration: string; easing: string; delay: string; name?: string; frames?: string }
+/// on: the rule's selector, or the part itself for a kit move (data-move); frames: an animation's first and last keyframes; when: what sets it off.
+export interface SpecMotion { on: string; what: string; duration: string; easing: string; delay: string; name?: string; frames?: string; when?: string }
 export interface SpecMeasure {
   page: { width: number; height: number; background: string; color: string; font: string };
   colours: { value: string; uses: string[]; share: number }[];
@@ -20,6 +20,8 @@ export interface SpecMeasure {
   parts: SpecPart[];
   words: string[];
   motion: SpecMotion[];
+  /// The places not showing when it was measured (later screens of a flow, a sheet not opened), with their words.
+  places?: { name: string; words: string[] }[];
 }
 
 const SPEC_FN = String.raw`(given) => {
@@ -65,6 +67,23 @@ const SPEC_FN = String.raw`(given) => {
   for (const sheet of document.styleSheets) { if (/^foundry:\/\/kit\//.test(sheet.href || "")) continue; try { walk(sheet.cssRules); } catch (error) {} }
   const list = (value) => (value || "").split(/,(?![^(]*\))/).map((part) => part.trim());
   const there = (selector) => { try { return !!document.querySelector(selector.replace(/::?(hover|focus-visible|focus-within|focus|active|before|after|checked|disabled)\b/g, "") || "*"); } catch (error) { return false; } };
+  // An option drawn alone leaves the other options in the page, hidden: nothing of theirs belongs in this hand-off.
+  const drawn = (el) => { const option = el.closest("[data-option]"); return !option || shown(option); };
+  // Places not showing (the later screens of a flow, a sheet not opened yet): their words, since only the first place is measured.
+  const places = [];
+  for (const place of [...document.body.querySelectorAll("[data-view]")].filter((el) => !shown(el) && drawn(el)).slice(0, 12)) {
+    const said = [];
+    for (const el of [place, ...place.querySelectorAll("*")]) { if (skip.has(el.tagName)) continue; const text = own(el); if (text && said.length < 24 && !said.includes(text)) said.push(text.length > 160 ? text.slice(0, 159) + "…" : text); }
+    if (said.length) places.push({ name: place.getAttribute("data-view").slice(0, 80), words: said });
+  }
+  // The kit's moves (base.css, data-move): a part that plays once whenever it appears, timed by the page's --move, --ease and --move-after.
+  const kitMoves = { rise: "from transform: translateY(100%)", lift: "from transform: translateY(12px); opacity: 0", fade: "from opacity: 0", slide: "from transform: translateX(100%)", pop: "from transform: scale(0.96); opacity: 0" };
+  for (const el of [...document.body.querySelectorAll("[data-move]")].filter((el) => !el.closest("[data-chrome]") && drawn(el)).slice(0, 12)) {
+    const name = el.getAttribute("data-move"), cs = getComputedStyle(el);
+    if (!kitMoves[name]) continue;
+    const ms = seconds(cs.getPropertyValue("--move").trim() || "240ms")[0], after = seconds(cs.getPropertyValue("--move-after").trim() || "0ms")[0];
+    if (ms > 0) motion.push({ on: label(el), what: "animation", name: name, duration: ms + "ms", easing: cs.getPropertyValue("--ease").trim().replace(/\s+/g, " ") || "ease", delay: after + "ms", frames: kitMoves[name] + " → at rest", when: "each time it appears" });
+  }
   for (const rule of moving) {
     if (motion.length >= 16) break;
     const st = rule.style, on = rule.selectorText.slice(0, 80);
@@ -104,7 +123,7 @@ const SPEC_FN = String.raw`(given) => {
     type: [...type.entries()].sort((a, b) => b[1].chars - a[1].chars).slice(0, 8).map(([key, had]) => { const p = key.split("|"); return { font: p[0], size: p[1], weight: p[2], line: p[3], sample: had.sample, chars: had.chars }; }),
     spacing: top(spacing, 8).map(([px]) => Number(px)).sort((a, b) => a - b),
     radii: top(radii, 4).map(([value]) => value),
-    parts: parts, words: words, motion: motion,
+    parts: parts, words: words, motion: motion, places: places,
   };
 }`;
 

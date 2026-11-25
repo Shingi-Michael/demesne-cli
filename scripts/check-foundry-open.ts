@@ -147,7 +147,8 @@ try {
   assert.ok(existsSync(file), "the file is in Downloads");
   const written = readFileSync(file, "utf8");
   assert.ok(!written.includes(`href="foundry://kit/base.css"`) && written.includes("#dfe8f5"), `the copy stands on its own: ${written.slice(0, 400)}`);
-  assert.equal(await open.locator(".fd-said-b").textContent(), "Show");
+  // The line offers Show, then the page's other format (piece 6 of pass 274: a picture).
+  assert.deepEqual(await open.locator(".fd-said .fd-said-b").allTextContents(), ["Show", "Also as a picture"]);
   assert.ok(await frameAt(2)!.evaluate(() => !!document.querySelector("#making .card")), "saving leaves the page as you had it (no reload)");
   await page.screenshot({ path: join(output, "foundry-open-saved.png") });
 

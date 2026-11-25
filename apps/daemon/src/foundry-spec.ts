@@ -64,7 +64,8 @@ export function specReport(measured: unknown, look: ProjectLook | null): Record<
     return line;
   });
   const motion = (Array.isArray(measured.motion) ? measured.motion : []).filter(isRecord).map((one) =>
-    `${text(one.on)}: ${one.what === "animation" ? `animation ${text(one.name)}${text(one.frames) ? ` (${text(one.frames)})` : ""}` : text(one.what)}, ${text(one.duration)}, ${text(one.easing)}${text(one.delay) && one.delay !== "0ms" ? `, after ${text(one.delay)}` : ""}`);
+    `${text(one.on)}: ${one.what === "animation" ? `animation ${text(one.name)}${text(one.frames) ? ` (${text(one.frames)})` : ""}` : text(one.what)}, ${text(one.duration)}, ${text(one.easing)}${text(one.delay) && one.delay !== "0ms" ? `, after ${text(one.delay)}` : ""}${text(one.when) ? `, ${text(one.when)}` : ""}`);
+  const places = (Array.isArray(measured.places) ? measured.places : []).filter(isRecord).map((one) => ({ name: text(one.name), words: strings(one.words) })).filter((one) => one.name && one.words.length);
   const spacing = (Array.isArray(measured.spacing) ? measured.spacing : []).filter((n): n is number => typeof n === "number");
   return {
     page: `${number(page.width)}×${number(page.height)}, ground ${named(text(page.background), look)}, text ${named(text(page.color), look)}, ${text(page.font)}`,
@@ -75,6 +76,7 @@ export function specReport(measured: unknown, look: ProjectLook | null): Record<
     ...(parts.length ? { parts } : {}),
     ...(strings(measured.words).length ? { words: strings(measured.words) } : {}),
     ...(motion.length ? { motion } : {}),
+    ...(places.length ? { other_places: places, other_places_rule: "Measured with its first place showing. These places show later (a next screen, a sheet): the same type, colours and spacing apply; their words are here and their layout is in the source." } : {}),
   };
 }
 

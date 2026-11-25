@@ -62,6 +62,39 @@ export function pageLookRow(tool: { state: string; drafting?: boolean; input: Re
   return { verb: look.steps.length ? "Tried" : "Opened", target: h(pageName(look.url)), meta, tone: look.errorCount || failed ? "failed" : "", below: steps + errors + shots };
 }
 
+type LookTool = { state: string; drafting?: boolean; waiting?: boolean; input: Record<string, unknown>; message?: string; durationMs?: number };
+
+/// A finished look with nothing to point at: no failed step, no console error.
+export function cleanLook(tool: LookTool & { name: string }): boolean {
+  if (tool.name !== "look_at_page" || tool.state !== "done" || tool.waiting || tool.drafting) return false;
+  const look = pageLookOutcome(tool.message);
+  return Boolean(look) && !look!.errorCount && !look!.steps.some((line) => line.startsWith("✕"));
+}
+
+/// Consecutive clean looks as one row: "Opened 4 pages · localhost:56639",
+/// and under it one strip of every picture they took, in order.
+export function pageLookGroup(tools: readonly LookTool[], picture: (id: string) => string | undefined): { verb: string; files: string; durationMs: number; below: string } {
+  const looks = tools.map((tool) => pageLookOutcome(tool.message)).filter((look): look is PageLookOutcome => Boolean(look));
+  const tried = looks.some((look) => look.steps.length);
+  const hosts = [...new Set(looks.map((look) => hostOf(look.url)))];
+  const shots = looks.flatMap((look) => look.pictures.map((p) => {
+    const page = pageName(look.url), short = pagePart(look.url) || captionShort(p.label);
+    const caption = pictureCaption(p.label, page), src = picture(p.id);
+    return `<button type="button" class="pl-shot" data-action="look-picture" data-args="${h(JSON.stringify({ id: p.id, caption }))}" title="${h(caption)}">`
+      + `<img data-picture="${h(p.id)}" alt="${h(caption)}" style="aspect-ratio:${p.width} / ${p.height}"${src ? ` src="${h(src)}"` : ""}><span>${h(short)}</span></button>`;
+  }));
+  return {
+    verb: `${tried ? "Tried" : "Opened"} ${tools.length} pages`,
+    files: hosts.length === 1 ? hosts[0]! : "",
+    durationMs: tools.reduce((sum, tool) => sum + (tool.durationMs ?? 0), 0),
+    below: shots.length ? `<div class="pl-shots">${shots.join("")}</div>` : "",
+  };
+}
+
+const hostOf = (url: string) => { const page = pageName(url); return page.split(/[/?]/)[0] ?? page; };
+/// What tells one page from the next once the host is said: "/login", "?ids=keys,models".
+const pagePart = (url: string) => pageName(url).slice(hostOf(url).length).replace(/^\//, "");
+
 const captionShort = (label: string) => !label || label === "on opening" ? "Opening" : label.replace(/^after /, "After ");
 export const pictureCaption = (label: string, page: string) => `${captionShort(label)} · ${page}`;
 

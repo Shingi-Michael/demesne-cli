@@ -13,7 +13,7 @@ test("finished reads, edits and writes between two commands make one stretch", (
     step("edit_file", { input: { path: "src/host.ts" }, state: "running" }),
   ];
   const groups = stretches(tools);
-  expect(groups.map((group) => group.kind === "stretch" ? group.tools.map((tool) => tool.name) : group.tool.name)).toEqual([
+  expect(groups.map((group) => group.kind === "one" ? group.tool.name : group.tools.map((tool) => tool.name))).toEqual([
     ["read_files", "edit_file"], "run_command", "write_file", "edit_file",
   ]);
 });
@@ -56,4 +56,10 @@ test("a read's paths and a file's name", () => {
   expect(readPaths(step("view_image", { input: {}, detail: "shot.png" }))).toEqual(["shot.png"]);
   expect(fileName("packages/protocol/src/index.ts")).toBe("index.ts");
   expect(fileName("C:\\Users\\shing\\a.ts")).toBe("a.ts");
+});
+
+test("two or more page checks in a row become one looks group; one alone keeps its row", () => {
+  const looks = (tool: { name: string }) => tool.name === "look_at_page";
+  const groups = stretches([step("look_at_page"), step("look_at_page"), step("look_at_page"), step("run_command"), step("look_at_page"), step("read_file"), step("read_file")], 2, looks);
+  expect(groups.map((group) => group.kind === "one" ? group.tool.name : `${group.kind}:${group.tools.length}`)).toEqual(["looks:3", "run_command", "look_at_page", "stretch:2"]);
 });

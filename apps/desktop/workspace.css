@@ -2918,6 +2918,7 @@ html[data-theme="demesne-light"] #desktop-sidebar .agent-face { box-shadow: 0 0 
 .desktop .pl-step.bad .pl-mark { color: var(--bad); }
 .desktop .pl-errors { margin-left: 26px; }
 .desktop .pl-shots { display: flex; gap: 10px; margin: 4px 0 8px 26px; overflow-x: auto; scrollbar-width: none; }
+.desktop .look-group > div > .pl-shots { margin-left: 3px; }
 .desktop .pl-shot { flex: none; display: grid; gap: 4px; padding: 0; border: 0; background: none; color: var(--t3); font-size: 11px; text-align: left; cursor: zoom-in; }
 .desktop .pl-shot img { display: block; height: 120px; max-width: 240px; object-fit: cover; object-position: top; border-radius: 8px; background: var(--tone2); box-shadow: 0 0 0 1px var(--hair2); transition: box-shadow .15s; }
 .desktop .pl-shot:hover img, .desktop .pl-shot:focus-visible img { box-shadow: 0 0 0 1px var(--acc); }

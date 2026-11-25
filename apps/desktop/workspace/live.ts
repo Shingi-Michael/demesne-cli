@@ -45,7 +45,7 @@ import { FoundryChatArtifacts } from "./foundry-inline.ts";
 import { WorkingLine, workingPhrases } from "./working-line.ts";
 import { planLook, planMoved, planOf, planRibbonHTML, UPDATE_PLAN } from "./plan-ribbon.ts";
 import { waitingFor, waitRow } from "./wait-row.ts";
-import { pageLookRow, pageName, showPicture } from "./page-look-row.ts";
+import { cleanLook, pageLookGroup, pageLookRow, pageName, showPicture } from "./page-look-row.ts";
 import { answersAfter, askedIn, askRowHTML } from "./ask-row.ts";
 import { researchRowHTML } from "./research-row.ts";
 import { crewRowHTML } from "./crew-row.ts";
@@ -3406,9 +3406,15 @@ function runHTML(run: WorkspaceRun, index: number) {
         i += themed.length - 1;
         continue;
       }
-      for (const part of stretches(group)) {
+      for (const part of stretches(group, 2, cleanLook)) {
         if (part.kind === "one" && part.tool.name === "start_threads" && part.tool.state === "done") { flush(); body += threadsSlot(part.tool); continue; }
         if (part.kind === "one") { steps += toolRow(run, part.tool); continue; }
+        if (part.kind === "looks") {
+          // Page checks in a row (pass 271): one line, every picture in one strip.
+          const look = pageLookGroup(part.tools, lookPicture), lookKey = `${run.id}:${part.tools[0]!.id}`;
+          steps += `<details class="explored stretch look-group" data-detail="${lookKey}"${detailsOpen.has(lookKey) ? " open" : ""}><summary>${stepIcon(part.tools[0]!)}<span class="verb">${h(look.verb)}</span>${look.files ? `<span class="files">${h(look.files)}</span>` : ""}${CHEVRON}<span class="sp"></span><small class="meta"><span class="success">✓</span> ${duration(look.durationMs)}</small></summary><div>${look.below}</div></details>`;
+          continue;
+        }
         const words = stretchWords(part.tools, (tool) => totals(run, tool as ToolEntry)), first = part.tools[0]!, stretchKey = `${run.id}:${first.id}`;
         const meta = words.changed ? counts(words) : `<span class="success">✓</span> ${duration(words.durationMs)}`;
         steps += `<details class="explored stretch" data-detail="${stretchKey}"${detailsOpen.has(stretchKey) ? " open" : ""}><summary>${stepIconFor(words.changed ? "edit" : "read")}<span class="verb">${h(words.verb)}</span>${words.files ? `<span class="files">${h(words.files)}</span>` : ""}${CHEVRON}<span class="sp"></span><small class="meta">${meta}</small></summary><div>${part.tools.map((tool) => toolRow(run, tool)).join("")}</div></details>`;

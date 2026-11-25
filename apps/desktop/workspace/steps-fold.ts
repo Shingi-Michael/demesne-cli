@@ -18,12 +18,16 @@ export const CHANGE_TOOLS = new Set(["edit_file", "write_file", "move_path", "de
 export const inStretch = (tool: Step) =>
   tool.state === "done" && !tool.waiting && !tool.drafting && !tool.repo && (LOOK_TOOLS.has(tool.name) || CHANGE_TOOLS.has(tool.name));
 
-export type StepGroup<T> = { kind: "one"; tool: T } | { kind: "stretch"; tools: T[] };
+export type StepGroup<T> = { kind: "one"; tool: T } | { kind: "stretch"; tools: T[] } | { kind: "looks"; tools: T[] };
 
 /// Consecutive steps that can hide become one stretch, from `min` of them.
-export function stretches<T extends Step>(tools: readonly T[], min = 2): StepGroup<T>[] {
+/// Consecutive page checks that `looks` accepts become one looks group.
+export function stretches<T extends Step>(tools: readonly T[], min = 2, looks: (tool: T) => boolean = () => false): StepGroup<T>[] {
   const groups: StepGroup<T>[] = [];
   for (let i = 0; i < tools.length; i++) {
+    let k = i;
+    while (k < tools.length && looks(tools[k]!)) k++;
+    if (k - i >= 2) { groups.push({ kind: "looks", tools: tools.slice(i, k) }); i = k - 1; continue; }
     let j = i;
     while (j < tools.length && inStretch(tools[j]!)) j++;
     if (j - i >= min) { groups.push({ kind: "stretch", tools: tools.slice(i, j) }); i = j - 1; }

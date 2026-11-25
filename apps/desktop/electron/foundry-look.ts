@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DESIGN_MEASURE, LOOK_MEASURE, type DesignMeasure, type LookMeasure } from "./foundry-look-measure.ts";
+import { specMeasure, type SpecMeasure } from "./foundry-spec-measure.ts";
 import { FOUNDRY_CSP, FOUNDRY_KIT, foundryDocument, foundryKitFile, usesRemember, withPictures, withRemember, withShots } from "./policy.ts";
 import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryPlan, type TryResult, type TryStep, type TryStepResult } from "./foundry-try.ts";
 
@@ -18,8 +19,9 @@ import { changed, stepName, TRY_RUNTIME, TRY_WIDTHS, type Fingerprint, type TryP
 /// phone: the page is a phone screen (surface phone), looked at at a phone's width instead of the desktop's.
 /// option: only that option of the page is drawn, as on Foundry's long page.
 /// shots: the real pictures the page shows (<d-shot>, pass 240 A), by id, base64.
-export interface LookJob { kind: string; source: string; title: string; phone?: boolean; option?: number; try?: TryPlan; url?: string; shots?: Record<string, { data: string; mimeType: string; width: number; height: number; scale: number }> }
-export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure }
+export interface LookJob { kind: string; source: string; title: string; phone?: boolean; option?: number; spec?: { parts?: { name: string; at?: string }[] }; try?: TryPlan; url?: string; shots?: Record<string, { data: string; mimeType: string; width: number; height: number; scale: number }> }
+/// spec: what the page measures, for a hand-off (piece 7 of pass 274, foundry-spec-measure.ts); only when the job asks.
+export interface LookPage extends LookMeasure { png: string; design?: DesignMeasure; spec?: SpecMeasure }
 export interface LookResult { pages: LookPage[]; errors: string[] }
 
 /// The job file a `--foundry-look=` argument names, or null.
@@ -87,11 +89,12 @@ export function runFoundryLook(path: string) {
         await settle(400);
         const measured = await contents.executeJavaScript(LOOK_MEASURE) as LookMeasure;
         const design = await contents.executeJavaScript(DESIGN_MEASURE).catch(() => undefined) as DesignMeasure | undefined;
+        const spec = job.spec ? await contents.executeJavaScript(specMeasure(Array.isArray(job.spec.parts) ? job.spec.parts : [])).catch(() => undefined) as SpecMeasure | undefined : undefined;
         const height = Math.min(Math.max(view.height, measured.height), view.maxHeight);
         if (height !== view.height) { win.setContentSize(view.width, height); await settle(350); }
         let image = await contents.capturePage({ x: 0, y: 0, width: view.width, height });
         if (image.getSize().width > view.scaleTo) image = image.resize({ width: view.scaleTo, quality: "good" });
-        pages.push({ ...measured, ...(design ? { design } : {}), png: image.toPNG().toString("base64") });
+        pages.push({ ...measured, ...(design ? { design } : {}), ...(spec ? { spec } : {}), png: image.toPNG().toString("base64") });
       } catch (error) {
         errors.push(`Could not render at ${view.width}px: ${error instanceof Error ? error.message : String(error)}`);
       } finally { win.destroy(); }

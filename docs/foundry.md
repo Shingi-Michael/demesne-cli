@@ -413,6 +413,33 @@ Read about it:
 - [ZIP file format, Wikipedia](https://en.wikipedia.org/wiki/ZIP_(file_format)): the container all three share.
 - [webContents.capturePage, Electron](https://www.electronjs.org/docs/latest/api/web-contents#contentscapturepagerect-opts): how the picture of a page is taken.
 
+## A measured hand-off
+
+"Build it" used to hand the chat a picture and the mockup's source, and the build came out close: a button a little short, a gap of 20 where the mockup had 24, the project's green typed again as a hex. Now a build starts from numbers (piece 7 of pass 274). Before it writes any code, the chat reads the mockup's **spec**: Foundry draws the mockup once more off screen, at the width it was designed for, and measures it.
+
+What the spec holds, for the page or for the one option you picked:
+
+- **The page**: its size, ground, text colour and body type.
+- **Colours**, each with what it is used for (ground, surface, button, text, line). A colour your project already has a name for is given by that name: `#0b6e4f (= brand)`, or `≈ brand` when it is a shade off, so the build uses the project's token and not a new hex.
+- **Type**: every style in use (family, size, weight, line height) with a sample of the words set in it.
+- **Spacing and corners**: the steps the page keeps to.
+- **Each part the walkthrough names**: where it sits, how big it is, its words, type, colours, padding, corners, gap and layout. `Book button: <button> 133×44 at 96,230, 600 16px/24px Georgia, ground #0b6e4f (= brand), padding 10px 20px, corners 10px`.
+- **The words**, in reading order, so copy is carried over and not retyped from a picture.
+- **How it moves**: every transition and animation the page's own rules set, with what changes, how long and which easing.
+- **Your project's parts**: the components the project already has (Button, SlotPicker, …), with the rule to build with those and write a new one only where none fits.
+
+There is nothing to press: say "build it" or "build the second one" in the chat. Once the build runs, the chat still looks at it and puts it beside the mockup, as before (Built like the mockup, above).
+
+For the curious: the chat calls `foundry_read` with `spec: true` (and `option` when the mockup has several). The measuring runs in the drawn page ([foundry-spec-measure.ts](../apps/desktop/electron/foundry-spec-measure.ts)) and the daemon words it and names the tokens ([foundry-spec.ts](../apps/daemon/src/foundry-spec.ts)). Without the desktop app nothing can be drawn, so the read says so and the build goes from the source.
+
+- `bun test apps/daemon/test/foundry-spec.test.ts` checks the wording, the token names and the refusals; `apps/desktop/test/foundry-spec.dom.test.ts` measures a page in a browser (`DEMESNE_DOM_TESTS=1`); `xvfb-run -a bun scripts/check-foundry-spec.ts` does the whole thing through the real app.
+
+Read about it:
+- [Design handoff, Figma](https://www.figma.com/resource-library/design-handoff/): what a hand-off is and what goes wrong without measurements.
+- [Window.getComputedStyle, MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/getComputedStyle): how a page's real sizes and colours are read after it is drawn.
+- [Element.getBoundingClientRect, MDN](https://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect): how a part's place and size are measured.
+- [Design tokens, W3C community group](https://www.designtokens.org/): why a named colour beats a hex typed again.
+
 ## Taste that carries over
 
 What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.

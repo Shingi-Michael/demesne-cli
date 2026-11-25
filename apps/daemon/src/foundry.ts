@@ -16,6 +16,7 @@ import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
 import { learnedIn } from "./design-guide.ts";
 import { loadProjectLook, nearest, offLook } from "./project-look.ts";
+import { readSpec } from "./foundry-spec.ts";
 import { called, rewriteCalled } from "./tool-search.ts";
 
 // Foundry stores artifacts in Demesne, so these tools need no project folder.
@@ -920,17 +921,17 @@ const stageRead = (found: FoundryArtifactDetail) => {
 };
 
 /// Pass 241 A: what a read says about building the mockup it returns.
-export const BUILD_CHECK = "Once it runs in the project, look at it (look_at_page, capture_window) and compare with foundry_built before you answer.";
+export const BUILD_CHECK = "Before you build, read it again with spec: true and build to those numbers. Once it runs in the project, look at it (look_at_page, capture_window) and compare with foundry_built before you answer.";
 const BUILT_READ = "The record of a build, written by foundry_built: the pick beside what was built. It is not edited.";
 
-export function foundryReadTool(store: DemesneStore): AgentTool {
+export function foundryReadTool(store: DemesneStore, look?: FoundryLook): AgentTool {
   return {
     definition: {
       name: "foundry_read",
-      description: "List Foundry artifacts (no id; query searches), the parts catalogue (id \"kit:parts\"), or read one's current source (or a version) with the version number you pass as base_version to foundry_edit or foundry_save. A read also gives the notes the person pinned on it in Foundry and has not sent yet (their comments).",
+      description: "List Foundry artifacts (no id; query searches), the parts catalogue (id \"kit:parts\"), or read one's current source (or a version) with its version (the base_version for foundry_edit or foundry_save). A read includes their unsent pinned notes. spec: true measures a mockup to build from.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "string" }, version: { type: "integer", minimum: 1 }, query: { type: "string" } },
+        properties: { id: { type: "string" }, version: { type: "integer", minimum: 1 }, query: { type: "string" }, spec: { type: "boolean" }, option: { type: "string" } },
         additionalProperties: false,
       },
     },
@@ -945,6 +946,7 @@ export function foundryReadTool(store: DemesneStore): AgentTool {
       const found = store.getFoundryArtifact(args.id, typeof args.version === "number" ? args.version : undefined);
       if (!found) throw new Error("[not_found] No such Foundry artifact or version. Hint: call foundry_read without id to list them");
       remember(context.turnId, found.id, found.version);
+      if (args.spec === true) return readSpec(look, found, args.option, context, await lookShots(store, found.id));
       return JSON.stringify({ id: found.id, title: found.title, kind: found.kind, version: found.version, description: found.description,
         ...(found.basedOn ? { basedOn: found.basedOn } : {}), ...(found.built ? { built: BUILT_READ } : found.kind !== "markdown" ? { if_you_build_it: BUILD_CHECK } : {}),
         ...briefOf(found), ...(STYLES_PAGE.test(found.source) ? { styles: styleNames(found.source), styles_rule: stylesKeep(found.id) } : {}), ...likedOf(store, found.id), ...(found.built ? {} : tasteOf(store, found.id, store.foundryLikes(found.id).length > 0)), ...waitingOf(store, found.id), ...stageRead(found), ...walkRead(found), source: found.source, ...(found.files ? { files: found.files } : {}),

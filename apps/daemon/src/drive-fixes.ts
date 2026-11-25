@@ -225,10 +225,18 @@ export class DriveFixes {
     const workspace = this.fixes.find((fix) => fix.thread && fix.from === from)?.workspace;
     // Whoever is looking at the threads is how they get looked over.
     if (workspace) void this.noticeMerged(workspace);
+    // A working thread whose chat is gone never comes back: it stops, so the
+    // person can try it again or delete it.
+    for (const fix of this.fixes) if (fix.thread && fix.from === from && this.orphaned(fix)) this.fail(fix, new Error("Its chat is gone, so it can't finish."));
     return workspace ? this.list(workspace).filter((fix) => fix.thread && fix.from === from) : [];
   }
 
   get(id: string) { return this.fixes.find((fix) => fix.id === id); }
+
+  /// Running, but its turn (and the chat it was in) no longer exists.
+  private orphaned(fix: DriveFix) {
+    return fix.status === "running" && Boolean(fix.turnId) && !this.host.turn(fix.turnId!);
+  }
 
   /// Waits for a running fix to finish (tests and shutdown).
   async settled(id: string) { await this.done.get(id); }
@@ -646,7 +654,13 @@ export class DriveFixes {
     }
     const before = fix.status;
     if (action === "discard") {
-      if (fix.status === "running" && fix.turnId) { this.host.cancel(fix.turnId); await this.done.get(id); }
+      if (fix.status === "running" && fix.turnId) {
+        // A turn whose chat is gone can't be cancelled or waited for: delete anyway.
+        const live = this.host.turn(fix.turnId);
+        try { this.host.cancel(fix.turnId); } catch { /* already gone */ }
+        const settling = this.done.get(id);
+        if (live && settling) await Promise.race([settling, new Promise((resolve) => setTimeout(resolve, 10_000))]);
+      }
       await this.cleanup(fix, true);
       Object.assign(fix, { status: "discarded", finishedAt: fix.finishedAt ?? new Date().toISOString() });
       this.archive(fix);

@@ -39,6 +39,7 @@ import { routeInspection } from "./inspection-commands.ts";
 import { checkArgs, clip as clipSessionOutput, describe, fill, parseVariant, SESSION_TOOLS, sessionToolsDefinition, stepData, type SessionToolStore } from "./session-tools.ts";
 import { parseSubagentInput, runSubagent, SUBAGENT_TOOL, subagentDefinitionFor, type SubagentModel } from "./subagent.ts";
 import { parseResearchInput, RESEARCH_TOOL, researchDefinition, runResearch } from "./research.ts";
+import { drawSystem, drawWithModels, modelsDefinitionFor, MODELS_TOOL, parseModelsInput } from "./foundry-models.ts";
 import { agentIdOf, subagentStep, type AgentId } from "./agent-cli.ts";
 import { agentName, HANDOFF_TOOL, handoffDefinition, handoffResult, parseHandoffInput, type Handoffs } from "./handoff.ts";
 import { grounded, jobKind, pickAgent, type JobKind, type RouteBook } from "./subagent-route.ts";
@@ -337,6 +338,11 @@ export class AgentEngine {
     if (definitions.some((definition) => definition.name === SUBAGENT_TOOL)) definitions.push(agentsDefinition);
     // Deep research wherever the web is: the chat plans, agents read, a judge checks.
     if (!themefy && !assistant && definitions.some((definition) => definition.name === "web_search")) definitions.push(researchDefinition);
+    // Piece 3 of pass 274, every model draws it: wherever Foundry is and another model is connected.
+    if (!themefy && !assistant && this.options.inferenceFor && definitions.some((definition) => definition.name === "foundry_save")) {
+      const everyModel = modelsDefinitionFor(this.drawingModels(), inference.modelId);
+      if (everyModel) definitions.push(everyModel);
+    }
     // Orchestrate mode: the chat reads, plans and runs threads; the threads change the files.
     const orchestrating = !themefy && !assistant && Boolean(session.workspace) && this.store.isSessionOrchestrate(session.id);
     if (orchestrating) for (let index = definitions.length - 1; index >= 0; index--) if (!ORCHESTRATE_TOOL_NAMES.has(definitions[index]!.name)) definitions.splice(index, 1);
@@ -1057,6 +1063,52 @@ export class AgentEngine {
     }
   }
 
+  /// The models that can draw a mockup: every connected model, not the agent tools on this machine (they change files, they don't answer with a page).
+  private drawingModels(): SubagentModel[] {
+    return (this.options.subagentModels?.() ?? []).filter((model) => !model.id.startsWith("agent:"));
+  }
+
+  /// foundry_models (piece 3 of pass 274): the brief goes to each other
+  /// model at once, each on its own provider's queue; their drawings and the
+  /// chat's own become tabs of one mockup, saved through foundry_save so
+  /// every check a mockup gets still runs.
+  private async executeFoundryModels(toolCallId: string, input: unknown, workspaceRoot: string, turnId: string, sessionId: string,
+    inference: TurnInference, signal: AbortSignal): Promise<string> {
+    const fail = (error: unknown) => {
+      const result = `Error: ${error instanceof Error ? error.message : "every model draws it failed"}`;
+      this.store.settleToolCall(toolCallId, "failed", result);
+      return result;
+    };
+    let parsed: ReturnType<typeof parseModelsInput>;
+    try { parsed = parseModelsInput(input, this.drawingModels(), inference.modelId); } catch (error) { return fail(error); }
+    const save = this.tools.get("foundry_save");
+    if (!save || !this.options.inferenceFor) return fail(new Error("[unavailable] Foundry is not available in this chat"));
+    const system = drawSystem(designGuideBlock(loadDesignGuides(workspaceRoot, this.options.designHome), undefined, loadProjectLook(workspaceRoot)));
+    this.store.startToolCall(toolCallId);
+    try {
+      const text = await drawWithModels(parsed, inference.modelId, {
+        draw: (model, prompt) => {
+          const delegate = this.options.inferenceFor!(model.id, false);
+          return runSubagent({ prompt, workspaceRoot, sessionId, turnId, tools: this.tools, inference: delegate, cacheKey: `${sessionId}:${toolCallId}:${model.id}`,
+            scheduler: this.scheduler.for(delegate.providerId), signal, limits: this.options, system, toolNames: new Set(), progress: () => {} });
+        },
+        save: async (source, walkthrough) => {
+          const made = { kind: "html", title: parsed.title, description: parsed.description, source, note: "Every model's take",
+            why: { direction: `One brief, drawn by ${walkthrough.length} models at the same time.`, look_at: "How the takes differ: each tab is one model's answer.", starts_from: "new", followed: "none", walkthrough } };
+          const context = { workspaceRoot, sessionId, turnId, signal };
+          // The once-per-ask notes a mockup gets (the project's look, learned taste) are for the chat's model; the others can't act on them, so the save goes through on the second try.
+          try { return await save.execute(made, context); }
+          catch (error) { if (!(error instanceof Error) || !/^\[(look|taste)\]/.test(error.message)) throw error; return save.execute(made, context); }
+        },
+      });
+      this.store.settleToolCall(toolCallId, "completed", text);
+      return text;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return fail(error);
+    }
+  }
+
   /// hand_off: one of your agent tools makes a change in its own worktree.
   /// It needs no approval: nothing reaches your files until you bring it in
   /// on its card. Its steps stream like a sub-agent's, under "agent:<id> · ".
@@ -1297,6 +1349,10 @@ export class AgentEngine {
       : this.executeSubagent(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
     if (call.name === AGENTS_TOOL) return this.runAgents(toolCallId, input, turnId, signal);
     if (call.name === RESEARCH_TOOL && inference) return this.executeResearch(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
+    if (call.name === MODELS_TOOL && inference) {
+      if (planOnly) { const result = "Error: foundry_models is not available in plan mode"; this.store.settleToolCall(toolCallId, "denied", result); return result; }
+      return this.executeFoundryModels(toolCallId, input, workspaceRoot, turnId, sessionId, inference, signal);
+    }
     if (call.name === SESSION_TOOLS) return this.executeSessionTool(toolCallId, call, input, permissionMode, workspaceRoot, turnId, sessionId, signal, planOnly, imageArtifactIds, inference);
     // ls, cat, grep… through run_command: answered by the built-in read tool
     // when equivalent (no approval, no host process), or pointed at it.

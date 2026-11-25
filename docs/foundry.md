@@ -342,6 +342,21 @@ Read about it:
 - [Wizards: definition and design recommendations, Nielsen Norman Group](https://www.nngroup.com/articles/wizards/): one decision per screen, and telling people where they are.
 - [Using custom elements, MDN](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements): how a tag like `<d-flow>` draws itself.
 
+## Every model draws it
+
+Demesne runs every model you have connected, so one design ask can go to several of them at once (piece 3 of pass 274). Ask for it in words: "have every model draw the booking page", "what would another model make of this". It is never done unasked, because it costs a full model run for each model.
+
+- **What happens.** The chat's model draws its own take, then calls `foundry_models` with that take and a brief. Up to three other models, by default one from each other provider you have connected, each draw one take at the same time. They see the brief and the design guide and nothing of the chat, so their answers are their own.
+- **What comes back.** One mockup, with a tab per model, named by the model and the shape of its take ("GPT-6.2 · Slots first"). Each tab has its walkthrough. A model that failed or answered with something unusable is left out and named in the result; the mockup is saved with whoever drew.
+- **Why the takes don't bleed into each other.** Each model writes a page of its own with its own stylesheet. Foundry wraps every stylesheet in `@scope` under its tab (`scopedCSS` in [foundry-models.ts](../apps/daemon/src/foundry-models.ts)), so one model's `:root{--accent}` or `h1` rule can't reach another's tab.
+- **The same checks.** The assembled mockup is saved through `foundry_save`, so the project's look, your taste and the walkthrough rules apply to it like to any mockup.
+- **Where it runs.** The engine runs the other models itself (`executeFoundryModels` in [engine.ts](../apps/daemon/src/engine.ts)), each with no tools. Command-line agents in the sidebar are not asked; only models Demesne calls directly.
+
+Read about it:
+- [@scope, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/@scope): how a stylesheet is kept to one part of a page.
+- [Parallel and iterative design, Nielsen Norman Group](https://www.nngroup.com/articles/parallel-and-iterative-design/): why several independent takes on one brief beat refining a single one.
+- [Promise.allSettled(), MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled): how several asks run at once and one failure doesn't sink the rest.
+
 ## Taste that carries over
 
 What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.

@@ -194,7 +194,7 @@ function backgroundNames(run: WorkspaceRun, ids: unknown): string {
 /// A step's target in a few words: a file's name, a command's program, a page's title.
 function stepTarget(tool: ToolEntry) {
   if (tool.name === "run_command") return (tool.detail ?? "").replace(/^\$\s*/, "").replace(/^\S*\//, "");
-  if (tool.name === "foundry_save" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
+  if (tool.name === "foundry_save" || tool.name === "foundry_models" || tool.name === "foundry_edit") return typeof tool.input.title === "string" ? tool.input.title : "";
   if (tool.name === "read_files") { const paths = readPaths(tool); return paths.length > 1 ? `${paths.length} files` : fileName(paths[0] ?? tool.detail ?? ""); }
   if (tool.name === "remember") return typeof tool.input.rule === "string" ? tool.input.rule : "";
   if (tool.name === "run_tests") { const files = Array.isArray(tool.input.files) ? tool.input.files.map((file) => String(file).split("/").at(-1)) : []; return [files.length > 2 ? `${files.length} files` : files.join(", "), typeof tool.input.name === "string" ? `“${tool.input.name}”` : ""].filter(Boolean).join(" ") || "all tests"; }
@@ -333,6 +333,7 @@ const verb = (tool: ToolEntry) =>
     start_threads: "Started threads",
     message_thread: "Told",
     foundry_save: "Made",
+    foundry_models: "Every model drew",
     foundry_edit: "Changed",
     foundry_read: "Looked in Foundry",
     use_skill: "Using skill",
@@ -2745,6 +2746,7 @@ function toolTarget(run: WorkspaceRun, tool: ToolEntry) {
     return first ? `${h(first)}${asked.length > 1 ? `<span class="muted"> · ${asked.length - 1} more</span>` : ""}` : "";
   }
   if (tool.name === "foundry_save") return h(String(tool.input.title || (tool.input.id ? "a new version" : "an artifact")));
+  if (tool.name === "foundry_models") { const n = Array.isArray(tool.input.models) ? tool.input.models.length : 0; return h(`${String(tool.input.title || "a mockup")}${n ? ` · with ${n} other ${n === 1 ? "model" : "models"}` : " · with your other models"}`); }
   if (tool.name === "foundry_edit") { const n = Array.isArray(tool.input.edits) ? tool.input.edits.length : 0; return h(String(tool.input.title || (n ? `${n} edit${n === 1 ? "" : "s"}` : "an artifact"))); }
   if (tool.name === "foundry_read") return "";
   if (tool.name === "read_source") return h(sourceName(tool));
@@ -3052,7 +3054,7 @@ function toolRow(run: WorkspaceRun, tool: ToolEntry) {
     : "";
   // Something made in Foundry opens from its step.
   // Only once the turn is over, like the chip: never while it is still being made.
-  const made = (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done" && !active(run)
+  const made = (tool.name === "foundry_save" || tool.name === "foundry_models" || tool.name === "foundry_edit") && tool.state === "done" && !active(run)
     ? btn("foundry-open-step", "Open ›", { id: tool.input.id ?? null, title: tool.input.title ?? null, message: tool.message ?? null }, "fd-step-open")
     : "";
   // A commit or a merge draws the tree under its step (repo-flow.ts); the
@@ -3330,7 +3332,7 @@ function requestText(content: string) {
 const PASTE_ICON = '<span class="pc-ic" aria-hidden="true">TXT</span>';
 const PARTS_ICON = '<span class="pc-ic" aria-hidden="true">⌖</span>';
 /// The Foundry steps that make or change a page.
-const FOUNDRY_WORK = new Set(["foundry_save", "foundry_edit", "foundry_read", "foundry_try"]);
+const FOUNDRY_WORK = new Set(["foundry_save", "foundry_models", "foundry_edit", "foundry_read", "foundry_try"]);
 function runHTML(run: WorkspaceRun, index: number) {
   const rewound = rewoundBy(run);
   if (rewound) return rewindLine(rewound);
@@ -4799,7 +4801,7 @@ function openPage(kind: "" | PageKind) {
 }
 /// Foundry saves seen in this window's chats: a new one refreshes the page.
 function foundrySaveCount() {
-  return (state?.runs ?? []).reduce((count, run) => count + tools(run).filter((tool) => (tool.name === "foundry_save" || tool.name === "foundry_edit") && tool.state === "done").length, 0);
+  return (state?.runs ?? []).reduce((count, run) => count + tools(run).filter((tool) => (tool.name === "foundry_save" || tool.name === "foundry_models" || tool.name === "foundry_edit") && tool.state === "done").length, 0);
 }
 async function loadFoundry() {
   try {

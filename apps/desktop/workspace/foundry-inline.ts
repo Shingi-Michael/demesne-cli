@@ -19,7 +19,7 @@ export interface ChatArtifact { id: string; title: string; kind: FoundryKind; ve
 export function chatArtifacts(entries: readonly Pick<ToolEntry, "name" | "state" | "message">[]): ChatArtifact[] {
   const saved = new Map<string, ChatArtifact>();
   for (const entry of entries) {
-    if ((entry.name !== "foundry_save" && entry.name !== "foundry_edit" && entry.name !== "foundry_built") || entry.state !== "done" || !entry.message) continue;
+    if ((entry.name !== "foundry_save" && entry.name !== "foundry_models" && entry.name !== "foundry_edit" && entry.name !== "foundry_built") || entry.state !== "done" || !entry.message) continue;
     try {
       const value = JSON.parse(entry.message);
       if (!value || typeof value.id !== "string" || !/^[\w-]{1,200}$/.test(value.id)

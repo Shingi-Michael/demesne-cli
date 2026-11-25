@@ -1,7 +1,7 @@
 /// Pass 273 A: Foundry's front page, a card for everything made, pinned first.
 import { expect, test } from "bun:test";
 import type { FoundryArtifact, FoundryShelfVersion } from "@demesne/protocol";
-import { ago, galleryGrid, galleryItems, galleryPage, oneHead, projectName, thumbHTML, type GalleryView } from "../foundry-gallery.ts";
+import { ago, galleryGrid, galleryItems, galleryPage, pageHead, projectName, thumbHTML, type GalleryView } from "../foundry-gallery.ts";
 import { foundryPage } from "../foundry-page.ts";
 
 const at = (hours: number) => new Date(Date.parse("2026-11-24T20:00:00Z") - hours * 3_600_000).toISOString();
@@ -68,13 +68,11 @@ test("a card's picture is the newest page, drawn small with no demo or input; a 
   expect(thumbHTML(list[1]!, list[1]!.updatedAt)).toContain('class="fd-doc markdown fg-doc" data-md="soil:1"');
 });
 
-test("one mockup's long page shows only its versions, under the line back", () => {
-  const head = oneHead(list[0]!, false, false);
-  expect(head).toContain('data-action="foundry-home"');
-  const html = foundryPage({ list, versions, error: "", chatTitle: () => null, only: "plans", head });
-  expect(html).toContain("← Foundry");
+test("opened from the front page, the long page keeps every mockup under the line back", () => {
+  const html = foundryPage({ list, versions, error: "", chatTitle: () => null, head: pageHead() });
+  expect(html).toContain('data-action="foundry-home"');
   expect(html).not.toContain(">Foundry</h1>");
-  expect(html.match(/class="fd-item/g)?.length).toBe(1);
+  expect(html.match(/class="fd-item/g)?.length).toBe(versions.length);
   expect(html).toContain('data-fd="plans:1"');
 });
 

@@ -83,9 +83,7 @@ export interface FoundryView {
   changed?: ReadonlySet<string>;
   /// Pass 262 C: the one mockup you opened, grown to full width where it sits.
   open?: FoundryOpen | null;
-  /// Pass 273 A: the long page for this one mockup, opened from its card,
-  /// under `head` (the line back to the front page) in place of the title.
-  only?: string | null;
+  /// Opened from the front page, the long page has `head` (the line back) in place of the title.
   head?: string;
 }
 
@@ -237,14 +235,13 @@ const clock = (date: string) => new Date(date).toLocaleTimeString([], { hour: "2
 
 /// The long page: every version, newest first, under the day it was made.
 /// The day stays at the top as you scroll.
-/// Where an opened mockup's line goes when the page's head row takes its place.
-const HELD = "\u0001held-head\u0001";
 export function foundryPage(view: FoundryView) {
   const { list, versions } = view;
   const title = (view.head ?? `<h1 class="cp-title fd-h">Foundry</h1>`) + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "");
   if (list === null || versions === null) return title + '<p class="cp-empty">Reading Foundry…</p>';
   const byId = new Map(list.map((item) => [item.id, item]));
-  const shown = versions.filter((item) => byId.has(item.artifactId) && (!view.only || item.artifactId === view.only));
+  // Every mockup, newest first: a new one adds to the page, it never replaces what is there (Mike, 2026-11-25).
+  const shown = versions.filter((item) => byId.has(item.artifactId));
   if (!shown.length) return title + `<div class="fd-empty">${icon('<path d="M4 15h16l-2 5H6z"/><path d="M8 15V9h8v6M10 9V5h4v4"/>')}<b>Nothing made yet</b><span>Ask for a mockup in any chat. It lands here, and every version is kept.</span></div>`;
   const days = shelfDays(shown);
   const built = builtVersions(shown, view.builtIn);
@@ -297,20 +294,10 @@ export function foundryPage(view: FoundryView) {
     // Opened, the design comes straight under its one head line: what was asked, what it is and why it looks so
     // move under the design, above its walkthrough, with the version's own line.
     const story = `${asked}${words}${because}`;
-    // One mockup on its own page, opened: the page's one head row becomes its line (below), so the design starts right under it.
-    if (open && view.only) heldHead = { ln: `<span class="fd-ln-r">${artifact.built ? "Built" : h(KIND_WORD[artifact.kind])} · ${h(clock(version.createdAt))}</span>`, rest: `${chat ? `<span class="fg-from">from ${link("select-session", { id: version.sessionId }, `“${h(chat)}”`, "Open the chat")}</span>` : ""}${openHead(open, versionsOf(shown, artifact.id), artifact.kind)}` };
-    return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${open && view.only ? HELD : line}${open ? "" : `${story}${ver}`}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}${open ? `<div class="fd-story">${ver}${story}</div>` : ""}${open && open.code !== undefined ? "" : walkHTML(why?.walk, artifact.title)}</section>`;
+    return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${line}${open ? "" : `${story}${ver}`}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}${open ? `<div class="fd-story">${ver}${story}</div>` : ""}${open && open.code !== undefined ? "" : walkHTML(why?.walk, artifact.title)}</section>`;
   };
-  // One mockup on its own page: no day to sort it under.
-  let heldHead: { ln: string; rest: string } | null = null;
-  const items = days.map((day) => `${view.only ? "" : `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>`}${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
-  if (!heldHead) return title + items;
-  // Opened, the page's head row (foundry-gallery.ts oneHead) is the mockup's own line: its kind and time after the
-  // name, its project (the kind is said once), where it is from, then its controls before the pin.
-  const { ln, rest } = heldHead as { ln: string; rest: string };
-  const head = (view.head ?? "").replace('<div class="fg-one">', '<div class="fg-one fd-ln">').replace("</h1>", `</h1>${ln}`)
-    .replace(/<span class="fg-meta">[^<·]*· /, '<span class="fg-meta">').replace('<button type="button" class="fg-pin', `${rest}<button type="button" class="fg-pin`);
-  return (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + items.replace(HELD, head);
+  const items = days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
+  return title + items;
 }
 
 /// The page's days, newest first, each with its versions in page order.

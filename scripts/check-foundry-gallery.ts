@@ -2,7 +2,8 @@
  * sidebar it shows a card with a picture of everything made, newest first;
  * the search finds a mockup by a word only its page shows; This project,
  * Pinned and Shared filter the cards; a pin keeps a card on top and is kept
- * on disk; a card opens the long page for that one mockup, with a line back.
+ * on disk; a card opens the long page of everything made at that mockup, grown
+ * and scrolled to, with a line back (a new mockup adds to the page, Mike 2026-11-25).
  * Run after `bun scripts/prepare-desktop.ts`, under xvfb-run -a. */
 import { _electron as electron, type Page } from "playwright";
 import assert from "node:assert/strict";
@@ -105,23 +106,23 @@ try {
   await app.screenshot({ path: "output/foundry-gallery-pinned.png" });
   console.log("PASS: Shared, This project and Pinned filter the cards; a pin keeps a card on top and is kept.");
 
-  // A card opens that mockup's own long page, with a line back to the front page.
+  // A card opens the long page of everything made at that mockup, grown, with a line back to the front page.
   await app.locator("#page .fg-card").filter({ hasText: "Plans page" }).locator(".fg-go").click();
-  await app.locator(`#page [data-fd="${ids["Plans page"]}:1"]`).waitFor();
-  assert.equal(await app.locator("#page .fd-item").count(), 1);
-  assert.equal(await app.locator("#page .fg-one h1").textContent(), "Plans page");
+  await app.locator(`#page [data-fd="${ids["Plans page"]}:1"].fd-open`).waitFor();
+  assert.ok(await app.locator("#page .fd-item").count() > 1, "every mockup is on the page, not only the one opened");
+  assert.equal(await app.locator("#page .fg-one h1").textContent(), "Everything made");
   await app.waitForTimeout(600);
   await app.screenshot({ path: "output/foundry-gallery-one.png" });
   await app.locator("#page .fg-back").click();
   await step(116, async () => await cards.count() === 3);
-  console.log("PASS: a card opens the long page for that one mockup, and the line goes back.");
+  console.log("PASS: a card opens the long page at that mockup, with every other mockup on it, and the line goes back.");
 
-  // A link in a chat still opens the mockup's own page.
+  // A link in a chat opens the long page at that mockup too.
   await app.locator('[data-action="page-open"][data-args*="foundry"]').first().click();
   await app.locator("#conversation .fd-chip").filter({ hasText: "Trail cards" }).click();
-  await app.locator(`#page [data-fd="${ids["Trail cards"]}:1"]`).waitFor();
-  assert.equal(await app.locator("#page .fd-item").count(), 1);
-  console.log("PASS: a link in the chat opens that mockup's own page.");
+  await app.locator(`#page [data-fd="${ids["Trail cards"]}:1"].fd-open`).waitFor();
+  assert.ok(await app.locator("#page .fd-item").count() > 1);
+  console.log("PASS: a link in the chat opens the long page at that mockup.");
   // Step 2: a kind starts a new chat in this project with its words ready, and nothing runs until you send.
   await app.locator("#page .fg-back").click();
   await app.locator("#page .fg-mk").first().waitFor();

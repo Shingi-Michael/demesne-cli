@@ -167,10 +167,8 @@ export function galleryPage(view: GalleryView, error = "") {
   return head + make + chips + `<div id="fg-cards">${galleryGrid(view)}</div>`;
 }
 
-/// The long page for one mockup: a line back to the front page, its name,
-/// where it is from, and its pin.
-export function oneHead(item: FoundryArtifact, pinned: boolean, shared: boolean) {
-  // One row: the way back, the name and where it is from, and the pin; the design starts right under it.
-  return `<div class="fg-one"><button type="button" class="fg-back" data-action="foundry-home">← Foundry</button><h1 class="cp-title fd-h">${h(item.title)}</h1><span class="fg-meta">${h(kindWord(item))} · ${h(projectName(item.workspace))}${shared ? " · Shared" : ""}</span>`
-    + `<button type="button" class="fg-pin${pinned ? " on" : ""}" ${act("foundry-pin", { id: item.id, pinned: !pinned })} aria-pressed="${pinned}" aria-label="${pinned ? "Unpin" : "Pin to the top"}" title="${pinned ? "Unpin" : "Pin to the top"}">${PIN}</button></div>`;
+/// The long page, opened from a card or a chat's link: a line back to the front page over every mockup made,
+/// newest first, so a new one adds to the page and the one you opened is scrolled to.
+export function pageHead() {
+  return `<div class="fg-one"><button type="button" class="fg-back" data-action="foundry-home">← Foundry</button><h1 class="cp-title fd-h">Everything made</h1></div>`;
 }

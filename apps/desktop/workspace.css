@@ -1935,6 +1935,17 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fn-keys kbd, .fd-notes kbd { font: inherit; color: var(--t2); }
 .fd-notes { display: flex; align-items: center; gap: 9px; min-height: 19px; margin: 8px 2px 0; color: var(--t2); font-size: 12.5px; line-height: 19px; }
 .fd-notes[hidden] { display: none; }
+/* Piece 5 of pass 274, knobs: a quiet row of sliders over the opened mockup, one per value the page named. Grey; no colour. */
+.fd-knobs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 26px; margin: 8px 2px 12px; color: var(--t2); font-size: 12.5px; line-height: 19px; }
+.fd-knob { display: inline-flex; align-items: center; gap: 9px; }
+.fd-knob output { min-width: 42px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.fd-knob input[type=range] { -webkit-appearance: none; appearance: none; width: 132px; height: 16px; margin: 0; background: transparent; cursor: pointer; }
+.fd-knob input[type=range]::-webkit-slider-runnable-track { height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--t2) 34%, transparent); }
+.fd-knob input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: var(--t1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--t1) 0%, transparent); transition: box-shadow .15s; }
+.fd-knob input[type=range]:hover::-webkit-slider-thumb, .fd-knob input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--t1) 16%, transparent); }
+.fd-knob input[type=range]:focus-visible { outline: none; }
+.fd-knobs-say { display: inline-flex; align-items: center; gap: 9px; min-height: 19px; }
+.fd-knobs-say .fd-quiet { color: var(--t3); }
 .fd-notes-send { all: unset; padding: 0 7px; margin: 0 -7px; border-radius: 6px; color: var(--t2); cursor: pointer; }
 .fd-notes-send:hover, .fd-notes-send:focus-visible { background: color-mix(in srgb, var(--t2) 12%, transparent); color: var(--t1); }
 .fd-notes-work { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--t2) 30%, transparent); border-top-color: var(--t2); animation: rl-spin .8s linear infinite; }

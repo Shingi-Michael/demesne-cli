@@ -372,6 +372,23 @@ Read about it:
 - [Document.elementFromPoint(), MDN](https://developer.mozilla.org/en-US/docs/Web/API/Document/elementFromPoint): how a click becomes "this element".
 - [Source maps, web.dev](https://web.dev/articles/source-maps): how a running page leads back to the file and line it was written in.
 
+## Knobs
+
+Some changes are easier to feel than to describe: a little more room, softer corners, a warmer colour. A mockup can now carry two to four knobs for exactly those values, chosen by the model for that page (piece 5 of pass 274).
+
+- **Where they are.** Open a mockup and its knobs sit in one quiet line over the page: a name, a slider and the value ("Room 14px"). A mockup that isn't opened shows none, so the long page stays a page for looking.
+- **What moving one does.** The page changes at once. No model runs and no version is made; you are trying values on the page you have.
+- **Keeping what you like.** Once a slider has moved, "Send these to the chat" appears at the end of the line. It sends one message to the chat that made the mockup, with only the values you moved ("Room: --pad 26px, was 14px"), and the model keeps them as the next version, changing nothing else.
+- **How a page gets them.** A knob is one line in the page's head, bound to a value the page declares and uses: `<meta name="knob" content="Room | --pad | 8 | 24 | px">` with `:root{--pad:14px}` and `padding: var(--pad)`. At save each knob is checked (`knobProblem` in [foundry-knobs.ts](../packages/protocol/src/foundry-knobs.ts)): the value is declared as a number inside the knob's range and something on the page uses it, so no slider is ever dead.
+- **What the page can and can't do.** The script that reads the knobs ([knobs.js](../apps/desktop/foundry-kit/knobs.js)) only sets a knob's own value, to a number in its unit. Foundry draws the sliders itself and keeps only sound knobs, four at most.
+
+This is the one place Foundry has controls of its own; it is otherwise for looking. They appear only on a mockup you opened, and only when its page names knobs.
+
+Read about it:
+- [Using CSS custom properties, MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties): the page values a knob turns.
+- [Window.postMessage(), MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage): how the slider on Foundry reaches the page in its frame.
+- [Slider design: rules of thumb, Nielsen Norman Group](https://www.nngroup.com/articles/gui-slider-controls/): when a slider is the right control, and why it shows its value.
+
 ## Taste that carries over
 
 What you liked on one mockup used to stay with that mockup. A heart on the Plans page was kept for later versions of the Plans page, a pick lived in the chat, and the next chat that drew a checkout page started from the stock rules again. Now Foundry learns your taste per project and the next mockup starts from it (pass 245 A). It never asks, and there is nothing to press.

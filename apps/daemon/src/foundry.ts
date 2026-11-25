@@ -10,6 +10,7 @@
 import type { DemesneStore } from "@demesne/storage";
 import { APP_WINDOW, LOOKS_PER_TURN, lookReport, tryReport, type FoundryLook, type FoundryTry, type Judged } from "./foundry-look.ts";
 import { readArtifact, type StructuredToolResult } from "./artifacts.ts";
+import { knobProblem } from "@demesne/protocol";
 import { BUILT_PAGE, DEMO_MAX_STEPS, demoControls, FOUNDRY_BACKDROPS, FOUNDRY_FRAMES, FOUNDRY_KINDS, FOUNDRY_MAX_SOURCE_BYTES, FOUNDRY_REACT_IMPORTS, MERMAID_TYPES, mermaidType, isRecord, parseStage, picturesOf, FOUNDRY_FILE_NAME, FOUNDRY_MAX_FILES, withFoundryFiles, parseSteps, REVIEW_PAGE, reviewOf, reviewProblem, shotBox, shotsOf, STYLE_NEEDS, STYLES_PAGE, styleNames, stylesProblem, cleanWalk, walkProblem, optionNames, sheetProblem, boardProblem, boardWords, FOUNDRY_MAX_VARIANTS, FOUNDRY_MAX_WALK_PARTS, TRY_MAX_STEPS, type FoundryArtifactDetail, type ImageArtifact, type FoundryKind, type FoundryStage, type FoundryWhy, type ModelMessage, type TryStep } from "@demesne/protocol";
 import type { AgentTool, ToolContext } from "./tools.ts";
 import { seenIn } from "./foundry-seen.ts";
@@ -42,6 +43,7 @@ Demesne itself, drawn with the app's own markup and stylesheet, so it starts out
 - Inside the window the kit does not apply. A plain button (.primary, .danger), input, h1 to h3 and .muted take Demesne's tokens; style anything else from the tokens above.
 Places: any elements marked data-view="Name" are places (siblings; the first shows); anything with data-go="Name" goes there. Give every tab and chat you name a view, so nothing you click is dead.
 - <d-flow><section data-view="Find a time">… <button data-go="Your details">Book 10:30</button></section><section data-view="Your details">…</section>…</d-flow> a whole flow, for an ask that spans screens (sign-up, checkout, onboarding, booking): two to twelve screens as places, in the order a person meets them, each drawn in full at real size. Foundry draws the map above them (every screen by name, the one you are on, where its controls lead), so draw no steps bar of your own unless the product has one. Every screen's main control has a data-go to the next; give the last one a way back or on. Walk it in why.walkthrough screen by screen.
+- Knobs (no tag to draw): <meta name="knob" content="Room | --pad | 8 | 24 | px"> in the head, two to four per html mockup, for the values a person is likeliest to nudge: room, corners, type size, a hue (<meta name="knob" content="Warmth | --hue | 150 | 200 | "> with :root{--hue:175} and hsl(var(--hue) 70% 26%)). Each names a custom property the page declares as a number in :root, inside the knob's range, and uses with var(). Over the opened mockup Foundry draws a slider for each that changes the page at once; when the person sends their settings you get the values: foundry_edit only those declarations and keep the knobs.
 - <d-message from="you">text</d-message>, <d-message meta="gpt-6.1 · 4s" files="1 file changed" checks="checks passed" steps="2 steps">answer</d-message> (the d. mark and the receipt under it), <d-composer placeholder="Ask anything" mode="Ask" model="GPT-6.1" reply="first answer|second answer">: a real input; Enter puts the message above it, then the next reply (or answer it yourself: on its "send" event, event.detail.text, call event.preventDefault()).
 - <d-card title="Changes" icon="git-branch">…</d-card>, <d-row title="Keep awake" note="While it works"><d-toggle on></d-toggle></d-row> (a settings row; group rows in a box), <d-seg options="Home|Last chat" value="Home">, <d-tabs items="Week|Month">.
 Anywhere:
@@ -64,6 +66,7 @@ const FILE_RULES = `HTML is one document that starts with <link rel="stylesheet"
   + "Other outside loads: pinned scripts from " + FOUNDRY_LIBRARY_HOSTS.join(", ") + " (react@18.3.1, never react@18) and Google Fonts; everything else is blocked, so images are inline SVG or data URIs. "
   + `Mockups build on the parts (<script src="${FOUNDRY_PARTS_SCRIPT}"></script>: <d-demesne> for Demesne itself, <d-window> <d-browser> <d-phone> frames, <d-icon> <d-avatar> <d-chart> <d-stat> <d-compare>, <d-review> for a review of what exists); foundry_read id "kit:parts" lists them. `
   + "A bigger page may split into files: pass files {\"styles.css\": …, \"app.js\": …, \"data.json\": …} and link them by name (<link rel=\"stylesheet\" href=\"styles.css\">, <script src=\"app.js\">, <script type=\"application/json\" id=\"data\" src=\"data.json\">). "
+  + "Give an html mockup two to four knobs (kit:parts): <meta name=\"knob\" content=\"Room | --pad | 8 | 24 | px\">. "
   + "SVG is one <svg> with a viewBox. Under 512 KB in all.";
 
 /// How a page should look is not here: the design guide (design-guide.ts)
@@ -535,6 +538,8 @@ function checkTaste(store: DemesneStore, kind: FoundryKind | undefined, id: stri
 /// exists, so nothing you press in a flow is dead.
 export const FLOW_MAX_SCREENS = 12;
 const checkFlow = (source: string) => { const problem = flowProblem(source); if (problem) throw new Error(problem); };
+/// Piece 5 of pass 274: a page's knobs turn something real (knobProblem in @demesne/protocol), or go back to be fixed.
+const checkKnobs = (kind: string | undefined, source: string) => { if (kind !== "html") return; const problem = knobProblem(source); if (problem) throw new Error(problem); };
 export function flowProblem(source: string): string | null {
   const flow = /<d-flow\b[^>]*>([\s\S]*?)<\/d-flow>/i.exec(source);
   if (!flow) return /<d-flow\b/i.test(source) ? "[invalid_input] <d-flow> is not closed. Hint: end it with </d-flow>" : null;
@@ -710,6 +715,7 @@ export function foundrySaveTool(store: DemesneStore, look?: FoundryLook, looks =
       checkControls(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       checkKindSource(id ? store.getFoundryArtifact(id)?.kind : kind, input.source);
       checkFlow(input.source);
+      checkKnobs(id ? store.getFoundryArtifact(id)?.kind ?? kind : kind, input.source);
       const shots = checkShots(store, id, input.source, context.sessionId);
       const baseVersion = id ? baseVersionOf(input) : undefined;
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
@@ -828,6 +834,7 @@ export function foundryEditTool(store: DemesneStore, look?: FoundryLook, looks =
       checkControls(current.kind, source);
       checkKindSource(current.kind, source);
       checkFlow(source);
+      checkKnobs(current.kind, source);
       const shots = checkShots(store, input.id, source, context.sessionId);
       const session = context.sessionId ? store.getSession(context.sessionId) : undefined;
       context.signal.throwIfAborted();

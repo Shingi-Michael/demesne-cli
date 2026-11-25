@@ -12,6 +12,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -1270,11 +1271,41 @@ function deletePathTool(): AgentTool {
   };
 }
 
+/// Your own sign-ins, for commands only: the command's HOME stays a scratch
+/// folder, but gh and git read your real gh config and global git config, so
+/// a push uses the GitHub sign-in and commit identity your terminal has
+/// instead of asking for a new device code each session. Nothing is copied.
+export function signinEnv(home = homedir(), env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  const gh = env.GH_CONFIG_DIR || join(env.XDG_CONFIG_HOME || join(home, ".config"), "gh");
+  if (env.GH_CONFIG_DIR || existsSync(gh)) out.GH_CONFIG_DIR = gh;
+  const git = env.GIT_CONFIG_GLOBAL || [join(home, ".gitconfig"), join(env.XDG_CONFIG_HOME || join(home, ".config"), "git", "config")].find((path) => existsSync(path));
+  if (git) out.GIT_CONFIG_GLOBAL = git;
+  if (env.SSH_AUTH_SOCK) out.SSH_AUTH_SOCK = env.SSH_AUTH_SOCK;
+  return out;
+}
+
+/// macOS finds your login keychain under HOME/Library/Keychains, where gh and
+/// git's osxkeychain helper keep the GitHub token. The scratch home links to
+/// the real folder so they find it; nothing is copied or written there.
+export function linkKeychain(toolHome: string, home = homedir(), os: NodeJS.Platform = process.platform): void {
+  if (os !== "darwin") return;
+  const real = join(home, "Library", "Keychains"), link = join(toolHome, "Library", "Keychains");
+  if (!existsSync(real) || resolve(real) === resolve(link)) return;
+  try {
+    if (lstatSync(link, { throwIfNoEntry: false })) return;
+    mkdirSync(join(toolHome, "Library"), { recursive: true, mode: 0o700 });
+    symlinkSync(real, link);
+  } catch { /* no keychain: gh and git ask as before */ }
+}
+
 function runCommandTool(): AgentTool {
   const backgroundEnv = () => {
     const toolHome = join(tmpdir(), `demesne-tool-${process.pid}`);
     mkdirSync(toolHome, { recursive: true, mode: 0o700 });
+    linkKeychain(toolHome);
     return {
+      ...signinEnv(),
       PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
       HOME: toolHome,
       TMPDIR: toolHome,

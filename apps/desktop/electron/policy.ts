@@ -85,6 +85,8 @@ export const FOUNDRY_KIT: Record<string, { path: string; type: string; then?: st
   "note.js": { path: "kit/note.js", type: "application/javascript; charset=utf-8" },
   // Every variant explained (pass 263 A): put in front of pages on the Foundry page; it numbers the parts its walkthrough names.
   "marks.js": { path: "kit/marks.js", type: "application/javascript; charset=utf-8" },
+  // Knobs (piece 5 of pass 274): put in front of pages on the Foundry page; it reads the values a page named as knobs and sets them as a slider moves.
+  "knobs.js": { path: "kit/knobs.js", type: "application/javascript; charset=utf-8" },
   // Edit in place (step 3): put in front of a deck, doc or dashboard on the Foundry page while you edit its text, instead of the demo and notes.
   "edit.js": { path: "kit/edit.js", type: "application/javascript; charset=utf-8" },
   // More kinds (foundry-more-kinds.ts): what a React page, a Mermaid diagram runs on, from the app, so they work offline.

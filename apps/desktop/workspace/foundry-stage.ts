@@ -7,6 +7,8 @@
 /// the demo's words go on the quiet line under the stage.
 
 import { FOUNDRY_MAX_VARIANTS, isStyleColour } from "@demesne/protocol";
+import { knobValue } from "@demesne/protocol";
+import { cleanKnobs, knobsHTML, knobsSet } from "./foundry-knobs.ts";
 
 const STEADY = 1800, AGAIN = 1400;
 const h = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -227,6 +229,32 @@ export function watchFoundryStages(root: HTMLElement): () => void {
   root.addEventListener("pointerover", lit);
   root.addEventListener("pointerout", lit);
 
+  /// Piece 5 of pass 274, knobs: the page named some of its values; over the opened mockup each gets a slider.
+  /// A page that loads again (its demo starting over, another tab) is put back on what the sliders say.
+  const setKnobs = (stage: HTMLElement, set: Record<string, number>) => { try { frameOf(stage)?.contentWindow?.postMessage({ demesne: "knobs", set }, "*"); } catch {} };
+  function knobs(stage: HTMLElement, reported: unknown) {
+    const item = stage.closest<HTMLElement>(".fd-item.fd-open"), list = cleanKnobs(reported);
+    if (!item || !list.length) return;
+    const had = item.querySelector<HTMLElement>(":scope > .fd-knobs");
+    if (had) { const { set, moved } = knobsSet(had); if (moved) setKnobs(stage, set); return; }
+    // Over the page, under its version line: in sight while you look at what they change.
+    const ver = item.querySelector<HTMLElement>(":scope > .fd-ver");
+    if (ver) ver.insertAdjacentHTML("afterend", knobsHTML(list)); else stage.insertAdjacentHTML("beforebegin", knobsHTML(list));
+  }
+  const turned = (event: Event) => {
+    const input = event.target as HTMLInputElement, row = input.closest?.<HTMLElement>(".fd-knobs");
+    if (!row || !input.dataset?.knob) return;
+    const stage = row.closest(".fd-item")?.querySelector<HTMLElement>(".fd-stage");
+    const { knobs: all, set, moved } = knobsSet(row), knob = all.find((one) => one.name === input.dataset.knob);
+    if (!stage || !knob) return;
+    const output = input.nextElementSibling;
+    if (output) output.textContent = knobValue(knob, set[knob.name] ?? knob.value);
+    setKnobs(stage, { [knob.name]: set[knob.name] ?? knob.value });
+    const send = row.querySelector<HTMLButtonElement>(".fd-knobs-send");
+    if (send && !row.dataset.sent) send.hidden = !moved;
+  };
+  root.addEventListener("input", turned);
+
   const stageFor = (source: MessageEventSource | null) => stages().find((stage) => frameOf(stage)?.contentWindow === source) ?? null;
   const heard = (event: MessageEvent) => {
     const data = event.data as Record<string, unknown> | null;
@@ -254,6 +282,7 @@ export function watchFoundryStages(root: HTMLElement): () => void {
       split(stage, options, Number(data.shown) || 0, typeof data.rec === "number" ? data.rec : -1, data.styles === true);
       return;
     }
+    if (data.demesne === "knobs") { if (data.state === "ready") knobs(stage, data.knobs); return; }
     if (data.demesne === "marks") {
       if (data.state === "ready") marks(stage);
       else if (typeof data.over === "number") {
@@ -274,5 +303,5 @@ export function watchFoundryStages(root: HTMLElement): () => void {
   const resized = new ResizeObserver(() => { stages().forEach(fit); glances().forEach(fitGlance); });
   resized.observe(root);
   stages().forEach(watch);
-  return () => { window.removeEventListener("message", heard); root.removeEventListener("pointerover", lit); root.removeEventListener("pointerout", lit); seen.disconnect(); resized.disconnect(); };
+  return () => { window.removeEventListener("message", heard); root.removeEventListener("pointerover", lit); root.removeEventListener("pointerout", lit); root.removeEventListener("input", turned); seen.disconnect(); resized.disconnect(); };
 }

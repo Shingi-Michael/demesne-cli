@@ -38,6 +38,7 @@ import { dayLine } from "./assistant-chat.ts";
 import { codeWithFiles, foundryPage, savedLine, shelfKey, versionsOf as foundryVersionsOf, type FoundryOpen } from "./foundry-page.ts";
 import { galleryGrid, galleryPage, MAKE_KINDS, oneHead, type FoundryGallery, type GalleryView } from "./foundry-gallery.ts";
 import { placeEdit } from "./foundry-edit.ts";
+import { KNOBS_SEND, knobsSet } from "./foundry-knobs.ts";
 import { watchFoundrySites } from "./foundry-sites.ts";
 import { errorMessage as foundryErrorMessage, watchFoundryErrors, type FoundryErrorState } from "./foundry-errors.ts";
 import { keptNote, newNoteStore, notesMessage as foundryNotesMessage, notePictureFile, readKeptNote, watchFoundryNotes, type FoundryNote } from "./foundry-notes.ts";
@@ -60,7 +61,7 @@ import { droppedLink, fieldLink, SOURCES_CARD, sourceOfStep, sourcesCardHTML, us
 import { landShot, shotCardHTML, shotKey, shotPaste, shotsNote, type Rect, type WindowShot } from "./window-shots.ts";
 import { drawPdf, fileName as previewFileName, foldPreview, growPreview, PREVIEW_CARD, previewCardHTML, rectOfElement, resizePreview, type OpenPreview } from "./file-preview.ts";
 import { watchFoundryStages } from "./foundry-stage.ts";
-import { previewable, type FilePreview } from "@demesne/protocol";
+import { knobsMessage, previewable, type FilePreview } from "@demesne/protocol";
 import { RepoFlowView } from "./repo-flow.ts";
 import { FileEditView } from "./file-edit.ts";
 import { deferredChanges } from "./display-runs.ts";
@@ -7172,6 +7173,7 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
   if (!open) return action === "foundry-shrink" || action === "foundry-shown" || action === "foundry-code" || action === "foundry-copy" || action === "foundry-copy-show" || action === "foundry-edit" || action === "foundry-compare" || action === "foundry-branch" || action.startsWith("foundry-share");
   if (action === "foundry-compare") { open.compare = !open.compare; if (open.compare) delete open.code; renderPage(); return true; }
   if (action === "foundry-edit") { await foundryEdit(open); return true; }
+  if (action === "foundry-knobs-send") { await sendFoundryKnobs(open); return true; }
   if (action === "foundry-shrink") {
     foundryOpen = null;
     foundryFocus = { id: open.id, version: open.at, quiet: true };
@@ -7255,6 +7257,36 @@ async function foundryOpenAction(action: string, args: Record<string, any>) {
 /// dashboard's newest version where it sits; Done keeps every change you
 /// made as one new version, "Edited by you", and shows it.
 const EDIT_SAID = "Click any text to change it. Done keeps your changes as a new version.";
+/// Piece 5 of pass 274: where you left the knobs goes to the chat that made the mockup as one message,
+/// and that chat's model keeps them as the next version. The page stays on Foundry.
+async function sendFoundryKnobs(open: FoundryOpen) {
+  const row = document.querySelector<HTMLElement>("#page .fd-item.fd-open > .fd-knobs"), mockup = foundryList?.find((item) => item.id === open.id);
+  if (!row || !mockup || !state || row.dataset.sent) return;
+  const { knobs, set, moved } = knobsSet(row), say = row.querySelector<HTMLElement>(".fd-knobs-say");
+  const text = moved ? knobsMessage({ id: open.id, title: mockup.title, version: open.shown }, knobs, set) : "";
+  if (!text || !say) return;
+  row.dataset.sent = "1";
+  say.innerHTML = '<span class="fd-quiet">Sending…</span>';
+  try {
+    // Its own chat, when that chat is in this project; otherwise the chat that is open.
+    const made = foundryVersions?.find((item) => item.artifactId === open.id && item.version === open.shown)?.sessionId ?? null;
+    const here = document.getElementById("sidebar-sessions")?.dataset.workspace || state.workspace;
+    const chat = made && made !== state.session?.id ? state.sessions.find((item) => item.id === made && (item.workspace ?? "") === (here ?? "") && !deletedSessions.has(item.id)) : null;
+    if (chat) {
+      await api("select-session", { id: chat.id });
+      for (let tries = 0; tries < 40 && state?.session?.id !== chat.id; tries++) await new Promise((done) => setTimeout(done, 50));
+    }
+    if (!state?.session) throw new Error("Open a chat first: the settings go to it.");
+    const session = state.session, name = state.sessions.find((item) => item.id === session.id)?.title || "the chat";
+    const queued = Boolean(state.activeTurnId || state.busy || state.queue.trim());
+    await api("submit", { text, wait: true });
+    const line = document.querySelector<HTMLElement>("#page .fd-item.fd-open > .fd-knobs .fd-knobs-say");
+    if (line) line.innerHTML = `<span class="fd-quiet">${h(queued ? `Waiting in “${name}”: they become the next version when it is free` : `Sent to “${name}”: they become the next version`)}</span>`;
+  } catch (error) {
+    delete row.dataset.sent;
+    say.innerHTML = `<span class="fd-quiet">${h(`Not sent: ${errorWords(error)}`)}</span><button type="button" class="fd-said-b fd-knobs-send" data-action="foundry-knobs-send">${KNOBS_SEND}</button>`;
+  }
+}
 async function foundryEdit(open: FoundryOpen) {
   if (!open.editing) {
     open.said = "Reading…"; open.saved = null; paintFoundrySaid();

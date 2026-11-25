@@ -1992,7 +1992,7 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fg-chip.on { background: var(--tone2); color: var(--t1); }
 .fg-chip:focus-visible, .fg-back:focus-visible, .fg-go:focus-visible, .fg-pin:focus-visible { outline: 2px solid var(--focus, var(--hair2)); outline-offset: 2px; }
 .fg-group { margin: 18px 0 10px; color: var(--t3); font-size: 12.5px; font-weight: 500; }
-.fg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 22px 16px; }
+.fg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 24px 18px; }
 .fg-card { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .fg-th { position: relative; aspect-ratio: 16 / 10; margin-bottom: 6px; border-radius: var(--r); overflow: hidden; background: var(--tone); box-shadow: 0 0 0 1px var(--hair) inset; }
 .fg-card:hover .fg-th { box-shadow: 0 0 0 1px var(--hair2) inset; }
@@ -2011,7 +2011,9 @@ html[data-theme="demesne-light"] .sidebar-row-actions .sidebar-pr.merged { color
 .fg-none { margin: 28px 0; color: var(--t3); font-size: 13px; }
 .fg-back { all: unset; cursor: pointer; color: var(--t3); font-size: 13px; }
 .fg-back:hover { color: var(--t1); }
-.fg-one { display: flex; align-items: center; gap: 12px; margin: 8px 0 18px; }
+.fg-one { display: flex; align-items: baseline; gap: 12px; margin: 0 0 14px; }
+.fg-one .fg-back { margin-right: 4px; }
+.fg-one .fg-pin { align-self: center; }
 .fg-one .fd-h { margin: 0; }
 .fg-one .fg-meta { flex: 1; }
 @media (prefers-reduced-motion: reduce) { .fg-card .fg-pin { transition: none; } }
@@ -3474,6 +3476,24 @@ html[data-theme="demesne-light"] body.desktop { --k-read: #3f78c9; --k-search: #
 .fd-open > .fd-tabs + .fd-stage { box-shadow: 0 -1px 0 var(--hair); }
 .fd-open .fd-stage:not(.fd-s), .fd-open .fd-stage.graphic { height: max(520px, calc(100vh - 170px)); }
 .fd-open .fd-doc { max-width: none; }
+/* The opened design comes first: one head line, the knobs if it has them, then the design; its story (what was
+   asked, what it is, why, the version) waits under it, above the walkthrough. */
+.fd-open > .fd-ln { margin-bottom: 10px; }
+.fd-open > .fd-knobs { margin: -2px 2px 10px; }
+.fd-open > .fd-story { margin-top: 16px; }
+.fd-open > .fd-story > .fd-ver { margin-top: 0; }
+/* One mockup opened on its own page: one row holds the way back, its name, where it came from and its controls. */
+.fg-one:has(.fd-hd) { align-items: center; margin-bottom: 12px; }
+.fg-one:has(.fd-hd) .fd-h { font-size: 20px; line-height: 26px; }
+.fg-one .fg-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font-size: 12.5px; }
+.fg-one .fg-from .fd-link { color: inherit; box-shadow: none; }
+.fg-one:has(.fd-hd) .fg-meta { flex: none; }
+.fg-one .fd-hd { margin-left: auto; }
+/* Opened, the page's head row is the mockup's own line: its kind and time sit after the name, not at the far end. */
+.desktop #page[data-kind="foundry"]:has(.fg-one.fd-ln) { padding-top: 6px; }
+.fg-one.fd-ln { margin: 0 0 12px; color: var(--t3); font-size: 12.5px; }
+.fg-one.fd-ln .fd-ln-r { margin-left: 0; }
+.fg-one.fd-ln .fg-meta { flex: none; }
 .fd-ln .fd-link { color: inherit; box-shadow: none; }
 .fd-ln b .fd-link:hover { box-shadow: inset 0 -1px 0 var(--hair2); }
 .fd-hd { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-left: 10px; align-self: center; }

@@ -62,6 +62,8 @@ try {
   // The page arrives as its link in the chat; opening it shows the Foundry page.
   await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
   await frame.locator("body[data-ready='1']").waitFor();
+  // Pass 277 B: the sidebar folds as the mockup opens; a click in the first moments of a resized frame can miss.
+  await page.waitForTimeout(600);
   assert.equal(await frame.locator("#count").textContent(), "0 of 2 done");
   const artifact = (await f.client.foundryList()).artifacts[0]!;
   // Ticking saves to Demesne, kept with the artifact.
@@ -70,10 +72,13 @@ try {
   assert.deepEqual((await f.client.foundryData(artifact.id)).data, { done: { flights: false, camera: true } });
   console.log("PASS: a tick is saved with the artifact.");
   // Back to the chat and open the page again from its link: the tick is back.
+  // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+  await page.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
   await page.locator(`#sidebar-chats [data-action="select-session"][data-args*="${plain.id}"]`).first().click();
   await eventually(async () => await page!.locator("#page").isHidden());
   await page.locator("#conversation .fd-chip").filter({ hasText: "Lisbon checklist" }).first().click();
   await frame.locator("body[data-ready='1']").waitFor();
+  await page.waitForTimeout(600);
   assert.equal(await frame.getByLabel("Pack the camera").isChecked(), true, "the tick survives closing the page");
   assert.equal(await frame.locator("#count").textContent(), "1 of 2 done");
   console.log("PASS: the page remembers after closing.");

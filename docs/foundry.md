@@ -112,6 +112,12 @@ The rail of ticks on the long page's edge (pass 209 A) is gone: the front page a
 
 Read about it: [Recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/) (Nielsen Norman Group: why a picture of each thing beats remembering which chat made it), and [Cards](https://m3.material.io/components/cards/overview) (Material Design: when a grid of cards is the right way to show a collection).
 
+## The design has the screen
+
+Opened, a mockup takes the window (pass 277 B). On its own page the way back, its name, kind and chat, its version arrows and its tools share one head line, its knobs sit right under it, and the design starts there: about 130 px higher than before. What you asked, its description, why it looks so and its version line now come under the design, above its walkthrough. While that page shows, the sidebar folds to its slim strip, so the design is about 210 px wider (1386 px on a MacBook Air full screen). Leaving the page unfolds it again; if you fold or unfold the sidebar yourself meanwhile, yours stands. The fold is never saved. On the front page the cards grow to fill each row (four across at that width).
+
+Read more: [Fitts's law](https://www.nngroup.com/articles/fitts-law/) (why the controls stay together on one line), [Progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/) (the story waits under the design), [Sidebars](https://developer.apple.com/design/human-interface-guidelines/sidebars) (Apple: hiding the sidebar to give content room), [grid-template-columns](https://developer.mozilla.org/en-US/docs/Web/CSS/grid-template-columns) (how the cards fill a row).
+
 ## Sheets
 
 A table people sort, type into and add up (samples, a budget, a list of records) is kind `sheet` (step 3 of pass 273 A). The model writes CSV, with the first row naming the columns and one row per record, and Demesne draws it ([foundry-more-kinds.ts](../apps/desktop/electron/foundry-more-kinds.ts), `sheetPage`):

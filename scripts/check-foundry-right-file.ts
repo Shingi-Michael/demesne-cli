@@ -61,6 +61,8 @@ try {
   const idOf = (key: string) => list.find((item) => item.title === SAVES[key]!.title)!.id;
   const openIt = async (key: string) => {
     if (await app.locator("#page .fd-open").count()) await app.keyboard.press("Escape");
+    // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+    await app.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
     await app.locator("#sidebar-sessions .sidebar-session, #sidebar-chats [data-action=select-session]").first().click();
     await chips.filter({ hasText: SAVES[key]!.title }).first().click();
     const item = app.locator(`#page [data-fd="${idOf(key)}:1"]`);

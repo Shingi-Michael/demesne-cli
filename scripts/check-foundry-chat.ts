@@ -108,8 +108,8 @@ try {
     await page!.waitForTimeout(200);
     await editor.fill(text); await editor.press("Enter");
   };
-  /// Back to the conversation from the Foundry page.
-  const backToChat = async () => { await chat.first().click(); await eventually(async () => await page!.locator("#page").isHidden()); };
+  /// Back to the conversation from the Foundry page (pass 277 B: an opened mockup folds the sidebar, so unfold it first).
+  const backToChat = async () => { await page!.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); }); await chat.first().click(); await eventually(async () => await page!.locator("#page").isHidden()); };
   // While Foundry writes and tries the page, nothing opens.
   await page.locator("#conversation .turn").first().waitFor();
   assert(await page.locator("#page").isHidden(), "nothing opens while Foundry works");

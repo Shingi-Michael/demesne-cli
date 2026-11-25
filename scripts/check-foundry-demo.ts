@@ -112,6 +112,8 @@ try {
   await page.mouse.move(5, 5);
 
   // Options (pass 263 A): tabs over one stage, the pick first with a dot, nothing drawn inside.
+  // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+  await page.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
   await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
   await idle(); await page.waitForTimeout(300);
   await editor.fill("/foundry pin a chat, with options"); await editor.press("Enter");
@@ -139,6 +141,8 @@ try {
   console.log("PASS: options are tabs over one stage, each with its walkthrough, nothing drawn inside.");
 
   // Pass 246 A: a page of styles is drawn once per style. A row of small ones to compare, then each at full size under its name, its colours and what it is made of.
+  // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+  await page.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
   await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
   await idle(); await page.waitForTimeout(300);
   await editor.fill("/foundry the checkout page in a few styles"); await editor.press("Enter");

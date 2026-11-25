@@ -515,7 +515,11 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
       try { frame.contentWindow?.postMessage({ demesne: "note", action: "away" }, "*"); } catch { /* the frame is gone */ }
     }
   };
-  const resized = new ResizeObserver(() => { hidePlus(); sections().forEach(placePins); placeOpen(); });
+  let settle = 0;
+  const replace = () => { sections().forEach(placePins); placeOpen(); };
+  // The page moves under its frames (the sidebar folds, the window resizes): place the pins now, and again once the frames have settled.
+  // Once settled, each frame is asked where its pins are now (a frame shown again may not say so on its own).
+  const resized = new ResizeObserver(() => { hidePlus(); replace(); clearTimeout(settle); settle = window.setTimeout(() => { replace(); sections().forEach((section) => stagesOf(section).forEach(watch)); }, 450); });
 
   window.addEventListener("message", heard);
   root.addEventListener("click", clicked);
@@ -539,7 +543,7 @@ export function watchFoundryNotes(root: HTMLElement, store: NoteStore, send: (ke
       root.removeEventListener("input", input);
       document.removeEventListener("keydown", typed, true);
       document.removeEventListener("pointerover", elsewhere, true);
-      resized.disconnect();
+      resized.disconnect(); clearTimeout(settle);
     },
     paint() { sections().forEach((section) => { stagesOf(section).forEach(watch); paintSection(section); }); },
   };

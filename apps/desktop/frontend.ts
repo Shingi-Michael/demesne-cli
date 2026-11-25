@@ -264,8 +264,18 @@ function setSidebarCollapsed(collapsed: boolean) {
   try { localStorage.setItem("demesne-sidebar-collapsed", String(collapsed)); } catch {}
 }
 try { setSidebarCollapsed(localStorage.getItem("demesne-sidebar-collapsed") === "true"); } catch {}
-sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
-el("rail-search").addEventListener("click", () => { setSidebarCollapsed(false); searchField.focus(); });
+let foldedForFoundry = false;
+sidebarToggle.addEventListener("click", () => { foldedForFoundry = false; setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")); });
+// Pass 277 B: a mockup open on Foundry's own page folds the sidebar for as
+// long as it shows, without saving it; leaving unfolds it again, unless you
+// moved the sidebar yourself meanwhile.
+document.addEventListener("demesne:foundry-wide", (event) => {
+  const wide = (event as CustomEvent<boolean>).detail;
+  const folded = shell.classList.contains("sidebar-collapsed");
+  if (wide && !folded) { foldedForFoundry = true; shell.classList.add("sidebar-collapsed"); sidebarToggle.setAttribute("aria-expanded", "false"); syncReadyNotice(); }
+  else if (!wide && foldedForFoundry) { foldedForFoundry = false; setSidebarCollapsed(false); }
+});
+el("rail-search").addEventListener("click", () => { foldedForFoundry = false; setSidebarCollapsed(false); searchField.focus(); });
 // Search is always there; Escape clears it and gives the list back.
 searchField.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;

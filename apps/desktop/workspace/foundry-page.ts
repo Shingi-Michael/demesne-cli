@@ -237,6 +237,8 @@ const clock = (date: string) => new Date(date).toLocaleTimeString([], { hour: "2
 
 /// The long page: every version, newest first, under the day it was made.
 /// The day stays at the top as you scroll.
+/// Where an opened mockup's line goes when the page's head row takes its place.
+const HELD = "\u0001held-head\u0001";
 export function foundryPage(view: FoundryView) {
   const { list, versions } = view;
   const title = (view.head ?? `<h1 class="cp-title fd-h">Foundry</h1>`) + (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "");
@@ -292,9 +294,23 @@ export function foundryPage(view: FoundryView) {
     // A build's record takes none: what to change goes to the code or the mockup.
     const notes = artifact.version === version.version && NOTE_KINDS.has(artifact.kind) && !artifact.built ? '<p class="fd-notes" aria-live="polite" hidden></p>' : "";
     const notesHere = open && (open.code !== undefined || !!open.editing || !!beforeSlot || version !== slot) ? "" : notes;
-    return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${line}${asked}${words}${because}${ver}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}${open && open.code !== undefined ? "" : walkHTML(why?.walk, artifact.title)}</section>`;
+    // Opened, the design comes straight under its one head line: what was asked, what it is and why it looks so
+    // move under the design, above its walkthrough, with the version's own line.
+    const story = `${asked}${words}${because}`;
+    // One mockup on its own page, opened: the page's one head row becomes its line (below), so the design starts right under it.
+    if (open && view.only) heldHead = { ln: `<span class="fd-ln-r">${artifact.built ? "Built" : h(KIND_WORD[artifact.kind])} · ${h(clock(version.createdAt))}</span>`, rest: `${chat ? `<span class="fg-from">from ${link("select-session", { id: version.sessionId }, `“${h(chat)}”`, "Open the chat")}</span>` : ""}${openHead(open, versionsOf(shown, artifact.id), artifact.kind)}` };
+    return `<section class="fd-item${pick ? " fd-rec" : ""}${open ? " fd-open" : ""}" data-fd="${h(slotKey)}" aria-label="${h(`${artifact.title}, version ${version.version}${pick ? ", recommended" : ""}${open ? ", open" : ""}`)}">${open && view.only ? HELD : line}${open ? "" : `${story}${ver}`}${body}${open ? `<p class="fd-said" role="status" data-kind="${h(artifact.kind)}" hidden></p>` : ""}${notesHere}${open ? `<div class="fd-story">${ver}${story}</div>` : ""}${open && open.code !== undefined ? "" : walkHTML(why?.walk, artifact.title)}</section>`;
   };
-  return title + days.map((day) => `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
+  // One mockup on its own page: no day to sort it under.
+  let heldHead: { ln: string; rest: string } | null = null;
+  const items = days.map((day) => `${view.only ? "" : `<h2 class="fd-day" id="fd-day-${h(day.key)}">${h(day.word)}</h2>`}${pickFirst(day.items).map(({ version, pick }) => item(version, pick)).join("")}`).join("");
+  if (!heldHead) return title + items;
+  // Opened, the page's head row (foundry-gallery.ts oneHead) is the mockup's own line: its kind and time after the
+  // name, its project (the kind is said once), where it is from, then its controls before the pin.
+  const { ln, rest } = heldHead as { ln: string; rest: string };
+  const head = (view.head ?? "").replace('<div class="fg-one">', '<div class="fg-one fd-ln">').replace("</h1>", `</h1>${ln}`)
+    .replace(/<span class="fg-meta">[^<·]*· /, '<span class="fg-meta">').replace('<button type="button" class="fg-pin', `${rest}<button type="button" class="fg-pin`);
+  return (view.error ? `<p class="sp-error" role="alert">${h(view.error)}</p>` : "") + items.replace(HELD, head);
 }
 
 /// The page's days, newest first, each with its versions in page order.

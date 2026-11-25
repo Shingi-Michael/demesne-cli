@@ -55,6 +55,8 @@ try {
     return { shown: !el.hidden && s.display !== "none", below: Math.round(new DOMMatrix(s.transform === "none" ? "" : s.transform).m42), height: el.offsetHeight, name: s.animationName, duration: s.animationDuration, playing: move?.playState ?? "none", at: Math.round(Number(move?.currentTime ?? -1)) }; });
   await step(52, async () => !!frame() && !!(await frame()!.evaluate(() => !!document.querySelector(".sheet")).catch(() => false)));
   assert.equal((await sheet()).shown, false, "the sheet is not there before Book is pressed");
+  // Pass 277 B: the sidebar folds as the mockup opens; a click in the first moments of a resized frame can miss.
+  await app.waitForTimeout(600);
 
   // Press Book: the sheet appears below its place and rises over the page's own time.
   await frame()!.locator("#book").click();

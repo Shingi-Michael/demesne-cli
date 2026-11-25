@@ -180,12 +180,16 @@ try {
   await item(1).screenshot({ path: join(output, "foundry-pin-pins.png") });
 
   // The notes wait while you are elsewhere, at their spots.
+  // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+  await page.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
   await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
   await step(152, async () => await page!.locator("#page").isHidden());
   await chips.first().click();
   await stage.waitFor();
   await step(155, async () => /^1 to change, 1 to keep/.test((await line.textContent()) ?? "") && await pins.count() === 2);
   await step(164, async () => !!(await frame(1)) && await (await frame(1))!.evaluate(() => !!document.querySelector(".sw i")).catch(() => false));
+  // Pass 277 B: the sidebar folds again as the mockup opens; the pins follow once the page settles.
+  await page.waitForTimeout(800);
   const again = await spot(".sw i", 0.3, 0.5), first = (await pins.first().boundingBox())!;
   assert.ok(Math.abs(first.x - again.x) <= 2 && Math.abs(first.y + first.height - again.y) <= 2, `the pin is still on its spot: ${JSON.stringify({ first, again })}`);
 
@@ -219,6 +223,8 @@ try {
   await step(185, async () => { const at = await item(2).boundingBox(); return !!at && at.y < 400 && at.y > -50; });
   await item(2).screenshot({ path: join(output, "foundry-pin-back.png") });
   // In the chat the message is the notes, with the model's detail folded away.
+  // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+  await page.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
   await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
   await step(189, async () => await page!.locator("#page").isHidden());
   const bubble = page.locator("#conversation .request").last();
@@ -240,6 +246,8 @@ try {
   // The chip opens Foundry at the mockup, where the note is back on its pin.
   await chip.click();
   await step(236, async () => /^1 to change/.test((await item(2).locator(".fd-notes").textContent()) ?? "") && await item(2).locator(".fn-pin[data-n]").count() === 1, 20000);
+  // Pass 277 B: an opened mockup folds the sidebar; unfold it to reach a chat.
+  await page.evaluate(() => { if (document.getElementById("desktop-shell")?.classList.contains("sidebar-collapsed")) document.getElementById("desktop-toggle-sidebar")?.click(); });
   await page.locator("#sidebar-chats [data-action=select-session], #sidebar-sessions .sidebar-session").first().click();
   await step(238, async () => await page!.locator("#page").isHidden());
   await page.locator("textarea").fill("apply my comment please");

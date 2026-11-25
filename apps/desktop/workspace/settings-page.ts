@@ -406,10 +406,10 @@ function pages(view: SettingsView): Page[] {
   ] });
   const auto = view.drive.auto;
   out.push({ id: "drive", title: "Drive", sub: "Drive picks work on its own, each run on its own branch. It never pushes, leaves results for your review, and pauses when it needs your input.", groups: [
-    { name: view.drive.project ? `In ${view.drive.project}` : "In a project", rows: [view.drive.project && auto
+    { name: view.drive.project ? `This project · ${view.drive.project}` : "This project", rows: [view.drive.project && auto
       ? { title: "Start on its own", line: `After ${auto.quietMinutes} quiet minutes it runs the top idea, at most ${auto.perDay} a day${auto.usedToday ? ` (${auto.usedToday} today)` : ""}`, control: toggle(auto.on, "drive-auto", { on: !auto.on }, "Start on its own"), keywords: "drive auto quiet start own" }
       : { title: "Start on its own", line: "Open a project to set Drive for it", keywords: "drive auto quiet" }] },
-    { name: "How far one mission may go", rows: info ? [
+    { name: "All projects · limits for new missions", rows: info ? [
       { title: "Active time", line: "It stops and leaves the branch for you", control: number("drive.max_active_minutes", info.drive.maxActiveMinutes, "min", "Active time in minutes", DEFAULT_DRIVE_LIMITS.maxActiveMinutes), keywords: "drive limit minutes time" },
       { title: "Tokens", line: "Planning and coding together", control: number("drive.max_tokens", info.drive.maxTokens, "", "Tokens", DEFAULT_DRIVE_LIMITS.maxTokens), keywords: "drive limit tokens budget" },
       { title: "Tasks", line: "Steps it hands to the coder, at most 64", control: number("drive.max_tasks", info.drive.maxTasks, "", "Tasks", DEFAULT_DRIVE_LIMITS.maxTasks), keywords: "drive limit tasks" },
@@ -443,7 +443,8 @@ function pages(view: SettingsView): Page[] {
           fold: view.fold === `google:${item.key}` ? `<div data-google-provider="${h(item.key)}"></div>` : "", keywords: "google gemini ai studio api key test connect" };
         const signing = view.providers.signingIn === item.key;
         const action = signing ? "provider-cancel" : item.status === "signed-in" ? "provider-signout" : item.status === "signed-out" ? "provider-signin" : "";
-        return { title: item.label, line: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`, control: action ? link(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }, item.status === "signed-in" || signing ? "" : " key") : "", keywords: "sign in account api key local provider" };
+        // Codex, ChatGPT and OpenRouter sign in through the browser: \"api key\" finds only providers that take one.
+        return { title: item.label, line: signing ? "Waiting for your browser…" : `${item.active ? "In use. " : ""}${item.detail}`, control: action ? link(action, signing ? "Cancel" : item.status === "signed-in" ? "Sign out" : "Sign in", { key: item.key }, item.status === "signed-in" || signing ? "" : " key") : "", keywords: `sign in account local provider${item.kind === "api-key" ? " api key" : ""}` };
   };
   // Accounts sorts itself: what works first, then what you could add.
   const signedIn = view.providers.items.filter((item) => item.status === "signed-in"), notYet = view.providers.items.filter((item) => item.status !== "signed-in");
@@ -798,12 +799,34 @@ const rowHtml = (row: SettingsRow, marks: string[]) =>
 const groupHtml = (group: Group, marks: string[]) =>
   `<div class="st-head"><span>${h(group.name)}</span>${group.right ? `<span>${h(group.right)}</span>` : ""}</div><div class="st-group">${group.rows.map((row) => rowHtml(row, marks)).join("")}</div>${group.hint ? `<p class="st-hint">${h(group.hint)}</p>` : ""}`;
 
-/// The rows that match a search, by section: a row matches when any word
-/// you typed is in its title, line or keywords.
+/// How well a row answers the words you typed: every word found counts,
+/// most in its name, then as a whole word, then anywhere in it.
+function rowScore(page: Page, row: SettingsRow, marks: string[]) {
+  const title = row.title.toLowerCase(), all = `${page.title} ${row.title} ${row.line ?? ""} ${row.keywords ?? ""}`.toLowerCase();
+  let found = 0, score = 0;
+  for (const mark of marks) {
+    if (!all.includes(mark)) continue;
+    found++;
+    const whole = new RegExp(`(^|[^a-z0-9])${mark.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`);
+    score += 1 + (title.includes(mark) ? 2 : 0) + (whole.test(all) ? 1 : 0);
+  }
+  return { found, score };
+}
+
+/// The rows that match a search, by section, the best section first; rows
+/// keep their page's order. When some rows have every word you typed, only
+/// those show ("api key" finds the keys, not every shortcut with "key" in
+/// it); otherwise any word will do.
 export function settingsSearch(view: SettingsView) {
   const marks = view.query.trim().toLowerCase().split(/\s+/).filter((item) => item.length > 1);
   if (!marks.length) return { marks, found: [] as { page: Page; rows: SettingsRow[] }[] };
-  const found = pages(view).map((page) => ({ page, rows: page.groups.flatMap((group) => group.rows).filter((row) => marks.some((mark) => `${page.title} ${row.title} ${row.line ?? ""} ${row.keywords ?? ""}`.toLowerCase().includes(mark))) })).filter((item) => item.rows.length);
+  const scored = pages(view).map((page, order) => ({ page, order, rows: page.groups.flatMap((group) => group.rows).map((row, at) => ({ row, at, ...rowScore(page, row, marks) })).filter((item) => item.found) }));
+  const every = scored.some((item) => item.rows.some((one) => one.found === marks.length));
+  const found = scored
+    .map((item) => ({ ...item, rows: item.rows.filter((one) => !every || one.found === marks.length) }))
+    .filter((item) => item.rows.length)
+    .sort((a, b) => Math.max(...b.rows.map((one) => one.score)) - Math.max(...a.rows.map((one) => one.score)) || a.order - b.order)
+    .map(({ page, rows }) => ({ page, rows: rows.map((one) => one.row) }));
   return { marks, found };
 }
 

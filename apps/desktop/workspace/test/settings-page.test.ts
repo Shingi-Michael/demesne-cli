@@ -156,6 +156,34 @@ test("search looks through every section and marks the words", () => {
   expect(settingsPage(view({ query: "zzzz" }))).toContain("Nothing matches");
 });
 
+test("searching api key puts the accounts with Add key first, not the keyboard shortcuts", () => {
+  const providers = { items: [
+    { key: "new:codex", label: "Codex · ChatGPT account", kind: "codex" as const, status: "signed-out" as const, detail: "Not set up · uses your Codex plan" },
+    { key: "new:chatgpt", label: "ChatGPT", kind: "chatgpt" as const, status: "signed-out" as const, detail: "Not set up · metered as credits" },
+    { key: "new:openrouter", label: "OpenRouter", kind: "openrouter" as const, status: "signed-out" as const, detail: "Not set up · hosted models" },
+    { key: "new:google", label: "Google AI Studio", kind: "google" as const, status: "signed-out" as const, detail: "Gemini models · test a key without saving it" },
+    { key: "new:anthropic", label: "Anthropic", kind: "anthropic" as const, status: "signed-out" as const, detail: "Claude models · API billing" },
+  ], signingIn: null, message: null };
+  const { found } = settingsSearch(view({ query: "api key", providers }));
+  expect(found.map(({ page }) => page.id)).toEqual(["providers"]);
+  expect(found[0]!.rows.map((row) => row.title)).toEqual(["Google AI Studio", "Anthropic", "Google API keys", "Provider setup"]);
+  const html = settingsPage(view({ query: "api key", providers }));
+  expect(html).toContain("4 settings match");
+  expect(html.indexOf("Google AI Studio")).toBeLessThan(html.indexOf("Provider setup"));
+  expect(html).toContain('data-action="google-ai-open"');
+  expect(html).not.toContain("New chat");
+  // One word still finds everything with it; the shortcuts are among them.
+  expect(settingsSearch(view({ query: "key", providers })).found.map(({ page }) => page.id)).toContain("keys");
+});
+
+test("Drive names the scope of each group: this project's start, every project's limits", () => {
+  const html = settingsPage(view({ section: "drive" }));
+  expect(html).toContain("This project · demesne-cli");
+  expect(html).toContain("All projects · limits for new missions");
+  expect(html).not.toContain("How far one mission may go");
+  expect(settingsPage(view({ section: "drive", drive: { project: "", auto: null } }))).toContain("<span>This project</span>");
+});
+
 test("themes are cards drawn in their own colours, with a live preview above", () => {
   const html = settingsPage(view({ section: "appearance", appearance: { ...view().appearance, themes: [{ name: "demesne", label: "Demesne", colors: { bg: "#111111", surface: "#222222", accent: "#3366ff", text: "#eeeeee" } }, { name: "demesne-light", label: "Demesne Light", light: true }] } }));
   expect(html).toContain("ap-preview");

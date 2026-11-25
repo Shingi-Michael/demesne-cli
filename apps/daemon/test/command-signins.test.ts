@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { linkKeychain, signinEnv } from "../src/tools.ts";
+import { linkKeychain, signinEnv, toolArguments, ToolRegistry } from "../src/tools.ts";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "demesne-signins-"));
 
@@ -34,4 +34,14 @@ test("on a Mac the scratch home links to your keychain folder once; elsewhere it
     linkKeychain(other, home, "linux");
     expect(lstatSync(join(other, "Library"), { throwIfNoEntry: false })).toBeUndefined();
   } finally { for (const dir of [home, tool, other]) rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a tool called with empty arguments (git_status) runs as if given {}", async () => {
+  expect(toolArguments("")).toEqual({});
+  expect(toolArguments("  \n")).toEqual({});
+  expect(toolArguments('{"staged":true}')).toEqual({ staged: true });
+  expect(() => toolArguments("{oops")).toThrow();
+  const status = new ToolRegistry().get("git_status")!;
+  const result = JSON.parse(await status.execute(toolArguments(""), { workspaceRoot: process.cwd(), signal: new AbortController().signal })) as { branch: string };
+  expect(typeof result.branch).toBe("string");
 });

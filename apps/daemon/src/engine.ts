@@ -25,7 +25,7 @@ import { PermissionBroker } from "./permissions.ts";
 import type { QuestionBroker } from "./questions.ts";
 import type { ThemeStore } from "./themes.ts";
 import { themefyDefinition, THEMEFY_PROMPT } from "./themefy.ts";
-import { resolveWorkspacePath, ToolRegistry } from "./tools.ts";
+import { resolveWorkspacePath, toolArguments, ToolRegistry } from "./tools.ts";
 import { gitIn, gitStep, repoSnapshot, repoResult, stepDirectory } from "./repo-flow.ts";
 import { designGuideBlock, loadDesignGuides } from "./design-guide.ts";
 import { loadProjectLook } from "./project-look.ts";
@@ -705,7 +705,7 @@ export class AgentEngine {
         const tool = this.tools.get(call.name);
         if (!tool) return false;
         try {
-          const input = JSON.parse(call.arguments);
+          const input = toolArguments(call.arguments);
           return tool.permission(input) === null;
         } catch {
           return false;
@@ -1279,7 +1279,7 @@ export class AgentEngine {
     workspaceRoot ??= ""; // Questions and Foundry require no filesystem access.
     let input: unknown;
     try {
-      input = JSON.parse(call.arguments);
+      input = toolArguments(call.arguments);
     } catch {
       const result = "Error: tool arguments are not valid JSON";
       this.store.settleToolCall(toolCallId, "failed", result);

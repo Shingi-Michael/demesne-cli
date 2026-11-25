@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanLook, pageLookGroup, pageLookRow, pageName } from "../page-look-row.ts";
+import { cleanLook, lookFailure, pageLookGroup, pageLookRow, pageName } from "../page-look-row.ts";
 
 const message = JSON.stringify({ url: "http://localhost:5173/home", title: "Home", width: "1280px", errors: [], errorCount: 0,
   steps: ["✓ click “Sign in”: button “Sign in” → went to /home", "✕ click “Save”: nothing matches"],
@@ -32,6 +32,16 @@ test("a finished look shows its steps and pictures, red when a step didn't work"
 test("a look that couldn't open says so", () => {
   const row = pageLookRow({ state: "failed", input: { url: "http://localhost:9" } }, () => undefined);
   expect([row.verb, row.meta, row.tone]).toEqual(["Couldn't open", "is it running?", "failed"]);
+});
+
+test("a look that failed names the real cause, not the server, when the server isn't it", () => {
+  const viewer = "Error: [VIEWER_MISSING] the page viewer isn't there (/x/Demesne), so no page can be opened. Hint: …";
+  const row = pageLookRow({ state: "failed", input: { url: "test-results/look/view.html" }, message: viewer }, () => undefined);
+  expect([row.verb, row.meta]).toEqual(["Couldn't open", "the page viewer is missing"]);
+  expect(lookFailure("localhost:5173", viewer)).toBe("the page viewer is missing");
+  expect(lookFailure("site/index.html", "Error: [UNAVAILABLE] the page could not be opened just now")).toBe("the page didn't load");
+  expect(lookFailure("site/missing.html", "Error: [NOT_FOUND] site/missing.html does not exist")).toBe("no such file");
+  expect(lookFailure("http://localhost:5173", "Error: [UNREACHABLE] net::ERR_CONNECTION_REFUSED")).toBe("is it running?");
 });
 
 test("page checks in a row are one line with every picture in one strip", () => {

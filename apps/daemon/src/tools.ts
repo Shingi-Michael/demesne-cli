@@ -60,6 +60,12 @@ export function toolError(code: string, message: string, hint: string): Error {
   return new Error(`[${code}] ${message}. Hint: ${hint}`);
 }
 
+/// A call's arguments as sent. A tool that takes none (git_status) often
+/// comes with an empty string rather than {}: that means no arguments.
+export function toolArguments(text: string): unknown {
+  return text.trim() === "" ? {} : JSON.parse(text);
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, AgentTool>();
 

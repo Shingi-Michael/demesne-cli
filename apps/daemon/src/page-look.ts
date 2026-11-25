@@ -40,9 +40,19 @@ export function pageAddress(input: string, workspaceRoot: string): string {
   return pathToFileURL(path).href;
 }
 
+/// The page viewer is the desktop app itself; when its program isn't where
+/// the daemon expects it, no server the model starts would help, so say so.
+export function viewerMissing(command: string[]): Error {
+  return toolError("VIEWER_MISSING", `the page viewer isn't there (${command[0] ?? "no program"}), so no page can be opened`, "this is not the page's fault: say you couldn't look, and check the page another way (run_command, or the browser tool)");
+}
+
 export function electronPageLook(command: string[]): PageLook {
   return (url, plan, signal) => queued(async () => {
-    const parsed = await runJob(command, { kind: "html", source: "", title: "", url, try: plan }, signal);
+    const program = command[0];
+    if (!program || (program.includes("/") && !existsSync(program))) throw viewerMissing(command);
+    let parsed: unknown;
+    try { parsed = await runJob(command, { kind: "html", source: "", title: "", url, try: plan }, signal); }
+    catch (error) { if ((error as { code?: string }).code === "ENOENT" || /ENOENT|No such file/i.test(String(error))) throw viewerMissing(command); throw error; }
     if (!isRecord(parsed) || !Array.isArray(parsed.steps)) return null;
     const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
     return {

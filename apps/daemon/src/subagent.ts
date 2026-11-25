@@ -5,7 +5,7 @@ import { assertModelResponseComplete, withProviderDeadlines } from "./engine.ts"
 import type { InferenceScheduler } from "./inference-scheduler.ts";
 import type { TurnInference } from "./processor.ts";
 import { providerStreamLimits, type ProviderStreamLimits } from "./provider-limits.ts";
-import type { ToolRegistry } from "./tools.ts";
+import { toolArguments, type ToolRegistry } from "./tools.ts";
 
 export const SUBAGENT_TOOL = "subagent";
 
@@ -184,7 +184,7 @@ export async function runReadOnlyTool(call: ProviderToolCall, options: { workspa
   const tool = SUBAGENT_TOOLS.has(call.name) ? options.tools.get(call.name) : undefined;
   if (!tool) return `Error: ${call.name} is not available to a sub-agent; use ${[...SUBAGENT_TOOLS].join(", ")}`;
   let input: unknown;
-  try { input = JSON.parse(call.arguments); } catch { return "Error: tool arguments are not valid JSON"; }
+  try { input = toolArguments(call.arguments); } catch { return "Error: tool arguments are not valid JSON"; }
   try {
     // Defence in depth: never run anything that would need an approval.
     if (tool.permission(input) !== null) return `Error: ${call.name} needs approval and is not available to a sub-agent`;

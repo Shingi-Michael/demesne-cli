@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pageLookMetadata } from "@demesne/storage";
-import { lookAtPageTool, pageAddress, PAGE_LOOK_PREFIX, type PageLook } from "../src/page-look.ts";
+import { electronPageLook, lookAtPageTool, pageAddress, PAGE_LOOK_PREFIX, type PageLook } from "../src/page-look.ts";
 import { canonicalWorkspace } from "../src/tools.ts";
 
 const root = canonicalWorkspace(mkdtempSync(join(tmpdir(), "demesne-page-look-")));
@@ -61,4 +61,12 @@ test("look_at_page says when the app isn't running, and stops after a few looks 
   for (let i = 0; i < 5; i++) await down.executeWithArtifacts!({ url: "http://localhost:9" }, context).catch(() => {});
   await expect(down.executeWithArtifacts!({ url: "http://localhost:9" }, context)).rejects.toThrow("LIMIT");
   await expect(down.executeWithArtifacts!({ url: "http://localhost:9", steps: [{ jump: 1 }] }, { ...context, turnId: "t3" })).rejects.toThrow("INVALID_STEPS");
+});
+
+test("a missing page viewer is named, not blamed on the page's server", async () => {
+  const look = electronPageLook(["/nowhere/Demesne.app/Contents/MacOS/Demesne"]);
+  const error = await look("http://localhost:5173/", { width: 1280, steps: [] }, new AbortController().signal).then(() => null, (e: Error) => e);
+  expect(error?.message).toContain("[VIEWER_MISSING]");
+  expect(error?.message).toContain("/nowhere/Demesne.app");
+  expect(error?.message).not.toContain("dev server");
 });

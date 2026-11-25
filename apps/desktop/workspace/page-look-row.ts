@@ -38,12 +38,24 @@ export function pageName(url: unknown): string {
 
 const stepCount = (steps: unknown) => Array.isArray(steps) ? steps.length : 0;
 
+/// Why a look failed, in a few words, from the error it gave: only a local
+/// server that didn't answer is asked whether it is running.
+export function lookFailure(url: unknown, message: string | undefined): string {
+  const code = /\[([A-Z_]+)\]/.exec(message ?? "")?.[1];
+  if (code === "VIEWER_MISSING") return "the page viewer is missing";
+  if (code === "NOT_FOUND") return "no such file";
+  if (code === "LIMIT") return "too many looks this turn";
+  if (code === "NOT_LOCAL" || code === "INVALID_URL" || code === "INVALID_PATH") return "not an address it can open";
+  const server = typeof url === "string" && /^(https?:\/\/)?(localhost|127\.|\[::1\]|0\.0\.0\.0)/i.test(url.trim());
+  return server && (!code || code === "UNREACHABLE" || code === "UNAVAILABLE") ? "is it running?" : "the page didn't load";
+}
+
 /// The row's words and what goes under it.
 export function pageLookRow(tool: { state: string; drafting?: boolean; input: Record<string, unknown>; message?: string }, picture: (id: string) => string | undefined): { verb: string; target: string; meta: string; tone: string; below: string } {
   const asked = pageName(tool.input.url), n = stepCount(tool.input.steps), phone = tool.input.width === "phone" ? " · phone" : "";
   if (tool.drafting || tool.state === "running") return { verb: n ? "Trying" : "Opening", target: h(asked), meta: h(n ? `${n} step${n === 1 ? "" : "s"}${phone}` : phone.slice(3)), tone: "running", below: "" };
   const look = pageLookOutcome(tool.message);
-  if (!look) return { verb: "Couldn't open", target: h(asked), meta: tool.state === "failed" ? "is it running?" : "", tone: tool.state === "failed" ? "failed" : "", below: "" };
+  if (!look) return { verb: "Couldn't open", target: h(asked), meta: tool.state === "failed" ? h(lookFailure(tool.input.url, tool.message)) : "", tone: tool.state === "failed" ? "failed" : "", below: "" };
   const failed = look.steps.filter((line) => line.startsWith("✕")).length;
   const meta = look.errorCount ? `<span class="bad">${look.errorCount} console error${look.errorCount === 1 ? "" : "s"}</span>`
     : failed ? `<span class="bad">${failed} of ${look.steps.length} step${look.steps.length === 1 ? "" : "s"} didn't work</span>`

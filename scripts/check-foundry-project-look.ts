@@ -91,7 +91,7 @@ try {
   const why = app.locator(`#page [data-fd="${id}:1"] .fd-why`);
   await step(80, async () => /Project look\s*Checked against tailwind\.config\.ts: 2 things fixed before you saw it/.test(((await why.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ")));
   // And it is drawn in them: what the page sets wins over the kit's own values.
-  const frame = () => app.frames().find((one) => one.url().includes(id));
+  const frame = () => app.frames().find((one) => one.url().includes(id) && one.url().includes("&"));
   await step(84, async () => !!frame() && await frame()!.evaluate(() => !!document.querySelector(".go")).catch(() => false));
   const drawn = await frame()!.evaluate(() => ({ button: getComputedStyle(document.querySelector(".go")!).backgroundColor, heading: getComputedStyle(document.querySelector("h1")!).fontFamily }));
   assert.equal(drawn.button, "rgb(15, 118, 110)", "the button is the project's teal");

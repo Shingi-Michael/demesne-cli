@@ -130,7 +130,9 @@ try {
   assert.equal(await page.locator("#conversation .tool-row").filter({ hasText: /^Tried/ }).count(), 0, "no Tried rows");
   // There is no split view any more: the link opens the Foundry page itself.
   assert.equal(await page.locator("#pane").count(), 0, "no pane beside the chat");
-  assert.equal(await page.locator("#conversation iframe").count(), 0, "Nothing live runs in the conversation");
+  // Pass 280 B: the card's picture is the only frame in the chat: inert, no demo, no notes (not stack mode).
+  assert.equal(await page.locator("#conversation iframe:not(.fd-chip-frame)").count(), 0, "Nothing live runs in the conversation");
+  for (const src of await page.locator("#conversation iframe.fd-chip-frame").evaluateAll((frames) => frames.map((frame) => (frame as HTMLIFrameElement).inert ? frame.getAttribute("src") : "not inert"))) assert.match(src ?? "", /^foundry:\/\/artifact\/[^?]+\?v=\d+$/, "the card's picture is a still, inert copy");
   const item = (id: string, version: number) => foundry.locator(`[data-fd="${id}:${version}"]`);
   const frameOf = (id: string, version: number) => page!.frameLocator(`#page [data-fd="${id}:${version}"] iframe.fd-frame`);
   await chips.first().click();
@@ -141,7 +143,8 @@ try {
   await frame.getByRole("button", { name: "Plant an idea" }).waitFor();
   // The kit reached the page: its stylesheet and its anime.js, and no assembly beside it.
   const served = async (version: number, inline: number) => {
-    const inner = page!.frames().find(found => found.url().startsWith(`foundry://artifact/${artifact.id}?v=${version}`));
+    // The chat card's still picture has the bare address; the long page's frame carries more.
+    const inner = page!.frames().find(found => found.url().startsWith(`foundry://artifact/${artifact.id}?v=${version}&`));
     assert(inner, "the page's frame is reachable");
     assert.match(inner.url(), /&stack=1&at=\d+$/, "the long page asks for options stacked, at the version's last change");
     await eventually(async () => inner.evaluate(() => (window as unknown as { anime?: unknown }).anime !== undefined));

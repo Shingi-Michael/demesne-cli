@@ -89,7 +89,7 @@ try {
   const item = page.locator(`#page [data-fd="${made.id}:1"]`), stage = item.locator(".fd-stage");
   await stage.first().waitFor();
   assert.match((await stage.first().getAttribute("class"))!, /fd-s s-page b-white fd-fluid/, "the sheet fills the column");
-  const frame = (): Frame => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${made.id}?v=1`))!;
+  const frame = (): Frame => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${made.id}?v=1&`))!;
   await step(93, async () => !!frame());
   // The sheet takes the height its parts need.
   await step(95, async () => Number(await stage.first().getAttribute("data-oh")) > 1200);

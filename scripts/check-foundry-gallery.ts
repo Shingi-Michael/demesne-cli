@@ -65,8 +65,8 @@ try {
   assert.deepEqual(await app.locator("#page .fg-card .fg-name").allTextContents(), ["Plans page", "Trail cards", "Field guide"]);
   assert.equal(await app.locator("#page .fg-chip").count(), 4);
   assert.equal(await app.locator("#page .fd-item").count(), 0, "no long page on the front page");
-  await step(69, async () => app.frames().some((frame) => frame.url().startsWith(`foundry://artifact/${ids["Plans page"]}?v=1`) && !frame.url().includes("stack=1")));
-  const plansFrame = app.frames().find((frame) => frame.url().startsWith(`foundry://artifact/${ids["Plans page"]}?v=1`))!;
+  await step(69, async () => app.frames().some((frame) => frame.url().startsWith(`foundry://artifact/${ids["Plans page"]}?v=1&`) && !frame.url().includes("stack=1")));
+  const plansFrame = app.frames().find((frame) => frame.url().startsWith(`foundry://artifact/${ids["Plans page"]}?v=1&`))!;
   await step(71, async () => (await plansFrame.evaluate(() => document.body?.innerText ?? "").catch(() => "")).includes("Gift a bag"));
   await step(72, async () => ((await app.locator("#page .fg-card").nth(2).locator(".fg-doc").textContent()) ?? "").includes("nitrogen"));
   assert.ok((await app.locator("#page .fg-card").nth(1).locator(".fg-meta").textContent())?.endsWith("Shared"));

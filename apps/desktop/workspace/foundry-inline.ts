@@ -5,7 +5,7 @@
 /// version is always one click away (a quiet "Edited" line was missed).
 import { FOUNDRY_KINDS, type FoundryKind } from "@demesne/protocol";
 import type { ToolEntry, WorkbenchEntry } from "@demesne/workbench/entries.ts";
-import { BUILT_ICON, KIND_ICON, KIND_WORD } from "./foundry-page.ts";
+import { BUILT_ICON, frameURL, KIND_ICON, KIND_WORD } from "./foundry-page.ts";
 
 export interface ChatArtifact { id: string; title: string; kind: FoundryKind; version: number;
   /// Pass 208 A: what it is, the version's name, and whether it is the pick.
@@ -46,6 +46,15 @@ interface ChipOptions {
 export const chipWords = (artifact: ChatArtifact) => artifact.built ? `Built like the mockup${artifact.note ? ` · ${artifact.note}` : ""}`
   : `${KIND_WORD[artifact.kind]} · v${artifact.version}${artifact.note ? ` · ${artifact.note}` : ""}`;
 
+const ARROW = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>`;
+const attr = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+/** The mockup itself, at a desktop size, shrunk into the card. */
+export const chipPicture = (artifact: Pick<ChatArtifact, "id" | "version">) =>
+  `<iframe class="fd-chip-frame" src="${attr(frameURL(artifact.id, artifact.version))}" loading="lazy" tabindex="-1" inert aria-hidden="true" sandbox="allow-scripts" referrerpolicy="no-referrer" title=""></iframe>`;
+
+/** How long the card's edge light takes for its one lap when a mockup lands. */
+export const CHIP_LAP_MS = 6000;
+
 function chip(artifact: ChatArtifact, options: ChipOptions) {
   const node = document.createElement("button");
   node.type = "button";
@@ -60,10 +69,13 @@ function chip(artifact: ChatArtifact, options: ChipOptions) {
 function fill(node: HTMLButtonElement, artifact: ChatArtifact) {
   const title = document.createElement("b");
   title.textContent = artifact.title;
-  // Its kind's tile; nothing live runs in the chat.
+  // Pass 280 B: a still picture of the mockup, drawn small the way Foundry's
+  // front page draws its cards. It loads only near the screen, takes no
+  // input and plays no demo. A document or a build record keeps its icon.
   const tile = document.createElement("span");
   tile.className = "fd-chip-thumb";
-  tile.innerHTML = artifact.built ? BUILT_ICON : KIND_ICON[artifact.kind];
+  tile.innerHTML = artifact.built || artifact.kind === "markdown" ? artifact.built ? BUILT_ICON : KIND_ICON[artifact.kind] : chipPicture(artifact);
+  tile.classList.toggle("pic", !artifact.built && artifact.kind !== "markdown");
   const text = document.createElement("span"), words = document.createElement("span");
   text.className = "fd-chip-text";
   words.textContent = chipWords(artifact);
@@ -83,7 +95,7 @@ function fill(node: HTMLButtonElement, artifact: ChatArtifact) {
   }
   const open = document.createElement("span");
   open.className = "fd-chip-open";
-  open.textContent = "Open";
+  open.innerHTML = `Open${ARROW}`;
   node.replaceChildren(tile, text, open);
   node.setAttribute("aria-label", `Open ${artifact.title}, ${chipWords(artifact)}${artifact.recommended ? ", recommended" : ""}`);
 }
@@ -97,6 +109,9 @@ export class FoundryChatArtifacts {
     this.element.className = "fd-chips";
     this.element.hidden = true;
   }
+  /// The first update draws what the turn already had (a chat opened later):
+  /// only a card that arrives after it laps, once, as its mockup lands.
+  private primed = false;
   update(entries: readonly WorkbenchEntry[]) {
     const artifacts = chatArtifacts(entries.filter((entry): entry is ToolEntry => entry.type === "tool"));
     const keys = new Set(artifacts.map(artifact => `${artifact.id}:${artifact.version}`));
@@ -108,6 +123,7 @@ export class FoundryChatArtifacts {
       if (!item) {
         item = { artifact, node: chip(artifact, this.options), words };
         this.chips.set(key, item);
+        if (this.primed) { const node = item.node; node.classList.add("lap"); setTimeout(() => node.classList.remove("lap"), CHIP_LAP_MS); }
       } else if (item.words !== words) {
         // A new name, description or pick redraws the chip in place.
         item.artifact = artifact;
@@ -117,6 +133,7 @@ export class FoundryChatArtifacts {
       if (this.element.children[index] !== item.node) this.element.insertBefore(item.node, this.element.children[index] ?? null);
     });
     this.artifacts = artifacts;
+    this.primed = true;
     this.element.hidden = !artifacts.length;
     return artifacts;
   }

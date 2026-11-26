@@ -123,7 +123,7 @@ try {
   assert.match((await item.locator(".fd-ver").innerText()).replace(/\s+/g, " "), /Built like the mockup · matches from Plans page v1/);
   assert.match(await item.locator(".fd-ask").innerText(), /build Yearly first/);
   assert.equal(await item.locator(".fd-notes").count(), 0, "a record takes no notes");
-  const frame = (): Frame => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${record.id}?v=1`))!;
+  const frame = (): Frame => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${record.id}?v=1&`))!;
   await step(108, async () => !!frame());
   // The pick (only the Yearly option, drawn by Foundry) beside what was built, both real pictures served from inside the app.
   await step(110, async () => frame().evaluate(() => [...document.querySelectorAll("d-built d-shot img")].filter((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth === 960 && (image as HTMLImageElement).src.startsWith("foundry://shot/")).length === 3));

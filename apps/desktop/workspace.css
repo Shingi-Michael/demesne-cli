@@ -3731,3 +3731,25 @@ html:is([data-theme="demesne"], [data-theme="demesne-light"]) body.desktop :is(#
 }
 @keyframes mw-dawn { 0% { opacity: 0; transform: translateY(6px); } 18% { opacity: 1; transform: none; } 55% { opacity: 1; } 100% { opacity: 0; transform: none; } }
 @keyframes mw-horizon { 0% { opacity: 0; transform: translateX(-30%); } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateX(380%); } }
+
+/* The card a finished mockup leaves in the chat, in the pill's glass with a
+   still picture of the mockup (pass 280 B). The picture is the mockup at a
+   desktop size, shrunk; it takes no input and plays nothing. The edge makes
+   one lap of silver light when the mockup lands, then stays still. Greys
+   from the theme. Read more:
+   https://www.nngroup.com/articles/recognition-and-recall/ */
+@property --chip-a { syntax: "<angle>"; inherits: false; initial-value: -90deg; }
+@keyframes chip-light { from { --chip-a: -90deg; } to { --chip-a: 270deg; } }
+.desktop .fd-chip { position: relative; width: min(560px, 100%); gap: 14px; padding: 8px 10px 8px 8px; border-radius: 18px; background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 9%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 10%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85); }
+.desktop .fd-chip:hover, .desktop .fd-chip[aria-pressed="true"] { background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--t1) 12%, transparent), transparent 60%), color-mix(in srgb, var(--surface3) 94%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t1) 12%, transparent), 0 18px 36px -18px rgb(0 0 0 / .85); }
+.desktop .fd-chip::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; padding: 1px; pointer-events: none; background: conic-gradient(from var(--chip-a), color-mix(in srgb, var(--t1) 9%, transparent), color-mix(in srgb, var(--t1) 58%, transparent), color-mix(in srgb, var(--t1) 9%, transparent) 30%, color-mix(in srgb, var(--t1) 9%, transparent) 70%, color-mix(in srgb, var(--t1) 32%, transparent), color-mix(in srgb, var(--t1) 9%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.desktop .fd-chip-thumb { position: relative; width: 144px; height: 90px; overflow: hidden; border-radius: 11px; background: color-mix(in srgb, var(--t1) 6%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--t1) 10%, transparent); color: var(--t2); }
+.desktop .fd-chip-thumb .ico { width: 22px; height: 22px; }
+.desktop .fd-chip-frame { position: absolute; left: 0; top: 0; width: 1280px; height: 800px; border: 0; background: #fff; transform: scale(.1125); transform-origin: 0 0; pointer-events: none; }
+.desktop .fd-chip-open { display: flex; align-items: center; gap: 6px; margin-right: 8px; padding: 0; box-shadow: none; color: var(--t2); font-size: 12.5px; }
+.desktop .fd-chip-open .ico { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 160ms var(--ease); }
+.desktop .fd-chip:hover .fd-chip-open { color: var(--t1); }
+.desktop .fd-chip:hover .fd-chip-open .ico { transform: translateX(2px); }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop .fd-chip.lap::after { animation: chip-light 6s linear 1 both; }
+}

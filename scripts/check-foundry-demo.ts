@@ -85,7 +85,7 @@ try {
   const item = page.locator(`#page [data-fd="${pin.id}:1"]`), stage = item.locator(".fd-stage");
   await stage.waitFor();
   assert.match((await stage.getAttribute("class"))!, /fd-s s-part b-paper/, "the stage is the part on paper");
-  const frame = (): Frame => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${pin.id}?v=1`))!;
+  const frame = (): Frame => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${pin.id}?v=1&`))!;
   await step(63, async () => !!frame());
   // A part grows to its content: the stage takes the height the page says.
   await step(65, async () => Number(await stage.getAttribute("data-oh")) !== 480);
@@ -127,7 +127,7 @@ try {
   assert.equal(await both.locator(".fd-stage").count(), 1, "one stage, the variants as tabs over it");
   assert.match((await both.locator(".fd-stage").first().getAttribute("class"))!, /s-window b-desk/);
   assert.equal(await both.locator(".fd-chrome span").first().textContent(), "Demesne", "the window's title on Foundry's frame");
-  const optionFrame = (n: number) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${two.id}?v=1`) && (n ? found.url().endsWith("&option=1") : !found.url().includes("option=")));
+  const optionFrame = (n: number) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${two.id}?v=1&`) && (n ? found.url().endsWith("&option=1") : !found.url().includes("option=")));
   await step(103, async () => !!optionFrame(0));
   await step(104, async () => optionFrame(0)!.evaluate(() => [...document.querySelectorAll("d-compare > section")].map((el) => (el as HTMLElement).hidden).join()) .then((value) => value === "false,true"));
   assert.equal(await optionFrame(0)!.evaluate(() => document.querySelectorAll(".dp-strip, .dp-opt").length), 0, "no strip or label inside the page");
@@ -168,7 +168,7 @@ try {
   assert.equal(small.pointer, "none");
   assert.ok(await styled.evaluate((item) => item.querySelector(".fd-glance")!.compareDocumentPosition(item.querySelector(".fd-opt")!) & Node.DOCUMENT_POSITION_FOLLOWING), "the row comes first");
   // Each stage is the one page in its style: the values are set on its root, the kit follows, nothing is drawn in it.
-  const styleFrame = (n: number) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${range.id}?v=1`) && (n ? found.url().endsWith(`&option=${n}`) : !found.url().includes("option=")))!;
+  const styleFrame = (n: number) => page!.frames().find((found) => found.url().startsWith(`foundry://artifact/${range.id}?v=1&`) && (n ? found.url().endsWith(`&option=${n}`) : !found.url().includes("option=")))!;
   await step(135, async () => [0, 1, 2].every((n) => !!styleFrame(n)));
   const look = (n: number) => styleFrame(n).evaluate(() => ({ style: document.documentElement.dataset.style, paper: getComputedStyle(document.body).backgroundColor, head: getComputedStyle(document.querySelector("h1")!).fontFamily, button: getComputedStyle(document.querySelector("button")!).backgroundColor, on: getComputedStyle(document.querySelector("button")!).color, corner: getComputedStyle(document.querySelector("button")!).borderRadius, drawn: getComputedStyle(document.querySelector("d-styles")!).display, words: document.body.innerText.replace(/\s+/g, " ").trim() }));
   await step(137, async () => (await look(1)).style === "Roastery label");

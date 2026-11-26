@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chatArtifacts, type ChatArtifact } from "../foundry-inline.ts";
+import { chatArtifacts, chipPicture, type ChatArtifact } from "../foundry-inline.ts";
 import type { ToolEntry } from "@demesne/workbench/entries.ts";
 
 const save = (value: unknown, state: ToolEntry["state"] = "done") => ({ name: "foundry_save", state, message: JSON.stringify(value) });
@@ -60,4 +60,11 @@ test("a build's record is a chip that says how it came out (pass 241 A)", async 
   expect(chipWords({ ...chip!, note: "2 still differ" })).toBe("Built like the mockup · 2 still differ");
   // Only foundry_built makes a record chip; a save that says built is a plain mockup.
   expect(chatArtifacts([save(record)])[0]!.built).toBeUndefined();
+});
+
+test("pass 280 B: the card's picture is the mockup itself, still and out of reach", () => {
+  const html = chipPicture({ id: "garden", version: 3 });
+  expect(html).toContain('src="foundry://artifact/garden?v=3"');
+  for (const part of ['loading="lazy"', "inert", 'tabindex="-1"', 'sandbox="allow-scripts"', 'aria-hidden="true"']) expect(html).toContain(part);
+  expect(html).not.toContain("allow-same-origin");
 });
